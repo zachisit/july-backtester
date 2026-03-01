@@ -420,44 +420,44 @@ STRATEGIES = {
 
     # -- Versions of EMA Crossover
     # --- FULL REGIME FILTER (Original) ---
-    "EMA Crossover w/ SPY+VIX Filter": {
-        "logic": strategy_ema_regime,
-        "dependencies": ['spy', 'vix'],
-        "params": {
-            "fast_ema": get_bars_for_period('20d', TIMEFRAME, MULTIPLIER),
-            "slow_ema": get_bars_for_period('50d', TIMEFRAME, MULTIPLIER)
-        }
-    },
+    # "EMA Crossover w/ SPY+VIX Filter": {
+    #     "logic": strategy_ema_regime,
+    #     "dependencies": ['spy', 'vix'],
+    #     "params": {
+    #         "fast_ema": get_bars_for_period('20d', TIMEFRAME, MULTIPLIER),
+    #         "slow_ema": get_bars_for_period('50d', TIMEFRAME, MULTIPLIER)
+    #     }
+    # },
 
-    # --- VARIATION 1: UNFILTERED ---
-    "EMA Crossover (Unfiltered)": {
-        "logic": strategy_ema_unfiltered,
-        "dependencies": [], # No dependencies
-        "params": {
-            "fast_ema": get_bars_for_period('20d', TIMEFRAME, MULTIPLIER),
-            "slow_ema": get_bars_for_period('50d', TIMEFRAME, MULTIPLIER)
-        }
-    },
+    # # --- VARIATION 1: UNFILTERED ---
+    # "EMA Crossover (Unfiltered)": {
+    #     "logic": strategy_ema_unfiltered,
+    #     "dependencies": [], # No dependencies
+    #     "params": {
+    #         "fast_ema": get_bars_for_period('20d', TIMEFRAME, MULTIPLIER),
+    #         "slow_ema": get_bars_for_period('50d', TIMEFRAME, MULTIPLIER)
+    #     }
+    # },
 
-    # --- VARIATION 2: SPY-ONLY FILTER ---
-    "EMA Crossover w/ SPY-Only Filter": {
-        "logic": strategy_ema_spy_only,
-        "dependencies": ['spy'], # Only depends on SPY
-        "params": {
-            "fast_ema": get_bars_for_period('20d', TIMEFRAME, MULTIPLIER),
-            "slow_ema": get_bars_for_period('50d', TIMEFRAME, MULTIPLIER)
-        }
-    },
+    # # --- VARIATION 2: SPY-ONLY FILTER ---
+    # "EMA Crossover w/ SPY-Only Filter": {
+    #     "logic": strategy_ema_spy_only,
+    #     "dependencies": ['spy'], # Only depends on SPY
+    #     "params": {
+    #         "fast_ema": get_bars_for_period('20d', TIMEFRAME, MULTIPLIER),
+    #         "slow_ema": get_bars_for_period('50d', TIMEFRAME, MULTIPLIER)
+    #     }
+    # },
 
-    # --- VARIATION 3: VIX-ONLY FILTER ---
-    "EMA Crossover w/ VIX-Only Filter": {
-        "logic": strategy_ema_vix_only,
-        "dependencies": ['vix'], # Only depends on VIX
-        "params": {
-            "fast_ema": get_bars_for_period('20d', TIMEFRAME, MULTIPLIER),
-            "slow_ema": get_bars_for_period('50d', TIMEFRAME, MULTIPLIER)
-        }
-    },
+    # # --- VARIATION 3: VIX-ONLY FILTER ---
+    # "EMA Crossover w/ VIX-Only Filter": {
+    #     "logic": strategy_ema_vix_only,
+    #     "dependencies": ['vix'], # Only depends on VIX
+    #     "params": {
+    #         "fast_ema": get_bars_for_period('20d', TIMEFRAME, MULTIPLIER),
+    #         "slow_ema": get_bars_for_period('50d', TIMEFRAME, MULTIPLIER)
+    #     }
+    # },
 }
 
 def main():

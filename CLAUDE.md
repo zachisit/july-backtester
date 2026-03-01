@@ -1,0 +1,89 @@
+# CLAUDE.md — july-backtester
+
+## What This Is
+Python backtesting engine for US equities. Tests 20+ technical strategies across single symbols or large portfolios (Nasdaq, S&P 500, etc.) with Monte Carlo robustness scoring.
+
+## Entry Points
+- `main.py` — portfolio mode (default), multiprocessing across all CPU cores
+- `main.py --mode single` — single-asset mode, all strategies vs `symbols_to_test`
+- `main.py --name "run-name"` — optional prefix for report folder and S3 path
+
+## Key Files
+```
+config.py                          # All settings — edit this before running
+main.py                            # Single entry point (--mode portfolio|single --name)
+helpers/indicators.py              # All strategy logic — add new strategies here
+helpers/simulations.py             # Single-asset trade simulation engine
+helpers/portfolio_simulations.py   # Multi-asset portfolio simulation engine
+helpers/monte_carlo.py             # Monte Carlo robustness scoring
+helpers/summary.py                 # Report generation, S3 upload
+helpers/caching.py                 # Local Parquet cache (24h TTL)
+helpers/aws_utils.py               # AWS Secrets Manager + S3; falls back to .env
+helpers/timeframe_utils.py         # Converts '200d' → bar count for given timeframe
+services/services.py               # Data provider factory (Polygon or Norgate)
+services/polygon_service.py        # Polygon.io REST API
+services/norgate_service.py        # Norgate Data local API
+tickers_to_scan/                   # JSON ticker lists (nasdaq_100.json, sp-500.json, etc.)
+```
+
+## Config Quick Reference
+```python
+"data_provider": "polygon"         # or "norgate"
+"polygon_api_secret_name": "POLYGON_API_KEY"  # AWS secret name OR .env key
+"start_date": "2004-01-01"
+"initial_capital": 100000.0
+"timeframe": "D"                   # D, H, MIN, W, M
+"timeframe_multiplier": 1          # e.g. 5 for 5-min bars
+"symbols_to_test": ["AAPL"]        # single-asset mode
+"portfolios": {"Nasdaq 100": "nasdaq_100.json"}  # portfolio mode
+"allocation_per_trade": 0.10       # 10% equity per position
+"stop_loss_configs": [{"type": "none"}]  # or {"type":"percentage","value":0.05}
+"slippage_pct": 0.0005
+"commission_per_share": 0.002
+"min_trades_for_mc": 50
+"num_mc_simulations": 1000
+```
+
+## Architecture Notes
+
+**Multiprocessing design:** `init_worker` passes large DataFrames (SPY, VIX, TNX, portfolio data) into each worker process as globals at pool creation time. Tasks are small tuples — they do NOT contain DataFrames. Do not change this pattern; it avoids pickling large objects.
+
+**Signal convention:** Strategy functions return a DataFrame with a `Signal` column: `1` = enter/hold long, `-1` = exit/flat, `0` = no change.
+
+**Caching:** `helpers/caching.py` stores Parquet files in `data_cache/` keyed by `{symbol}_{start}_{end}_{timeframe}_{multiplier}.parquet`. TTL is 24h. Delete the folder to force a fresh fetch.
+
+**API key resolution order** (in `helpers/aws_utils.py`): environment variable → `.env` file → AWS Secrets Manager.
+
+**Data fetcher signature:** `fetcher(symbol, start_date, end_date, config) -> pd.DataFrame | None`. Columns must be `Open, High, Low, Close, Volume` with a `Datetime` index.
+
+## Adding a Strategy
+1. Add a function to `helpers/indicators.py` that accepts a DataFrame and returns it with a `Signal` column.
+2. Register it in the `STRATEGIES` dict in `main.py` (or the portfolio runner):
+```python
+"My Strategy Name": {
+    "logic": my_strategy_logic,        # or partial(fn, param=value)
+    "dependencies": [],                # add 'spy' or 'vix' if needed
+    "params": {}                       # passed as **kwargs to logic func
+}
+```
+3. If the strategy uses SPY or VIX data, add a wrapper function following the `strategy_ema_regime` pattern (accepts `df, **kwargs`) so it's pickle-safe for multiprocessing.
+
+## Output
+- Terminal: summary table per portfolio with P&L, Sharpe, Calmar, Max DD, MC Score
+- `reports/` — CSV summary files (local)
+- `trades/` — per-trade CSV logs (local, optional)
+- `s3://<bucket>/<run-timestamp>/` — same files on S3 if configured
+
+## Do Not Touch
+- `helpers/indicators.py` strategy logic (all working correctly)
+- `helpers/simulations.py` and `helpers/portfolio_simulations.py` simulation engines
+- `helpers/monte_carlo.py`
+- `tickers_to_scan/` JSON files
+- The multiprocessing architecture (`init_worker`, `run_single_simulation`, `Pool`)
+
+## Common Pitfalls
+- `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
+- Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float
+- `apply_stop_loss(df, stop_config)` takes the dict, not a percentage float
+- Norgate portfolios use `"norgate:WatchlistName"` string prefix; JSON files use `"filename.json"`; inline lists use a Python list
+- `execution_time: "open"` means signals are generated on day N and filled at day N+1 open — the simulator handles the 1-day lag via `prev_trading_dates`
