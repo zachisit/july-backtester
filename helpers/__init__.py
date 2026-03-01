@@ -1,6 +1,5 @@
 # helpers/__init__.py
 from .indicators import *
-from .simulations import run_simulation, apply_stop_loss
 from .portfolio_simulations import run_portfolio_simulation
 from .monte_carlo import run_monte_carlo_simulation, analyze_mc_results
 from .summary import (generate_single_asset_summary_report, generate_final_summary,
