@@ -1,0 +1,11 @@
+# requirements.txt
+
+pandas
+numpy<2.0
+tqdm
+boto3
+requests
+python-dotenv
+pandas-ta
+orjson
+pyarrow

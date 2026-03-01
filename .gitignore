@@ -1,0 +1,42 @@
+# Virtual Environment
+venv/
+.venv/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE / Editor specific files
+.vscode/
+.idea/
+
+# Environment variables file
+.env
+*.env
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Instance folder (if using Flask, good to keep for FastAPI if you create one)
+instance/
+
+# Test output
+htmlcov/
+.pytest_cache/
+.tox/
+.coverage
+.coverage.*
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Dynamic Trade csv files
+trades/
+
+tools/watchlists
+
+data_cache/
