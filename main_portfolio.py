@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from functools import partial
+import logging
 import os
 import json
 import time
@@ -9,7 +10,44 @@ from datetime import datetime
 import argparse
 from config import CONFIG
 from services import get_data_service
-from helpers.indicators import *
+from helpers.indicators import (
+    # --- Feature calculation helpers (used in portfolio data prep loop) ---
+    calculate_sma, calculate_rsi, calculate_atr,
+    # --- Active STRATEGIES ---
+    sma_crossover_logic,
+    # --- Wrapper bodies (always compiled, even when strategy is commented out) ---
+    ema_regime_crossover_logic,
+    ema_crossover_unfiltered_logic,
+    ema_crossover_spy_only_logic,
+    ema_crossover_vix_only_logic,
+    bollinger_fade_with_regime_filter_logic,
+    weekday_overnight_with_vix_filter_logic,
+    weekday_overnight_with_trend_filter_logic,
+    weekday_overnight_with_rsi_filter_logic,
+    ma_confluence_with_regime_filter_logic,
+    # --- Commented-out STRATEGIES (imported so uncommenting needs no import changes) ---
+    ma_confluence_logic,
+    rsi_logic,
+    macd_crossover_logic,
+    stochastic_logic,
+    obv_logic,
+    ma_bounce_logic,
+    sma_trend_filter_logic,
+    macd_rsi_filter_logic,
+    atr_trailing_stop_with_trend_filter_logic,
+    bollinger_band_logic,
+    bollinger_breakout_logic,
+    bollinger_band_squeeze_logic,
+    chaikin_money_flow_logic,
+    donchian_channel_breakout_logic,
+    keltner_channel_breakout_logic,
+    atr_trailing_stop_logic,
+    rsi_with_trend_filter_logic,
+    hold_the_week_logic,
+    weekend_hold_logic,
+    ema_scalping_logic,
+    rsi_scalping_logic,
+)
 from helpers.portfolio_simulations import run_portfolio_simulation
 from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary
 from helpers.monte_carlo import run_monte_carlo_simulation, analyze_mc_results
@@ -19,6 +57,8 @@ import orjson
 from helpers.caching import CACHE_DIR
 from helpers.timeframe_utils import get_bars_for_period
 from functools import partial
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------
 # --- STRATEGY WRAPPER FUNCTIONS (PICKLE-SAFE) ---
@@ -468,8 +508,19 @@ def main():
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_folder_name = f"{args.name}_{timestamp}" if args.name else timestamp
     start_time = time.monotonic()
+
+    os.makedirs("logs", exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(f"logs/run_{timestamp}.log"),
+        ],
+    )
+
     data_fetcher = get_data_service()
-    print("\n---> PORTFOLIO STRATEGY ANALYZER <---")
+    logger.info("PORTFOLIO STRATEGY ANALYZER")
 
     # --- FETCHING DEPENDENCY & BENCHMARK DATA (No changes) ---
     # (Your existing code to fetch spy_df, vix_df, etc., and calculate benchmarks is correct)
@@ -480,19 +531,19 @@ def main():
         qqq_buy_and_hold_return = (qqq_df['Close'].iloc[-1] - qqq_df['Close'].iloc[0]) / qqq_df['Close'].iloc[0]
         vix_df = data_fetcher("I:VIX", CONFIG["start_date"], CONFIG["end_date"], CONFIG) # Simplified
         tnx_df = data_fetcher("I:TNX", CONFIG["start_date"], CONFIG["end_date"], CONFIG) # Simplified
-        print(f"SPY B&H: {spy_buy_and_hold_return:.2%}, QQQ B&H: {qqq_buy_and_hold_return:.2%}\n")
+        logger.info(f"SPY B&H: {spy_buy_and_hold_return:.2%}, QQQ B&H: {qqq_buy_and_hold_return:.2%}")
     except Exception as e:
-        print(f"FATAL: Could not fetch dependency data: {e}")
+        logger.error(f"FATAL: Could not fetch dependency data: {e}")
         return
-    
+
     # --- START OF MODIFIED LOGIC ---
-    
+
     all_portfolio_results = [] # To gather results from all portfolios
 
-    print("\n\n" + "="*25 + " PROCESSING PORTFOLIOS " + "="*25)
+    logger.info("=" * 25 + " PROCESSING PORTFOLIOS " + "=" * 25)
     # Loop through each portfolio sequentially
     for portfolio_name, value in CONFIG['portfolios'].items():
-        print(f"\n--> Preparing and running portfolio: {portfolio_name}")
+        logger.info(f"--> Preparing and running portfolio: {portfolio_name}")
         
         # --- Data fetching for the current portfolio (no changes) ---
         # (Your existing code to get symbols and build `portfolio_data` is perfect)
@@ -505,18 +556,18 @@ def main():
         # ... your norgate logic ...
         
         if not symbols:
-            print(f"  -> No symbols found for '{portfolio_name}'. Skipping.")
+            logger.warning(f"No symbols found for '{portfolio_name}'. Skipping.")
             continue
-        
+
         portfolio_data = {}
         for symbol in tqdm(symbols, desc="  -> Fetching & Preparing Data", unit=" symbols"):
             df = data_fetcher(symbol, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
             if df is not None and not df.empty:
                 # (Your existing feature calculation logic here)
                 portfolio_data[symbol] = df
-        
+
         if not portfolio_data:
-            print(f"  -> Could not fetch data for any symbols in '{portfolio_name}'. Skipping.")
+            logger.warning(f"Could not fetch data for any symbols in '{portfolio_name}'. Skipping.")
             continue
 
         # --- Generate tasks for THIS portfolio, WITHOUT the large `portfolio_data` ---
@@ -533,12 +584,12 @@ def main():
                 tasks_for_this_portfolio.append(task_args)
 
         if not tasks_for_this_portfolio:
-            print(f"  -> No tasks generated for {portfolio_name}.")
+            logger.warning(f"No tasks generated for {portfolio_name}.")
             continue
-            
+
         # --- Create a NEW Pool initialized with THIS portfolio's data ---
-        print(f"\n{'='*15} RUNNING SIMULATIONS FOR '{portfolio_name}' {'='*15}")
-        print(f"Found {len(tasks_for_this_portfolio)} tasks. Using up to {cpu_count()} CPU cores.")
+        logger.info("=" * 15 + f" RUNNING SIMULATIONS FOR '{portfolio_name}' " + "=" * 15)
+        logger.info(f"Found {len(tasks_for_this_portfolio)} tasks. Using up to {cpu_count()} CPU cores.")
         
         # Pass `portfolio_data` during initialization, not with each task
         init_args = (spy_df, vix_df, tnx_df, portfolio_data)
@@ -551,7 +602,7 @@ def main():
 
     # --- FINAL REPORTING (No changes needed here) ---
     if not all_portfolio_results:
-        print("\nNo simulation tasks were generated or completed successfully.")
+        logger.warning("No simulation tasks were generated or completed successfully.")
         return
         
     results_by_portfolio = {}
@@ -567,7 +618,7 @@ def main():
     generate_portfolio_summary_report(all_portfolio_results, duration_seconds, run_folder_name)
     
     mins, secs = divmod(duration_seconds, 60)
-    print(f"\n\nAll portfolio simulations complete in {int(mins)} minutes and {secs:.2f} seconds.")
+    logger.info(f"All portfolio simulations complete in {int(mins)}m {secs:.2f}s.")
 
 if __name__ == "__main__":
     main()
