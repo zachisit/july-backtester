@@ -10,7 +10,11 @@ CONFIG = {
     # --- Data Provider Settings ---
     "data_provider": "polygon",  # Options: "norgate" or "polygon"
 
-    "polygon_api_secret_name": "POLYGON_API_SECRET_NAME",
+    # Your Polygon.io API key.
+    # Set this as an environment variable or add it to a .env file:
+    #   POLYGON_API_KEY=your_key_here
+    # Get your key at: https://polygon.io/dashboard/api-keys
+    "polygon_api_key_name": "POLYGON_API_KEY",
 
     # --- General Settings ---
     "start_date": "2004-01-01",

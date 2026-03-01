@@ -9,7 +9,7 @@ A systematic strategy backtesting engine for US equities. Test 20+ built-in tech
 1. [What This Tool Does](#what-this-tool-does)
 2. [Prerequisites](#prerequisites)
 3. [Installation](#installation)
-4. [API Key & AWS Setup](#api-key--aws-setup)
+4. [API Key Setup](#api-key-setup)
 5. [Configuration](#configuration)
 6. [Running the Backtester](#running-the-backtester)
 7. [Understanding the Output](#understanding-the-output)
@@ -45,10 +45,6 @@ Before starting, you will need:
 
 1. **Python 3.10 or higher** — [Download here](https://www.python.org/downloads/)
 2. **A Polygon.io account** — [Sign up here](https://polygon.io/). A paid plan is required for full historical data (the free tier is limited to 2 years of daily data). The Stocks Starter plan (~$29/month) covers most use cases.
-3. **An AWS account** — [Sign up here](https://aws.amazon.com/). Used for two things: securely storing your Polygon API key (AWS Secrets Manager) and optionally uploading reports (S3). A free-tier account is sufficient for Secrets Manager; S3 costs pennies for the report sizes involved.
-4. **AWS CLI configured on your machine** — Required for the tool to authenticate with AWS. See setup steps below.
-
-**If you work in our office:** You may already have AWS credentials configured and shared S3/Secrets Manager resources. Check with your team before creating new AWS resources — you likely only need to configure the AWS CLI to point at the existing setup. Ask for the Access Key ID, Secret Access Key, and region.
 
 **For Norgate users:** If you have a [Norgate Data](https://norgatedata.com/) subscription and the Norgate Data Updater installed locally, you can use Norgate as the data provider instead of Polygon. See [Data Provider Settings](#data-provider-settings) below.
 
@@ -89,69 +85,31 @@ You should see `(venv)` appear at the start of your terminal prompt. Every time 
 pip install -r requirements.txt
 ```
 
-This installs: `pandas`, `numpy`, `tqdm`, `boto3`, `requests`, `python-dotenv`, `pandas-ta`, `orjson`, `pyarrow`.
+This installs: `pandas`, `numpy`, `tqdm`, `boto3` (S3 uploads), `requests`, `python-dotenv`, `pandas-ta`, `orjson`, `pyarrow`.
 
 ---
 
-## API Key & AWS Setup
+## API Key Setup
 
-The backtester retrieves your Polygon API key from **AWS Secrets Manager** rather than a plain text file. This keeps your key out of the codebase and environment variables, which is safer when sharing a machine or working in a team.
+1. Get your Polygon.io API key from [https://polygon.io/dashboard/api-keys](https://polygon.io/dashboard/api-keys)
 
-### Step 1 — Install the AWS CLI
+2. Copy `.env.example` to `.env` in the project root:
 
-```bash
-# macOS (using Homebrew)
-brew install awscli
+   ```bash
+   cp .env.example .env
+   ```
 
-# Windows — download the MSI installer from:
-# https://aws.amazon.com/cli/
+3. Add your key:
 
-# Verify installation
-aws --version
-```
+   ```env
+   POLYGON_API_KEY=your_key_here
+   ```
 
-### Step 2 — Configure Your AWS Credentials
+4. Confirm `config.py` has `"polygon_api_key_name": "POLYGON_API_KEY"` (this is the default — no change needed).
 
-```bash
-aws configure
-```
+Your `.env` file is gitignored and will never be committed. Alternatively, set `POLYGON_API_KEY` as a system environment variable if you prefer not to use a `.env` file.
 
-You will be prompted for four values:
-
-| Prompt | What to Enter |
-| --- | --- |
-| AWS Access Key ID | Your IAM access key (AWS Console → IAM → Users → Your User → Security credentials → Create access key) |
-| AWS Secret Access Key | The corresponding secret key shown at creation time |
-| Default region name | `us-east-1` (or the region your team uses) |
-| Default output format | `json` |
-
-**Office users:** Get the Access Key ID, Secret Access Key, and region from your team. Do not create new IAM users if credentials already exist for this project.
-
-### Step 3 — Store Your Polygon API Key in AWS Secrets Manager
-
-This creates the secret the tool looks up at runtime.
-
-1. Log in to the [AWS Console](https://console.aws.amazon.com/)
-2. Search for **Secrets Manager** in the top search bar and open it
-3. Click **Store a new secret**
-4. Choose **Other type of secret**
-5. Click the **Plaintext** tab under the key/value section
-6. Delete any placeholder text and paste your Polygon API key as the only content (plain string, no quotes, no JSON)
-7. Click **Next**
-8. Give the secret a name — for example: `polygon-api-key`
-9. Click through the remaining pages and click **Store**
-
-**Office users:** A shared secret likely already exists. Ask your team for its exact name and skip to Step 4.
-
-### Step 4 — Set the Secret Name in config.py
-
-Open [config.py](config.py) and update this line to match the secret name you used:
-
-```python
-"polygon_api_secret_name": "polygon-api-key",  # Must match exactly what you named it in Secrets Manager
-```
-
-### Step 5 — (Optional) Set Up an S3 Bucket for Reports
+### (Optional) Set Up an S3 Bucket for Reports
 
 If you want reports automatically uploaded to S3 after each run:
 
@@ -176,7 +134,7 @@ All settings live in one file: [config.py](config.py). Open it in any text edito
 
 ### Quick Setup Checklist
 
-- [ ] Set `polygon_api_secret_name` to match your AWS secret
+- [ ] Add `POLYGON_API_KEY` to your `.env` file (copy `.env.example` to get started)
 - [ ] Set `s3_reports_bucket` (optional)
 - [ ] Choose `data_provider`: `"polygon"` or `"norgate"`
 - [ ] Set `start_date` and `initial_capital`
@@ -186,7 +144,7 @@ All settings live in one file: [config.py](config.py). Open it in any text edito
 ### Data Provider Settings
 
 ```python
-"data_provider": "polygon",   # Polygon.io — API key via AWS Secrets Manager
+"data_provider": "polygon",   # Polygon.io — API key via .env or environment variable
 # "data_provider": "norgate", # Norgate Data — requires local Norgate installation
 ```
 
@@ -289,7 +247,7 @@ python main_single_asset.py
 ### First Run Tips
 
 1. **Validate with one symbol first.** Set `"symbols_to_test": ['SPY']` or `"portfolios": {"Test": ["SPY", "QQQ"]}` and confirm the run completes without errors before testing larger lists.
-2. **Watch for AWS errors.** If you see `Could not retrieve AWS secret` in the terminal, your AWS CLI is not configured or the secret name in `config.py` does not match.
+2. **Watch for API key errors.** If you see `Could not find 'POLYGON_API_KEY'` in the terminal, your `.env` file is missing or the key name in `config.py` does not match.
 3. **The first run is the slowest.** Data is fetched from Polygon and cached locally. Subsequent runs within 24 hours load from disk and are much faster.
 
 ---
@@ -406,7 +364,7 @@ Defined in the `STRATEGIES` dictionary at the top of [main_portfolio.py](main_po
 | Setting | Default | Description |
 | --- | --- | --- |
 | `data_provider` | `"polygon"` | `"polygon"` or `"norgate"` |
-| `polygon_api_secret_name` | — | Name of your AWS Secrets Manager secret |
+| `polygon_api_key_name` | `"POLYGON_API_KEY"` | Environment variable name holding your Polygon API key |
 | `s3_reports_bucket` | — | S3 bucket name. Leave blank to skip uploads. |
 | `start_date` | `"2004-01-01"` | Backtest start date (YYYY-MM-DD) |
 | `end_date` | Today | Backtest end date |
