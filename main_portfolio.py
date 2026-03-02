@@ -56,7 +56,6 @@ from multiprocessing import Pool, cpu_count
 import orjson
 from helpers.caching import CACHE_DIR
 from helpers.timeframe_utils import get_bars_for_period
-from functools import partial
 
 logger = logging.getLogger(__name__)
 
@@ -548,12 +547,24 @@ def main():
         # --- Data fetching for the current portfolio (no changes) ---
         # (Your existing code to get symbols and build `portfolio_data` is perfect)
         symbols = []
-        if isinstance(value, list): symbols = value
-        elif value.endswith('.json'):
+        if isinstance(value, list):
+            symbols = value
+        elif isinstance(value, str) and value.startswith("norgate:"):
+            watchlist_name = value.split(":", 1)[1]
+            try:
+                import norgatedata
+                symbols = norgatedata.watchlist_symbols(watchlist_name)
+                logger.info(f"  -> Loaded {len(symbols)} symbols from Norgate watchlist: '{watchlist_name}'")
+            except ImportError:
+                logger.warning(f"  -> SKIPPING Norgate watchlist '{portfolio_name}': norgatedata package not installed.")
+                continue
+            except Exception as e:
+                logger.error(f"  -> ERROR loading Norgate watchlist '{watchlist_name}': {e}")
+                continue
+        elif isinstance(value, str) and value.endswith('.json'):
              file_path = os.path.join("tickers_to_scan", value)
              with open(file_path, 'rb') as f:
                  symbols = orjson.loads(f.read())
-        # ... your norgate logic ...
         
         if not symbols:
             logger.warning(f"No symbols found for '{portfolio_name}'. Skipping.")

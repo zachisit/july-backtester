@@ -350,12 +350,8 @@ Defined in the `STRATEGIES` dictionary at the top of [main_portfolio.py](main_po
 | --- | --- |
 | SMA Crossover (20d/50d) | Portfolio version of the SMA crossover |
 | SMA Crossover (50d/200d) | Portfolio version of the golden cross |
-| EMA Crossover (Unfiltered) | Pure EMA crossover across the full portfolio |
-| EMA Crossover w/ SPY-Only Filter | Only takes trades when SPY is in an uptrend (above its regime MA) |
-| EMA Crossover w/ VIX-Only Filter | Only takes trades when VIX is below its threshold (calm market) |
-| EMA Crossover w/ SPY+VIX Filter | Requires both SPY trend and low VIX — most conservative, fewest trades |
 
-**Available but commented out** (uncomment in `main_portfolio.py` to enable): RSI, MACD, Bollinger Band variants, Stochastic, OBV, MA Bounce, SMA 200 Trend Filter, Donchian, ATR, Keltner, Chaikin Money Flow, MA Confluence, Overnight Hold, and sub-daily scalping strategies.
+**Available but commented out** (uncomment in `main_portfolio.py` to enable): EMA Crossover variants (Unfiltered, SPY-Only, VIX-Only, SPY+VIX), RSI, MACD, Bollinger Band variants, Stochastic, OBV, MA Bounce, SMA 200 Trend Filter, Donchian, ATR, Keltner, Chaikin Money Flow, MA Confluence, Overnight Hold, and sub-daily scalping strategies.
 
 ---
 

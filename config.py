@@ -119,7 +119,7 @@ CONFIG = {
     #     #{"type": "atr", "period": 14, "multiplier": 3.0}
     # ],
     "execution_time":"open",
-    "show_qqq_losers":"false",
+    "show_qqq_losers": False,
 
     # --- Monte Carlo Settings ---
     "min_trades_for_mc": 50,
