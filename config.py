@@ -62,9 +62,6 @@ CONFIG = {
     # Limited to one symbol.
     "benchmark_symbol": "SPY",
 
-    "trades_folder": "trades",
-    "reports_folder": "reports", 
-
     # ============================================================
     # SECTION 5: FILE OUTPUT
     # ============================================================

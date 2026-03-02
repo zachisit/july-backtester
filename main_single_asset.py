@@ -36,7 +36,7 @@ def main():
     start_time = time.monotonic()
     run_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
-    trades_folder = CONFIG['trades_folder']
+    trades_folder = "trades"
     if os.path.exists(trades_folder):
         shutil.rmtree(trades_folder)
     os.makedirs(trades_folder)

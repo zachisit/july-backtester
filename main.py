@@ -31,7 +31,7 @@ def get_norgate_data(symbol, timeframe, start_date, end_date):
 def main():
     print("\n---> SINGLE-ASSET STRATEGY ANALYZER (v7.3 - Final Stable) <---")
 
-    trades_folder = CONFIG['trades_folder']
+    trades_folder = "trades"
     if os.path.exists(trades_folder):
         shutil.rmtree(trades_folder)
     os.makedirs(trades_folder)

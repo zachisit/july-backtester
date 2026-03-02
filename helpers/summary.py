@@ -170,7 +170,7 @@ def generate_final_summary(all_results):
     print(final_df_display.to_string(index=False))
     
     try:
-        output_dir = CONFIG.get('reports_folder', 'reports')
+        output_dir = "reports"
         os.makedirs(output_dir, exist_ok=True)
         filepath = os.path.join(output_dir, "top_5_single_asset_summary.csv")
         final_df_display.to_csv(filepath, index=False)
@@ -237,7 +237,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
     # --- Step 4: Use the ORIGINAL, UNFILTERED list to save ALL generated trade logs ---
     if CONFIG.get("save_individual_trades", False):
         print("\n" + "-" * 80)
-        portfolio_trades_folder = os.path.join(CONFIG['trades_folder'], portfolio_name.replace(" ", "_"))
+        portfolio_trades_folder = os.path.join("trades", portfolio_name.replace(" ", "_"))
         os.makedirs(portfolio_trades_folder, exist_ok=True)
         
         s3_enabled = CONFIG.get("upload_to_s3") and CONFIG.get("s3_reports_bucket")
@@ -343,7 +343,7 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
     print(summary_df_sorted.to_string(index=False))
 
     try:
-        output_dir = CONFIG.get('reports_folder', 'reports')
+        output_dir = "reports"
         os.makedirs(output_dir, exist_ok=True)
         filename = "overall_portfolio_summary.csv"
         local_filepath = os.path.join(output_dir, filename)
