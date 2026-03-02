@@ -18,12 +18,6 @@ CONFIG = {
     # The Data Provider is hardcoded with two options at this time
     "data_provider": "polygon",  # Options: "norgate" or "polygon"
 
-    # Your Polygon.io API key.
-    # Set this as an environment variable or add it to a .env file:
-    #   POLYGON_API_KEY=your_key_here
-    # Get your key at: https://polygon.io/dashboard/api-keys
-    "polygon_api_key_name": "POLYGON_API_KEY",
-
     # ============================================================
     # SECTION 2: BACKTEST PERIOD & CAPITAL
     # ============================================================
