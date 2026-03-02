@@ -6,6 +6,7 @@ import numpy as np
 CONFIG = {
     # --- S3 Bucket for Reports ---
     "s3_reports_bucket": "july-backtester-reports",
+    "upload_to_s3": False,
 
     # --- Data Provider Settings ---
     "data_provider": "polygon",  # Options: "norgate" or "polygon"

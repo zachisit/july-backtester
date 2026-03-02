@@ -8,32 +8,29 @@ import numpy as np
 from helpers.aws_utils import upload_file_to_s3
 
 def save_trades_to_csv(result, local_folder, run_id):
-    """Saves the trade log locally and uploads it to S3."""
+    """Saves the trade log locally and optionally uploads it to S3."""
     if not result.get('trade_log') or result.get('Trades', 0) == 0:
         return
     
-    s3_bucket = CONFIG.get("s3_reports_bucket")
-    if not s3_bucket:
-        print("  -> WARNING: s3_reports_bucket not set in config. Skipping S3 upload.")
-        return
-
     # Sanitize names for filenames/paths
     strategy_name_safe = result['Strategy'].replace('/', '_').replace(' ', '_').replace('(', '').replace(')', '').replace(':', '')
     portfolio_name_safe = result.get('Portfolio', 'Portfolio').replace(" ", "_")
     symbol = result.get('Asset', portfolio_name_safe)
-    
+
     filename = f"{symbol}_{strategy_name_safe}_trade_log.csv"
     local_filepath = os.path.join(local_folder, filename)
-    
+
     try:
         pd.DataFrame(result['trade_log']).to_csv(local_filepath, index=False)
-        
-        # Construct the S3 key (folder structure within the bucket)
-        s3_key = f"{run_id}/{portfolio_name_safe}/trades/{filename}"
-        upload_file_to_s3(local_filepath, s3_bucket, s3_key)
+
+        # Upload to S3 if enabled
+        s3_bucket = CONFIG.get("s3_reports_bucket")
+        if CONFIG.get("upload_to_s3") and s3_bucket:
+            s3_key = f"{run_id}/{portfolio_name_safe}/trades/{filename}"
+            upload_file_to_s3(local_filepath, s3_bucket, s3_key)
 
     except Exception as e:
-        print(f"  -> WARNING: Could not save or upload trade log for {strategy_name_safe}. Error: {e}")
+        print(f"  -> WARNING: Could not save trade log for {strategy_name_safe}. Error: {e}")
         
 def generate_single_asset_summary_report(symbol_results, spy_benchmark_result, qqq_benchmark_result, symbol, symbol_trades_folder, run_id):
     """
@@ -92,7 +89,9 @@ def generate_single_asset_summary_report(symbol_results, spy_benchmark_result, q
     
     if CONFIG.get("save_individual_trades", False):
         print("\n" + "-" * 80)
-        print(f"Saving and uploading profitable trade logs for {symbol}...")
+        s3_enabled = CONFIG.get("upload_to_s3") and CONFIG.get("s3_reports_bucket")
+        action = "Saving and uploading" if s3_enabled else "Saving"
+        print(f"{action} profitable trade logs for {symbol}...")
         profitable_strategies = pd.DataFrame(symbol_results)[pd.DataFrame(symbol_results)['pnl_percent'] > 0]
         if profitable_strategies.empty:
             print(f"No profitable strategies found for {symbol}.")
@@ -101,7 +100,8 @@ def generate_single_asset_summary_report(symbol_results, spy_benchmark_result, q
                 full_result_dict = next((r for r in symbol_results if r['Strategy'] == row['Strategy']), None)
                 if full_result_dict:
                     save_trades_to_csv(full_result_dict, symbol_trades_folder, run_id)
-            print(f"Saved and uploaded {len(profitable_strategies)} trade logs.")
+            done_action = "Saved and uploaded" if s3_enabled else "Saved"
+            print(f"{done_action} {len(profitable_strategies)} trade logs.")
         print("-" * 80)
     else:
         print(f"\nSkipping individual trade log saving for {symbol} as per config.")
@@ -240,16 +240,20 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         portfolio_trades_folder = os.path.join(CONFIG['trades_folder'], portfolio_name.replace(" ", "_"))
         os.makedirs(portfolio_trades_folder, exist_ok=True)
         
+        s3_enabled = CONFIG.get("upload_to_s3") and CONFIG.get("s3_reports_bucket")
+        action = "Saving and uploading" if s3_enabled else "Saving"
+        done_action = "Saved and uploaded" if s3_enabled else "Saved"
+
         results_to_save = []
         if CONFIG.get("save_only_filtered_trades", False):
-            print(f"Saving and uploading filtered trade logs for portfolio: {portfolio_name}...")
+            print(f"{action} filtered trade logs for portfolio: {portfolio_name}...")
             # Get the list of strategy names that passed the filter
             # (Need to define display_df earlier in the function if it's not already)
             display_df = pd.DataFrame(portfolio_results) # Or use the filtered one if available
-            filtered_strategy_names = display_df['Strategy'].tolist() 
+            filtered_strategy_names = display_df['Strategy'].tolist()
             results_to_save = [r for r in portfolio_results if r['Strategy'] in filtered_strategy_names]
         else:
-            print(f"Saving and uploading all valid trade logs for portfolio: {portfolio_name}...")
+            print(f"{action} all valid trade logs for portfolio: {portfolio_name}...")
             results_to_save = portfolio_results
 
         saved_logs = 0
@@ -257,9 +261,9 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
             if result.get('trade_log') and len(result['trade_log']) > 0:
                 save_trades_to_csv(result, portfolio_trades_folder, run_id)
                 saved_logs += 1
-                
+
         if saved_logs > 0:
-            print(f"Saved and uploaded {saved_logs} trade logs.")
+            print(f"{done_action} {saved_logs} trade logs.")
         else:
             print("No trade logs met the criteria for saving.")
         print("-" * 80)
@@ -347,15 +351,12 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
         summary_df_sorted.to_csv(local_filepath, index=False)
         print(f"\nSuccessfully saved overall portfolio summary to '{local_filepath}'")
 
-        # Upload the summary to S3
+        # Upload the summary to S3 if enabled
         s3_bucket = CONFIG.get("s3_reports_bucket")
-        if s3_bucket and run_id: # Check for run_id instead of run_timestamp
-            # CHANGE this line to use run_id
+        if CONFIG.get("upload_to_s3") and s3_bucket and run_id:
             s3_key = f"{run_id}/{filename}"
             if upload_file_to_s3(local_filepath, s3_bucket, s3_key):
                 print(f"Successfully uploaded summary to s3://{s3_bucket}/{s3_key}")
-        else:
-            print("  -> SKIPPING S3 upload: 's3_reports_bucket' or 'run_id' not available.")
 
     except Exception as e:
-        print(f"\n  -> WARNING: Could not save or upload the overall portfolio summary. Error: {e}")
+        print(f"\n  -> WARNING: Could not save the overall portfolio summary. Error: {e}")
