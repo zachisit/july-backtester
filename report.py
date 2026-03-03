@@ -58,6 +58,12 @@ def main():
         default=INITIAL_EQUITY,
         help=f"Initial equity for the analysis (default: {INITIAL_EQUITY}).",
     )
+    parser.add_argument(
+        "--report-name",
+        type=str,
+        default=None,
+        help="Custom name for the generated PDF/Markdown report and its parent folder. If not provided, the CSV filename will be used.",
+    )
     args = parser.parse_args()
 
     csv_path = args.csv_path
@@ -79,7 +85,10 @@ def main():
         else:
             output_dir = "detailed_reports"
 
-    report_name = os.path.splitext(os.path.basename(csv_path))[0]
+    if args.report_name:
+        report_name = args.report_name
+    else:
+        report_name = os.path.splitext(os.path.basename(csv_path))[0]
 
     print(f"Loading trades from: {csv_path}")
     trades_df = pd.read_csv(csv_path)
