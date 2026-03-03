@@ -18,7 +18,7 @@ helpers/portfolio_simulations.py   # Multi-asset portfolio simulation engine
 helpers/monte_carlo.py             # Monte Carlo robustness scoring
 helpers/summary.py                 # Report generation, S3 upload
 helpers/caching.py                 # Local Parquet cache (24h TTL)
-helpers/aws_utils.py               # AWS Secrets Manager + S3; falls back to .env
+helpers/aws_utils.py               # S3 upload helper (upload_file_to_s3); reads API key from env or .env via get_secret
 helpers/timeframe_utils.py         # Converts '200d' → bar count for given timeframe
 services/services.py               # Data provider factory (Polygon or Norgate)
 services/polygon_service.py        # Polygon.io REST API
@@ -52,7 +52,7 @@ tickers_to_scan/                   # JSON ticker lists (nasdaq_100.json, sp-500.
 
 **Caching:** `helpers/caching.py` stores Parquet files in `data_cache/` keyed by `{symbol}_{start}_{end}_{timeframe}_{multiplier}.parquet`. TTL is 24h. Delete the folder to force a fresh fetch.
 
-**API key resolution order** (in `helpers/aws_utils.py`): environment variable → `.env` file → AWS Secrets Manager.
+**API key resolution order** (in `helpers/aws_utils.py`): environment variable → `.env` file. No AWS Secrets Manager.
 
 **Data fetcher signature:** `fetcher(symbol, start_date, end_date, config) -> pd.DataFrame | None`. Columns must be `Open, High, Low, Close, Volume` with a `Datetime` index.
 

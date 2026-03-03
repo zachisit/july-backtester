@@ -39,21 +39,22 @@ def get_data_service():
         """
         # We need the timeframe to create a unique cache filename
         timeframe = config.get("timeframe", "D")
-        
+        multiplier = config.get("timeframe_multiplier", 1)
+
         # Try to load from cache
-        df = get_cached_data(symbol, start_date, end_date, timeframe)
-        
+        df = get_cached_data(symbol, start_date, end_date, timeframe, multiplier)
+
         if df is not None:
             # If we found it in the cache, we're done!
             return df
-        
+
         # If not in cache, call the original API fetcher (e.g., polygon_service.get_price_data)
         logger.info(f"  -> Cache miss for '{symbol}'. Fetching from API...")
         df = original_fetcher(symbol, start_date, end_date, config)
-        
+
         # If the fetch was successful, save the result to the cache for next time
         if df is not None and not df.empty:
-            set_cached_data(df, symbol, start_date, end_date, timeframe)
+            set_cached_data(df, symbol, start_date, end_date, timeframe, multiplier)
             
         return df
 

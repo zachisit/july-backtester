@@ -3,7 +3,7 @@ Command-line script to generate detailed PDF/Markdown reports from backtester CS
 
 Usage:
     python report.py path/to/strategy.csv
-    python report.py summaries/2026-03-02_14-00-00/Nasdaq_100/EMA_Regime.csv
+    python report.py output/runs/2026-03-02_14-00-00/analyzer_csvs/Nasdaq_100/EMA_Regime.csv
 """
 import argparse
 import os

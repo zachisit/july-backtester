@@ -201,7 +201,7 @@ CONFIG = {
     "num_mc_simulations": 1000,
 
     # ============================================================
-    # SECTION 10: TRADING COST SETTINGS
+    # SECTION 11: TRADING COST SETTINGS
     # ============================================================
     # --- Slippage Percentage ---
     "slippage_pct": 0.0005,
