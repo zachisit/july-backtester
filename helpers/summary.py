@@ -170,7 +170,7 @@ def generate_final_summary(all_results):
     print(final_df_display.to_string(index=False))
     
     try:
-        output_dir = "reports"
+        output_dir = "summaries"
         os.makedirs(output_dir, exist_ok=True)
         filepath = os.path.join(output_dir, "top_5_single_asset_summary.csv")
         final_df_display.to_csv(filepath, index=False)
@@ -234,7 +234,50 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         print(f"\n--- Strategy Comparison for {portfolio_name} (filtered, sorted by MC Score) ---")
         print(summary_df_display.to_string(index=False))
 
-    # --- Step 4: Use the ORIGINAL, UNFILTERED list to save ALL generated trade logs ---
+    # --- Step 4a: Export analyzer-compatible CSVs to summaries/ ---
+    portfolio_name_safe = portfolio_name.replace(" ", "_")
+    analyzer_csv_folder = os.path.join("summaries", run_id, portfolio_name_safe)
+    os.makedirs(analyzer_csv_folder, exist_ok=True)
+
+    # Column mapping: backtester trade_log keys -> trade_analyzer expected columns
+    COLUMN_MAP = {
+        'EntryDate': 'Date',
+        'ExitDate': 'Ex. date',
+        'EntryPrice': 'Price',
+        'ExitPrice': 'Ex. Price',
+        'Profit': 'Profit',
+        'ProfitPct': '% Profit',
+        'is_win': 'Win',
+        'HoldDuration': '# bars',
+        'MAE_pct': 'MAE',
+        'MFE_pct': 'MFE',
+        'Symbol': 'Symbol',
+        'ExitReason': 'ExitReason',
+    }
+
+    analyzer_csvs_saved = 0
+    for result in portfolio_results:
+        if not result.get('trade_log') or len(result['trade_log']) == 0:
+            continue
+        strategy_name_safe = result['Strategy'].replace('/', '_').replace(' ', '_').replace('(', '').replace(')', '').replace(':', '')
+        raw_df = pd.DataFrame(result['trade_log'])
+        mapped_df = raw_df.rename(columns=COLUMN_MAP)
+        # Convert fractional values to percentages for the analyzer
+        if '% Profit' in mapped_df.columns:
+            mapped_df['% Profit'] = mapped_df['% Profit'] * 100.0
+        if 'MAE' in mapped_df.columns:
+            mapped_df['MAE'] = mapped_df['MAE'] * 100.0
+        if 'MFE' in mapped_df.columns:
+            mapped_df['MFE'] = mapped_df['MFE'] * 100.0
+        csv_filename = f"{strategy_name_safe}.csv"
+        csv_path = os.path.join(analyzer_csv_folder, csv_filename)
+        mapped_df.to_csv(csv_path, index=False)
+        analyzer_csvs_saved += 1
+
+    if analyzer_csvs_saved > 0:
+        print(f"  Exported {analyzer_csvs_saved} analyzer-compatible CSVs to {analyzer_csv_folder}")
+
+    # --- Step 4b: Use the ORIGINAL, UNFILTERED list to save ALL generated trade logs ---
     if CONFIG.get("save_individual_trades", False):
         print("\n" + "-" * 80)
         portfolio_trades_folder = os.path.join("trades", portfolio_name.replace(" ", "_"))
@@ -343,7 +386,7 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
     print(summary_df_sorted.to_string(index=False))
 
     try:
-        output_dir = "reports"
+        output_dir = os.path.join("summaries", run_id) if run_id else "summaries"
         os.makedirs(output_dir, exist_ok=True)
         filename = "overall_portfolio_summary.csv"
         local_filepath = os.path.join(output_dir, filename)

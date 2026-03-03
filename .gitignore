@@ -36,8 +36,9 @@ Thumbs.db
 
 # Project outputs
 data_cache/
-reports/
+summaries/
 trades/
+detailed_reports/
 logs/
 *.log
 
