@@ -125,13 +125,14 @@ def main():
     run_folder_name = f"{args.name}_{timestamp}" if args.name else timestamp
     start_time = time.monotonic()
 
-    os.makedirs("logs", exist_ok=True)
+    run_base_dir = os.path.join("output", "runs", run_folder_name)
+    os.makedirs(os.path.join(run_base_dir, "logs"), exist_ok=True)
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(f"logs/run_{timestamp}.log"),
+            logging.FileHandler(os.path.join(run_base_dir, "logs", f"run_{timestamp}.log")),
         ],
     )
 

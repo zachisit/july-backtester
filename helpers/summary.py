@@ -170,7 +170,7 @@ def generate_final_summary(all_results):
     print(final_df_display.to_string(index=False))
     
     try:
-        output_dir = "summaries"
+        output_dir = "output"
         os.makedirs(output_dir, exist_ok=True)
         filepath = os.path.join(output_dir, "top_5_single_asset_summary.csv")
         final_df_display.to_csv(filepath, index=False)
@@ -234,10 +234,9 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         print(f"\n--- Strategy Comparison for {portfolio_name} (filtered, sorted by MC Score) ---")
         print(summary_df_display.to_string(index=False))
 
-    # --- Step 4a: Export analyzer-compatible CSVs to summaries/ ---
+    # --- Step 4a: Export analyzer-compatible CSVs ---
     portfolio_name_safe = portfolio_name.replace(" ", "_")
-    analyzer_csv_folder = os.path.join("summaries", run_id, portfolio_name_safe)
-    os.makedirs(analyzer_csv_folder, exist_ok=True)
+    analyzer_csv_folder = os.path.join("output", "runs", run_id, "analyzer_csvs", portfolio_name_safe)
 
     # Column mapping: backtester trade_log keys -> trade_analyzer expected columns
     COLUMN_MAP = {
@@ -255,7 +254,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         'ExitReason': 'ExitReason',
     }
 
-    analyzer_csvs_saved = 0
+    pending_csvs = []
     for result in portfolio_results:
         if not result.get('trade_log') or len(result['trade_log']) == 0:
             continue
@@ -270,17 +269,19 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         if 'MFE' in mapped_df.columns:
             mapped_df['MFE'] = mapped_df['MFE'] * 100.0
         csv_filename = f"{strategy_name_safe}.csv"
-        csv_path = os.path.join(analyzer_csv_folder, csv_filename)
-        mapped_df.to_csv(csv_path, index=False)
-        analyzer_csvs_saved += 1
+        pending_csvs.append((os.path.join(analyzer_csv_folder, csv_filename), mapped_df))
 
+    analyzer_csvs_saved = len(pending_csvs)
     if analyzer_csvs_saved > 0:
+        os.makedirs(analyzer_csv_folder, exist_ok=True)
+        for csv_path, mapped_df in pending_csvs:
+            mapped_df.to_csv(csv_path, index=False)
         print(f"  Exported {analyzer_csvs_saved} analyzer-compatible CSVs to {analyzer_csv_folder}")
 
     # --- Step 4b: Use the ORIGINAL, UNFILTERED list to save ALL generated trade logs ---
     if CONFIG.get("save_individual_trades", False):
         print("\n" + "-" * 80)
-        portfolio_trades_folder = os.path.join("trades", portfolio_name.replace(" ", "_"))
+        portfolio_trades_folder = os.path.join("output", "runs", run_id, "raw_trades", portfolio_name_safe)
         os.makedirs(portfolio_trades_folder, exist_ok=True)
         
         s3_enabled = CONFIG.get("upload_to_s3") and CONFIG.get("s3_reports_bucket")
@@ -386,7 +387,7 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
     print(summary_df_sorted.to_string(index=False))
 
     try:
-        output_dir = os.path.join("summaries", run_id) if run_id else "summaries"
+        output_dir = os.path.join("output", "runs", run_id) if run_id else "output"
         os.makedirs(output_dir, exist_ok=True)
         filename = "overall_portfolio_summary.csv"
         local_filepath = os.path.join(output_dir, filename)

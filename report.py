@@ -8,6 +8,7 @@ Usage:
 import argparse
 import os
 import sys
+from pathlib import Path
 
 import pandas as pd
 
@@ -48,8 +49,8 @@ def main():
     )
     parser.add_argument(
         "--output-dir",
-        default="detailed_reports",
-        help="Root directory for report output (default: detailed_reports/).",
+        default=None,
+        help="Root directory for report output. Auto-detected from the CSV path when inside output/runs/<run_id>/analyzer_csvs/.",
     )
     parser.add_argument(
         "--equity",
@@ -64,6 +65,20 @@ def main():
         print(f"ERROR: File not found: {csv_path}")
         sys.exit(1)
 
+    # Dynamically determine output directory based on the CSV path.
+    # If the CSV lives inside a run's analyzer_csvs/ folder, route the report
+    # to detailed_reports/ inside the same run directory.
+    if args.output_dir is not None:
+        output_dir = args.output_dir
+    else:
+        csv_parts = Path(csv_path).parts
+        if "analyzer_csvs" in csv_parts:
+            idx = csv_parts.index("analyzer_csvs")
+            base_run_dir = Path(*csv_parts[:idx])
+            output_dir = str(base_run_dir / "detailed_reports")
+        else:
+            output_dir = "detailed_reports"
+
     report_name = os.path.splitext(os.path.basename(csv_path))[0]
 
     print(f"Loading trades from: {csv_path}")
@@ -71,7 +86,7 @@ def main():
     print(f"Loaded {len(trades_df)} trades.")
 
     config_params = {
-        'BASE_OUTPUT_DIRECTORY': args.output_dir,
+        'BASE_OUTPUT_DIRECTORY': output_dir,
         'INITIAL_EQUITY': args.equity,
         'BENCHMARK_TICKER': BENCHMARK_TICKER,
         'RISK_FREE_RATE': RISK_FREE_RATE,
@@ -95,7 +110,7 @@ def main():
         'NUMERIC_COLS': NUMERIC_COLS,
     }
 
-    generate_trade_report(trades_df, args.output_dir, report_name, config_params)
+    generate_trade_report(trades_df, output_dir, report_name, config_params)
 
 
 if __name__ == "__main__":

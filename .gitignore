@@ -36,10 +36,6 @@ Thumbs.db
 
 # Project outputs
 data_cache/
-summaries/
-trades/
-detailed_reports/
-logs/
-*.log
+output/
 
 tools/watchlists
