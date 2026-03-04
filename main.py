@@ -138,6 +138,33 @@ def main():
             sys.exit(1)
     # --- END S1 ---
 
+    # --- S2: CONFIG VALIDATION ---
+    errors = []
+
+    from datetime import datetime as _dt
+    try:
+        start = _dt.strptime(CONFIG["start_date"], "%Y-%m-%d")
+        end = _dt.strptime(CONFIG["end_date"], "%Y-%m-%d")
+        if start >= end:
+            errors.append(f"  - start_date ({CONFIG['start_date']}) must be before end_date ({CONFIG['end_date']})")
+    except ValueError as e:
+        errors.append(f"  - Invalid date format in config: {e}")
+
+    alloc = CONFIG.get("allocation_per_trade", 0)
+    if not (0 < alloc <= 1.0):
+        errors.append(f"  - allocation_per_trade ({alloc}) must be between 0 (exclusive) and 1.0 (inclusive)")
+
+    if not CONFIG.get("portfolios"):
+        errors.append("  - portfolios is empty. Add at least one portfolio entry to run.")
+
+    if errors:
+        print("\n[ERROR] Invalid configuration in config.py:")
+        for e in errors:
+            print(e)
+        print()
+        sys.exit(1)
+    # --- END S2 ---
+
     # --- ARGUMENT PARSING & FOLDER SETUP (No changes) ---
     parser = argparse.ArgumentParser(description="Portfolio Backtester")
     parser.add_argument("--name", type=str, help="An optional name for the backtest run, used as a prefix for the report folder.")

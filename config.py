@@ -30,7 +30,7 @@ CONFIG = {
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
     #   grab the current date the app is ran
-    "end_date": datetime.now().strftime('%Y-%m-%d'),
+    "end_date": datetime.now().strftime("%Y-%m-%d"),
 
     # --- Initial Capital ---
     # No currency symbol or commas. Based in USD.
