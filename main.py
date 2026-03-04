@@ -236,12 +236,23 @@ def main():
             logger.warning(f"No symbols found for '{portfolio_name}'. Skipping.")
             continue
 
+        MIN_BARS = CONFIG.get("min_bars_required", 250)
+        skipped_symbols = []
         portfolio_data = {}
         for symbol in tqdm(symbols, desc="  -> Fetching & Preparing Data", unit=" symbols"):
             df = data_fetcher(symbol, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
             if df is not None and not df.empty:
+                if len(df) < MIN_BARS:
+                    skipped_symbols.append((symbol, len(df)))
+                    continue
                 # (Your existing feature calculation logic here)
                 portfolio_data[symbol] = df
+
+        if skipped_symbols:
+            logger.warning(
+                f"  -> Skipped {len(skipped_symbols)} symbol(s) with fewer than {MIN_BARS} bars: "
+                + ", ".join(f"{s} ({n} bars)" for s, n in skipped_symbols)
+            )
 
         if not portfolio_data:
             logger.warning(f"Could not fetch data for any symbols in '{portfolio_name}'. Skipping.")
