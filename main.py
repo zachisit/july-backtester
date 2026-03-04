@@ -3,8 +3,10 @@
 from datetime import datetime
 import logging
 import os
+import sys
 import time
 import argparse
+import pandas as pd
 from config import CONFIG
 from services import get_data_service
 from helpers.indicators import calculate_sma, calculate_rsi, calculate_atr
@@ -117,6 +119,53 @@ def run_single_simulation(args):
         return None
 
 def main():
+    # --- S1: API KEY CHECK ---
+    import os
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    if CONFIG.get("data_provider", "polygon").lower() == "polygon":
+        api_key = os.environ.get("POLYGON_API_KEY")
+        if not api_key:
+            print(
+                "\n[ERROR] POLYGON_API_KEY is not set.\n"
+                "  1. Copy .env.example to .env in the project root\n"
+                "  2. Add your key: POLYGON_API_KEY=your_key_here\n"
+                "  Or set it as a system environment variable.\n"
+            )
+            sys.exit(1)
+    # --- END S1 ---
+
+    # --- S2: CONFIG VALIDATION ---
+    errors = []
+
+    from datetime import datetime as _dt
+    try:
+        start = _dt.strptime(CONFIG["start_date"], "%Y-%m-%d")
+        end = _dt.strptime(CONFIG["end_date"], "%Y-%m-%d")
+        if start >= end:
+            errors.append(f"  - start_date ({CONFIG['start_date']}) must be before end_date ({CONFIG['end_date']})")
+    except ValueError as e:
+        errors.append(f"  - Invalid date format in config: {e}")
+
+    alloc = CONFIG.get("allocation_per_trade", 0)
+    if not (0 < alloc <= 1.0):
+        errors.append(f"  - allocation_per_trade ({alloc}) must be between 0 (exclusive) and 1.0 (inclusive)")
+
+    if not CONFIG.get("portfolios"):
+        errors.append("  - portfolios is empty. Add at least one portfolio entry to run.")
+
+    if errors:
+        print("\n[ERROR] Invalid configuration in config.py:")
+        for e in errors:
+            print(e)
+        print()
+        sys.exit(1)
+    # --- END S2 ---
+
     # --- ARGUMENT PARSING & FOLDER SETUP (No changes) ---
     parser = argparse.ArgumentParser(description="Portfolio Backtester")
     parser.add_argument("--name", type=str, help="An optional name for the backtest run, used as a prefix for the report folder.")
@@ -188,12 +237,50 @@ def main():
             logger.warning(f"No symbols found for '{portfolio_name}'. Skipping.")
             continue
 
+        MIN_BARS = CONFIG.get("min_bars_required", 250)
+        skipped_symbols = []
         portfolio_data = {}
         for symbol in tqdm(symbols, desc="  -> Fetching & Preparing Data", unit=" symbols"):
             df = data_fetcher(symbol, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
             if df is not None and not df.empty:
-                # (Your existing feature calculation logic here)
+                if len(df) < MIN_BARS:
+                    skipped_symbols.append((symbol, len(df)))
+                    continue
+                # --- FEATURE ENGINEERING ---
+                # These columns are captured at trade entry time for each
+                # position and stored in the trade log for later analysis.
+                # All calculations use .shift(1) where needed to ensure
+                # no look-ahead bias — indicators are based only on data
+                # available at the close of the previous bar.
+
+                # RSI (14-period)
+                _delta = df['Close'].diff()
+                _gain = _delta.where(_delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+                _loss = (-_delta.where(_delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                df['RSI_14'] = 100 - (100 / (1 + (_gain / _loss)))
+
+                # ATR (14-period) as % of close
+                _hl = df['High'] - df['Low']
+                _hc = (df['High'] - df['Close'].shift()).abs()
+                _lc = (df['Low'] - df['Close'].shift()).abs()
+                _atr = pd.concat([_hl, _hc, _lc], axis=1).max(axis=1)
+                df['ATR_14'] = _atr.ewm(alpha=1/14, adjust=False).mean()
+                df['ATR_14_pct'] = df['ATR_14'] / df['Close']
+
+                # Distance from 200-day SMA as % of close
+                df['SMA200_dist_pct'] = (df['Close'] - df['Close'].rolling(200).mean()) / df['Close'].rolling(200).mean()
+
+                # Volume spike: today's volume vs 20-day average volume
+                df['Volume_Spike'] = df['Volume'] / df['Volume'].rolling(20).mean()
+
+                # --- END FEATURE ENGINEERING ---
                 portfolio_data[symbol] = df
+
+        if skipped_symbols:
+            logger.warning(
+                f"  -> Skipped {len(skipped_symbols)} symbol(s) with fewer than {MIN_BARS} bars: "
+                + ", ".join(f"{s} ({n} bars)" for s, n in skipped_symbols)
+            )
 
         if not portfolio_data:
             logger.warning(f"Could not fetch data for any symbols in '{portfolio_name}'. Skipping.")

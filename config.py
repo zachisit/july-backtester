@@ -30,7 +30,7 @@ CONFIG = {
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
     #   grab the current date the app is ran
-    "end_date": datetime.now().strftime('%Y-%m-%d'),
+    "end_date": datetime.now().strftime("%Y-%m-%d"),
 
     # --- Initial Capital ---
     # No currency symbol or commas. Based in USD.
@@ -146,6 +146,12 @@ CONFIG = {
     #   up nicely for you directly. Very handy. The rubric of that looks
     #   like the following:
     #   "Nasdaq Biotechnology": "norgate:Nasdaq Biotechnology",
+    # --- Minimum Bars Required ---
+    # Symbols with fewer bars than this are skipped entirely.
+    # 250 ≈ one year of daily data. Increase if your strategies need
+    #   longer lookback periods (e.g. 200d SMA needs at least 200 bars).
+    "min_bars_required": 250,
+
     "portfolios": {
         "Nasdaq 100": "nasdaq_100.json",
         #"Nasdaq Biotech": "nasdaq_biotech_tickers.json",
