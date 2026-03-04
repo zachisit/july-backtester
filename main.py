@@ -3,6 +3,7 @@
 from datetime import datetime
 import logging
 import os
+import sys
 import time
 import argparse
 from config import CONFIG
@@ -117,6 +118,26 @@ def run_single_simulation(args):
         return None
 
 def main():
+    # --- S1: API KEY CHECK ---
+    import os
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    if CONFIG.get("data_provider", "polygon").lower() == "polygon":
+        api_key = os.environ.get("POLYGON_API_KEY")
+        if not api_key:
+            print(
+                "\n[ERROR] POLYGON_API_KEY is not set.\n"
+                "  1. Copy .env.example to .env in the project root\n"
+                "  2. Add your key: POLYGON_API_KEY=your_key_here\n"
+                "  Or set it as a system environment variable.\n"
+            )
+            sys.exit(1)
+    # --- END S1 ---
+
     # --- ARGUMENT PARSING & FOLDER SETUP (No changes) ---
     parser = argparse.ArgumentParser(description="Portfolio Backtester")
     parser.add_argument("--name", type=str, help="An optional name for the backtest run, used as a prefix for the report folder.")
