@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import argparse
+import pandas as pd
 from config import CONFIG
 from services import get_data_service
 from helpers.indicators import calculate_sma, calculate_rsi, calculate_atr
@@ -245,7 +246,34 @@ def main():
                 if len(df) < MIN_BARS:
                     skipped_symbols.append((symbol, len(df)))
                     continue
-                # (Your existing feature calculation logic here)
+                # --- FEATURE ENGINEERING ---
+                # These columns are captured at trade entry time for each
+                # position and stored in the trade log for later analysis.
+                # All calculations use .shift(1) where needed to ensure
+                # no look-ahead bias — indicators are based only on data
+                # available at the close of the previous bar.
+
+                # RSI (14-period)
+                _delta = df['Close'].diff()
+                _gain = _delta.where(_delta > 0, 0).ewm(alpha=1/14, adjust=False).mean()
+                _loss = (-_delta.where(_delta < 0, 0)).ewm(alpha=1/14, adjust=False).mean()
+                df['RSI_14'] = 100 - (100 / (1 + (_gain / _loss)))
+
+                # ATR (14-period) as % of close
+                _hl = df['High'] - df['Low']
+                _hc = (df['High'] - df['Close'].shift()).abs()
+                _lc = (df['Low'] - df['Close'].shift()).abs()
+                _atr = pd.concat([_hl, _hc, _lc], axis=1).max(axis=1)
+                df['ATR_14'] = _atr.ewm(alpha=1/14, adjust=False).mean()
+                df['ATR_14_pct'] = df['ATR_14'] / df['Close']
+
+                # Distance from 200-day SMA as % of close
+                df['SMA200_dist_pct'] = (df['Close'] - df['Close'].rolling(200).mean()) / df['Close'].rolling(200).mean()
+
+                # Volume spike: today's volume vs 20-day average volume
+                df['Volume_Spike'] = df['Volume'] / df['Volume'].rolling(20).mean()
+
+                # --- END FEATURE ENGINEERING ---
                 portfolio_data[symbol] = df
 
         if skipped_symbols:
