@@ -112,7 +112,18 @@ def atr_trailing_stop_with_trend_filter_logic(df, entry_period=20, atr_period=14
     """
     Combines a Donchian/Price Channel breakout entry with an ATR trailing stop
     and a long-term trend filter (SMA).
-    Corrected to produce a stateful signal for scanning.
+
+    *** IMPORTANT — KNOWN INTRABAR FILL ASSUMPTION ***
+    This strategy detects entry using the current bar's High exceeding the
+    breakout level, then records the fill at that same bar's Close. On daily
+    bars this means entry is triggered intraday but filled at end-of-day,
+    which is not achievable in live trading. Results will be optimistic
+    compared to filling at the next bar's open.
+
+    This strategy is safe to use for directional research but should NOT
+    be used for precise entry-cost analysis on daily bars without modification.
+    For a clean daily-bar version, move entry execution to the next bar's open
+    by shifting the signal output and letting the simulation engine handle fill.
     """
     # 1. Calculate all necessary indicators
     df = calculate_sma(df, ma_length)
@@ -748,8 +759,18 @@ def calculate_sma(df, length):
 def atr_trailing_stop_logic_breakout_entry(df, entry_period=20, atr_period=14, atr_multiplier=3.0):
     """
     Corrected ATR Trailing Stop strategy with Donchian Breakout Entry.
-    - Entry: Buys when Close exceeds the N-day high.
-    - Exit: Sells when price closes below the dynamic ATR trailing stop.
+
+    *** IMPORTANT — KNOWN INTRABAR FILL ASSUMPTION ***
+    This strategy detects entry using the current bar's High exceeding the
+    breakout level, then records the fill at that same bar's Close. On daily
+    bars this means entry is triggered intraday but filled at end-of-day,
+    which is not achievable in live trading. Results will be optimistic
+    compared to filling at the next bar's open.
+
+    This strategy is safe to use for directional research but should NOT
+    be used for precise entry-cost analysis on daily bars without modification.
+    For a clean daily-bar version, move entry execution to the next bar's open
+    by shifting the signal output and letting the simulation engine handle fill.
     """
     # 1. Calculate indicators
     df = calculate_atr(df, period=atr_period)
