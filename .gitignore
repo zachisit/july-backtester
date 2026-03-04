@@ -34,9 +34,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Dynamic Trade csv files
-trades/
+# Project outputs
+data_cache/
+output/
 
 tools/watchlists
-
-data_cache/

@@ -1,12 +1,16 @@
 # services/polygon_service.py (Definitively Corrected for Authentication)
 
 import datetime
+import os
 import requests
 import pandas as pd
 import orjson
 import logging
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
 from helpers.caching import get_cached_data, set_cached_data
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 SESSION = requests.Session()
@@ -16,19 +20,9 @@ def get_previous_close_data(symbol, config):
     Fetches only the single previous day's OHLC bar using Polygon's /prev endpoint.
     This is the most reliable way to get the last settled closing data.
     """
-    # This logic is mostly copied from get_price_data for consistency
-    secret_name = config.get("polygon_api_secret_name")
-    if not secret_name:
-        raise ValueError("Configuration error: 'polygon_api_secret_name' is not defined in config.py")
-
-    try:
-        from helpers.aws_utils import get_secret
-        api_key = get_secret(secret_name)
-    except ImportError:
-        raise ImportError("Could not import get_secret from helpers.aws_utils")
-
+    api_key = os.environ.get("POLYGON_API_KEY")
     if not api_key:
-        raise ValueError(f"Failed to retrieve a valid Polygon API key from AWS secret: '{secret_name}'")
+        raise ValueError("POLYGON_API_KEY is not set. Add it to your .env file or environment.")
 
     is_index = symbol.upper().startswith("I:")
     # Use "total_return" setting from config to determine 'adjusted' flag
@@ -66,18 +60,9 @@ def get_price_data(symbol, start_date, end_date, config):
     This version includes automatic pagination, correctly authenticates
     ALL requests, and dynamically handles different timeframes.
     """
-    secret_name = config.get("polygon_api_secret_name")
-    if not secret_name:
-        raise ValueError("Configuration error: 'polygon_api_secret_name' is not defined in config.py")
-
-    try:
-        from helpers.aws_utils import get_secret
-        api_key = get_secret(secret_name)
-    except ImportError:
-        raise ImportError("Could not import get_secret from helpers.aws_utils")
-
+    api_key = os.environ.get("POLYGON_API_KEY")
     if not api_key:
-        raise ValueError(f"Failed to retrieve a valid Polygon API key from AWS secret: '{secret_name}'")
+        raise ValueError("POLYGON_API_KEY is not set. Add it to your .env file or environment.")
 
     # --- START: New Dynamic Timeframe Logic ---
     timeframe_code = config.get("timeframe", "D")
@@ -161,18 +146,9 @@ def get_last_n_bars(symbol, n_bars, config):
     Fetches the last N settled daily bars for a symbol.
     This is a highly reliable way to get "yesterday" and "the day before."
     """
-    secret_name = config.get("polygon_api_secret_name")
-    if not secret_name:
-        raise ValueError("Configuration error: 'polygon_api_secret_name' is not defined in config.py")
-
-    try:
-        from helpers.aws_utils import get_secret
-        api_key = get_secret(secret_name)
-    except ImportError:
-        raise ImportError("Could not import get_secret from helpers.aws_utils")
-
+    api_key = os.environ.get("POLYGON_API_KEY")
     if not api_key:
-        raise ValueError(f"Failed to retrieve a valid Polygon API key from AWS secret: '{secret_name}'")
+        raise ValueError("POLYGON_API_KEY is not set. Add it to your .env file or environment.")
 
     # We query a recent range to ensure we capture the latest data
     end_date = datetime.utcnow().strftime('%Y-%m-%d')
