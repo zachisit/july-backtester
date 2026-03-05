@@ -169,6 +169,7 @@ def main():
     # --- ARGUMENT PARSING & FOLDER SETUP (No changes) ---
     parser = argparse.ArgumentParser(description="Portfolio Backtester")
     parser.add_argument("--name", type=str, help="An optional name for the backtest run, used as a prefix for the report folder.")
+    parser.add_argument("--dry-run", action="store_true", help="Validate config and print run summary without fetching data or running simulations.")
     args = parser.parse_args()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_folder_name = f"{args.name}_{timestamp}" if args.name else timestamp
@@ -229,6 +230,10 @@ def main():
     logger.info(f"  Total tasks   : {_total_tasks}  (symbols x strategies x stop configs)")
     logger.info("=" * 60)
     # --- END U1 ---
+
+    if args.dry_run:
+        logger.info("[DRY RUN] Exiting before data fetch. No simulations will run.")
+        sys.exit(0)
 
     data_fetcher = get_data_service()
     logger.info("PORTFOLIO STRATEGY ANALYZER")
