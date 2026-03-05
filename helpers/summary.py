@@ -392,6 +392,13 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
         filename = "overall_portfolio_summary.csv"
         local_filepath = os.path.join(output_dir, filename)
         
+        # Add run metadata columns so results are self-describing across runs
+        summary_df_sorted.insert(0, 'run_id', run_id or 'unknown')
+        summary_df_sorted.insert(1, 'data_provider', CONFIG.get('data_provider', 'polygon'))
+        summary_df_sorted.insert(2, 'start_date', CONFIG.get('start_date', ''))
+        summary_df_sorted.insert(3, 'end_date', CONFIG.get('end_date', ''))
+        summary_df_sorted.insert(4, 'timeframe', f"{CONFIG.get('timeframe_multiplier', 1)}{CONFIG.get('timeframe', 'D')}")
+
         summary_df_sorted.to_csv(local_filepath, index=False)
         print(f"\nSuccessfully saved overall portfolio summary to '{local_filepath}'")
 

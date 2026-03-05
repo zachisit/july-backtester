@@ -169,6 +169,7 @@ def main():
     # --- ARGUMENT PARSING & FOLDER SETUP (No changes) ---
     parser = argparse.ArgumentParser(description="Portfolio Backtester")
     parser.add_argument("--name", type=str, help="An optional name for the backtest run, used as a prefix for the report folder.")
+    parser.add_argument("--dry-run", action="store_true", help="Validate config and print run summary without fetching data or running simulations.")
     args = parser.parse_args()
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_folder_name = f"{args.name}_{timestamp}" if args.name else timestamp
@@ -176,6 +177,22 @@ def main():
 
     run_base_dir = os.path.join("output", "runs", run_folder_name)
     os.makedirs(os.path.join(run_base_dir, "logs"), exist_ok=True)
+
+    # --- C1: CONFIG SNAPSHOT ---
+    import json as _json
+    def _config_serializer(obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return str(obj)
+
+    try:
+        _snapshot_path = os.path.join(run_base_dir, "config_snapshot.json")
+        with open(_snapshot_path, "w", encoding="utf-8") as _f:
+            _json.dump(CONFIG, _f, indent=2, default=_config_serializer)
+    except Exception as _e:
+        print(f"[WARNING] Could not write config_snapshot.json: {_e}")
+    # --- END C1 ---
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -184,6 +201,75 @@ def main():
             logging.FileHandler(os.path.join(run_base_dir, "logs", f"run_{timestamp}.log")),
         ],
     )
+
+    # --- U1: RUN SUMMARY ---
+    total_stop_configs = len(CONFIG.get("stop_loss_configs", []))
+    total_strategies = len(STRATEGIES)
+
+    # Count total symbols across all portfolios to estimate task count
+    _symbol_counts = {}
+    for _pname, _pvalue in CONFIG.get("portfolios", {}).items():
+        if isinstance(_pvalue, list):
+            _symbol_counts[_pname] = len(_pvalue)
+        elif isinstance(_pvalue, str) and _pvalue.endswith(".json"):
+            try:
+                import orjson as _orjson
+                with open(os.path.join("tickers_to_scan", _pvalue), "rb") as _f:
+                    _symbol_counts[_pname] = len(_orjson.loads(_f.read()))
+            except Exception:
+                _symbol_counts[_pname] = "?"
+        elif isinstance(_pvalue, str) and _pvalue.startswith("norgate:"):
+            _symbol_counts[_pname] = "? (Norgate)"
+        else:
+            _symbol_counts[_pname] = "?"
+
+    _total_symbols = sum(v for v in _symbol_counts.values() if isinstance(v, int))
+    _total_tasks = (
+        _total_symbols * total_strategies * total_stop_configs
+        if isinstance(_total_symbols, int) else "?"
+    )
+
+    logger.info("=" * 60)
+    logger.info("  RUN SUMMARY")
+    logger.info("=" * 60)
+    logger.info(f"  Run ID        : {run_folder_name}")
+    logger.info(f"  Data provider : {CONFIG.get('data_provider', 'polygon')}")
+    logger.info(f"  Period        : {CONFIG['start_date']} -> {CONFIG['end_date']}")
+    logger.info(f"  Timeframe     : {CONFIG.get('timeframe', 'D')} x {CONFIG.get('timeframe_multiplier', 1)}")
+    logger.info(f"  Strategies    : {total_strategies}")
+    logger.info(f"  Stop configs  : {total_stop_configs}")
+    logger.info("-" * 60)
+    for _pname, _count in _symbol_counts.items():
+        logger.info(f"  Portfolio     : {_pname} ({_count} symbols)")
+    logger.info("-" * 60)
+    logger.info(f"  Total symbols : {_total_symbols}")
+    logger.info(f"  Total tasks   : {_total_tasks}  (symbols x strategies x stop configs)")
+    logger.info("=" * 60)
+    # --- END U1 ---
+
+    if args.dry_run:
+        logger.info("[DRY RUN] Exiting before data fetch. No simulations will run.")
+        sys.exit(0)
+
+    # --- D1: STALE CACHE WARNING ---
+    import glob
+    from datetime import timedelta
+    _cache_dir = "data_cache"
+    _stale_threshold = timedelta(days=7)
+    _now = datetime.now()
+
+    # Ensure the directory exists before globbing to avoid errors in clean environments
+    if os.path.exists(_cache_dir):
+        _stale = [
+            f for f in glob.glob(os.path.join(_cache_dir, "*.parquet"))
+            if _now - datetime.fromtimestamp(os.path.getmtime(f)) > _stale_threshold
+        ]
+        if _stale:
+            logger.warning(
+                f"  -> STALE CACHE: {len(_stale)} file(s) in '{_cache_dir}' are older than 7 days. "
+                "Delete data_cache/ to force a fresh fetch."
+            )
+    # --- END D1 ---
 
     data_fetcher = get_data_service()
     logger.info("PORTFOLIO STRATEGY ANALYZER")
