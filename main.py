@@ -185,6 +185,51 @@ def main():
         ],
     )
 
+    # --- U1: RUN SUMMARY ---
+    total_stop_configs = len(CONFIG.get("stop_loss_configs", []))
+    total_strategies = len(STRATEGIES)
+
+    # Count total symbols across all portfolios to estimate task count
+    _symbol_counts = {}
+    for _pname, _pvalue in CONFIG.get("portfolios", {}).items():
+        if isinstance(_pvalue, list):
+            _symbol_counts[_pname] = len(_pvalue)
+        elif isinstance(_pvalue, str) and _pvalue.endswith(".json"):
+            try:
+                import orjson as _orjson
+                with open(os.path.join("tickers_to_scan", _pvalue), "rb") as _f:
+                    _symbol_counts[_pname] = len(_orjson.loads(_f.read()))
+            except Exception:
+                _symbol_counts[_pname] = "?"
+        elif isinstance(_pvalue, str) and _pvalue.startswith("norgate:"):
+            _symbol_counts[_pname] = "? (Norgate)"
+        else:
+            _symbol_counts[_pname] = "?"
+
+    _total_symbols = sum(v for v in _symbol_counts.values() if isinstance(v, int))
+    _total_tasks = (
+        _total_symbols * total_strategies * total_stop_configs
+        if isinstance(_total_symbols, int) else "?"
+    )
+
+    logger.info("=" * 60)
+    logger.info("  RUN SUMMARY")
+    logger.info("=" * 60)
+    logger.info(f"  Run ID        : {run_folder_name}")
+    logger.info(f"  Data provider : {CONFIG.get('data_provider', 'polygon')}")
+    logger.info(f"  Period        : {CONFIG['start_date']} -> {CONFIG['end_date']}")
+    logger.info(f"  Timeframe     : {CONFIG.get('timeframe', 'D')} x {CONFIG.get('timeframe_multiplier', 1)}")
+    logger.info(f"  Strategies    : {total_strategies}")
+    logger.info(f"  Stop configs  : {total_stop_configs}")
+    logger.info("-" * 60)
+    for _pname, _count in _symbol_counts.items():
+        logger.info(f"  Portfolio     : {_pname} ({_count} symbols)")
+    logger.info("-" * 60)
+    logger.info(f"  Total symbols : {_total_symbols}")
+    logger.info(f"  Total tasks   : {_total_tasks}  (symbols x strategies x stop configs)")
+    logger.info("=" * 60)
+    # --- END U1 ---
+
     data_fetcher = get_data_service()
     logger.info("PORTFOLIO STRATEGY ANALYZER")
 
