@@ -347,7 +347,7 @@ Every strategy with 50+ trades is stress-tested with 1,000 simulations that rand
 
 | Location | Contents |
 | --- | --- |
-| `output/runs/<run_id>/overall_portfolio_summary.csv` | All results across all portfolios, sorted by MC Score |
+| `output/runs/<run_id>/overall_portfolio_summary.csv` | All results across all portfolios, sorted by MC Score. The first 5 columns are run metadata (`run_id`, `data_provider`, `start_date`, `end_date`, `timeframe`) so results are self-describing when combined across runs. |
 | `output/runs/<run_id>/analyzer_csvs/<Portfolio>/` | Column-mapped CSVs ready to pass into `report.py` |
 | `output/runs/<run_id>/raw_trades/<Portfolio>/` | Per-symbol, per-strategy raw trade logs (when `save_individual_trades=True`) |
 | `output/runs/<run_id>/logs/` | Full execution log for the run |
