@@ -235,6 +235,26 @@ def main():
         logger.info("[DRY RUN] Exiting before data fetch. No simulations will run.")
         sys.exit(0)
 
+    # --- D1: STALE CACHE WARNING ---
+    import glob
+    from datetime import timedelta
+    _cache_dir = "data_cache"
+    _stale_threshold = timedelta(days=7)
+    _now = datetime.now()
+
+    # Ensure the directory exists before globbing to avoid errors in clean environments
+    if os.path.exists(_cache_dir):
+        _stale = [
+            f for f in glob.glob(os.path.join(_cache_dir, "*.parquet"))
+            if _now - datetime.fromtimestamp(os.path.getmtime(f)) > _stale_threshold
+        ]
+        if _stale:
+            logger.warning(
+                f"  -> STALE CACHE: {len(_stale)} file(s) in '{_cache_dir}' are older than 7 days. "
+                "Delete data_cache/ to force a fresh fetch."
+            )
+    # --- END D1 ---
+
     data_fetcher = get_data_service()
     logger.info("PORTFOLIO STRATEGY ANALYZER")
 
