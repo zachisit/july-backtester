@@ -397,7 +397,21 @@ def main():
         init_args = (spy_df, vix_df, tnx_df, portfolio_data)
 
         with Pool(processes=cpu_count(), initializer=init_worker, initargs=init_args) as p:
-            results_this_portfolio = list(tqdm(p.imap(run_single_simulation, tasks_for_this_portfolio), total=len(tasks_for_this_portfolio), desc="  -> Running sims"))
+            import time as _time
+            _results = []
+            _start_pool = _time.monotonic()
+            _total = len(tasks_for_this_portfolio)
+            _checkpoints = {max(1, int(_total * pct)) for pct in [0.1, 0.25, 0.5, 0.75, 0.9]}
+
+            for _i, _r in enumerate(tqdm(p.imap(run_single_simulation, tasks_for_this_portfolio), total=_total, desc="  -> Running sims"), start=1):
+                _results.append(_r)
+                if _i in _checkpoints:
+                    _elapsed = _time.monotonic() - _start_pool
+                    _rate = _i / _elapsed
+                    _remaining = (_total - _i) / _rate if _rate > 0 else 0
+                    logger.info(f"  -> Progress: {_i}/{_total} tasks done | Elapsed: {_elapsed:.0f}s | ETA: {_remaining:.0f}s remaining")
+
+            results_this_portfolio = _results
         
         # Add the results to the main list
         all_portfolio_results.extend([r for r in results_this_portfolio if r is not None])
