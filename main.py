@@ -177,6 +177,22 @@ def main():
 
     run_base_dir = os.path.join("output", "runs", run_folder_name)
     os.makedirs(os.path.join(run_base_dir, "logs"), exist_ok=True)
+
+    # --- C1: CONFIG SNAPSHOT ---
+    import json as _json
+    def _config_serializer(obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        return str(obj)
+
+    try:
+        _snapshot_path = os.path.join(run_base_dir, "config_snapshot.json")
+        with open(_snapshot_path, "w", encoding="utf-8") as _f:
+            _json.dump(CONFIG, _f, indent=2, default=_config_serializer)
+    except Exception as _e:
+        print(f"[WARNING] Could not write config_snapshot.json: {_e}")
+    # --- END C1 ---
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(message)s",
