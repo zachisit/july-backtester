@@ -49,6 +49,25 @@ _COL_ALIASES: dict[str, str] = {
 }
 
 
+# Characters illegal in Windows filenames (and generally problematic on any OS)
+_ILLEGAL_FILENAME_CHARS = r'\/:*?"<>|'
+
+
+def _sanitize_filename(symbol: str) -> str:
+    """
+    Replace characters that are illegal in Windows filenames with underscores.
+
+    Examples
+    --------
+    ``"I:VIX"``   → ``"I_VIX"``
+    ``"$I:TNX"``  → ``"$I_TNX"``
+    ``"AAPL"``    → ``"AAPL"``   (unchanged)
+    """
+    for ch in _ILLEGAL_FILENAME_CHARS:
+        symbol = symbol.replace(ch, "_")
+    return symbol
+
+
 def _resolve_dir(config: dict) -> str:
     """Return absolute path to the CSV data directory."""
     csv_dir = config.get("csv_data_dir", "csv_data")
@@ -58,11 +77,17 @@ def _resolve_dir(config: dict) -> str:
 
 
 def _find_csv(symbol: str, csv_dir: str) -> str | None:
-    """Return the first matching CSV path for *symbol*, or None."""
+    """Return the first matching CSV path for *symbol*, or None.
+
+    Special characters that are illegal in Windows filenames (e.g. ``:`` in
+    ``I:VIX``) are replaced with underscores before constructing the path, so
+    the expected file for ``I:VIX`` is ``I_VIX.csv``.
+    """
+    safe = _sanitize_filename(symbol)
     candidates = [
-        os.path.join(csv_dir, f"{symbol.upper()}.csv"),
-        os.path.join(csv_dir, f"{symbol.lower()}.csv"),
-        os.path.join(csv_dir, f"{symbol}.csv"),
+        os.path.join(csv_dir, f"{safe.upper()}.csv"),
+        os.path.join(csv_dir, f"{safe.lower()}.csv"),
+        os.path.join(csv_dir, f"{safe}.csv"),
     ]
     for path in candidates:
         if os.path.isfile(path):
@@ -137,13 +162,14 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     filepath = _find_csv(symbol, csv_dir)
 
     if filepath is None:
+        safe = _sanitize_filename(symbol)
         candidates = [
-            os.path.join(csv_dir, f"{symbol.upper()}.csv"),
-            os.path.join(csv_dir, f"{symbol.lower()}.csv"),
+            os.path.join(csv_dir, f"{safe.upper()}.csv"),
+            os.path.join(csv_dir, f"{safe.lower()}.csv"),
         ]
         logger.warning(
-            f"CSV file not found for '{symbol}'. "
-            f"Looked in: {candidates}"
+            f"CSV file not found for '{symbol}' "
+            f"(filename base: '{safe}'). Looked in: {candidates}"
         )
         return None
 

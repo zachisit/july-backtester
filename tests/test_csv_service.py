@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from services.csv_service import get_price_data
+from services.csv_service import get_price_data, _sanitize_filename
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -334,3 +334,79 @@ class TestConfigIntegration:
         result = get_price_data("AAPL", "2023-01-01", "2023-12-31", config)
         # Contract: None (not an exception) when file is absent
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Filename sanitization — illegal characters mapped to underscores
+# ---------------------------------------------------------------------------
+
+class TestFilenameSanitization:
+    """Symbols with Windows-illegal characters (e.g. I:VIX) must map to safe
+    filenames (e.g. I_VIX.csv) transparently."""
+
+    # --- Unit tests for _sanitize_filename ---
+
+    def test_colon_replaced_with_underscore(self):
+        assert _sanitize_filename("I:VIX") == "I_VIX"
+
+    def test_dollar_colon_prefix(self):
+        assert _sanitize_filename("$I:TNX") == "$I_TNX"
+
+    def test_plain_ticker_unchanged(self):
+        assert _sanitize_filename("AAPL") == "AAPL"
+
+    def test_caret_ticker_unchanged(self):
+        """Yahoo-style '^VIX' contains no illegal Windows chars — passes through."""
+        assert _sanitize_filename("^VIX") == "^VIX"
+
+    def test_all_illegal_chars_replaced(self):
+        """Every illegal Windows filename character is replaced."""
+        for ch in r'\/:*?"<>|':
+            result = _sanitize_filename(f"A{ch}B")
+            assert result == "A_B", f"char {ch!r} was not replaced: got {result!r}"
+
+    def test_multiple_illegal_chars(self):
+        assert _sanitize_filename("A:B/C") == "A_B_C"
+
+    # --- Integration tests: get_price_data reads from the sanitized filename ---
+
+    def test_index_symbol_reads_sanitized_file(self, tmp_path):
+        """Passing 'I:VIX' reads from I_VIX.csv (uppercase sanitized name)."""
+        (tmp_path / "I_VIX.csv").write_text(_standard_csv())
+        result = get_price_data("I:VIX", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert result is not None
+        assert isinstance(result, pd.DataFrame)
+
+    def test_index_symbol_returns_correct_data(self, tmp_path):
+        """Data read via sanitized filename has the canonical columns and UTC index."""
+        (tmp_path / "I_VIX.csv").write_text(_standard_csv(n=5))
+        result = get_price_data("I:VIX", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert list(result.columns) == ["Open", "High", "Low", "Close", "Volume"]
+        assert str(result.index.tz) == "UTC"
+        assert len(result) == 5
+
+    def test_tnx_index_symbol(self, tmp_path):
+        """I:TNX maps to I_TNX.csv."""
+        (tmp_path / "I_TNX.csv").write_text(_standard_csv(n=3))
+        result = get_price_data("I:TNX", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert result is not None
+        assert len(result) == 3
+
+    def test_dollar_prefix_index_symbol(self, tmp_path):
+        """$I:VIX maps to $I_VIX.csv."""
+        (tmp_path / "$I_VIX.csv").write_text(_standard_csv(n=4))
+        result = get_price_data("$I:VIX", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert result is not None
+        assert len(result) == 4
+
+    def test_missing_sanitized_file_returns_none(self, tmp_path):
+        """If I_VIX.csv does not exist, get_price_data returns None (not an error)."""
+        result = get_price_data("I:VIX", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert result is None
+
+    def test_missing_sanitized_file_logs_safe_name(self, tmp_path, caplog):
+        """Warning message should include the sanitized filename base."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger="services.csv_service"):
+            get_price_data("I:VIX", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert "I_VIX" in caplog.text

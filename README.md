@@ -201,6 +201,15 @@ Reads historical OHLCV data from local CSV files. Useful for custom feeds, propr
 
 **File naming:** one file per symbol, named `{SYMBOL}.csv` (case-insensitive). Example: `csv_data/AAPL.csv` or `csv_data/aapl.csv`.
 
+**Symbols with special characters:** Windows does not allow colons or other special characters in filenames. Symbols that contain illegal characters (e.g. `I:VIX`, `$I:TNX`) have those characters replaced with underscores when constructing the filename. The mapping rule is: replace each of `` \ / : * ? " < > | `` with `_`. Examples:
+
+| Symbol passed to the backtester | Expected CSV filename |
+| -------------------------------- | --------------------- |
+| `I:VIX` | `I_VIX.csv` |
+| `I:TNX` | `I_TNX.csv` |
+| `$I:VIX` | `$I_VIX.csv` |
+| `AAPL` | `AAPL.csv` (unchanged) |
+
 **Required CSV schema** (column names are case-insensitive):
 
 | Column | Aliases accepted | Notes |
@@ -213,6 +222,15 @@ Reads historical OHLCV data from local CSV files. Useful for custom feeds, propr
 | `Volume` | `volume` | Numeric |
 
 Extra columns (e.g. `VWAP`, `Turnover`) are silently ignored. The date column may be a named column or the CSV index. Multiple date formats are supported (ISO `YYYY-MM-DD`, US `MM/DD/YYYY`, datetime strings with time components, etc.).
+
+**Mandatory benchmark files:** The backtester fetches four symbols at startup — before any portfolio simulation begins — to calculate SPY/QQQ buy-and-hold baselines, VIX regime filters, and TNX data used by certain strategies. These files must be present in your `csv_data_dir` regardless of which portfolio or single ticker you are testing. Missing any one of them causes an immediate fatal crash at startup.
+
+| Required file | Symbol | Purpose |
+| ------------- | ------ | ------- |
+| `SPY.csv` | `SPY` | SPY buy-and-hold benchmark + regime reference |
+| `QQQ.csv` | `QQQ` | QQQ buy-and-hold benchmark |
+| `I_VIX.csv` | `I:VIX` | VIX regime filter (strategies that use `vix` dependency) |
+| `I_TNX.csv` | `I:TNX` | 10-Year Treasury Yield (strategies that use `tnx` dependency) |
 
 ### Backtest Period
 
