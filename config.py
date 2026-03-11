@@ -15,8 +15,15 @@ CONFIG = {
     # ============================================================
     # SECTION 1: DATA PROVIDER
     # ============================================================
-    # The Data Provider is hardcoded with two options at this time
-    "data_provider": "polygon",  # Options: "norgate" or "polygon"
+    # Options: "polygon", "norgate", "yahoo", "csv"
+    "data_provider": "polygon",
+
+    # --- CSV Data Directory (only used when data_provider = "csv") ---
+    # Path to the folder containing per-symbol CSV files.
+    # Relative paths are resolved from the project root.
+    # Each file must be named {SYMBOL}.csv (case-insensitive).
+    # Required columns: Date, Open, High, Low, Close, Volume
+    "csv_data_dir": "csv_data",
 
     # ============================================================
     # SECTION 2: BACKTEST PERIOD & CAPITAL
@@ -216,7 +223,7 @@ CONFIG = {
     "commission_per_share": 0.002,
 }
 
-if CONFIG.get("data_provider") == "norgate":
+if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
     try:
         import norgatedata
         

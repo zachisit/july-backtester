@@ -9,3 +9,4 @@ python-dotenv
 pandas-ta
 orjson
 pyarrow
+yfinance  # required only when data_provider = "yahoo"

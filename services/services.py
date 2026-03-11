@@ -28,8 +28,20 @@ def get_data_service():
             original_fetcher = get_price_data
         except ImportError:
             raise ImportError("Configuration Error: data_provider is 'norgate', but norgate_service.py could not be imported.")
+    elif provider == "yahoo":
+        try:
+            from .yahoo_service import get_price_data
+            original_fetcher = get_price_data
+        except ImportError:
+            raise ImportError("Configuration Error: data_provider is 'yahoo', but yahoo_service.py could not be imported. Run: pip install yfinance")
+    elif provider == "csv":
+        try:
+            from .csv_service import get_price_data
+            original_fetcher = get_price_data
+        except ImportError:
+            raise ImportError("Configuration Error: data_provider is 'csv', but csv_service.py could not be imported.")
     else:
-        raise ValueError(f"Unsupported data_provider in config: {provider}")
+        raise ValueError(f"Unsupported data_provider in config: '{provider}'. Valid options: 'polygon', 'norgate', 'yahoo', 'csv'.")
 
     # --- Step 2: Define a new function that wraps the original fetcher with caching logic ---
     def cached_fetcher(symbol, start_date, end_date, config):

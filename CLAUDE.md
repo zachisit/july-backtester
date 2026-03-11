@@ -1,5 +1,7 @@
 # CLAUDE.md — july-backtester
 
+> **RTK RULE — NON-NEGOTIABLE**: Every terminal command MUST be prefixed with `rtk`. No exceptions. This includes `rtk git`, `rtk grep`, `rtk pytest`, `rtk ls`, `rtk read`, etc. Bare `grep`, `git`, `pytest`, `find` etc. are FORBIDDEN in this project.
+
 ## What This Is
 Python backtesting engine for US equities. Tests 20+ technical strategies across single symbols or large portfolios (Nasdaq, S&P 500, etc.) with Monte Carlo robustness scoring.
 
@@ -20,15 +22,18 @@ helpers/summary.py                 # Report generation, S3 upload
 helpers/caching.py                 # Local Parquet cache (24h TTL)
 helpers/aws_utils.py               # S3 upload helper (upload_file_to_s3); reads API key from env or .env via get_secret
 helpers/timeframe_utils.py         # Converts '200d' → bar count for given timeframe
-services/services.py               # Data provider factory (Polygon or Norgate)
+services/services.py               # Data provider factory (caching wrapper)
 services/polygon_service.py        # Polygon.io REST API
 services/norgate_service.py        # Norgate Data local API
+services/yahoo_service.py          # Yahoo Finance via yfinance (no API key)
+services/csv_service.py            # Local CSV files ({csv_data_dir}/{SYMBOL}.csv)
 tickers_to_scan/                   # JSON ticker lists (nasdaq_100.json, sp-500.json, etc.)
 ```
 
 ## Config Quick Reference
 ```python
-"data_provider": "polygon"         # or "norgate"
+"data_provider": "polygon"         # or "norgate", "yahoo", "csv"
+"csv_data_dir": "csv_data"         # only used when data_provider = "csv"
 "polygon_api_secret_name": "POLYGON_API_KEY"  # AWS secret name OR .env key
 "start_date": "2004-01-01"
 "initial_capital": 100000.0
@@ -95,6 +100,29 @@ output/
 - `helpers/monte_carlo.py`
 - `tickers_to_scan/` JSON files
 - The multiprocessing architecture (`init_worker`, `run_single_simulation`, `Pool`)
+
+## Data Providers
+
+### Yahoo Finance (`data_provider = "yahoo"`)
+
+- **New file**: `services/yahoo_service.py` — uses `yfinance` (lazy import inside `get_price_data` so the library is optional for non-Yahoo users)
+- **Dependency**: `yfinance` added to `requirements.txt`
+- **Interval building**: `_build_interval(config)` maps `timeframe`/`timeframe_multiplier` → yfinance interval string (`"1d"`, `"1h"`, `"5m"`, `"1wk"`, `"1mo"`). Multiplier >1 on D/W/M falls back to base interval with a warning.
+- **No API key** needed — free data, but quality/availability varies.
+- **Mock pattern** in tests: yfinance is imported *inside* `get_price_data()` via `import yfinance as yf`, so patching `sys.modules["yfinance"]` in `patch.dict` intercepts the import on every call without needing to reload the module.
+
+### CSV (`data_provider = "csv"`)
+
+- **New file**: `services/csv_service.py` — reads `{csv_data_dir}/{SYMBOL}.csv` (case-insensitive).
+- **Config key**: `csv_data_dir` (default `"csv_data"`, relative to project root). Add to `config.py` when switching providers.
+- **Column normalisation**: case-insensitive; `Adj Close` / `Adjusted Close` → `Close`. Duplicate column names after rename (e.g. both `Close` and `Adj Close` present) are deduplicated by keeping the first occurrence: `df.loc[:, ~df.columns.duplicated(keep="first")]`.
+- **Date parsing**: `pd.to_datetime()` with no explicit format — handles ISO, US slash format, and datetime strings with time components. Index is always converted to UTC.
+- **Date filter**: rows outside `[start_date, end_date]` are dropped; returns `None` if result is empty.
+- **Tests**: `tests/test_csv_service.py` — 32 tests, all using `tmp_path` real-file fixtures (no mocking of I/O).
+
+### Wiring
+
+Both providers are wired in `services/__init__.py` (`get_data_service` factory — the one actually used by `main.py`) and `services/services.py` (the caching wrapper, not currently called by main but kept consistent). New `elif provider == "yahoo"` and `elif provider == "csv"` branches import from the new modules via lazy local imports.
 
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes

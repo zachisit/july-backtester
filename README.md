@@ -141,17 +141,63 @@ All settings live in one file: [config.py](config.py). Open it in any text edito
 
 - [ ] Add `POLYGON_API_KEY` to your `.env` file (copy `.env.example` to get started)
 - [ ] Set `upload_to_s3` and `s3_reports_bucket` if you want S3 uploads (optional)
-- [ ] Choose `data_provider`: `"polygon"` or `"norgate"`
+- [ ] Choose `data_provider`: `"polygon"`, `"norgate"`, `"yahoo"`, or `"csv"`
 - [ ] Set `start_date` and `initial_capital`
 - [ ] For portfolio mode: uncomment the portfolios you want in the `portfolios` dict
 - [ ] For single-asset mode: set `symbols_to_test`
 
 ### Data Provider Settings
 
+Four data providers are supported. Set `data_provider` in `config.py`:
+
 ```python
-"data_provider": "polygon",   # Polygon.io — API key via .env or environment variable
+"data_provider": "polygon",   # Polygon.io — API key via .env (default)
 # "data_provider": "norgate", # Norgate Data — requires local Norgate installation
+# "data_provider": "yahoo",   # Yahoo Finance via yfinance (free, no API key needed)
+# "data_provider": "csv",     # Local CSV files (see CSV Data Provider section below)
 ```
+
+#### Polygon.io (default)
+
+Requires a Polygon.io account and API key set in `.env` as `POLYGON_API_KEY`. A paid plan is needed for full historical data. See [API Key Setup](#api-key-setup) above.
+
+#### Norgate Data
+
+Requires a [Norgate Data](https://norgatedata.com/) subscription and the Norgate Data Updater installed locally. No API key needed.
+
+#### Yahoo Finance
+
+Uses the [yfinance](https://pypi.org/project/yfinance/) library. **No API key or account required.** Provides free adjusted daily data for most US equities and ETFs.
+
+```python
+"data_provider": "yahoo",
+```
+
+`yfinance` is already included in `requirements.txt` — no additional setup needed. Note that Yahoo Finance data quality and availability varies; it is best suited for exploratory backtests rather than production research.
+
+#### CSV Data Provider
+
+Reads historical OHLCV data from local CSV files. Useful for custom feeds, proprietary data, or offline use.
+
+```python
+"data_provider": "csv",
+"csv_data_dir": "csv_data",   # folder containing CSV files (relative to project root)
+```
+
+**File naming:** one file per symbol, named `{SYMBOL}.csv` (case-insensitive). Example: `csv_data/AAPL.csv` or `csv_data/aapl.csv`.
+
+**Required CSV schema** (column names are case-insensitive):
+
+| Column | Aliases accepted | Notes |
+| ------ | --------------- | ----- |
+| `Date` | `date`, `datetime`, `timestamp`, `time` | Any pandas-parseable date or datetime string |
+| `Open` | `open` | Numeric |
+| `High` | `high` | Numeric |
+| `Low` | `low` | Numeric |
+| `Close` | `close`, `adj close`, `adjusted close` | Numeric. `Adj Close` is silently treated as `Close`. |
+| `Volume` | `volume` | Numeric |
+
+Extra columns (e.g. `VWAP`, `Turnover`) are silently ignored. The date column may be a named column or the CSV index. Multiple date formats are supported (ISO `YYYY-MM-DD`, US `MM/DD/YYYY`, datetime strings with time components, etc.).
 
 ### Backtest Period
 

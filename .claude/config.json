@@ -1,0 +1,9 @@
+"permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+        "Bash(rtk *)",
+        "Read(*)",
+        "Edit(*)",
+        "Write(*)"
+    ]
+}
