@@ -19,6 +19,7 @@ helpers/simulations.py             # Single-asset trade simulation engine
 helpers/portfolio_simulations.py   # Multi-asset portfolio simulation engine
 helpers/monte_carlo.py             # Monte Carlo robustness scoring
 helpers/summary.py                 # Report generation, S3 upload
+helpers/wfa.py                     # Walk-Forward Analysis (get_split_date, split_trades, evaluate_wfa)
 helpers/caching.py                 # Local Parquet cache (24h TTL)
 helpers/aws_utils.py               # S3 upload helper (upload_file_to_s3); reads API key from env or .env via get_secret
 helpers/timeframe_utils.py         # Converts '200d' → bar count for given timeframe
@@ -53,6 +54,7 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "commission_per_share": 0.002
 "min_trades_for_mc": 50
 "num_mc_simulations": 1000
+"wfa_split_ratio": 0.80          # 0.80 = 80% IS / 20% OOS; None or 0 = disabled
 ```
 
 ## Architecture Notes
@@ -161,6 +163,15 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 ### S1/S2 Test Robustness
 
 `tests/test_startup_validation.py::TestS1ApiKeyCheck` and `tests/test_main_cli.py::TestMissingApiKey` now explicitly force `data_provider = "polygon"` via the config-patch wrapper before testing the `POLYGON_API_KEY` guard. This makes the tests pass regardless of which provider is configured in `config.py`. Pattern: always patch `data_provider` when testing provider-specific guards.
+
+## Walk-Forward Analysis (WFA)
+
+- **`helpers/wfa.py`** — pure, stateless module: `get_split_date`, `split_trades`, `evaluate_wfa`.
+- **Split date source**: computed from `spy_df` actual start/end dates (not `config.start_date`) in `main.py` after the SPY fetch. Stored as a plain `str` and passed as the last element of each task tuple so Windows spawn workers receive it.
+- **Placement in pipeline**: `run_single_simulation` in `main.py` calls `evaluate_wfa` after Monte Carlo, before `return result`. Adds `oos_pnl_pct` and `wfa_verdict` to the result dict.
+- **"Likely Overfitted" triggers**: (1) IS P&L > 0 and OOS P&L < 0 (sign flip); (2) OOS annualised return degraded > 75% vs IS annualised return. Both require `_MIN_OOS_TRADES = 5` minimum OOS trades; fewer → "N/A".
+- **Summary columns**: `OOS P&L (%)` (formatted `{:+.2%}`) and `WFA Verdict` appear in all 4 summary functions in `helpers/summary.py`, placed before `MC Verdict`.
+- **Tests**: `tests/test_wfa.py` — 39 tests, 5 test classes. No I/O, no network. All deterministic.
 
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes

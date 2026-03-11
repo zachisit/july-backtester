@@ -465,6 +465,25 @@ Every strategy with 50+ trades is stress-tested with 1,000 simulations that rand
 - `Moderate Tail Risk` — Worst-case simulations show 50–80% drawdown potential.
 - `High Tail Risk` — Worst-case simulations show >80% drawdown potential. High risk of ruin.
 
+### Walk-Forward Analysis (WFA)
+
+Every strategy result includes two WFA columns alongside the Monte Carlo output:
+
+| Column | Meaning |
+| --- | --- |
+| OOS P&L (%) | Total P&L earned in the Out-of-Sample window as a percentage of initial capital |
+| WFA Verdict | Pass / Likely Overfitted / N/A |
+
+**How the split works:** The backtester uses the actual data period (as reported by SPY) — not the configured `start_date` — to compute the IS/OOS boundary. With the default `wfa_split_ratio: 0.80`, the first 80% of that period is In-Sample (IS) and the final 20% is Out-of-Sample (OOS). A strategy tested over 20 years of data would have 16 years of IS history and 4 years of OOS history.
+
+**Verdict logic:**
+
+- **Pass** — OOS performance does not show signs of overfitting.
+- **Likely Overfitted** — Either the IS period is profitable but the OOS period is a net loss (sign flip), *or* the OOS annualised return has degraded by more than 75% relative to the IS annualised return.
+- **N/A** — WFA is disabled (`wfa_split_ratio` is `None` or `0`), or the OOS window contains fewer than 5 completed trades (insufficient data for a meaningful verdict).
+
+**Disabling WFA:** Set `"wfa_split_ratio": None` (or `0`) in `config.py`. Both `OOS P&L (%)` and `WFA Verdict` will show `N/A` for all strategies.
+
 ### Local Report Files
 
 | Location | Contents |
@@ -620,6 +639,7 @@ Defined in the `STRATEGIES` dictionary in [strategies.py](strategies.py). Enable
 | `min_performance_vs_spy` | `-9999` | Minimum outperformance vs SPY to include in output table |
 | `min_performance_vs_qqq` | `-9999` | Minimum outperformance vs QQQ to include in output table |
 | `show_qqq_losers` | `False` | If False, hides strategies that underperform QQQ |
+| `wfa_split_ratio` | `0.80` | Walk-Forward Analysis IS/OOS split. `0.80` = first 80% of data is In-Sample, last 20% is Out-of-Sample. Set to `None` or `0` to disable. |
 | `roc_thresholds` | `[0.0, 0.5]` | Rate-of-change thresholds for ROC Momentum strategy |
 
 ---

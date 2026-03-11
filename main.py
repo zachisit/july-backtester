@@ -48,7 +48,7 @@ def run_single_simulation(args):
 
     # 1. Unpack the arguments. `portfolio_data` has been REMOVED from the tuple.
     portfolio_name, name, logic_func, dependencies, stop_config, \
-    spy_buy_and_hold_return, qqq_buy_and_hold_return, strategy_params = args
+    spy_buy_and_hold_return, qqq_buy_and_hold_return, strategy_params, wfa_split_date = args
     
     # Assign the global data to a local variable for clarity
     portfolio_data = portfolio_data_global
@@ -111,6 +111,15 @@ def run_single_simulation(args):
 
             result['vs_spy_benchmark'] = result.get('pnl_percent', 0.0) - spy_buy_and_hold_return
             result['vs_qqq_benchmark'] = result.get('pnl_percent', 0.0) - qqq_buy_and_hold_return
+
+            # --- WFA ---
+            if wfa_split_date and result.get('trade_log'):
+                from helpers.wfa import split_trades as _split_trades, evaluate_wfa as _evaluate_wfa
+                _is, _oos = _split_trades(result['trade_log'], wfa_split_date)
+                result.update(_evaluate_wfa(_is, _oos, result['initial_capital']))
+            else:
+                result.update({'oos_pnl_pct': None, 'wfa_verdict': 'N/A'})
+
             return result
             
     except Exception:
@@ -293,6 +302,20 @@ def main():
         logger.error(f"FATAL: Could not fetch dependency data: {e}")
         return
 
+    # --- WFA SPLIT DATE ---
+    _wfa_ratio = CONFIG.get("wfa_split_ratio")
+    wfa_split_date = None
+    if _wfa_ratio and 0 < float(_wfa_ratio) < 1:
+        from helpers.wfa import get_split_date as _get_split_date
+        wfa_split_date = _get_split_date(_spy_actual_start, _spy_actual_end, float(_wfa_ratio))
+        logger.info(
+            f"  WFA split date   : {wfa_split_date}  "
+            f"(IS: {_spy_actual_start} -> {wfa_split_date} | OOS: {wfa_split_date} -> {_spy_actual_end})"
+        )
+    else:
+        logger.info("  WFA              : disabled (wfa_split_ratio not set)")
+    # --- END WFA SPLIT DATE ---
+
     # --- START OF MODIFIED LOGIC ---
 
     all_portfolio_results = [] # To gather results from all portfolios
@@ -386,7 +409,8 @@ def main():
                     portfolio_name, strat_name, strategy_config["logic"],
                     strategy_config.get("dependencies", []),
                     stop_config, spy_buy_and_hold_return, qqq_buy_and_hold_return,
-                    strategy_config.get("params", {}) 
+                    strategy_config.get("params", {}),
+                    wfa_split_date,
                 )
                 tasks_for_this_portfolio.append(task_args)
 

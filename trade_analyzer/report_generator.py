@@ -222,6 +222,58 @@ def generate_overall_metrics_summary(
 
     return title, summary_text
 
+
+def generate_wfa_summary(wfa_result: dict, wfa_split_date: str | None, wfa_split_ratio) -> tuple[str, str]:
+    """Generate the Walk-Forward Analysis section for the report.
+
+    Parameters
+    ----------
+    wfa_result      : dict returned by ``helpers.wfa.evaluate_wfa``
+                      (keys: ``oos_pnl_pct``, ``wfa_verdict``), or empty dict if
+                      WFA was not run.
+    wfa_split_date  : ISO date string of the IS/OOS boundary, or None.
+    wfa_split_ratio : The configured split ratio (e.g. 0.80), or None if disabled.
+    """
+    title = "Walk-Forward Analysis (WFA)"
+    lines = []
+
+    if not wfa_result or wfa_split_date is None:
+        if not wfa_split_ratio or float(wfa_split_ratio or 0) <= 0:
+            lines.append("WFA is disabled. Set WFA_SPLIT_RATIO (e.g. 0.80) to enable.")
+        else:
+            lines.append("WFA could not be computed (insufficient trade data or date information).")
+        return title, "\n".join(lines)
+
+    is_pct = int(float(wfa_split_ratio) * 100)
+    oos_pct = 100 - is_pct
+    lines.append(f"Split Ratio   : {is_pct}% In-Sample / {oos_pct}% Out-of-Sample")
+    lines.append(f"IS/OOS Boundary : {wfa_split_date}")
+    lines.append("")
+
+    oos_pnl = wfa_result.get("oos_pnl_pct")
+    verdict = wfa_result.get("wfa_verdict", "N/A")
+
+    if oos_pnl is not None:
+        lines.append(f"{'OOS P&L (% of capital):':<45} {oos_pnl:+.2%}")
+    else:
+        lines.append(f"{'OOS P&L (% of capital):':<45} N/A")
+
+    lines.append(f"{'WFA Verdict:':<45} {verdict}")
+    lines.append("")
+
+    if verdict == "Pass":
+        lines.append("Result: Out-of-Sample performance is consistent with In-Sample. No overfitting signal detected.")
+    elif verdict == "Likely Overfitted":
+        lines.append("Result: CAUTION — OOS performance significantly underperforms IS.")
+        lines.append("        This may indicate curve-fitting to historical data.")
+        lines.append("        Triggers: IS profitable + OOS loss (sign flip), OR OOS annualised return")
+        lines.append("        degraded >75% relative to IS annualised return.")
+    else:
+        lines.append("Result: N/A — Insufficient OOS trades to issue a verdict (minimum 5 required).")
+
+    return title, "\n".join(lines)
+
+
 # In report_generator.py
 
 # (imports and other functions)

@@ -7,6 +7,7 @@ Usage:
     python report.py --all output/runs/2026-03-02_14-00-00
 """
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -36,8 +37,29 @@ from trade_analyzer.default_config import (
     VERBOSE_DEBUG,
     CRITICAL_COLS,
     NUMERIC_COLS,
+    WFA_SPLIT_RATIO,
 )
 from trade_analyzer.analyzer import generate_trade_report
+
+
+def _load_wfa_split_ratio(run_dir: Path) -> float | None:
+    """Read wfa_split_ratio from config_snapshot.json in a run directory.
+
+    Returns the ratio (float) if present and valid (0 < ratio < 1),
+    or None if the file is missing, the key is absent, or the value is invalid.
+    """
+    snapshot_path = run_dir / "config_snapshot.json"
+    if not snapshot_path.is_file():
+        return None
+    try:
+        with open(snapshot_path, "r", encoding="utf-8") as fh:
+            snapshot = json.load(fh)
+        ratio = snapshot.get("wfa_split_ratio")
+        if ratio is not None and 0 < float(ratio) < 1:
+            return float(ratio)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    return None
 
 
 def main():
@@ -100,6 +122,7 @@ def main():
         'VERBOSE_DEBUG': VERBOSE_DEBUG,
         'CRITICAL_COLS': CRITICAL_COLS,
         'NUMERIC_COLS': NUMERIC_COLS,
+        'WFA_SPLIT_RATIO': WFA_SPLIT_RATIO,
     }
 
     if args.all:
@@ -115,8 +138,13 @@ def main():
             print(f"ERROR: No CSV files found under: {analyzer_csvs_dir}")
             sys.exit(1)
 
+        # Load WFA split ratio from this run's config_snapshot.json (if present)
+        wfa_ratio = _load_wfa_split_ratio(run_dir)
+        if wfa_ratio is not None:
+            print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
+
         output_dir = str(run_dir / "detailed_reports")
-        config_params = {**base_config, 'BASE_OUTPUT_DIRECTORY': output_dir}
+        config_params = {**base_config, 'BASE_OUTPUT_DIRECTORY': output_dir, 'WFA_SPLIT_RATIO': wfa_ratio}
         count = 0
         for csv_file in csv_files:
             report_name = csv_file.stem
@@ -148,6 +176,15 @@ def main():
             else:
                 output_dir = "detailed_reports"
 
+        # Load WFA split ratio from config_snapshot.json if the CSV is inside a run dir
+        wfa_ratio = None
+        csv_parts = Path(csv_path).parts
+        if "analyzer_csvs" in csv_parts:
+            idx = csv_parts.index("analyzer_csvs")
+            wfa_ratio = _load_wfa_split_ratio(Path(*csv_parts[:idx]))
+            if wfa_ratio is not None:
+                print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
+
         if args.report_name:
             report_name = args.report_name
         else:
@@ -157,7 +194,7 @@ def main():
         trades_df = pd.read_csv(csv_path)
         print(f"Loaded {len(trades_df)} trades.")
 
-        config_params = {**base_config, 'BASE_OUTPUT_DIRECTORY': output_dir}
+        config_params = {**base_config, 'BASE_OUTPUT_DIRECTORY': output_dir, 'WFA_SPLIT_RATIO': wfa_ratio}
         generate_trade_report(trades_df, output_dir, report_name, config_params)
 
 

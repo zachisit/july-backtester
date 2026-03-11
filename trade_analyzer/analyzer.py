@@ -66,6 +66,7 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
     mc_use_pct = config_params.get('MC_USE_PERCENTAGE_RETURNS', config.MC_USE_PERCENTAGE_RETURNS)
     mc_simulations = config_params.get('MC_SIMULATIONS', config.MC_SIMULATIONS)
     mc_dd_neg = config_params.get('MC_DRAWDOWN_AS_NEGATIVE', config.MC_DRAWDOWN_AS_NEGATIVE)
+    wfa_split_ratio = config_params.get('WFA_SPLIT_RATIO', getattr(config, 'WFA_SPLIT_RATIO', None))
     unprofitable_pf = config_params.get('UNPROFITABLE_PF_THRESHOLD', config.UNPROFITABLE_PF_THRESHOLD)
     profitable_pf = config_params.get('PROFITABLE_PF_THRESHOLD', config.PROFITABLE_PF_THRESHOLD)
     top_n_losing = config_params.get('TOP_N_LOSING_SYMBOLS', config.TOP_N_LOSING_SYMBOLS)
@@ -122,6 +123,33 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
             print("Warning: Cannot accurately calculate strategy duration for CAGR.")
             total_duration_years = 0.0
 
+        # --- WFA ---
+        wfa_split_date: str | None = None
+        wfa_result: dict = {}
+        if wfa_split_ratio and 0 < float(wfa_split_ratio) < 1 and pd.notna(start_dt) and pd.notna(end_dt):
+            try:
+                import sys as _sys, os as _os
+                _proj_root = _os.path.abspath(_os.path.join(_os.path.dirname(__file__), ".."))
+                if _proj_root not in _sys.path:
+                    _sys.path.insert(0, _proj_root)
+                from helpers.wfa import get_split_date, split_trades, evaluate_wfa
+
+                actual_start = start_dt.strftime("%Y-%m-%d")
+                actual_end   = end_dt.strftime("%Y-%m-%d")
+                wfa_split_date = get_split_date(actual_start, actual_end, float(wfa_split_ratio))
+
+                # Build minimal trade dicts compatible with helpers/wfa
+                wfa_trade_dicts = [
+                    {"ExitDate": row["Ex. date"].strftime("%Y-%m-%d"), "Profit": row["Profit"]}
+                    for _, row in trades_df.iterrows()
+                    if pd.notna(row.get("Ex. date")) and pd.notna(row.get("Profit"))
+                ]
+                is_trades, oos_trades = split_trades(wfa_trade_dicts, wfa_split_date)
+                wfa_result = evaluate_wfa(is_trades, oos_trades, initial_equity)
+                print(f"WFA: split_date={wfa_split_date}  IS={len(is_trades)} trades  OOS={len(oos_trades)} trades  verdict={wfa_result.get('wfa_verdict')}")
+            except Exception as wfa_err:
+                print(f"WFA Warning: could not compute WFA metrics: {wfa_err}")
+
         daily_equity, daily_returns = data_handler.calculate_daily_returns(trades_df, initial_equity)
         benchmark_df = data_handler.download_benchmark_data(benchmark_ticker, start_dt, end_dt)
         if benchmark_df is not None and not benchmark_df.empty:
@@ -141,6 +169,12 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
             benchmark_ticker, initial_equity, risk_free_rate, trading_days
         )
         report_sections.append({'type': 'text', 'title': title, 'data': summary})
+
+        # WFA section — immediately after overall metrics
+        wfa_title, wfa_summary = report_generator.generate_wfa_summary(
+            wfa_result, wfa_split_date, wfa_split_ratio
+        )
+        report_sections.append({'type': 'text', 'title': wfa_title, 'data': wfa_summary})
 
         equity_for_dd_plot = trades_df.get('Equity')
         if not daily_equity.empty:
@@ -228,7 +262,7 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
         fig_bench = plotting.plot_benchmark_comparison(daily_equity, benchmark_df, benchmark_ticker)
         report_sections.append({'type': 'plot', 'title': f"Strategy Equity vs {benchmark_ticker}", 'data': fig_bench})
 
-        fig_eq_dd = plotting.plot_equity_and_drawdown(trades_df, equity_dd_percent)
+        fig_eq_dd = plotting.plot_equity_and_drawdown(trades_df, equity_dd_percent, wfa_split_date)
         report_sections.append({'type': 'plot', 'title': 'Equity Curve and Drawdown Plot', 'data': fig_eq_dd})
 
         trades_per_year_rolling = 0

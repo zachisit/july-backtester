@@ -326,12 +326,11 @@ class TestConfigIntegration:
 
     def test_default_csv_dir_is_csv_data(self, tmp_path, monkeypatch):
         """When csv_data_dir is absent from config, default 'csv_data' is used."""
-        # We can't create a real csv_data/ relative to project root in tests,
-        # so instead verify that the service looks for the symbol in the right place
-        # by checking it returns None (file doesn't exist) without raising.
+        # Use a guaranteed-absent ticker so this test passes regardless of what
+        # real CSV files the user has placed in csv_data/ (e.g. AAPL.csv).
         config = {**_BASE_CONFIG}  # no csv_data_dir key
         config.pop("csv_data_dir", None)
-        result = get_price_data("AAPL", "2023-01-01", "2023-12-31", config)
+        result = get_price_data("DUMMY_MISSING_TICKER_999", "2023-01-01", "2023-12-31", config)
         # Contract: None (not an exception) when file is absent
         assert result is None
 
