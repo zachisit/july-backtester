@@ -17,7 +17,7 @@ A systematic strategy backtesting engine for US equities. Test 20+ built-in tech
 9. [Available Strategies](#available-strategies)
 10. [Configuration Reference](#configuration-reference)
 11. [Data Caching](#data-caching)
-12. [Adding Custom Strategies](#adding-custom-strategies)
+12. [Adding Custom Strategies (Plugin System)](#adding-custom-strategies-plugin-system)
 13. [Project Structure](#project-structure)
 14. [Contributing](#contributing)
 
@@ -141,17 +141,106 @@ All settings live in one file: [config.py](config.py). Open it in any text edito
 
 - [ ] Add `POLYGON_API_KEY` to your `.env` file (copy `.env.example` to get started)
 - [ ] Set `upload_to_s3` and `s3_reports_bucket` if you want S3 uploads (optional)
-- [ ] Choose `data_provider`: `"polygon"` or `"norgate"`
+- [ ] Choose `data_provider`: `"polygon"`, `"norgate"`, `"yahoo"`, or `"csv"`
 - [ ] Set `start_date` and `initial_capital`
 - [ ] For portfolio mode: uncomment the portfolios you want in the `portfolios` dict
 - [ ] For single-asset mode: set `symbols_to_test`
 
 ### Data Provider Settings
 
+Four data providers are supported. Set `data_provider` in `config.py`:
+
 ```python
-"data_provider": "polygon",   # Polygon.io — API key via .env or environment variable
+"data_provider": "polygon",   # Polygon.io — API key via .env (default)
 # "data_provider": "norgate", # Norgate Data — requires local Norgate installation
+# "data_provider": "yahoo",   # Yahoo Finance via yfinance (free, no API key needed)
+# "data_provider": "csv",     # Local CSV files (see CSV Data Provider section below)
 ```
+
+#### Polygon.io (default)
+
+Requires a Polygon.io account and API key set in `.env` as `POLYGON_API_KEY`. A paid plan is needed for full historical data. See [API Key Setup](#api-key-setup) above.
+
+#### Norgate Data
+
+Requires a [Norgate Data](https://norgatedata.com/) subscription and the Norgate Data Updater installed locally. No API key needed.
+
+#### Yahoo Finance
+
+Uses the [yfinance](https://pypi.org/project/yfinance/) library. **No API key or account required.** Provides free adjusted daily data for most US equities and ETFs.
+
+```python
+"data_provider": "yahoo",
+```
+
+`yfinance` is already included in `requirements.txt` — no additional setup needed. Note that Yahoo Finance data quality and availability varies; it is best suited for exploratory backtests rather than production research.
+
+**Index ticker translation.** Polygon and Norgate use an `I:` prefix for index symbols (e.g. `I:VIX`, `$I:VIX`). Yahoo Finance uses `^` (e.g. `^VIX`). The service translates these automatically — you do not need to change anything in `config.py` or your portfolio lists. The mapping for the most common indices is:
+
+| Norgate/Polygon symbol | Yahoo Finance symbol | Description |
+| ---------------------- | -------------------- | ----------- |
+| `I:VIX` / `$I:VIX` | `^VIX` | CBOE Volatility Index |
+| `I:TNX` / `$I:TNX` | `^TNX` | 10-Year Treasury Yield |
+| `I:TYX` / `$I:TYX` | `^TYX` | 30-Year Treasury Yield |
+| `I:IRX` / `$I:IRX` | `^IRX` | 13-Week Treasury Bill |
+| `I:SPX` / `$I:SPX` | `^GSPC` | S&P 500 Index |
+| `I:NDX` / `$I:NDX` | `^NDX` | Nasdaq 100 Index |
+| `I:DJI` / `$I:DJI` | `^DJI` | Dow Jones Industrial Average |
+| `I:RUT` / `$I:RUT` | `^RUT` | Russell 2000 |
+
+For any unmapped `I:XYZ` symbol the service falls back to `^XYZ` automatically.
+
+#### CSV Data Provider
+
+Reads historical OHLCV data from local CSV files. Useful for custom feeds, proprietary data, or offline use.
+
+```python
+"data_provider": "csv",
+"csv_data_dir": "csv_data",   # folder containing CSV files (relative to project root)
+```
+
+**File naming:** one file per symbol, named `{SYMBOL}.csv` (case-insensitive). Example: `csv_data/AAPL.csv` or `csv_data/aapl.csv`.
+
+**Symbols with special characters:** Windows does not allow colons or other special characters in filenames. Symbols that contain illegal characters (e.g. `I:VIX`, `$I:TNX`) have those characters replaced with underscores when constructing the filename. The mapping rule is: replace each of `` \ / : * ? " < > | `` with `_`. Examples:
+
+| Symbol passed to the backtester | Expected CSV filename |
+| -------------------------------- | --------------------- |
+| `I:VIX` | `I_VIX.csv` |
+| `I:TNX` | `I_TNX.csv` |
+| `$I:VIX` | `$I_VIX.csv` |
+| `AAPL` | `AAPL.csv` (unchanged) |
+
+**Required CSV schema** (column names are case-insensitive):
+
+| Column | Aliases accepted | Notes |
+| ------ | --------------- | ----- |
+| `Date` | `date`, `datetime`, `timestamp`, `time` | Any pandas-parseable date or datetime string |
+| `Open` | `open` | Numeric |
+| `High` | `high` | Numeric |
+| `Low` | `low` | Numeric |
+| `Close` | `close`, `close/last`, `adj close`, `adjusted close` | Numeric. `Adj Close` and `Close/Last` (Nasdaq format) are silently treated as `Close`. |
+| `Volume` | `volume` | Numeric |
+
+Extra columns (e.g. `VWAP`, `Turnover`) are silently ignored. The date column may be a named column or the CSV index. Multiple date formats are supported (ISO `YYYY-MM-DD`, US `MM/DD/YYYY`, datetime strings with time components, etc.).
+
+**Nasdaq-format CSVs are natively supported.** Files downloaded directly from [nasdaq.com](https://www.nasdaq.com/market-activity/stocks/) use `Close/Last` as the price column header and prefix all price values with `$` (e.g. `$264.72`). Both are handled automatically: `Close/Last` is remapped to `Close`, and `$` signs and `,` thousands separators are stripped before numeric conversion. No pre-processing of the file is required.
+
+**Mandatory benchmark files:** The backtester fetches four symbols at startup — before any portfolio simulation begins — to calculate SPY/QQQ buy-and-hold baselines, VIX regime filters, and TNX data used by certain strategies. These files must be present in your `csv_data_dir` regardless of which portfolio or single ticker you are testing. Missing any one of them causes an immediate fatal crash at startup.
+
+| Required file | Symbol | Purpose |
+| ------------- | ------ | ------- |
+| `SPY.csv` | `SPY` | SPY buy-and-hold benchmark + regime reference |
+| `QQQ.csv` | `QQQ` | QQQ buy-and-hold benchmark |
+| `I_VIX.csv` | `I:VIX` | VIX regime filter (strategies that use `vix` dependency) |
+| `I_TNX.csv` | `I:TNX` | 10-Year Treasury Yield (strategies that use `tnx` dependency) |
+
+**Minimum data requirements (crucial for CSVs):** When supplying your own CSV files there are two hard limits that will cause a symbol to be silently skipped if not met.
+
+- **250-bar minimum.** The backtester has a built-in safety check that automatically skips any symbol whose CSV contains fewer than 250 bars (roughly one calendar year of daily data). No error is raised — the symbol simply produces no results. If you notice a symbol missing from your output, a CSV that is too short is the most likely cause.
+
+- **Indicator warm-up.** Even if a CSV passes the 250-bar check, long-lookback strategies need additional bars just to calculate their first signal. The default 50d/200d SMA Crossover strategy, for example, cannot fire a single trade until at least 200 daily bars have accumulated. A CSV that covers only a few months will pass the minimum check but still produce zero trades because the moving average never finishes warming up.
+
+**Recommendation:** When downloading historical data from Nasdaq, Yahoo Finance, or any other source, always request **at least 3–5 years of daily bars**. This gives every default strategy enough runway to warm up its indicators and execute a meaningful number of simulated trades.
 
 ### Backtest Period
 
@@ -301,6 +390,39 @@ output/
 
 The entire `output/` directory is gitignored. Each run is isolated in its own folder — previous runs are never overwritten. S3 uploads (if configured) mirror this same `<run_id>/` structure as the key prefix.
 
+### Run Summary Box
+
+At startup, the backtester prints a summary box to the log / terminal before fetching any data:
+
+```text
+============================================================
+  RUN SUMMARY
+============================================================
+  Run ID            : 2026-03-10_14-22-01
+  Data provider     : yahoo
+  Period Selected   : 2004-01-01 -> 2026-03-10
+  Timeframe         : D x 1
+  Strategies        : 22
+  Stop configs      : 1
+------------------------------------------------------------
+  Portfolio         : Nasdaq 100 (101 symbols)
+------------------------------------------------------------
+  Total symbols     : 101
+  Total tasks       : 2222  (symbols x strategies x stop configs)
+============================================================
+```
+
+After benchmark data (SPY) has been fetched, a second line is logged:
+
+```text
+  Actual Data Period : 2004-01-02 -> 2026-03-07  (via SPY)
+```
+
+**Period Selected** is exactly what you configured in `config.py`. **Actual Data Period** is the real date range returned by the data provider for SPY — this is the ground truth for how far back your strategy results are calculated. The two values differ whenever:
+
+- The data provider does not have data going back to your requested `start_date` (e.g. free-tier API limits, or a ticker that was listed later)
+- The `end_date` falls on a weekend or holiday, so the last available bar is a trading day before it
+
 ### Terminal Summary Table
 
 After each portfolio finishes, a results table is printed to the terminal:
@@ -343,11 +465,76 @@ Every strategy with 50+ trades is stress-tested with 1,000 simulations that rand
 - `Moderate Tail Risk` — Worst-case simulations show 50–80% drawdown potential.
 - `High Tail Risk` — Worst-case simulations show >80% drawdown potential. High risk of ruin.
 
+### Walk-Forward Analysis (WFA)
+
+Every strategy result includes two WFA columns alongside the Monte Carlo output:
+
+| Column | Meaning |
+| --- | --- |
+| OOS P&L (%) | Total P&L earned in the Out-of-Sample window as a percentage of initial capital |
+| WFA Verdict | Pass / Likely Overfitted / N/A |
+
+**How the split works:** The backtester uses the actual data period (as reported by SPY) — not the configured `start_date` — to compute the IS/OOS boundary. With the default `wfa_split_ratio: 0.80`, the first 80% of that period is In-Sample (IS) and the final 20% is Out-of-Sample (OOS). A strategy tested over 20 years of data would have 16 years of IS history and 4 years of OOS history.
+
+**Verdict logic:**
+
+- **Pass** — OOS performance does not show signs of overfitting.
+- **Likely Overfitted** — Either the IS period is profitable but the OOS period is a net loss (sign flip), *or* the OOS annualised return has degraded by more than 75% relative to the IS annualised return.
+- **N/A** — WFA is disabled (`wfa_split_ratio` is `None` or `0`), or the OOS window contains fewer than 5 completed trades (insufficient data for a meaningful verdict).
+
+**Disabling WFA:** Set `"wfa_split_ratio": None` (or `0`) in `config.py`. Both `OOS P&L (%)` and `WFA Verdict` will show `N/A` for all strategies.
+
+### Strategy Correlation Matrix
+
+> **Why this matters:** Running two highly correlated strategies is effectively doubling your position in a single edge — they will win and lose together, offering no diversification benefit. The correlation analysis automatically surfaces these overlaps after every portfolio run.
+
+After each portfolio finishes, the backtester computes pairwise Pearson correlations between all strategies based on their daily realised P&L. The result is saved as a CSV, an `Avg. Corr` column appears in the terminal summary table, and any pairs above the threshold trigger a prominent alert.
+
+**How it works:** Each strategy's trade log is aggregated into a daily P&L series (trades grouped by exit date, profits summed). These series are aligned into a date x strategy matrix, with missing dates filled with 0. Pearson correlations are then computed on that combined matrix.
+
+**Output file location:**
+
+```text
+output/runs/<run_id>/<Portfolio_Name>_strategy_correlation.csv
+```
+
+For example: `output/runs/2026-03-10_14-22-01/Nasdaq_100_strategy_correlation.csv`
+
+The CSV has strategy names as both row index and column headers, values rounded to 4 decimal places.
+
+**`Avg. Corr` column in the summary table:**
+
+Each strategy shows its mean absolute Pearson correlation against all other strategies in the run. Strategies with any pairwise correlation above the threshold are flagged with `*` (e.g. `0.81*`).
+
+**How to Interpret:**
+
+| Range | Meaning | Action |
+| --- | --- | --- |
+| **0.70 - 1.00** | **High Overlap (Red Flag)** | Strategies enter/exit at nearly the same times. Remove one unless they differ in risk/sizing. |
+| **0.30 - 0.70** | **Moderate Overlap** | Some shared signal; acceptable if each strategy has independent edge. |
+| **0.00 - 0.30** | **High Diversification (Goal)** | Strategies behave independently -- ideal portfolio composition. |
+
+**Terminal alert example:**
+
+```text
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  HIGH CORRELATION ALERT  |  Portfolio: Nasdaq 100
+  Threshold: |r| > 0.70 -- strategies below may overlap significantly
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    'SMA Crossover (20d/50d)' <-> 'EMA Crossover (Unfiltered)'  r=+0.91  [HIGH OVERLAP -- consider removing one]
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+```
+
+The default threshold is **0.70** (absolute value). Pairs with `|r| > 0.70` are flagged as `HIGH CORRELATION ALERT` warnings.
+
+**When the matrix is not generated:** If fewer than 2 strategies have completed trades in a portfolio, correlation analysis is silently skipped and no CSV is written.
+
 ### Local Report Files
 
 | Location | Contents |
 | --- | --- |
 | `output/runs/<run_id>/overall_portfolio_summary.csv` | All results across all portfolios, sorted by MC Score. The first 5 columns are run metadata (`run_id`, `data_provider`, `start_date`, `end_date`, `timeframe`) so results are self-describing when combined across runs. |
+| `output/runs/<run_id>/<Portfolio>_strategy_correlation.csv` | Pearson correlation matrix of daily P&L across all strategies for that portfolio |
 | `output/runs/<run_id>/analyzer_csvs/<Portfolio>/` | Column-mapped CSVs ready to pass into `report.py` |
 | `output/runs/<run_id>/raw_trades/<Portfolio>/` | Per-symbol, per-strategy raw trade logs (when `save_individual_trades=True`) |
 | `output/runs/<run_id>/logs/` | Full execution log for the run |
@@ -498,6 +685,7 @@ Defined in the `STRATEGIES` dictionary in [strategies.py](strategies.py). Enable
 | `min_performance_vs_spy` | `-9999` | Minimum outperformance vs SPY to include in output table |
 | `min_performance_vs_qqq` | `-9999` | Minimum outperformance vs QQQ to include in output table |
 | `show_qqq_losers` | `False` | If False, hides strategies that underperform QQQ |
+| `wfa_split_ratio` | `0.80` | Walk-Forward Analysis IS/OOS split. `0.80` = first 80% of data is In-Sample, last 20% is Out-of-Sample. Set to `None` or `0` to disable. |
 | `roc_thresholds` | `[0.0, 0.5]` | Rate-of-change thresholds for ROC Momentum strategy |
 
 ---
@@ -517,46 +705,96 @@ Cache files are named using the pattern `{symbol}_{start}_{end}_{timeframe}_{mul
 
 ---
 
-## Adding Custom Strategies
+## Adding Custom Strategies (Plugin System)
 
-All strategy logic lives in [helpers/indicators.py](helpers/indicators.py). A strategy is a function that:
+> **No core file edits required.** Drop a `.py` file into `custom_strategies/`, decorate your function, and the engine discovers it automatically on the next run.
 
-1. Accepts a DataFrame with `Open`, `High`, `Low`, `Close`, `Volume` columns
-2. Returns the same DataFrame with a `Signal` column added
+The backtester uses a strategy plugin system built around `helpers/registry.py`. The `@register_strategy` decorator stores a strategy's name, logic function, dependencies, and parameters. `load_strategies("custom_strategies")` is called at startup and imports every `.py` file in that directory, triggering the decorators.
 
-Signal values:
+### Step-by-step: add a new strategy
 
-- `1` — Enter / hold long
-- `-1` — Exit / go flat
-- `0` — No position / no change
+**1. Add your signal logic to `helpers/indicators.py`** (or inline it directly):
 
 ```python
-# helpers/indicators.py
+# helpers/indicators.py  (or keep it inline in your plugin file)
 
-def my_strategy_logic(df):
-    """Buy when price is above the 50-day SMA, exit when below."""
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+def my_roc_logic(df, length=10, threshold=0.0):
+    """Buy when Rate-of-Change crosses above threshold, exit when it falls back."""
+    df['ROC'] = df['Close'].pct_change(length)
     df['Signal'] = 0
-    df.loc[df['Close'] > df['SMA_50'], 'Signal'] = 1
-    df.loc[df['Close'] <= df['SMA_50'], 'Signal'] = -1
+    df.loc[df['ROC'] > threshold, 'Signal'] = 1
+    df.loc[df['ROC'] <= threshold, 'Signal'] = -1
     return df
 ```
 
-Then register it in `strategies.py`. Import the function at the top and add an entry to the `STRATEGIES` dict:
+**2. Create a file in `custom_strategies/`** (any name, e.g. `my_roc.py`):
 
 ```python
-# strategies.py
+# custom_strategies/my_roc.py
 
-from helpers.indicators import my_strategy_logic
+from helpers.registry import register_strategy
+from helpers.timeframe_utils import get_bars_for_period
+from helpers.indicators import my_roc_logic
+from config import CONFIG
 
-STRATEGIES = {
-    "My Strategy Name": {
-        "logic": my_strategy_logic,
-        "dependencies": []  # Add 'spy' or 'vix' if your strategy uses those DataFrames
+_TF  = CONFIG.get("timeframe", "D")
+_MUL = CONFIG.get("timeframe_multiplier", 1)
+
+@register_strategy(
+    name="ROC Momentum (10d)",          # shown in all reports
+    dependencies=[],                    # add "spy" or "vix" if needed
+    params={
+        "length":    get_bars_for_period("10d", _TF, _MUL),
+        "threshold": 0.0,
     },
-    # ... other strategies
-}
+)
+def roc_momentum_10d(df, **kwargs):
+    """Rate-of-Change momentum. Timeframe-agnostic via get_bars_for_period."""
+    return my_roc_logic(df, length=kwargs["length"], threshold=kwargs["threshold"])
 ```
+
+**3. Run the backtester** — no other files need touching:
+
+```bash
+python main.py --dry-run   # verify "Strategies: N" increased by 1
+python main.py
+```
+
+That's it. The engine calls `load_strategies("custom_strategies")` at startup, imports `my_roc.py`, the decorator fires, and `"ROC Momentum (10d)"` appears in every summary table and CSV.
+
+### Signal convention
+
+| Value | Meaning |
+| --- | --- |
+| `1` | Enter / hold long |
+| `-1` | Exit / go flat |
+| `0` | No change (carry previous signal) |
+
+### Strategies that need SPY or VIX data
+
+Declare `dependencies=["spy"]`, `dependencies=["vix"]`, or `dependencies=["spy", "vix"]`. The engine injects `spy_df` / `vix_df` into `**kwargs` at runtime:
+
+```python
+@register_strategy(
+    name="EMA w/ SPY Filter",
+    dependencies=["spy"],
+    params={"fast": 20, "slow": 50},
+)
+def ema_spy_filter(df, **kwargs):
+    spy_df = kwargs["spy_df"]   # injected by main.py
+    fast   = kwargs["fast"]
+    slow   = kwargs["slow"]
+    # ... your logic using spy_df
+    return df
+```
+
+### Timeframe-agnostic bar counts
+
+Always use `get_bars_for_period("20d", TIMEFRAME, MULTIPLIER)` instead of hardcoded integers. This makes your strategy work correctly on daily, hourly, or minute data without any code changes.
+
+### Legacy format (strategies.py)
+
+Strategies can still be defined directly in `strategies.py` using `functools.partial` or wrapper functions (the original format). Any entry in `_STATIC_STRATEGIES` is merged with the auto-discovered registry — `_STATIC_STRATEGIES` takes precedence on name collision. Use this path only for strategies with complex wrapper requirements; prefer the plugin file approach for everything new.
 
 **Strategies that use SPY or VIX data** must declare them in `dependencies` and accept `**kwargs`. Create a wrapper function in `strategies.py` following the `strategy_ema_regime` pattern — this ensures the function is pickle-safe for multiprocessing. Pass the external DataFrame via kwargs inside the wrapper, then forward it to the underlying logic function. Always check with your data provider to confirm you're using the correct symbols they expect.
 
@@ -596,6 +834,9 @@ july-backtester/
 │   ├── plotting.py               # Chart generation
 │   ├── report_generator.py       # PDF/Markdown output
 │   └── ...
+│
+├── scripts/                      # One-off diagnostic and utility scripts (not part of the main pipeline)
+│   └── debug_data.py             # Compare Polygon vs Yahoo SPY data (provider diagnostic)
 │
 └── tickers_to_scan/              # JSON ticker lists
     ├── nasdaq_100.json

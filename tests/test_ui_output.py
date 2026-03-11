@@ -97,8 +97,9 @@ class TestU1SummaryContent:
         assert "Data provider" in result.stderr
 
     def test_period_label_present(self):
+        """'Period Selected' must appear (also satisfies the old 'Period' substring check)."""
         result = _run_main("--dry-run")
-        assert "Period" in result.stderr
+        assert "Period Selected" in result.stderr
 
     def test_strategies_label_present(self):
         result = _run_main("--dry-run")
@@ -133,6 +134,20 @@ class TestU1SummaryContent:
         )
         assert "2018-06-01" in result.stderr
         assert "2022-12-31" in result.stderr
+
+    def test_period_selected_label_is_exact(self):
+        """The startup summary must say 'Period Selected', not the old 'Period'."""
+        result = _run_main("--dry-run")
+        # The exact label should be present
+        assert "Period Selected" in result.stderr
+        # And the old bare label should not appear as a standalone label
+        # (it may still appear as part of "Period Selected", which is fine)
+        lines_with_period = [l for l in result.stderr.splitlines() if "Period" in l]
+        # Every line with "Period" must also contain "Selected" (it's always qualified now)
+        for line in lines_with_period:
+            assert "Selected" in line, (
+                f"Found bare 'Period' label (expected 'Period Selected'): {line!r}"
+            )
 
 
 # ---------------------------------------------------------------------------

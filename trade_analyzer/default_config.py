@@ -41,6 +41,11 @@ CRITICAL_COLS = ['Profit', '% Profit', 'Date', 'Ex. date']
 NUMERIC_COLS = ['Price', 'Ex. Price', '% chg', 'Profit', 'Shares',
                 'Position value', 'Cum. Profit', '# bars', 'Profit/bar', 'MAE', 'MFE']
 
+# --- Walk-Forward Analysis ---
+# Fraction of the trade history used as In-Sample (IS). The remainder is OOS.
+# Set to None to disable WFA (N/A will appear in the report).
+WFA_SPLIT_RATIO = None
+
 # --- Monte Carlo ---
 MC_SIMULATIONS = 1000  # Number of simulation paths to generate
 MC_USE_PERCENTAGE_RETURNS = False # CRITICAL: Revert to False to use $ P/L, matching Amibroker's likely default

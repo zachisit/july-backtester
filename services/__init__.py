@@ -1,24 +1,48 @@
 import logging
 from config import CONFIG
 
-# Import the specific functions directly from the service modules
+# Import Polygon helpers at module level for backwards compatibility.
+# These are only used when data_provider == "polygon".
 from .polygon_service import get_last_n_bars, get_price_data, get_previous_close_data
 
 logger = logging.getLogger(__name__)
 
 def get_data_service():
     """
-    Factory function to get the data fetching service for a date RANGE.
+    Factory function that returns the appropriate ``get_price_data`` callable
+    for the configured data provider.
+
+    Supported providers (config["data_provider"]):
+        "polygon" — Polygon.io REST API  (default)
+        "norgate" — Norgate Data local API
+        "yahoo"   — Yahoo Finance via yfinance
+        "csv"     — Local CSV files (see config["csv_data_dir"])
     """
     provider = CONFIG.get("data_provider", "polygon").lower()
+
     if provider == "polygon":
-        logger.info("--- Using Polygon.io Data Service for Range Fetch ---")
+        logger.info("Using Polygon.io data service.")
         return get_price_data
-    # Add other providers like norgate here in the future if needed
-    # elif provider == "norgate":
-    #     return norgate_get_price_data
-    else:
-        raise ValueError(f"Unsupported data provider: {provider}")
+
+    if provider == "norgate":
+        logger.info("Using Norgate data service.")
+        from .norgate_service import get_price_data as _fetcher
+        return _fetcher
+
+    if provider == "yahoo":
+        logger.info("Using Yahoo Finance data service.")
+        from .yahoo_service import get_price_data as _fetcher
+        return _fetcher
+
+    if provider == "csv":
+        logger.info("Using local CSV data service.")
+        from .csv_service import get_price_data as _fetcher
+        return _fetcher
+
+    raise ValueError(
+        f"Unsupported data_provider '{provider}'. "
+        f"Valid options: 'polygon', 'norgate', 'yahoo', 'csv'."
+    )
 
 def get_previous_close_service():
     """

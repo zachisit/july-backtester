@@ -15,8 +15,15 @@ CONFIG = {
     # ============================================================
     # SECTION 1: DATA PROVIDER
     # ============================================================
-    # The Data Provider is hardcoded with two options at this time
-    "data_provider": "polygon",  # Options: "norgate" or "polygon"
+    # Options: "polygon", "norgate", "yahoo", "csv"
+    "data_provider": "polygon",
+
+    # --- CSV Data Directory (only used when data_provider = "csv") ---
+    # Path to the folder containing per-symbol CSV files.
+    # Relative paths are resolved from the project root.
+    # Each file must be named {SYMBOL}.csv (case-insensitive).
+    # Required columns: Date, Open, High, Low, Close, Volume
+    "csv_data_dir": "csv_data",
 
     # ============================================================
     # SECTION 2: BACKTEST PERIOD & CAPITAL
@@ -207,6 +214,18 @@ CONFIG = {
     "num_mc_simulations": 1000,
 
     # ============================================================
+    # SECTION 11: WALK-FORWARD ANALYSIS (WFA)
+    # ============================================================
+    # Chronologically splits each strategy's trade history into an
+    # In-Sample (IS) window and an Out-of-Sample (OOS) window to
+    # test whether backtest results hold up on unseen data.
+    #
+    # wfa_split_ratio: fraction of the actual data period used for IS.
+    #   0.80  → first 80 % of bars are IS, last 20 % are OOS (default)
+    #   None or 0 → WFA disabled; OOS P&L and WFA Verdict show "N/A"
+    "wfa_split_ratio": 0.80,
+
+    # ============================================================
     # SECTION 11: TRADING COST SETTINGS
     # ============================================================
     # --- Slippage Percentage ---
@@ -216,7 +235,7 @@ CONFIG = {
     "commission_per_share": 0.002,
 }
 
-if CONFIG.get("data_provider") == "norgate":
+if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
     try:
         import norgatedata
         

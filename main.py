@@ -10,9 +10,10 @@ import pandas as pd
 from config import CONFIG
 from services import get_data_service
 from helpers.indicators import calculate_sma, calculate_rsi, calculate_atr
-from strategies import STRATEGIES
+from helpers.registry import get_active_strategies
 from helpers.portfolio_simulations import run_portfolio_simulation
 from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary
+from helpers.correlation import run_correlation_analysis, DEFAULT_THRESHOLD
 from helpers.monte_carlo import run_monte_carlo_simulation, analyze_mc_results
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
@@ -48,7 +49,7 @@ def run_single_simulation(args):
 
     # 1. Unpack the arguments. `portfolio_data` has been REMOVED from the tuple.
     portfolio_name, name, logic_func, dependencies, stop_config, \
-    spy_buy_and_hold_return, qqq_buy_and_hold_return, strategy_params = args
+    spy_buy_and_hold_return, qqq_buy_and_hold_return, strategy_params, wfa_split_date = args
     
     # Assign the global data to a local variable for clarity
     portfolio_data = portfolio_data_global
@@ -111,6 +112,15 @@ def run_single_simulation(args):
 
             result['vs_spy_benchmark'] = result.get('pnl_percent', 0.0) - spy_buy_and_hold_return
             result['vs_qqq_benchmark'] = result.get('pnl_percent', 0.0) - qqq_buy_and_hold_return
+
+            # --- WFA ---
+            if wfa_split_date and result.get('trade_log'):
+                from helpers.wfa import split_trades as _split_trades, evaluate_wfa as _evaluate_wfa
+                _is, _oos = _split_trades(result['trade_log'], wfa_split_date)
+                result.update(_evaluate_wfa(_is, _oos, result['initial_capital']))
+            else:
+                result.update({'oos_pnl_pct': None, 'wfa_verdict': 'N/A'})
+
             return result
             
     except Exception:
@@ -204,7 +214,7 @@ def main():
 
     # --- U1: RUN SUMMARY ---
     total_stop_configs = len(CONFIG.get("stop_loss_configs", []))
-    total_strategies = len(STRATEGIES)
+    total_strategies = len(get_active_strategies())
 
     # Count total symbols across all portfolios to estimate task count
     _symbol_counts = {}
@@ -234,7 +244,7 @@ def main():
     logger.info("=" * 60)
     logger.info(f"  Run ID        : {run_folder_name}")
     logger.info(f"  Data provider : {CONFIG.get('data_provider', 'polygon')}")
-    logger.info(f"  Period        : {CONFIG['start_date']} -> {CONFIG['end_date']}")
+    logger.info(f"  Period Selected : {CONFIG['start_date']} -> {CONFIG['end_date']}")
     logger.info(f"  Timeframe     : {CONFIG.get('timeframe', 'D')} x {CONFIG.get('timeframe_multiplier', 1)}")
     logger.info(f"  Strategies    : {total_strategies}")
     logger.info(f"  Stop configs  : {total_stop_configs}")
@@ -283,10 +293,29 @@ def main():
         qqq_buy_and_hold_return = (qqq_df['Close'].iloc[-1] - qqq_df['Close'].iloc[0]) / qqq_df['Close'].iloc[0]
         vix_df = data_fetcher("I:VIX", CONFIG["start_date"], CONFIG["end_date"], CONFIG) # Simplified
         tnx_df = data_fetcher("I:TNX", CONFIG["start_date"], CONFIG["end_date"], CONFIG) # Simplified
+        _spy_actual_start = spy_df.index.min().strftime("%Y-%m-%d")
+        _spy_actual_end   = spy_df.index.max().strftime("%Y-%m-%d")
+        logger.info("-" * 60)
+        logger.info(f"  Actual Data Period : {_spy_actual_start} -> {_spy_actual_end}  (via SPY)")
+        logger.info("-" * 60)
         logger.info(f"SPY B&H: {spy_buy_and_hold_return:.2%}, QQQ B&H: {qqq_buy_and_hold_return:.2%}")
     except Exception as e:
         logger.error(f"FATAL: Could not fetch dependency data: {e}")
         return
+
+    # --- WFA SPLIT DATE ---
+    _wfa_ratio = CONFIG.get("wfa_split_ratio")
+    wfa_split_date = None
+    if _wfa_ratio and 0 < float(_wfa_ratio) < 1:
+        from helpers.wfa import get_split_date as _get_split_date
+        wfa_split_date = _get_split_date(_spy_actual_start, _spy_actual_end, float(_wfa_ratio))
+        logger.info(
+            f"  WFA split date   : {wfa_split_date}  "
+            f"(IS: {_spy_actual_start} -> {wfa_split_date} | OOS: {wfa_split_date} -> {_spy_actual_end})"
+        )
+    else:
+        logger.info("  WFA              : disabled (wfa_split_ratio not set)")
+    # --- END WFA SPLIT DATE ---
 
     # --- START OF MODIFIED LOGIC ---
 
@@ -374,14 +403,15 @@ def main():
 
         # --- Generate tasks for THIS portfolio, WITHOUT the large `portfolio_data` ---
         tasks_for_this_portfolio = []
-        for strat_name, strategy_config in STRATEGIES.items():
+        for strat_name, strategy_config in get_active_strategies().items():
             for stop_config in CONFIG['stop_loss_configs']:
                 # This tuple is now much smaller because `portfolio_data` is removed
                 task_args = (
                     portfolio_name, strat_name, strategy_config["logic"],
                     strategy_config.get("dependencies", []),
                     stop_config, spy_buy_and_hold_return, qqq_buy_and_hold_return,
-                    strategy_config.get("params", {}) 
+                    strategy_config.get("params", {}),
+                    wfa_split_date,
                 )
                 tasks_for_this_portfolio.append(task_args)
 
@@ -428,7 +458,32 @@ def main():
         results_by_portfolio[p_name].append(res)
     
     for p_name, p_results in results_by_portfolio.items():
-         generate_per_portfolio_summary(p_results, p_name, spy_buy_and_hold_return, qqq_buy_and_hold_return, run_folder_name)
+        # --- Strategy Correlation Analysis (run first so matrix is available for summary) ---
+        portfolio_name_safe = p_name.replace(" ", "_")
+        corr_csv_path = os.path.join(
+            "output", "runs", run_folder_name,
+            f"{portfolio_name_safe}_strategy_correlation.csv"
+        )
+        corr_matrix = None
+        try:
+            corr_matrix, high_pairs = run_correlation_analysis(p_results, corr_csv_path)
+            logger.info(f"  Correlation matrix saved: {corr_csv_path}")
+            if high_pairs:
+                border = "!" * 70
+                logger.warning(border)
+                logger.warning(f"  HIGH CORRELATION ALERT  |  Portfolio: {p_name}")
+                logger.warning(f"  Threshold: |r| > {DEFAULT_THRESHOLD:.2f} — strategies below may overlap significantly")
+                logger.warning(border)
+                for strat_a, strat_b, corr_val in high_pairs:
+                    logger.warning(
+                        f"    '{strat_a}' <-> '{strat_b}'  r={corr_val:+.2f}"
+                        "  [HIGH OVERLAP — consider removing one]"
+                    )
+                logger.warning(border)
+        except Exception as _corr_err:
+            logger.warning(f"  Correlation analysis skipped for '{p_name}': {_corr_err}")
+
+        generate_per_portfolio_summary(p_results, p_name, spy_buy_and_hold_return, qqq_buy_and_hold_return, run_folder_name, corr_matrix=corr_matrix)
 
     duration_seconds = time.monotonic() - start_time
     generate_portfolio_summary_report(all_portfolio_results, duration_seconds, run_folder_name)

@@ -38,6 +38,36 @@ def _run(*args, extra_env=None):
     )
 
 
+def _run_with_config_patch(tmp_path, patches: dict, cli_args=("--dry-run",), extra_env=None):
+    """
+    Wrapper-script approach: mutates CONFIG keys then calls main.main().
+    Mirrors the identical helper in test_startup_validation.py.
+    """
+    lines = [
+        "import sys",
+        f"sys.path.insert(0, {repr(PROJECT_ROOT)})",
+        "import config",
+    ]
+    for k, v in patches.items():
+        lines.append(f"config.CONFIG[{repr(k)}] = {repr(v)}")
+    lines.append(f"sys.argv = {repr(['main.py'] + list(cli_args))}")
+    lines.append("import main")
+    lines.append("main.main()")
+
+    wrapper = tmp_path / "run_patched.py"
+    wrapper.write_text("\n".join(lines), encoding="utf-8")
+
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+
+    return subprocess.run(
+        [sys.executable, str(wrapper)],
+        capture_output=True, text=True,
+        env=env, cwd=PROJECT_ROOT,
+    )
+
+
 # ---------------------------------------------------------------------------
 # TestDryRun
 # ---------------------------------------------------------------------------
@@ -76,28 +106,42 @@ class TestDryRun:
 class TestMissingApiKey:
     """S1 guard: missing POLYGON_API_KEY exits 1 before argparse or dry-run gate."""
 
-    # Empty string is falsy — triggers S1 even when a .env file is present
-    # because load_dotenv() does not override pre-existing env vars by default.
-    _NO_KEY = {"POLYGON_API_KEY": ""}
+    # These tests force data_provider='polygon' so S1 fires regardless of the
+    # current config.py setting (user may have switched to 'yahoo' or 'csv').
 
-    def test_exits_one(self):
-        result = _run("--dry-run", extra_env=self._NO_KEY)
+    def test_exits_one(self, tmp_path):
+        result = _run_with_config_patch(
+            tmp_path,
+            patches={"data_provider": "polygon"},
+            extra_env={"POLYGON_API_KEY": ""},
+        )
         assert result.returncode == 1
 
-    def test_prints_error_message(self):
-        result = _run("--dry-run", extra_env=self._NO_KEY)
-        # S1 uses print(), which goes to stdout
+    def test_prints_error_message(self, tmp_path):
+        result = _run_with_config_patch(
+            tmp_path,
+            patches={"data_provider": "polygon"},
+            extra_env={"POLYGON_API_KEY": ""},
+        )
         assert "POLYGON_API_KEY is not set" in result.stdout
 
-    def test_dry_run_message_not_printed(self):
+    def test_dry_run_message_not_printed(self, tmp_path):
         """S1 fires before the dry-run gate — [DRY RUN] must never appear."""
-        result = _run("--dry-run", extra_env=self._NO_KEY)
+        result = _run_with_config_patch(
+            tmp_path,
+            patches={"data_provider": "polygon"},
+            extra_env={"POLYGON_API_KEY": ""},
+        )
         combined = result.stdout + result.stderr
         assert "[DRY RUN]" not in combined
 
-    def test_run_summary_not_printed(self):
+    def test_run_summary_not_printed(self, tmp_path):
         """S1 fires before the run summary block — RUN SUMMARY must not appear."""
-        result = _run("--dry-run", extra_env=self._NO_KEY)
+        result = _run_with_config_patch(
+            tmp_path,
+            patches={"data_provider": "polygon"},
+            extra_env={"POLYGON_API_KEY": ""},
+        )
         combined = result.stdout + result.stderr
         assert "RUN SUMMARY" not in combined
 

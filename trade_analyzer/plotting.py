@@ -51,8 +51,22 @@ def plot_monthly_performance(monthly_perf_df: pd.DataFrame) -> Optional[plt.Figu
     return fig
 
 
-def plot_equity_and_drawdown(trades_df: pd.DataFrame, equity_dd_percent: pd.Series) -> Optional[plt.Figure]:
-    """Generates the Equity Curve and Drawdown plot."""
+def plot_equity_and_drawdown(
+    trades_df: pd.DataFrame,
+    equity_dd_percent: pd.Series,
+    wfa_split_date: Optional[str] = None,
+) -> Optional[plt.Figure]:
+    """Generates the Equity Curve and Drawdown plot.
+
+    Parameters
+    ----------
+    trades_df        : cleaned trades DataFrame (must have 'Ex. date' and 'Equity').
+    equity_dd_percent: equity drawdown series aligned to ``trades_df.index``.
+    wfa_split_date   : ISO date string (e.g. ``'2018-01-01'``) marking the IS/OOS
+                       boundary.  When supplied, a vertical dashed line is drawn on
+                       both subplots at the first trade whose exit date falls on or
+                       after this date.  Pass ``None`` to omit the line.
+    """
     title = "Equity Curve and Drawdown"
     fig = None # Initialize
     try:
@@ -84,6 +98,29 @@ def plot_equity_and_drawdown(trades_df: pd.DataFrame, equity_dd_percent: pd.Seri
         else:
              axes[1].text(0.5, 0.5, 'Drawdown data not available', ha='center', va='center', transform=axes[1].transAxes)
         axes[1].set_xlabel('Trade Number')
+
+        # --- WFA split line ---
+        if wfa_split_date and 'Ex. date' in trades_df.columns:
+            try:
+                split_dt = pd.to_datetime(wfa_split_date)
+                # Find the integer index of the first OOS trade
+                oos_mask = trades_df['Ex. date'] >= split_dt
+                if oos_mask.any():
+                    split_idx = trades_df.index[oos_mask][0]
+                    for ax in axes:
+                        ax.axvline(
+                            x=split_idx,
+                            color='orange',
+                            linestyle='--',
+                            linewidth=1.5,
+                            label=f'WFA Split ({wfa_split_date})',
+                            zorder=5,
+                        )
+                    # Re-draw legends to include the WFA line
+                    axes[0].legend(loc='upper left', fontsize=8)
+                    axes[1].legend(loc='upper left', fontsize=8)
+            except Exception as vline_err:
+                print(f"WFA plot Warning: could not draw split line: {vline_err}")
 
         fig.tight_layout(pad=1.1, rect=[0, 0, 1, 0.96]) # Adjust rect to prevent suptitle overlap
 
