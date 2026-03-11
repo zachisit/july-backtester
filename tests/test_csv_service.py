@@ -410,3 +410,78 @@ class TestFilenameSanitization:
         with caplog.at_level(logging.WARNING, logger="services.csv_service"):
             get_price_data("I:VIX", "2023-01-01", "2023-12-31", _config_for(tmp_path))
         assert "I_VIX" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Nasdaq-format CSVs — Close/Last header + $ currency strings
+# ---------------------------------------------------------------------------
+
+_NASDAQ_CSV = """\
+Date,Close/Last,Volume,Open,High,Low
+01/10/2023,$264.72,34256281,$262.24,$265.07,$260.96
+01/11/2023,$267.41,33205000,$265.00,$268.50,$264.50
+01/12/2023,$270.18,31890000,$267.50,$271.00,$267.00
+01/13/2023,$272.30,29500000,$270.20,$273.10,$269.80
+01/17/2023,$268.95,35100000,$272.00,$272.50,$268.00
+"""
+
+
+class TestNasdaqFormat:
+    """Nasdaq-downloaded CSVs use 'Close/Last' as the header and prefix all
+    price values with '$'.  Both must be handled transparently."""
+
+    def test_returns_dataframe(self, tmp_path):
+        _write_csv(tmp_path, "AAPL", _NASDAQ_CSV)
+        result = get_price_data("AAPL", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert isinstance(result, pd.DataFrame)
+
+    def test_canonical_columns(self, tmp_path):
+        """'Close/Last' must be renamed to 'Close'."""
+        _write_csv(tmp_path, "AAPL", _NASDAQ_CSV)
+        result = get_price_data("AAPL", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert list(result.columns) == ["Open", "High", "Low", "Close", "Volume"]
+
+    def test_close_last_not_in_columns(self, tmp_path):
+        _write_csv(tmp_path, "AAPL", _NASDAQ_CSV)
+        result = get_price_data("AAPL", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert "Close/Last" not in result.columns
+
+    def test_dollar_signs_stripped_no_nan(self, tmp_path):
+        """All price columns must parse to floats — no NaN from '$' prefixes."""
+        _write_csv(tmp_path, "AAPL", _NASDAQ_CSV)
+        result = get_price_data("AAPL", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        for col in ["Open", "High", "Low", "Close"]:
+            assert result[col].isna().sum() == 0, f"{col} has unexpected NaN values"
+
+    def test_close_value_correct(self, tmp_path):
+        """First row Close should be 264.72, not NaN."""
+        _write_csv(tmp_path, "AAPL", _NASDAQ_CSV)
+        result = get_price_data("AAPL", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert abs(result["Close"].iloc[0] - 264.72) < 1e-6
+
+    def test_open_value_correct(self, tmp_path):
+        _write_csv(tmp_path, "AAPL", _NASDAQ_CSV)
+        result = get_price_data("AAPL", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert abs(result["Open"].iloc[0] - 262.24) < 1e-6
+
+    def test_row_count(self, tmp_path):
+        _write_csv(tmp_path, "AAPL", _NASDAQ_CSV)
+        result = get_price_data("AAPL", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert len(result) == 5
+
+    def test_all_columns_numeric(self, tmp_path):
+        _write_csv(tmp_path, "AAPL", _NASDAQ_CSV)
+        result = get_price_data("AAPL", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        for col in result.columns:
+            assert pd.api.types.is_numeric_dtype(result[col]), f"{col} is not numeric"
+
+    def test_comma_thousands_separator_stripped(self, tmp_path):
+        """Volume values with comma separators (e.g. 1,000,000) must parse correctly."""
+        csv = (
+            "Date,Close/Last,Volume,Open,High,Low\n"
+            "01/10/2023,$264.72,\"1,234,567\",$262.24,$265.07,$260.96\n"
+        )
+        _write_csv(tmp_path, "AAPL", csv)
+        result = get_price_data("AAPL", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert result is not None
+        assert abs(result["Volume"].iloc[0] - 1_234_567) < 1

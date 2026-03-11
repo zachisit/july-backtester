@@ -218,10 +218,12 @@ Reads historical OHLCV data from local CSV files. Useful for custom feeds, propr
 | `Open` | `open` | Numeric |
 | `High` | `high` | Numeric |
 | `Low` | `low` | Numeric |
-| `Close` | `close`, `adj close`, `adjusted close` | Numeric. `Adj Close` is silently treated as `Close`. |
+| `Close` | `close`, `close/last`, `adj close`, `adjusted close` | Numeric. `Adj Close` and `Close/Last` (Nasdaq format) are silently treated as `Close`. |
 | `Volume` | `volume` | Numeric |
 
 Extra columns (e.g. `VWAP`, `Turnover`) are silently ignored. The date column may be a named column or the CSV index. Multiple date formats are supported (ISO `YYYY-MM-DD`, US `MM/DD/YYYY`, datetime strings with time components, etc.).
+
+**Nasdaq-format CSVs are natively supported.** Files downloaded directly from [nasdaq.com](https://www.nasdaq.com/market-activity/stocks/) use `Close/Last` as the price column header and prefix all price values with `$` (e.g. `$264.72`). Both are handled automatically: `Close/Last` is remapped to `Close`, and `$` signs and `,` thousands separators are stripped before numeric conversion. No pre-processing of the file is required.
 
 **Mandatory benchmark files:** The backtester fetches four symbols at startup — before any portfolio simulation begins — to calculate SPY/QQQ buy-and-hold baselines, VIX regime filters, and TNX data used by certain strategies. These files must be present in your `csv_data_dir` regardless of which portfolio or single ticker you are testing. Missing any one of them causes an immediate fatal crash at startup.
 

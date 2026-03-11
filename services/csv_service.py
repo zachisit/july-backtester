@@ -43,6 +43,7 @@ _COL_ALIASES: dict[str, str] = {
     "high":             "High",
     "low":              "Low",
     "close":            "Close",
+    "close/last":       "Close",
     "adj close":        "Close",
     "adjusted close":   "Close",
     "volume":           "Volume",
@@ -204,6 +205,9 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     # --- Keep only canonical columns, coerce to numeric ---
     df = df[_CANONICAL_COLS].copy()
     for col in _CANONICAL_COLS:
+        # Strip currency formatting ($1,234.56 → 1234.56) before numeric coercion
+        if df[col].dtype == object:
+            df[col] = df[col].astype(str).str.replace(r"[$,]", "", regex=True).str.strip()
         df[col] = pd.to_numeric(df[col], errors="coerce")
 
     # --- Filter by date range ---
