@@ -19,6 +19,7 @@ from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 import orjson
 from helpers.caching import CACHE_DIR
+from helpers.noise import inject_price_noise
 
 logger = logging.getLogger(__name__)
 
@@ -255,6 +256,13 @@ def main():
     logger.info(f"  Total symbols : {_total_symbols}")
     logger.info(f"  Total tasks   : {_total_tasks}  (symbols x strategies x stop configs)")
     logger.info("=" * 60)
+    _noise_pct = CONFIG.get("noise_injection_pct", 0.0)
+    if _noise_pct > 0:
+        logger.info("")
+        logger.info("*" * 60)
+        logger.info(f"  [STRESS TEST MODE] Injecting {_noise_pct:.1%} random noise into OHLC price data")
+        logger.info("  High/Low bounds are enforced after noise — no invalid candlesticks")
+        logger.info("*" * 60)
     # --- END U1 ---
 
     if args.dry_run:
@@ -361,6 +369,10 @@ def main():
                 if len(df) < MIN_BARS:
                     skipped_symbols.append((symbol, len(df)))
                     continue
+                # --- NOISE INJECTION (stress test) ---
+                _noise_pct = CONFIG.get("noise_injection_pct", 0.0)
+                if _noise_pct > 0:
+                    df = inject_price_noise(df, _noise_pct)
                 # --- FEATURE ENGINEERING ---
                 # These columns are captured at trade entry time for each
                 # position and stored in the trade log for later analysis.
