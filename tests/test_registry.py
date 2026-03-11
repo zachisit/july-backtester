@@ -4,18 +4,19 @@ tests/test_registry.py
 Unit tests for helpers/registry.py — Strategy Registry and Plugin System.
 
 Covers:
-  register_strategy  — decorator API: stores logic, name, dependencies, params
-  StrategyRegistry   — dict-like interface (len, iter, contains, get, items…)
-  load_strategies    — dynamic auto-discovery from a directory of .py files
-  integration        — strategies.py loads custom_strategies/ correctly
+  register_strategy    — decorator API: stores logic, name, dependencies, params
+  StrategyRegistry     — dict-like interface (len, iter, contains, get, items…)
+  load_strategies      — dynamic auto-discovery from a directory of .py files
+  get_active_strategies — public API used by main.py
+  integration          — custom_strategies/ loads correctly end-to-end
 
 All tests are deterministic: no network calls, no I/O beyond tmp_path.
 """
 
-import importlib
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -27,6 +28,7 @@ if PROJECT_ROOT not in sys.path:
 from helpers.registry import (
     REGISTRY,
     _REGISTRY,
+    get_active_strategies,
     load_strategies,
     register_strategy,
 )
@@ -284,40 +286,57 @@ class TestLoadStrategies:
 # ---------------------------------------------------------------------------
 
 class TestIntegration:
-    """Verify that the real custom_strategies/ package loads correctly."""
+    """Verify that the real custom_strategies/ package loads correctly via
+    get_active_strategies().
+
+    This class overrides the module-level _clean_registry autouse fixture.
+    Before each test it removes custom_strategies.* from sys.modules so that
+    load_strategies() (called inside get_active_strategies) always re-imports
+    them fresh and re-triggers the @register_strategy decorators — even though
+    the module-level fixture may have cleared _REGISTRY after a previous test.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_registry(self):
+        """Override the module-level autouse fixture for integration tests."""
+        # Force-evict custom_strategies modules so they are re-imported fresh.
+        for key in list(sys.modules.keys()):
+            if key.startswith("custom_strategies."):
+                del sys.modules[key]
+        yield
+        _REGISTRY.clear()
 
     def test_sma_strategies_are_registered(self):
-        """After strategies.py is imported, both SMA strategies must be present."""
-        # strategies.py calls load_strategies("custom_strategies") at import time
-        import strategies  # noqa: F401  (side-effect: populates REGISTRY)
+        """get_active_strategies() must discover and return both SMA strategies."""
+        strategies = get_active_strategies()
+
+        assert "SMA Crossover (20d/50d)" in strategies
+        assert "SMA Crossover (50d/200d)" in strategies
+
+    def test_registry_also_populated(self):
+        """After get_active_strategies(), REGISTRY reflects the loaded plugins."""
+        get_active_strategies()
 
         assert "SMA Crossover (20d/50d)" in REGISTRY
         assert "SMA Crossover (50d/200d)" in REGISTRY
 
-    def test_strategies_dict_contains_sma(self):
-        from strategies import STRATEGIES
-
-        assert "SMA Crossover (20d/50d)" in STRATEGIES
-        assert "SMA Crossover (50d/200d)" in STRATEGIES
-
     def test_sma_logic_is_callable(self):
-        from strategies import STRATEGIES
+        strategies = get_active_strategies()
 
         for name in ["SMA Crossover (20d/50d)", "SMA Crossover (50d/200d)"]:
-            entry = STRATEGIES[name]
-            assert callable(entry["logic"])
+            assert callable(strategies[name]["logic"])
 
     def test_sma_dependencies_are_empty(self):
-        from strategies import STRATEGIES
+        strategies = get_active_strategies()
 
         for name in ["SMA Crossover (20d/50d)", "SMA Crossover (50d/200d)"]:
-            assert STRATEGIES[name]["dependencies"] == []
+            assert strategies[name]["dependencies"] == []
 
     def test_sma_params_have_fast_and_slow(self):
-        from strategies import STRATEGIES
+        strategies = get_active_strategies()
 
         for name in ["SMA Crossover (20d/50d)", "SMA Crossover (50d/200d)"]:
-            params = STRATEGIES[name]["params"]
+            params = strategies[name]["params"]
             assert "fast" in params
             assert "slow" in params
             assert isinstance(params["fast"], int)
@@ -326,8 +345,7 @@ class TestIntegration:
 
     def test_sma_logic_produces_signal_column(self):
         """End-to-end: the registered logic callable must add a Signal column."""
-        import numpy as np
-        from strategies import STRATEGIES
+        strategies = get_active_strategies()
 
         # Build a minimal OHLCV DataFrame long enough for a 200-bar SMA
         n = 250
@@ -340,8 +358,18 @@ class TestIntegration:
                 "Volume": [1_000_000] * n,
             }
         )
-        entry = STRATEGIES["SMA Crossover (50d/200d)"]
+        entry = strategies["SMA Crossover (50d/200d)"]
         result = entry["logic"](df.copy(), **entry["params"])
 
         assert "Signal" in result.columns
         assert result["Signal"].isin([-1, 0, 1]).all()
+
+    def test_returns_plain_dict(self):
+        """get_active_strategies() must return a plain dict, not StrategyRegistry."""
+        result = get_active_strategies()
+        assert type(result) is dict  # noqa: E721
+
+    def test_returns_two_strategies(self):
+        """custom_strategies/ ships with exactly 2 SMA strategies."""
+        strategies = get_active_strategies()
+        assert len(strategies) == 2

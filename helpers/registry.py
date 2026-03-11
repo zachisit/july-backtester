@@ -218,3 +218,28 @@ def load_strategies(directory: str) -> int:
         loaded += 1
 
     return loaded
+
+
+def get_active_strategies(directory: str = "custom_strategies") -> dict:
+    """Return all registered strategies as a plain ``{name: config}`` dict.
+
+    Calls :func:`load_strategies` on *directory* first so that any plugin
+    files not yet imported are discovered and their ``@register_strategy``
+    decorators fire.  Subsequent calls are fast because modules already in
+    ``sys.modules`` are skipped by :func:`load_strategies`.
+
+    Parameters
+    ----------
+    directory : str
+        Plugin directory to scan.  Defaults to ``"custom_strategies"``
+        relative to the current working directory.
+
+    Returns
+    -------
+    dict
+        Shallow copy of the current registry: ``{strategy_name: config_dict}``.
+        Each value has the shape ``{"logic": callable, "dependencies": list,
+        "params": dict}`` — identical to the old ``STRATEGIES`` dict format.
+    """
+    load_strategies(directory)
+    return dict(_REGISTRY)
