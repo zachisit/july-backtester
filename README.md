@@ -234,6 +234,14 @@ Extra columns (e.g. `VWAP`, `Turnover`) are silently ignored. The date column ma
 | `I_VIX.csv` | `I:VIX` | VIX regime filter (strategies that use `vix` dependency) |
 | `I_TNX.csv` | `I:TNX` | 10-Year Treasury Yield (strategies that use `tnx` dependency) |
 
+**Minimum data requirements (crucial for CSVs):** When supplying your own CSV files there are two hard limits that will cause a symbol to be silently skipped if not met.
+
+- **250-bar minimum.** The backtester has a built-in safety check that automatically skips any symbol whose CSV contains fewer than 250 bars (roughly one calendar year of daily data). No error is raised — the symbol simply produces no results. If you notice a symbol missing from your output, a CSV that is too short is the most likely cause.
+
+- **Indicator warm-up.** Even if a CSV passes the 250-bar check, long-lookback strategies need additional bars just to calculate their first signal. The default 50d/200d SMA Crossover strategy, for example, cannot fire a single trade until at least 200 daily bars have accumulated. A CSV that covers only a few months will pass the minimum check but still produce zero trades because the moving average never finishes warming up.
+
+**Recommendation:** When downloading historical data from Nasdaq, Yahoo Finance, or any other source, always request **at least 3–5 years of daily bars**. This gives every default strategy enough runway to warm up its indicators and execute a meaningful number of simulated trades.
+
 ### Backtest Period
 
 ```python
