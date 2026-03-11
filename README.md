@@ -17,7 +17,7 @@ A systematic strategy backtesting engine for US equities. Test 20+ built-in tech
 9. [Available Strategies](#available-strategies)
 10. [Configuration Reference](#configuration-reference)
 11. [Data Caching](#data-caching)
-12. [Adding Custom Strategies](#adding-custom-strategies)
+12. [Adding Custom Strategies (Plugin System)](#adding-custom-strategies-plugin-system)
 13. [Project Structure](#project-structure)
 14. [Contributing](#contributing)
 
@@ -705,46 +705,96 @@ Cache files are named using the pattern `{symbol}_{start}_{end}_{timeframe}_{mul
 
 ---
 
-## Adding Custom Strategies
+## Adding Custom Strategies (Plugin System)
 
-All strategy logic lives in [helpers/indicators.py](helpers/indicators.py). A strategy is a function that:
+> **No core file edits required.** Drop a `.py` file into `custom_strategies/`, decorate your function, and the engine discovers it automatically on the next run.
 
-1. Accepts a DataFrame with `Open`, `High`, `Low`, `Close`, `Volume` columns
-2. Returns the same DataFrame with a `Signal` column added
+The backtester uses a strategy plugin system built around `helpers/registry.py`. The `@register_strategy` decorator stores a strategy's name, logic function, dependencies, and parameters. `load_strategies("custom_strategies")` is called at startup and imports every `.py` file in that directory, triggering the decorators.
 
-Signal values:
+### Step-by-step: add a new strategy
 
-- `1` — Enter / hold long
-- `-1` — Exit / go flat
-- `0` — No position / no change
+**1. Add your signal logic to `helpers/indicators.py`** (or inline it directly):
 
 ```python
-# helpers/indicators.py
+# helpers/indicators.py  (or keep it inline in your plugin file)
 
-def my_strategy_logic(df):
-    """Buy when price is above the 50-day SMA, exit when below."""
-    df['SMA_50'] = df['Close'].rolling(window=50).mean()
+def my_roc_logic(df, length=10, threshold=0.0):
+    """Buy when Rate-of-Change crosses above threshold, exit when it falls back."""
+    df['ROC'] = df['Close'].pct_change(length)
     df['Signal'] = 0
-    df.loc[df['Close'] > df['SMA_50'], 'Signal'] = 1
-    df.loc[df['Close'] <= df['SMA_50'], 'Signal'] = -1
+    df.loc[df['ROC'] > threshold, 'Signal'] = 1
+    df.loc[df['ROC'] <= threshold, 'Signal'] = -1
     return df
 ```
 
-Then register it in `strategies.py`. Import the function at the top and add an entry to the `STRATEGIES` dict:
+**2. Create a file in `custom_strategies/`** (any name, e.g. `my_roc.py`):
 
 ```python
-# strategies.py
+# custom_strategies/my_roc.py
 
-from helpers.indicators import my_strategy_logic
+from helpers.registry import register_strategy
+from helpers.timeframe_utils import get_bars_for_period
+from helpers.indicators import my_roc_logic
+from config import CONFIG
 
-STRATEGIES = {
-    "My Strategy Name": {
-        "logic": my_strategy_logic,
-        "dependencies": []  # Add 'spy' or 'vix' if your strategy uses those DataFrames
+_TF  = CONFIG.get("timeframe", "D")
+_MUL = CONFIG.get("timeframe_multiplier", 1)
+
+@register_strategy(
+    name="ROC Momentum (10d)",          # shown in all reports
+    dependencies=[],                    # add "spy" or "vix" if needed
+    params={
+        "length":    get_bars_for_period("10d", _TF, _MUL),
+        "threshold": 0.0,
     },
-    # ... other strategies
-}
+)
+def roc_momentum_10d(df, **kwargs):
+    """Rate-of-Change momentum. Timeframe-agnostic via get_bars_for_period."""
+    return my_roc_logic(df, length=kwargs["length"], threshold=kwargs["threshold"])
 ```
+
+**3. Run the backtester** — no other files need touching:
+
+```bash
+python main.py --dry-run   # verify "Strategies: N" increased by 1
+python main.py
+```
+
+That's it. The engine calls `load_strategies("custom_strategies")` at startup, imports `my_roc.py`, the decorator fires, and `"ROC Momentum (10d)"` appears in every summary table and CSV.
+
+### Signal convention
+
+| Value | Meaning |
+| --- | --- |
+| `1` | Enter / hold long |
+| `-1` | Exit / go flat |
+| `0` | No change (carry previous signal) |
+
+### Strategies that need SPY or VIX data
+
+Declare `dependencies=["spy"]`, `dependencies=["vix"]`, or `dependencies=["spy", "vix"]`. The engine injects `spy_df` / `vix_df` into `**kwargs` at runtime:
+
+```python
+@register_strategy(
+    name="EMA w/ SPY Filter",
+    dependencies=["spy"],
+    params={"fast": 20, "slow": 50},
+)
+def ema_spy_filter(df, **kwargs):
+    spy_df = kwargs["spy_df"]   # injected by main.py
+    fast   = kwargs["fast"]
+    slow   = kwargs["slow"]
+    # ... your logic using spy_df
+    return df
+```
+
+### Timeframe-agnostic bar counts
+
+Always use `get_bars_for_period("20d", TIMEFRAME, MULTIPLIER)` instead of hardcoded integers. This makes your strategy work correctly on daily, hourly, or minute data without any code changes.
+
+### Legacy format (strategies.py)
+
+Strategies can still be defined directly in `strategies.py` using `functools.partial` or wrapper functions (the original format). Any entry in `_STATIC_STRATEGIES` is merged with the auto-discovered registry — `_STATIC_STRATEGIES` takes precedence on name collision. Use this path only for strategies with complex wrapper requirements; prefer the plugin file approach for everything new.
 
 **Strategies that use SPY or VIX data** must declare them in `dependencies` and accept `**kwargs`. Create a wrapper function in `strategies.py` following the `strategy_ema_regime` pattern — this ensures the function is pickle-safe for multiprocessing. Pass the external DataFrame via kwargs inside the wrapper, then forward it to the underlying logic function. Always check with your data provider to confirm you're using the correct symbols they expect.
 

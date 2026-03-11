@@ -1,9 +1,16 @@
 # strategies.py
 # Portfolio-mode strategy definitions, extracted from main_portfolio.py.
+#
+# Active strategies live in custom_strategies/ and are loaded via
+# load_strategies() at the bottom of this file.  Commented-out strategies
+# below can be re-activated by un-commenting them and adding them to
+# _STATIC_STRATEGIES (they stay in the old partial/wrapper format and are
+# merged with the auto-discovered registry entries).
 
 from functools import partial
 from config import CONFIG
 from helpers.timeframe_utils import get_bars_for_period
+from helpers.registry import REGISTRY, load_strategies
 from helpers.indicators import (
     # --- Active STRATEGIES ---
     sma_crossover_logic,
@@ -116,10 +123,12 @@ def strategy_ema_vix_only(df, **kwargs):
     )
 # --------------------------------------------------------------------
 
-# --- DEFINE STRATEGIES WITH DEPENDENCIES (Fully Refactored for Multiprocessing) ---
+# --- STATIC / LEGACY STRATEGY DEFINITIONS ---
+# Un-comment any entry here to reactivate it alongside auto-discovered ones.
+# These stay in the old partial/wrapper format and are merged with REGISTRY.
 TIMEFRAME = CONFIG.get("timeframe", "D")
 MULTIPLIER = CONFIG.get("timeframe_multiplier", 1)
-STRATEGIES = {
+_STATIC_STRATEGIES = {
         ## CHAMPION
         # The most aggressive version (fast entry AND fast exit)
         # "MA Confluence (Fast Entry & Exit)": {
@@ -185,14 +194,16 @@ STRATEGIES = {
     #     },
 
 
-    "SMA Crossover (20d/50d)": {
-        "logic": partial(sma_crossover_logic, fast=get_bars_for_period('20d', TIMEFRAME, MULTIPLIER), slow=get_bars_for_period('50d', TIMEFRAME, MULTIPLIER)),
-        "dependencies": []
-    },
-    "SMA Crossover (50d/200d)": {
-        "logic": partial(sma_crossover_logic, fast=get_bars_for_period('50d', TIMEFRAME, MULTIPLIER), slow=get_bars_for_period('200d', TIMEFRAME, MULTIPLIER)),
-        "dependencies": []
-    },
+    # SMA Crossover strategies are now in custom_strategies/sma_crossovers.py.
+    # Un-comment the entries below ONLY if you want to override the plugin versions.
+    # "SMA Crossover (20d/50d)": {
+    #     "logic": partial(sma_crossover_logic, fast=get_bars_for_period('20d', TIMEFRAME, MULTIPLIER), slow=get_bars_for_period('50d', TIMEFRAME, MULTIPLIER)),
+    #     "dependencies": []
+    # },
+    # "SMA Crossover (50d/200d)": {
+    #     "logic": partial(sma_crossover_logic, fast=get_bars_for_period('50d', TIMEFRAME, MULTIPLIER), slow=get_bars_for_period('200d', TIMEFRAME, MULTIPLIER)),
+    #     "dependencies": []
+    # },
     # "RSI Mean Reversion (14/30)": {
     #     "logic": partial(rsi_logic, length=get_bars_for_period('14d', TIMEFRAME, MULTIPLIER), oversold=30, exit_level=50),
     #     "dependencies": []
@@ -383,3 +394,14 @@ STRATEGIES = {
     #     }
     # },
 }
+
+# ---------------------------------------------------------------------------
+# Auto-discovery: load all *.py plugins from custom_strategies/
+# ---------------------------------------------------------------------------
+# This triggers @register_strategy decorators in every file found there,
+# populating helpers.registry.REGISTRY without touching any core files.
+load_strategies("custom_strategies")
+
+# Merge: static (legacy) entries take precedence only when a name collision
+# occurs with a plugin entry.  In practice, keep names unique.
+STRATEGIES = {**dict(REGISTRY), **_STATIC_STRATEGIES}
