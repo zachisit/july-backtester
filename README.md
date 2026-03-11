@@ -484,11 +484,57 @@ Every strategy result includes two WFA columns alongside the Monte Carlo output:
 
 **Disabling WFA:** Set `"wfa_split_ratio": None` (or `0`) in `config.py`. Both `OOS P&L (%)` and `WFA Verdict` will show `N/A` for all strategies.
 
+### Strategy Correlation Matrix
+
+> **Why this matters:** Running two highly correlated strategies is effectively doubling your position in a single edge — they will win and lose together, offering no diversification benefit. The correlation analysis automatically surfaces these overlaps after every portfolio run.
+
+After each portfolio finishes, the backtester computes pairwise Pearson correlations between all strategies based on their daily realised P&L. The result is saved as a CSV, an `Avg. Corr` column appears in the terminal summary table, and any pairs above the threshold trigger a prominent alert.
+
+**How it works:** Each strategy's trade log is aggregated into a daily P&L series (trades grouped by exit date, profits summed). These series are aligned into a date x strategy matrix, with missing dates filled with 0. Pearson correlations are then computed on that combined matrix.
+
+**Output file location:**
+
+```text
+output/runs/<run_id>/<Portfolio_Name>_strategy_correlation.csv
+```
+
+For example: `output/runs/2026-03-10_14-22-01/Nasdaq_100_strategy_correlation.csv`
+
+The CSV has strategy names as both row index and column headers, values rounded to 4 decimal places.
+
+**`Avg. Corr` column in the summary table:**
+
+Each strategy shows its mean absolute Pearson correlation against all other strategies in the run. Strategies with any pairwise correlation above the threshold are flagged with `*` (e.g. `0.81*`).
+
+**How to Interpret:**
+
+| Range | Meaning | Action |
+| --- | --- | --- |
+| **0.70 - 1.00** | **High Overlap (Red Flag)** | Strategies enter/exit at nearly the same times. Remove one unless they differ in risk/sizing. |
+| **0.30 - 0.70** | **Moderate Overlap** | Some shared signal; acceptable if each strategy has independent edge. |
+| **0.00 - 0.30** | **High Diversification (Goal)** | Strategies behave independently -- ideal portfolio composition. |
+
+**Terminal alert example:**
+
+```text
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  HIGH CORRELATION ALERT  |  Portfolio: Nasdaq 100
+  Threshold: |r| > 0.70 -- strategies below may overlap significantly
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    'SMA Crossover (20d/50d)' <-> 'EMA Crossover (Unfiltered)'  r=+0.91  [HIGH OVERLAP -- consider removing one]
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+```
+
+The default threshold is **0.70** (absolute value). Pairs with `|r| > 0.70` are flagged as `HIGH CORRELATION ALERT` warnings.
+
+**When the matrix is not generated:** If fewer than 2 strategies have completed trades in a portfolio, correlation analysis is silently skipped and no CSV is written.
+
 ### Local Report Files
 
 | Location | Contents |
 | --- | --- |
 | `output/runs/<run_id>/overall_portfolio_summary.csv` | All results across all portfolios, sorted by MC Score. The first 5 columns are run metadata (`run_id`, `data_provider`, `start_date`, `end_date`, `timeframe`) so results are self-describing when combined across runs. |
+| `output/runs/<run_id>/<Portfolio>_strategy_correlation.csv` | Pearson correlation matrix of daily P&L across all strategies for that portfolio |
 | `output/runs/<run_id>/analyzer_csvs/<Portfolio>/` | Column-mapped CSVs ready to pass into `report.py` |
 | `output/runs/<run_id>/raw_trades/<Portfolio>/` | Per-symbol, per-strategy raw trade logs (when `save_individual_trades=True`) |
 | `output/runs/<run_id>/logs/` | Full execution log for the run |

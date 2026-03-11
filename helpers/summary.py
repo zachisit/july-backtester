@@ -6,6 +6,7 @@ from config import CONFIG
 import numpy as np
 
 from helpers.aws_utils import upload_file_to_s3
+from helpers.correlation import compute_avg_correlations, DEFAULT_THRESHOLD
 
 def save_trades_to_csv(result, local_folder, run_id):
     """Saves the trade log locally and optionally uploads it to S3."""
@@ -180,7 +181,7 @@ def generate_final_summary(all_results):
 
     print("\n" + "=" * 80)
 
-def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return, qqq_return, run_id):
+def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return, qqq_return, run_id, corr_matrix=None):
     """
     Prints the per-portfolio strategy summary and saves all trade logs.
     """
@@ -224,12 +225,36 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         print(f"(Filters: Min Trades > 0, Max DD < {max_dd_filter:.0%}, Min MC Score >= {mc_score_min}, Min P&L >= {min_pnl:.2f}%, Min Calmar >= {min_calmar:.2f}, "
               f"vs SPY >= {min_vs_spy:.2f}%, vs QQQ >= {min_vs_qqq:.2f}%)")
     else:
-        # Formatting logic (no changes needed here)
+        # --- Avg. Corr column (from pre-computed correlation matrix) ---
+        if corr_matrix is not None and not corr_matrix.empty:
+            avg_corrs = compute_avg_correlations(corr_matrix)
+            # Build flag: True if any off-diagonal |r| > threshold for that strategy
+            high_corr_strategies = set()
+            for col in corr_matrix.columns:
+                for other in corr_matrix.columns:
+                    if other != col:
+                        val = corr_matrix.loc[col, other]
+                        if pd.notna(val) and abs(val) > DEFAULT_THRESHOLD:
+                            high_corr_strategies.add(col)
+                            break
+
+            def _fmt_avg_corr(strategy_name):
+                val = avg_corrs.get(strategy_name)
+                if val is None or (isinstance(val, float) and np.isnan(val)):
+                    return 'N/A'
+                flag = '*' if strategy_name in high_corr_strategies else ''
+                return f"{val:.2f}{flag}"
+
+            display_df['avg_corr'] = display_df['Strategy'].apply(_fmt_avg_corr)
+        else:
+            display_df['avg_corr'] = 'N/A'
+
+        # Formatting logic
         for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"), ('oos_pnl_pct', "{:+.2%}")]:
             if col in display_df.columns: display_df[col] = display_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
         if 'avg_trade_duration' in display_df.columns: display_df['avg_trade_duration'] = display_df['avg_trade_duration'].apply(lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x)
-        display_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict'}, inplace=True)
-        report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'OOS P&L (%)', 'WFA Verdict', 'MC Verdict', 'MC Score']
+        display_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'avg_corr': 'Avg. Corr'}, inplace=True)
+        report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'OOS P&L (%)', 'WFA Verdict', 'Avg. Corr', 'MC Verdict', 'MC Score']
         summary_df_display = display_df.reindex(columns=report_cols).fillna('N/A').sort_values(by='MC Score', ascending=False).reset_index(drop=True)
         print(f"\n--- Strategy Comparison for {portfolio_name} (filtered, sorted by MC Score) ---")
         print(summary_df_display.to_string(index=False))

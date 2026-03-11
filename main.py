@@ -13,6 +13,7 @@ from helpers.indicators import calculate_sma, calculate_rsi, calculate_atr
 from strategies import STRATEGIES
 from helpers.portfolio_simulations import run_portfolio_simulation
 from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary
+from helpers.correlation import run_correlation_analysis, DEFAULT_THRESHOLD
 from helpers.monte_carlo import run_monte_carlo_simulation, analyze_mc_results
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
@@ -457,7 +458,32 @@ def main():
         results_by_portfolio[p_name].append(res)
     
     for p_name, p_results in results_by_portfolio.items():
-         generate_per_portfolio_summary(p_results, p_name, spy_buy_and_hold_return, qqq_buy_and_hold_return, run_folder_name)
+        # --- Strategy Correlation Analysis (run first so matrix is available for summary) ---
+        portfolio_name_safe = p_name.replace(" ", "_")
+        corr_csv_path = os.path.join(
+            "output", "runs", run_folder_name,
+            f"{portfolio_name_safe}_strategy_correlation.csv"
+        )
+        corr_matrix = None
+        try:
+            corr_matrix, high_pairs = run_correlation_analysis(p_results, corr_csv_path)
+            logger.info(f"  Correlation matrix saved: {corr_csv_path}")
+            if high_pairs:
+                border = "!" * 70
+                logger.warning(border)
+                logger.warning(f"  HIGH CORRELATION ALERT  |  Portfolio: {p_name}")
+                logger.warning(f"  Threshold: |r| > {DEFAULT_THRESHOLD:.2f} — strategies below may overlap significantly")
+                logger.warning(border)
+                for strat_a, strat_b, corr_val in high_pairs:
+                    logger.warning(
+                        f"    '{strat_a}' <-> '{strat_b}'  r={corr_val:+.2f}"
+                        "  [HIGH OVERLAP — consider removing one]"
+                    )
+                logger.warning(border)
+        except Exception as _corr_err:
+            logger.warning(f"  Correlation analysis skipped for '{p_name}': {_corr_err}")
+
+        generate_per_portfolio_summary(p_results, p_name, spy_buy_and_hold_return, qqq_buy_and_hold_return, run_folder_name, corr_matrix=corr_matrix)
 
     duration_seconds = time.monotonic() - start_time
     generate_portfolio_summary_report(all_portfolio_results, duration_seconds, run_folder_name)
