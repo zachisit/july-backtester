@@ -175,6 +175,21 @@ Uses the [yfinance](https://pypi.org/project/yfinance/) library. **No API key or
 
 `yfinance` is already included in `requirements.txt` — no additional setup needed. Note that Yahoo Finance data quality and availability varies; it is best suited for exploratory backtests rather than production research.
 
+**Index ticker translation.** Polygon and Norgate use an `I:` prefix for index symbols (e.g. `I:VIX`, `$I:VIX`). Yahoo Finance uses `^` (e.g. `^VIX`). The service translates these automatically — you do not need to change anything in `config.py` or your portfolio lists. The mapping for the most common indices is:
+
+| Norgate/Polygon symbol | Yahoo Finance symbol | Description |
+| ---------------------- | -------------------- | ----------- |
+| `I:VIX` / `$I:VIX` | `^VIX` | CBOE Volatility Index |
+| `I:TNX` / `$I:TNX` | `^TNX` | 10-Year Treasury Yield |
+| `I:TYX` / `$I:TYX` | `^TYX` | 30-Year Treasury Yield |
+| `I:IRX` / `$I:IRX` | `^IRX` | 13-Week Treasury Bill |
+| `I:SPX` / `$I:SPX` | `^GSPC` | S&P 500 Index |
+| `I:NDX` / `$I:NDX` | `^NDX` | Nasdaq 100 Index |
+| `I:DJI` / `$I:DJI` | `^DJI` | Dow Jones Industrial Average |
+| `I:RUT` / `$I:RUT` | `^RUT` | Russell 2000 |
+
+For any unmapped `I:XYZ` symbol the service falls back to `^XYZ` automatically.
+
 #### CSV Data Provider
 
 Reads historical OHLCV data from local CSV files. Useful for custom feeds, proprietary data, or offline use.
@@ -346,6 +361,39 @@ output/
 ```
 
 The entire `output/` directory is gitignored. Each run is isolated in its own folder — previous runs are never overwritten. S3 uploads (if configured) mirror this same `<run_id>/` structure as the key prefix.
+
+### Run Summary Box
+
+At startup, the backtester prints a summary box to the log / terminal before fetching any data:
+
+```text
+============================================================
+  RUN SUMMARY
+============================================================
+  Run ID            : 2026-03-10_14-22-01
+  Data provider     : yahoo
+  Period Selected   : 2004-01-01 -> 2026-03-10
+  Timeframe         : D x 1
+  Strategies        : 22
+  Stop configs      : 1
+------------------------------------------------------------
+  Portfolio         : Nasdaq 100 (101 symbols)
+------------------------------------------------------------
+  Total symbols     : 101
+  Total tasks       : 2222  (symbols x strategies x stop configs)
+============================================================
+```
+
+After benchmark data (SPY) has been fetched, a second line is logged:
+
+```text
+  Actual Data Period : 2004-01-02 -> 2026-03-07  (via SPY)
+```
+
+**Period Selected** is exactly what you configured in `config.py`. **Actual Data Period** is the real date range returned by the data provider for SPY — this is the ground truth for how far back your strategy results are calculated. The two values differ whenever:
+
+- The data provider does not have data going back to your requested `start_date` (e.g. free-tier API limits, or a ticker that was listed later)
+- The `end_date` falls on a weekend or holiday, so the last available bar is a trading day before it
 
 ### Terminal Summary Table
 
@@ -642,6 +690,9 @@ july-backtester/
 │   ├── plotting.py               # Chart generation
 │   ├── report_generator.py       # PDF/Markdown output
 │   └── ...
+│
+├── scripts/                      # One-off diagnostic and utility scripts (not part of the main pipeline)
+│   └── debug_data.py             # Compare Polygon vs Yahoo SPY data (provider diagnostic)
 │
 └── tickers_to_scan/              # JSON ticker lists
     ├── nasdaq_100.json

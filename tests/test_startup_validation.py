@@ -110,40 +110,64 @@ def _run_with_config_patch(tmp_path, patches: dict, cli_args=("--dry-run",), ext
 class TestS1ApiKeyCheck:
     """S1 guard: POLYGON_API_KEY must be set when data_provider == 'polygon'."""
 
-    _NO_KEY = {"POLYGON_API_KEY": ""}
-
     # --- Failure cases ---
+    # These tests explicitly force data_provider='polygon' so S1 fires regardless
+    # of whatever data_provider is set in config.py at the time of the run.
 
-    def test_empty_key_exits_one(self):
-        result = _run_main("--dry-run", extra_env=self._NO_KEY)
+    def test_empty_key_exits_one(self, tmp_path):
+        result = _run_with_config_patch(
+            tmp_path,
+            patches={"data_provider": "polygon"},
+            extra_env={"POLYGON_API_KEY": ""},
+        )
         assert result.returncode == 1
 
-    def test_empty_key_prints_error_message(self):
-        result = _run_main("--dry-run", extra_env=self._NO_KEY)
+    def test_empty_key_prints_error_message(self, tmp_path):
+        result = _run_with_config_patch(
+            tmp_path,
+            patches={"data_provider": "polygon"},
+            extra_env={"POLYGON_API_KEY": ""},
+        )
         assert "POLYGON_API_KEY is not set" in result.stdout
 
-    def test_error_goes_to_stdout_not_stderr(self):
+    def test_error_goes_to_stdout_not_stderr(self, tmp_path):
         """S1 uses print() which writes to stdout."""
-        result = _run_main("--dry-run", extra_env=self._NO_KEY)
+        result = _run_with_config_patch(
+            tmp_path,
+            patches={"data_provider": "polygon"},
+            extra_env={"POLYGON_API_KEY": ""},
+        )
         assert "POLYGON_API_KEY" in result.stdout
         assert "POLYGON_API_KEY" not in result.stderr
 
-    def test_s1_fires_before_run_summary(self):
+    def test_s1_fires_before_run_summary(self, tmp_path):
         """S1 must abort before the U1 RUN SUMMARY block."""
-        result = _run_main("--dry-run", extra_env=self._NO_KEY)
+        result = _run_with_config_patch(
+            tmp_path,
+            patches={"data_provider": "polygon"},
+            extra_env={"POLYGON_API_KEY": ""},
+        )
         combined = result.stdout + result.stderr
         assert "RUN SUMMARY" not in combined
 
-    def test_s1_fires_before_dry_run_gate(self):
+    def test_s1_fires_before_dry_run_gate(self, tmp_path):
         """[DRY RUN] is logged after the summary — must not appear when S1 fires."""
-        result = _run_main("--dry-run", extra_env=self._NO_KEY)
+        result = _run_with_config_patch(
+            tmp_path,
+            patches={"data_provider": "polygon"},
+            extra_env={"POLYGON_API_KEY": ""},
+        )
         combined = result.stdout + result.stderr
         assert "[DRY RUN]" not in combined
 
     # --- Pass case ---
 
-    def test_valid_key_does_not_exit_one(self):
-        result = _run_main("--dry-run", extra_env={"POLYGON_API_KEY": "test-key"})
+    def test_valid_key_does_not_exit_one(self, tmp_path):
+        result = _run_with_config_patch(
+            tmp_path,
+            patches={"data_provider": "polygon"},
+            extra_env={"POLYGON_API_KEY": "test-key"},
+        )
         assert result.returncode != 1
 
     # --- Non-polygon provider skips S1 ---

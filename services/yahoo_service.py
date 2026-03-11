@@ -16,6 +16,65 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Index ticker normalisation
+# ---------------------------------------------------------------------------
+# Polygon and Norgate use an "I:" prefix for index symbols (e.g. "I:VIX",
+# "$I:VIX").  Yahoo Finance uses "^" (e.g. "^VIX").
+# _INDEX_SYMBOL_MAP maps the bare index name (after stripping the prefix) to
+# the Yahoo Finance symbol.  Unmapped symbols fall back to "^{BARE}".
+_INDEX_SYMBOL_MAP: dict[str, str] = {
+    # Volatility
+    "VIX":  "^VIX",    # CBOE Volatility Index
+    # Interest rates
+    "TNX":  "^TNX",    # 10-Year Treasury Yield
+    "TYX":  "^TYX",    # 30-Year Treasury Yield
+    "FVX":  "^FVX",    # 5-Year Treasury Yield
+    "IRX":  "^IRX",    # 13-Week Treasury Bill
+    # Broad market
+    "SPX":  "^GSPC",   # S&P 500
+    "NDX":  "^NDX",    # Nasdaq 100
+    "DJI":  "^DJI",    # Dow Jones Industrial Average
+    "RUT":  "^RUT",    # Russell 2000
+    "NYA":  "^NYA",    # NYSE Composite
+    "DXY":  "DX-Y.NYB",# US Dollar Index (ICE)
+    # Commodities / futures
+    "VXN":  "^VXN",    # Nasdaq Volatility Index
+}
+
+
+def _normalise_symbol(symbol: str) -> str:
+    """
+    Convert a Norgate/Polygon index symbol to its Yahoo Finance equivalent.
+
+    Rules
+    -----
+    - ``$I:VIX``  → ``^VIX``   (Polygon extended format)
+    - ``I:VIX``   → ``^VIX``   (Polygon / Norgate format)
+    - ``^VIX``    → ``^VIX``   (already Yahoo format — pass-through)
+    - ``AAPL``    → ``AAPL``   (plain ticker — pass-through)
+
+    Unknown ``I:`` symbols fall back to ``^{BARE}`` (e.g. ``I:XYZ`` → ``^XYZ``).
+    """
+    s = symbol.strip()
+
+    # Strip leading "$" so "$I:VIX" → "I:VIX"
+    if s.startswith("$"):
+        s = s[1:]
+
+    if s.upper().startswith("I:"):
+        bare = s[2:].upper()
+        yahoo = _INDEX_SYMBOL_MAP.get(bare, f"^{bare}")
+        if yahoo != symbol:
+            logger.debug(f"Normalised index symbol '{symbol}' → '{yahoo}'")
+        return yahoo
+
+    return symbol
+
+
+# ---------------------------------------------------------------------------
+# Timeframe mapping
+# ---------------------------------------------------------------------------
 # Maps config["timeframe"] codes to Yahoo Finance interval strings.
 # When timeframe_multiplier != 1 we compose dynamically for H and MIN.
 _TF_BASE = {
@@ -89,8 +148,10 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     interval = _build_interval(config)
     auto_adjust = config.get("price_adjustment", "total_return") == "total_return"
 
+    yahoo_symbol = _normalise_symbol(symbol)
+
     try:
-        ticker = yf.Ticker(symbol)
+        ticker = yf.Ticker(yahoo_symbol)
         df = ticker.history(
             start=start_date,
             end=end_date,
@@ -99,12 +160,12 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
             actions=False,          # drop Dividends / Stock Splits columns
         )
     except Exception as exc:
-        logger.error(f"Yahoo Finance ERROR fetching '{symbol}': {exc}")
+        logger.error(f"Yahoo Finance ERROR fetching '{symbol}' (as '{yahoo_symbol}'): {exc}")
         return None
 
     if df is None or df.empty:
         logger.debug(
-            f"Yahoo Finance returned no data for '{symbol}' "
+            f"Yahoo Finance returned no data for '{symbol}' (as '{yahoo_symbol}') "
             f"[{start_date} → {end_date}]."
         )
         return None

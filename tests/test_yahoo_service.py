@@ -301,3 +301,95 @@ class TestGetPriceDataErrors:
         finally:
             if saved is not None:
                 sys.modules["yfinance"] = saved
+
+
+# ---------------------------------------------------------------------------
+# Index symbol normalisation  (_normalise_symbol)
+# ---------------------------------------------------------------------------
+
+class TestNormaliseSymbol:
+    """
+    Tests for the _normalise_symbol() helper that converts Norgate/Polygon
+    index symbols (I:VIX, $I:VIX) to Yahoo Finance format (^VIX).
+    """
+
+    def _call(self, symbol: str) -> str:
+        from services.yahoo_service import _normalise_symbol
+        return _normalise_symbol(symbol)
+
+    # --- Known mappings ---
+
+    def test_i_prefix_vix(self):
+        assert self._call("I:VIX") == "^VIX"
+
+    def test_dollar_i_prefix_vix(self):
+        assert self._call("$I:VIX") == "^VIX"
+
+    def test_i_prefix_tnx(self):
+        assert self._call("I:TNX") == "^TNX"
+
+    def test_dollar_i_prefix_tnx(self):
+        assert self._call("$I:TNX") == "^TNX"
+
+    def test_i_prefix_spx(self):
+        assert self._call("I:SPX") == "^GSPC"
+
+    def test_i_prefix_ndx(self):
+        assert self._call("I:NDX") == "^NDX"
+
+    def test_i_prefix_dji(self):
+        assert self._call("I:DJI") == "^DJI"
+
+    def test_i_prefix_rut(self):
+        assert self._call("I:RUT") == "^RUT"
+
+    def test_i_prefix_tyx(self):
+        assert self._call("I:TYX") == "^TYX"
+
+    def test_i_prefix_irx(self):
+        assert self._call("I:IRX") == "^IRX"
+
+    # --- Fallback: unknown I: symbols get ^{BARE} ---
+
+    def test_unknown_index_prefix_fallback(self):
+        """Unmapped I:XYZ → ^XYZ (safe default for any index symbol)."""
+        assert self._call("I:XYZ") == "^XYZ"
+
+    def test_unknown_dollar_prefix_fallback(self):
+        assert self._call("$I:MYSTERYIDX") == "^MYSTERYIDX"
+
+    # --- Pass-through cases ---
+
+    def test_already_yahoo_format_passthrough(self):
+        """^VIX is already Yahoo format — must come back unchanged."""
+        assert self._call("^VIX") == "^VIX"
+
+    def test_plain_equity_ticker_passthrough(self):
+        assert self._call("AAPL") == "AAPL"
+
+    def test_spy_passthrough(self):
+        assert self._call("SPY") == "SPY"
+
+    # --- Case insensitivity ---
+
+    def test_lowercase_i_prefix(self):
+        """i:vix (all lower) should still resolve to ^VIX."""
+        assert self._call("i:vix") == "^VIX"
+
+    def test_mixed_case_i_prefix(self):
+        assert self._call("I:Vix") == "^VIX"
+
+    # --- Integration: get_price_data uses normalised symbol ---
+
+    def test_get_price_data_normalises_index_before_fetch(self, mock_yf):
+        """get_price_data("I:VIX", ...) must call yf.Ticker("^VIX"), not yf.Ticker("I:VIX")."""
+        _configure_ticker(mock_yf, _make_yf_df())
+        from services import yahoo_service
+        yahoo_service.get_price_data("I:VIX", "2023-01-01", "2023-12-31", _BASE_CONFIG)
+        mock_yf.Ticker.assert_called_once_with("^VIX")
+
+    def test_get_price_data_normalises_dollar_prefix_index(self, mock_yf):
+        _configure_ticker(mock_yf, _make_yf_df())
+        from services import yahoo_service
+        yahoo_service.get_price_data("$I:TNX", "2023-01-01", "2023-12-31", _BASE_CONFIG)
+        mock_yf.Ticker.assert_called_once_with("^TNX")

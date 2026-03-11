@@ -28,7 +28,13 @@ services/norgate_service.py        # Norgate Data local API
 services/yahoo_service.py          # Yahoo Finance via yfinance (no API key)
 services/csv_service.py            # Local CSV files ({csv_data_dir}/{SYMBOL}.csv)
 tickers_to_scan/                   # JSON ticker lists (nasdaq_100.json, sp-500.json, etc.)
+scripts/                           # One-off diagnostic and utility scripts (NOT part of the pipeline)
+scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run with: python scripts/debug_data.py
 ```
+
+## Scripts Directory
+
+`scripts/` houses temporary, diagnostic, and utility scripts that are not part of the main backtesting pipeline. Scripts here must add the project root to `sys.path` using `os.path.dirname(os.path.dirname(os.path.abspath(__file__)))` (one extra `dirname` level vs scripts at the root). Put any new debug tools, one-off data inspectors, or utility helpers here rather than at the project root.
 
 ## Config Quick Reference
 ```python
@@ -123,6 +129,38 @@ output/
 ### Wiring
 
 Both providers are wired in `services/__init__.py` (`get_data_service` factory — the one actually used by `main.py`) and `services/services.py` (the caching wrapper, not currently called by main but kept consistent). New `elif provider == "yahoo"` and `elif provider == "csv"` branches import from the new modules via lazy local imports.
+
+### Index Ticker Normalisation (Yahoo only)
+
+Yahoo Finance uses `^` prefix for index symbols (`^VIX`, `^TNX`), while Norgate and Polygon use `I:` (`I:VIX`, `I:TNX`) or `$I:` (`$I:VIX`). `_normalise_symbol(symbol)` in `yahoo_service.py` handles the mapping:
+
+- `I:VIX` / `$I:VIX` → `^VIX`
+- `I:TNX` / `$I:TNX` → `^TNX`
+- `I:SPX` / `$I:SPX` → `^GSPC`
+- Unknown `I:XYZ` → `^XYZ` (fallback)
+- Plain tickers (`AAPL`, `SPY`) and `^VIX` pass through unchanged.
+- Case-insensitive: `i:vix` → `^VIX`.
+
+Called inside `get_price_data` before constructing `yf.Ticker(yahoo_symbol)`. Tests in `TestNormaliseSymbol` (19 tests) cover all cases.
+
+### Run Summary UI Changes
+
+`main.py` now emits two period-related lines:
+
+1. **`Period Selected`** (in the startup `===` box) — config values `start_date` / `end_date`.
+2. **`Actual Data Period`** (logged after SPY is fetched) — `spy_df.index.min()` / `spy_df.index.max()` rounded to date strings.
+
+The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces that every log line containing "Period" also contains "Selected" (no bare `Period :` label remains).
+
+### Polygon API Plan Limitation — Root Cause of 71% vs 814% Discrepancy
+
+**Diagnostic (`debug_data.py`)**: Polygon returns 1,254 bars starting 2021-03-12. Yahoo returns 5,581 bars starting 2004-01-02. The SPY return difference (+742 pp) is 100% explained by the ~17-year start-date gap — Polygon's API plan (starter tier) limits history to roughly the last 5 years. There is NO pagination bug in `polygon_service.py` — the single page with 50,000-bar limit returns all available bars correctly. This is a hard server-side constraint; upgrading the Polygon plan is the only fix.
+
+**Key implication**: When using Polygon, `Actual Data Period` in the run summary will show the true start, making it visible that the configured `start_date` of 2004 is not honoured.
+
+### S1/S2 Test Robustness
+
+`tests/test_startup_validation.py::TestS1ApiKeyCheck` and `tests/test_main_cli.py::TestMissingApiKey` now explicitly force `data_provider = "polygon"` via the config-patch wrapper before testing the `POLYGON_API_KEY` guard. This makes the tests pass regardless of which provider is configured in `config.py`. Pattern: always patch `data_provider` when testing provider-specific guards.
 
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes

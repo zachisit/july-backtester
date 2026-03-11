@@ -234,7 +234,7 @@ def main():
     logger.info("=" * 60)
     logger.info(f"  Run ID        : {run_folder_name}")
     logger.info(f"  Data provider : {CONFIG.get('data_provider', 'polygon')}")
-    logger.info(f"  Period        : {CONFIG['start_date']} -> {CONFIG['end_date']}")
+    logger.info(f"  Period Selected : {CONFIG['start_date']} -> {CONFIG['end_date']}")
     logger.info(f"  Timeframe     : {CONFIG.get('timeframe', 'D')} x {CONFIG.get('timeframe_multiplier', 1)}")
     logger.info(f"  Strategies    : {total_strategies}")
     logger.info(f"  Stop configs  : {total_stop_configs}")
@@ -283,6 +283,11 @@ def main():
         qqq_buy_and_hold_return = (qqq_df['Close'].iloc[-1] - qqq_df['Close'].iloc[0]) / qqq_df['Close'].iloc[0]
         vix_df = data_fetcher("I:VIX", CONFIG["start_date"], CONFIG["end_date"], CONFIG) # Simplified
         tnx_df = data_fetcher("I:TNX", CONFIG["start_date"], CONFIG["end_date"], CONFIG) # Simplified
+        _spy_actual_start = spy_df.index.min().strftime("%Y-%m-%d")
+        _spy_actual_end   = spy_df.index.max().strftime("%Y-%m-%d")
+        logger.info("-" * 60)
+        logger.info(f"  Actual Data Period : {_spy_actual_start} -> {_spy_actual_end}  (via SPY)")
+        logger.info("-" * 60)
         logger.info(f"SPY B&H: {spy_buy_and_hold_return:.2%}, QQQ B&H: {qqq_buy_and_hold_return:.2%}")
     except Exception as e:
         logger.error(f"FATAL: Could not fetch dependency data: {e}")
