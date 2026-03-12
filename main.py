@@ -330,6 +330,7 @@ def main():
     all_portfolio_results = [] # To gather results from all portfolios
 
     logger.info("=" * 25 + " PROCESSING PORTFOLIOS " + "=" * 25)
+    noise_data_saved = False  # Save one noise sample CSV per run (first symbol with noise > 0)
     # Loop through each portfolio sequentially
     for portfolio_name, value in CONFIG['portfolios'].items():
         logger.info(f"--> Preparing and running portfolio: {portfolio_name}")
@@ -372,7 +373,18 @@ def main():
                 # --- NOISE INJECTION (stress test) ---
                 _noise_pct = CONFIG.get("noise_injection_pct", 0.0)
                 if _noise_pct > 0:
-                    df = inject_price_noise(df, _noise_pct)
+                    df_noisy = inject_price_noise(df, _noise_pct)
+                    if not noise_data_saved:
+                        _sample_clean = df[["Open", "High", "Low", "Close"]].tail(30).copy()
+                        _sample_noisy = df_noisy[["Open", "High", "Low", "Close"]].tail(30).copy()
+                        _sample_clean.columns = [f"Clean_{c}" for c in _sample_clean.columns]
+                        _sample_noisy.columns = [f"Noisy_{c}" for c in _sample_noisy.columns]
+                        _noise_sample = pd.concat([_sample_clean, _sample_noisy], axis=1)
+                        _noise_sample.insert(0, "Symbol", symbol)
+                        _noise_csv_path = os.path.join(run_base_dir, "noise_sample_data.csv")
+                        _noise_sample.to_csv(_noise_csv_path)
+                        noise_data_saved = True
+                    df = df_noisy
                 # --- FEATURE ENGINEERING ---
                 # These columns are captured at trade entry time for each
                 # position and stored in the trade log for later analysis.

@@ -10,3 +10,4 @@ pandas-ta
 orjson
 pyarrow
 yfinance  # required only when data_provider = "yahoo"
+matplotlib  # candlestick charts and PDF plot generation

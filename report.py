@@ -144,7 +144,13 @@ def main():
             print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
 
         output_dir = str(run_dir / "detailed_reports")
-        config_params = {**base_config, 'BASE_OUTPUT_DIRECTORY': output_dir, 'WFA_SPLIT_RATIO': wfa_ratio}
+        _noise_csv = run_dir / "noise_sample_data.csv"
+        config_params = {
+            **base_config,
+            'BASE_OUTPUT_DIRECTORY': output_dir,
+            'WFA_SPLIT_RATIO': wfa_ratio,
+            'NOISE_CSV_PATH': str(_noise_csv) if _noise_csv.is_file() else None,
+        }
         count = 0
         for csv_file in csv_files:
             report_name = csv_file.stem
@@ -194,7 +200,19 @@ def main():
         trades_df = pd.read_csv(csv_path)
         print(f"Loaded {len(trades_df)} trades.")
 
-        config_params = {**base_config, 'BASE_OUTPUT_DIRECTORY': output_dir, 'WFA_SPLIT_RATIO': wfa_ratio}
+        _noise_csv_single = None
+        csv_parts_check = Path(csv_path).parts
+        if "analyzer_csvs" in csv_parts_check:
+            idx_check = csv_parts_check.index("analyzer_csvs")
+            _candidate = Path(*csv_parts_check[:idx_check]) / "noise_sample_data.csv"
+            if _candidate.is_file():
+                _noise_csv_single = str(_candidate)
+        config_params = {
+            **base_config,
+            'BASE_OUTPUT_DIRECTORY': output_dir,
+            'WFA_SPLIT_RATIO': wfa_ratio,
+            'NOISE_CSV_PATH': _noise_csv_single,
+        }
         generate_trade_report(trades_df, output_dir, report_name, config_params)
 
 
