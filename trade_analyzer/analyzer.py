@@ -103,6 +103,7 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
     total_duration_years: float = 0.0
     pdf_save_attempted = False
     md_save_attempted = False
+    _temp_noise_img_path = None
 
     try:
         # --- Clean the provided DataFrame (no CSV loading) ---
@@ -175,6 +176,42 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
             wfa_result, wfa_split_date, wfa_split_ratio
         )
         report_sections.append({'type': 'text', 'title': wfa_title, 'data': wfa_summary})
+
+        # --- Stress Test Analysis — Noise Injection Overlay ---
+        _noise_csv_path = config_params.get('NOISE_CSV_PATH')
+        if _noise_csv_path and os.path.isfile(_noise_csv_path):
+            try:
+                import sys as _sys
+                _proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                if _proj_root not in _sys.path:
+                    _sys.path.insert(0, _proj_root)
+                from helpers.noise import generate_noise_chart_from_csv
+
+                _temp_noise_img_path = os.path.join(os.path.dirname(_noise_csv_path), "temp_noise_overlay.png")
+                generate_noise_chart_from_csv(_noise_csv_path, _temp_noise_img_path)
+
+                # Load PNG back as a matplotlib figure for embedding in the PDF.
+                # Use the same (12, 4) banner dimensions as the saved chart so the
+                # PDF page respects the natural 3:1 aspect ratio without distortion.
+                _img = plt.imread(_temp_noise_img_path)
+                _fig_noise = plt.figure(figsize=(12, 4))
+                _ax_noise = _fig_noise.add_subplot(111)
+                _ax_noise.imshow(_img)
+                _ax_noise.axis('off')
+                _fig_noise.tight_layout(pad=0)
+                report_sections.append({
+                    'type': 'plot',
+                    'title': 'Stress Test Analysis — Noise Injection Overlay',
+                    'data': _fig_noise,
+                })
+                print("Noise overlay chart embedded in report.")
+            except Exception as _noise_err:
+                print(f"Noise overlay warning: {_noise_err}")
+                report_sections.append({
+                    'type': 'text',
+                    'title': 'Stress Test Analysis — Noise Injection Overlay',
+                    'data': f"Skipped: {_noise_err}",
+                })
 
         equity_for_dd_plot = trades_df.get('Equity')
         if not daily_equity.empty:
@@ -362,6 +399,13 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
             print(f"ERROR during PDF report generation: {pdf_gen_err}")
             traceback.print_exc()
             pdf_save_attempted = True
+        finally:
+            # Remove the temporary noise overlay PNG immediately after the PDF is saved
+            if _temp_noise_img_path and os.path.isfile(_temp_noise_img_path):
+                try:
+                    os.remove(_temp_noise_img_path)
+                except OSError:
+                    pass
 
         try:
             key_metrics = report_generator.extract_key_metrics_for_console(report_sections)

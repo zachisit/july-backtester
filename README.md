@@ -484,6 +484,40 @@ Every strategy result includes two WFA columns alongside the Monte Carlo output:
 
 **Disabling WFA:** Set `"wfa_split_ratio": None` (or `0`) in `config.py`. Both `OOS P&L (%)` and `WFA Verdict` will show `N/A` for all strategies.
 
+### Price Noise Injection (Stress Testing)
+
+> **Why this matters:** A strategy that only works on perfectly clean historical prices is brittle. Real-world data contains bid/ask spread noise, stale quotes, and data-vendor rounding errors. Injecting a small amount of random noise before running the backtest reveals whether your edge survives minor perturbations — a robust strategy should still pass WFA and Monte Carlo checks even with ±1–2% noise applied per bar.
+
+Enable noise injection in `config.py`:
+
+```python
+"noise_injection_pct": 0.01,  # ±1% uniform noise per OHLC cell per bar
+```
+
+**How it works:**
+
+For each bar and each of Open, High, Low, and Close, an independent multiplier drawn from `Uniform(1 - noise_pct, 1 + noise_pct)` is applied. After perturbation, **High and Low are reconstructed** as the row-wise maximum and minimum across all four price columns — this guarantees that no candlestick becomes invalid (`High < Low` or price order violations). Volume and the date index are never touched.
+
+**Terminal warning when enabled:**
+
+```text
+************************************************************
+  [STRESS TEST MODE] Injecting 1.0% random noise into OHLC price data
+  High/Low bounds are enforced after noise — no invalid candlesticks
+************************************************************
+```
+
+**Typical usage:**
+
+| `noise_injection_pct` | Meaning |
+| --- | --- |
+| `0.0` (default) | Disabled — clean historical prices used |
+| `0.005` | ±0.5% noise — very mild perturbation |
+| `0.01` | ±1% noise — recommended starting point for robustness checks |
+| `0.02` | ±2% noise — aggressive; strategies with thin edges will fail |
+
+**What to look for:** If a strategy's WFA verdict flips from `Pass` → `Likely Overfitted` with noise enabled, it was curve-fitted to specific price levels. Discard it or widen entry/exit conditions.
+
 ### Strategy Correlation Matrix
 
 > **Why this matters:** Running two highly correlated strategies is effectively doubling your position in a single edge — they will win and lose together, offering no diversification benefit. The correlation analysis automatically surfaces these overlaps after every portfolio run.

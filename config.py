@@ -233,6 +233,14 @@ CONFIG = {
     
     # --- Commission Per Trade ---
     "commission_per_share": 0.002,
+
+    # ============================================================
+    # SECTION 12: STRESS TESTING — PRICE NOISE INJECTION
+    # ============================================================
+    # Inject random noise into OHLC price data before running strategies.
+    # 0.0 = disabled (default). 0.01 = ±1% uniform noise per bar per price.
+    # Use this to test whether a strategy is robust to small data perturbations.
+    "noise_injection_pct": 0.01,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
