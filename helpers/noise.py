@@ -110,7 +110,7 @@ def generate_noise_chart_from_csv(csv_path: str, output_img_path: str) -> None:
     x_ticks = list(range(0, n, max(1, n // 6)))
     labels = [str(df.index[i])[:10] for i in x_ticks]
 
-    fig, ax = plt.subplots(figsize=(14, 6))
+    fig, ax = plt.subplots(figsize=(12, 4), dpi=150)
     fig.patch.set_facecolor("#1a1a2e")
     ax.set_facecolor("#1a1a2e")
 

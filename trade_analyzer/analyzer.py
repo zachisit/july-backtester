@@ -190,11 +190,13 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
                 _temp_noise_img_path = os.path.join(os.path.dirname(_noise_csv_path), "temp_noise_overlay.png")
                 generate_noise_chart_from_csv(_noise_csv_path, _temp_noise_img_path)
 
-                # Load PNG back as a matplotlib figure for embedding in the PDF
+                # Load PNG back as a matplotlib figure for embedding in the PDF.
+                # Use the same (12, 4) banner dimensions as the saved chart so the
+                # PDF page respects the natural 3:1 aspect ratio without distortion.
                 _img = plt.imread(_temp_noise_img_path)
-                _fig_noise = plt.figure(figsize=config.A4_LANDSCAPE)
+                _fig_noise = plt.figure(figsize=(12, 4))
                 _ax_noise = _fig_noise.add_subplot(111)
-                _ax_noise.imshow(_img, aspect='auto')
+                _ax_noise.imshow(_img)
                 _ax_noise.axis('off')
                 _fig_noise.tight_layout(pad=0)
                 report_sections.append({
