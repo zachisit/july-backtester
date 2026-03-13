@@ -259,6 +259,31 @@ Computed in `run_single_simulation` in `main.py` immediately after WFA:
 - `TestExpectancyAndSQN` — formula validation, 0/1/2 trade edge cases, std=0 guard, growth with N
 - `TestTradeLogHasRMultipleFields` — integration: fields present in live simulation output, percentage stop sets correct InitialRisk
 
+## Underwater Plot (Drawdown Visualisation)
+
+Added to the PDF tearsheet immediately after the combined `Equity Curve and Drawdown` chart.
+
+### What it is
+
+A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full drawdown history as a red-filled area descending below a zero baseline. Depth = how far equity fell from the prior peak. Width = how long the drawdown lasted.
+
+### Implementation
+
+- **`trade_analyzer/plotting.py`** — `plot_underwater(trades_df, equity_dd_percent)`.
+  - Receives the same `equity_dd_percent` series (positive, 0–100 scale) that feeds the lower subplot of the existing equity+drawdown chart.
+  - Negates the series internally (`underwater = -equity_dd_percent`) so the curve descends below zero.
+  - `fill_between(x, underwater, 0, color='red', alpha=0.3)` fills the "underwater" area.
+  - Y-axis formatted with `PercentFormatter(xmax=100.0, decimals=1)` → labels like `-10.0%`, `-25.0%`.
+  - Black dashed `axhline` at `y=0` as the baseline.
+- **`trade_analyzer/analyzer.py`** — called right after `plot_equity_and_drawdown`; result appended to `report_sections` with title `"Underwater Plot (Drawdown & Duration)"`.
+
+### Underwater Plot Tests
+
+`tests/test_underwater_plot.py` — 12 tests across two classes:
+
+- `TestHighWaterMark` — verifies `cummax()` logic (rising, declining, flat, single-element equity curves).
+- `TestDrawdownPct` — verifies `(equity - hwm) / hwm` fractional values against hand-computed exact results for `[100, 110, 90, 105, 120]` and edge cases (always-rising, full recovery, trough fraction, single-element).
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float

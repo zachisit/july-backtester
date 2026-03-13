@@ -624,6 +624,8 @@ All output files are also uploaded to `s3://<your-bucket>/<run_id>/`. Each run u
 
 After a run completes, you can generate a detailed PDF or Markdown report for any individual strategy using `report.py`. This produces equity curves, drawdown charts, trade distribution analysis, and more.
 
+The PDF tearsheet includes an **Underwater Plot** positioned immediately below the equity curve — a short, wide red-filled chart that visualises both the depth and duration of every drawdown period throughout the backtest.
+
 ### Single-File Usage
 
 ```bash

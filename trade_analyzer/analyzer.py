@@ -329,6 +329,9 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
         fig_eq_dd = plotting.plot_equity_and_drawdown(trades_df, equity_dd_percent, wfa_split_date)
         report_sections.append({'type': 'plot', 'title': 'Equity Curve and Drawdown Plot', 'data': fig_eq_dd})
 
+        fig_underwater = plotting.plot_underwater(trades_df, equity_dd_percent)
+        report_sections.append({'type': 'plot', 'title': 'Underwater Plot (Drawdown & Duration)', 'data': fig_underwater})
+
         trades_per_year_rolling = 0
         if total_duration_years > 1e-6:
             trades_per_year_rolling = len(trades_df) / total_duration_years
