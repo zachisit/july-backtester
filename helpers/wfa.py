@@ -90,10 +90,11 @@ def _total_pnl_pct(trades: list[dict], initial_capital: float) -> Optional[float
 
 
 def _annualised_return(trades: list[dict], initial_capital: float) -> Optional[float]:
-    """Simple annualised P&L over the calendar span of the trade bucket.
+    """Compound annualised return (CAGR) over the calendar span of the trade bucket.
 
     Uses the earliest and latest ``ExitDate`` in the bucket as the window
-    boundaries.  Returns ``None`` when fewer than 2 distinct days exist.
+    boundaries.  Returns ``None`` when fewer than 2 distinct days exist or
+    when the strategy went bust (total equity <= 0).
     """
     if not trades:
         return None
@@ -103,9 +104,11 @@ def _annualised_return(trades: list[dict], initial_capital: float) -> Optional[f
     days  = (end - start).days
     if days < 1:
         return None
-    years            = days / 365.25
-    total_pnl_frac   = sum(t["Profit"] for t in trades) / initial_capital
-    return total_pnl_frac / years
+    years          = days / 365.25
+    total_pnl_frac = sum(t["Profit"] for t in trades) / initial_capital
+    if (1 + total_pnl_frac) <= 0:
+        return None  # strategy went bust — CAGR undefined
+    return (1 + total_pnl_frac) ** (1 / years) - 1
 
 
 # ---------------------------------------------------------------------------
