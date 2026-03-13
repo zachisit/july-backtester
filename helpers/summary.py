@@ -274,6 +274,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         'ProfitPct': '% Profit',
         'is_win': 'Win',
         'HoldDuration': '# bars',
+        'Shares': 'Shares',
         'MAE_pct': 'MAE',
         'MFE_pct': 'MFE',
         'Symbol': 'Symbol',
