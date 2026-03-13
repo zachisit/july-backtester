@@ -1,6 +1,18 @@
 # July Backtester
 
-A systematic strategy backtesting engine for US equities. Test 20+ built-in technical strategies across individual symbols or large portfolios (Nasdaq, S&P 500, Russell indices, etc.), with Monte Carlo simulation for robustness scoring, benchmark comparison against SPY and QQQ, and automatic report generation.
+> A professional-grade Python engine for stress-testing US equity strategies with Monte Carlo noise and Walk-Forward Analysis.
+
+![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-green)
+![Tests: 456/456 Passing](https://img.shields.io/badge/Tests-456%2F456%20Passing-brightgreen)
+
+---
+
+| Feature | Description |
+| --- | --- |
+| 📥 **Multi-Source Data** | Polygon, Norgate, Yahoo Finance, & native CSV support |
+| ⚙️ **Strategy Engine** | Modular plugin architecture with 35+ pre-built signals |
+| 📊 **Advanced Risk Analytics** | PDF tearsheets with SQN, R-Multiple, and Underwater plots |
 
 ---
 
@@ -449,6 +461,17 @@ SMA Crossover (50d/200d)       +74.1%   +12.1%   38.2%    0.98    0.65     46.1%
 | MC Verdict | Robustness classification from Monte Carlo analysis |
 | MC Score | Numeric robustness score (see below) |
 
+### Core Metrics Glossary
+
+A quick-reference for the key derived metrics produced by the engine. Detailed explanations follow in the sections below.
+
+| Metric | Definition | Why it's useful |
+| --- | --- | --- |
+| **Expectancy (R)** | Average R-Multiple per trade. | Answers: "On average, how many units of risk do I earn per trade?" |
+| **SQN** | System Quality Number — `(Expectancy / StdDev(R)) × √N`. | A score from Van Tharp measuring system quality; 2.5+ is Good, 3.0+ is Excellent. |
+| **Annual Turnover** | `(Σ(entry_price × shares) / initial_capital) / years × 100`. | Measures how many times the full portfolio is recycled per year. |
+| **After-Tax CAGR** | CAGR calculated after a flat 30% tax haircut on net profits. | Provides a realistic "take-home" performance comparison against gross benchmarks. |
+
 ### Additional Metrics in the PDF Report
 
 The **Overall Performance Metrics** page of the PDF tearsheet includes two additional derived metrics not shown in the terminal table:
@@ -477,6 +500,9 @@ Every strategy with 50+ trades is stress-tested with 1,000 simulations that rand
 
 ### Walk-Forward Analysis (WFA)
 
+> [!IMPORTANT]
+> **Why WFA?** A strategy optimised on the same data it's being measured on is like studying the answer key before a test — it will look great, but fail in the real world. WFA holds back the most recent slice of data during strategy development, then checks if the edge still holds on that unseen period. A strategy that passes both IS and OOS is far more likely to be genuinely robust.
+
 Every strategy result includes two WFA columns alongside the Monte Carlo output:
 
 | Column | Meaning |
@@ -496,7 +522,8 @@ Every strategy result includes two WFA columns alongside the Monte Carlo output:
 
 ### R-Multiple, Expectancy, and SQN
 
-> **Why this matters:** Win rate and P&L tell you *what* happened. R-Multiple metrics tell you *why* — how well you are managing risk per trade. A strategy with 40% win rate but an average winner of 3R and an average loser of −1R is far superior to a 60% winner that earns only 0.5R per win.
+> [!TIP]
+> **Why SQN?** While P&L tells you how much you made, SQN tells you how much you can actually *trust* your strategy's consistency. It penalises volatile strategies and rewards consistent ones — a system earning 1R every trade scores higher than one that randomly earns 10R then loses 8R. Meanwhile, Expectancy answers the simpler question: "On average, how many units of risk do I earn per trade?" A strategy with 40% win rate but an average winner of 3R and average loser of −1R is far superior to a 60% winner that earns only 0.5R per win.
 
 **How R-Multiple is calculated:**
 
@@ -535,7 +562,8 @@ Both `Expectancy (R)` and `SQN` show `N/A` for strategies with fewer than 2 comp
 
 ### Price Noise Injection (Stress Testing)
 
-> **Why this matters:** A strategy that only works on perfectly clean historical prices is brittle. Real-world data contains bid/ask spread noise, stale quotes, and data-vendor rounding errors. Injecting a small amount of random noise before running the backtest reveals whether your edge survives minor perturbations — a robust strategy should still pass WFA and Monte Carlo checks even with ±1–2% noise applied per bar.
+> [!IMPORTANT]
+> **Why stress test?** A strategy that only works on perfectly clean historical prices is brittle. Real-world data contains bid/ask spread noise, stale quotes, and data-vendor rounding errors. Injecting a small amount of random noise before running the backtest reveals whether your edge survives minor perturbations — a robust strategy should still pass WFA and Monte Carlo checks even with ±1–2% noise applied per bar.
 
 Enable noise injection in `config.py`:
 
@@ -569,7 +597,8 @@ For each bar and each of Open, High, Low, and Close, an independent multiplier d
 
 ### Strategy Correlation Matrix
 
-> **Why this matters:** Running two highly correlated strategies is effectively doubling your position in a single edge — they will win and lose together, offering no diversification benefit. The correlation analysis automatically surfaces these overlaps after every portfolio run.
+> [!TIP]
+> **Why check correlation?** Running two highly correlated strategies is effectively doubling your position in a single edge — they will win and lose together, offering no diversification benefit. The correlation analysis automatically surfaces these overlaps after every portfolio run so you can prune redundant strategies before live trading.
 
 After each portfolio finishes, the backtester computes pairwise Pearson correlations between all strategies based on their daily realised P&L. The result is saved as a CSV, an `Avg. Corr` column appears in the terminal summary table, and any pairs above the threshold trigger a prominent alert.
 
@@ -704,6 +733,18 @@ No file outside that directory needs to be edited to add, remove, or rename a st
 | `sma_crossovers.py` | SMA Crossover (20d/50d) | Buy when 20-bar SMA crosses above 50-bar SMA |
 | `sma_crossovers.py` | SMA Crossover (50d/200d) | Classic "golden cross" — 50-bar SMA crosses above 200-bar SMA |
 
+### Quick-Scan Strategy Matrix
+
+New to the library? Use this table to find a starting point based on your experience level. Then see the full catalogue below for parameters and dependencies.
+
+| Category | Example Plugins | Risk / Complexity |
+| --- | --- | --- |
+| **Trend Following** | SMA Crossover (50/200), MACD Crossover, Donchian Breakout | Low |
+| **Mean Reversion** | RSI (14/30), Bollinger Band Fade, Stochastic, CMF | Medium |
+| **Volatility / Breakout** | BB Squeeze, Keltner Breakout, ATR Trailing Stop | High |
+| **Scalping (Sub-Daily)** | 1m EMA Scalp, 1m RSI Extreme Fade, 1m BB Squeeze | Very High |
+| **Calendar / Regime** | Weekend Hold, Hold the Week, Daily Overnight Hold | Low |
+
 ### Strategy Library — Full Plugin Catalogue
 
 All strategies below are pre-built in `custom_strategies/` and inactive by default.
@@ -823,6 +864,15 @@ Cache files are named using the pattern `{symbol}_{start}_{end}_{timeframe}_{mul
 > **No core file edits required.** Drop a `.py` file into `custom_strategies/`, decorate your function, and the engine discovers it automatically on the next run.
 
 The backtester uses a strategy plugin system built around `helpers/registry.py`. The `@register_strategy` decorator stores a strategy's name, logic function, dependencies, and parameters. `load_strategies("custom_strategies")` is called at startup and imports every `.py` file in that directory, triggering the decorators.
+
+```text
+custom_strategies/          <-- The "Drop-Zone"
+├── my_new_signal.py        <-- 1. Create a file here
+├── rsi_strategies.py
+└── mean_reversion.py
+
+[ 2. The engine auto-discovers and registers it at runtime ]
+```
 
 ### Skeleton Strategy — copy and customise
 
