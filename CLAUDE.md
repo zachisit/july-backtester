@@ -147,6 +147,8 @@ output/
 - `tickers_to_scan/` JSON files
 - The multiprocessing architecture (`init_worker`, `run_single_simulation`, `Pool`)
 
+> **`helpers/summary.py`** — can be touched; actively maintained. `save_only_filtered_trades` now correctly filters by the display criteria captured in Step 2 of `generate_per_portfolio_summary` (see Known Issues Fixed below).
+
 ## Data Providers
 
 ### Yahoo Finance (`data_provider = "yahoo"`)
@@ -333,3 +335,11 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 **Fix**: both calls changed to `.get('ATR_14')` to match the column written by `main.py`.
 
 **Regression test**: `tests/test_atr_logic.py::TestSimulationAtrColumnName::test_atr_stop_triggered_on_crash` — builds a portfolio_data dict with `ATR_14` populated (no `ATR` column), runs a simulation with `stop_config={"type": "atr", ...}`, and asserts the trade exits with `"Stop Loss"` when price crashes below the ATR stop. This test failed before the fix and passes after.
+
+### `save_only_filtered_trades` saved all trades, not filtered ones (fixed 2026-03-13)
+
+In `helpers/summary.py::generate_per_portfolio_summary()`, Step 4b's `save_only_filtered_trades` branch rebuilt `display_df` from the raw `portfolio_results` list (overwriting the already-filtered Step 2 `display_df`), so all strategies were saved regardless of whether they passed the display filters (max drawdown, min P&L, min MC score, etc.).
+
+**Fix**: after Step 2 produces the filtered `display_df`, capture `passed_display_filter = set(display_df['Strategy'].tolist())`. Step 4b now filters via `[r for r in portfolio_results if r['Strategy'] in passed_display_filter]` — no DataFrame rebuild needed.
+
+**Regression tests**: `tests/test_save_filtered_trades.py::TestSaveOnlyFilteredTrades` — three tests confirm `save_trades_to_csv` is called exactly once (the passing strategy) when `save_only_filtered_trades=True` and one result fails `min_pandl_to_show_in_summary`, and called twice when the flag is `False`.

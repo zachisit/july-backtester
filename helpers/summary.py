@@ -220,6 +220,9 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         (summary_df['vs_qqq_benchmark'] * 100 >= min_vs_qqq)
     ].copy()
 
+    # Capture the set of strategy names that passed the display filter for use in Step 4b.
+    passed_display_filter = set(display_df['Strategy'].tolist())
+
     # --- Step 3: Use the filtered display_df to show the summary table ---
     if display_df.empty:
         print(f"\nNo strategies for {portfolio_name} met the required display criteria.")
@@ -318,11 +321,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         results_to_save = []
         if CONFIG.get("save_only_filtered_trades", False):
             print(f"{action} filtered trade logs for portfolio: {portfolio_name}...")
-            # Get the list of strategy names that passed the filter
-            # (Need to define display_df earlier in the function if it's not already)
-            display_df = pd.DataFrame(portfolio_results) # Or use the filtered one if available
-            filtered_strategy_names = display_df['Strategy'].tolist()
-            results_to_save = [r for r in portfolio_results if r['Strategy'] in filtered_strategy_names]
+            results_to_save = [r for r in portfolio_results if r['Strategy'] in passed_display_filter]
         else:
             print(f"{action} all valid trade logs for portfolio: {portfolio_name}...")
             results_to_save = portfolio_results
