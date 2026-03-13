@@ -299,3 +299,125 @@ class TestAtrWithTrendFilter:
         df = atr_trailing_stop_with_trend_filter_logic(_make_df(closes))
         post_plunge = df.iloc[300:]
         assert (post_plunge["Signal"] <= 0).any()
+
+
+# ---------------------------------------------------------------------------
+# TestSimulationAtrColumnName
+# Tests that run_portfolio_simulation reads ATR_14 (not ATR) for stop logic.
+# This test FAILS before the fix (`.get('ATR')` → None → stop never set) and
+# PASSES after the fix (`.get('ATR_14')` → real value → stop is set & trailed).
+# ---------------------------------------------------------------------------
+
+class TestSimulationAtrColumnName:
+    """
+    End-to-end smoke test for the ATR column name used inside
+    run_portfolio_simulation (helpers/portfolio_simulations.py).
+
+    Bug: Both the initial-stop calculation (entry path) and the trailing-stop
+    update (daily loop) called `.get('ATR')` on the bar's row, but main.py
+    writes the column as `ATR_14`.  The column lookup silently returned NaN,
+    so the stop was never set and the stop-breach check never fired.
+
+    Fix: both calls changed to `.get('ATR_14')`.
+    """
+
+    @staticmethod
+    def _make_portfolio_data(n_dates: int = 20, base_price: float = 100.0, atr: float = 2.0):
+        """
+        Build a minimal portfolio_data dict for one symbol.
+
+        Layout (business-day index):
+          Bars 0 .. n_dates-6  : price rises from base_price to base_price*2
+          Bars n_dates-5 .. end: price crashes to 1.0 (Low = 1.0)
+
+        ATR_14 is set to `atr` on every bar.  The crash Low of 1.0 is
+        guaranteed to be below any ATR-based stop (stop ≈ 180 - 2*atr ≈ 176).
+        """
+        dates = pd.bdate_range("2015-01-05", periods=n_dates)
+        n_rise = n_dates - 5
+        closes = np.concatenate([
+            np.linspace(base_price, base_price * 2, n_rise),
+            np.full(5, 1.0),                            # crash
+        ])
+        highs  = closes + 1.0
+        lows   = np.concatenate([
+            closes[:n_rise] - 1.0,
+            np.ones(5),                                 # very low lows during crash
+        ])
+        df = pd.DataFrame({
+            "Open":   closes,
+            "High":   highs,
+            "Low":    lows,
+            "Close":  closes,
+            "Volume": np.full(n_dates, 1_000_000.0),
+            "ATR_14": np.full(n_dates, atr),
+            # deliberately NO 'ATR' column — proves the fix uses ATR_14
+            "RSI_14":          np.full(n_dates, 50.0),
+            "ATR_14_pct":      np.full(n_dates, atr / base_price),
+            "SMA200_dist_pct": np.full(n_dates, 0.05),
+            "Volume_Spike":    np.full(n_dates, 1.0),
+        }, index=dates)
+        return {"SYM": df}
+
+    @staticmethod
+    def _make_signals(portfolio_data, entry_bar: int = 1):
+        """Signal=1 on bar `entry_bar`, 0 everywhere else (hold)."""
+        sym = "SYM"
+        df = portfolio_data[sym]
+        sig = pd.Series(0, index=df.index)
+        sig.iloc[entry_bar] = 1
+        return {sym: sig}
+
+    @staticmethod
+    def _make_spy_vix(portfolio_data):
+        """Minimal SPY/VIX DataFrames aligned to portfolio dates."""
+        dates = portfolio_data["SYM"].index
+        spy = pd.DataFrame({
+            "Close":          np.full(len(dates), 400.0),
+            "RSI_14":         np.full(len(dates), 55.0),
+            "SMA200_dist_pct": np.full(len(dates), 0.10),
+        }, index=dates)
+        vix = pd.DataFrame({
+            "Close": np.full(len(dates), 15.0),
+        }, index=dates)
+        return spy, vix
+
+    def test_atr_stop_triggered_on_crash(self):
+        """
+        With ATR_14 present and stop_config type='atr', the initial stop must
+        be set at entry and the crash must trigger a 'Stop Loss' exit.
+
+        BEFORE FIX: `.get('ATR')` returns NaN → initial stop is np.nan →
+        stop-breach check is skipped → trade runs to end of backtest as
+        'End of Backtest', not 'Stop Loss'.  The assertion fails.
+
+        AFTER FIX: `.get('ATR_14')` returns 2.0 → stop is set → crash Low of
+        1.0 is well below the stop → exit_reason == 'Stop Loss (atr)'.
+        """
+        from helpers.portfolio_simulations import run_portfolio_simulation
+
+        portfolio_data = self._make_portfolio_data(n_dates=20, base_price=100.0, atr=2.0)
+        signals = self._make_signals(portfolio_data, entry_bar=1)
+        spy_df, vix_df = self._make_spy_vix(portfolio_data)
+        stop_config = {"type": "atr", "period": 14, "multiplier": 2.0}
+
+        result = run_portfolio_simulation(
+            portfolio_data=portfolio_data,
+            signals=signals,
+            initial_capital=100_000.0,
+            allocation_pct=0.10,
+            spy_df=spy_df,
+            vix_df=vix_df,
+            tnx_df=None,
+            stop_config=stop_config,
+        )
+
+        assert result is not None, "Simulation returned None — no trades completed"
+        trade_log = result.get("trade_log", [])
+        assert len(trade_log) > 0, "No trades were logged"
+
+        exit_reasons = [t.get("ExitReason", "") for t in trade_log]
+        assert any("Stop Loss" in r for r in exit_reasons), (
+            f"Expected a 'Stop Loss' exit but got: {exit_reasons}. "
+            "This indicates the ATR column was not found (ATR vs ATR_14 mismatch)."
+        )

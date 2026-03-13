@@ -320,3 +320,16 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 - `apply_stop_loss(df, stop_config)` takes the dict, not a percentage float
 - Norgate portfolios use `"norgate:WatchlistName"` string prefix; JSON files use `"filename.json"`; inline lists use a Python list
 - `execution_time: "open"` means signals are generated on day N and filled at day N+1 open — the simulator handles the 1-day lag via `prev_trading_dates`
+
+## Known Issues Fixed
+
+### ATR Column Name Mismatch (fixed 2026-03-13)
+
+`main.py` writes the 14-period ATR column as `ATR_14`, but `helpers/portfolio_simulations.py` had two `.get('ATR')` calls that silently returned `NaN`:
+
+1. **Entry path** (initial stop calculation): `day_before_data.get('ATR')` — stop was never set, making all ATR stop configs behave identically to `{"type": "none"}`.
+2. **Daily trailing loop**: `portfolio_data[symbol].loc[date].get('ATR')` — even if the initial stop had been set by some other means, the trailing update would never fire.
+
+**Fix**: both calls changed to `.get('ATR_14')` to match the column written by `main.py`.
+
+**Regression test**: `tests/test_atr_logic.py::TestSimulationAtrColumnName::test_atr_stop_triggered_on_crash` — builds a portfolio_data dict with `ATR_14` populated (no `ATR` column), runs a simulation with `stop_config={"type": "atr", ...}`, and asserts the trade exits with `"Stop Loss"` when price crashes below the ATR stop. This test failed before the fix and passes after.
