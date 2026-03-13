@@ -240,6 +240,10 @@ CONFIG = {
     # --- Commission Per Trade ---
     "commission_per_share": 0.002,
 
+    # --- Risk-Free Rate (annual) ---
+    # Used in Sharpe ratio calculation. Default 5% per annum (US T-bill proxy).
+    "risk_free_rate": 0.05,
+
     # ============================================================
     # SECTION 13: STRESS TESTING — PRICE NOISE INJECTION
     # ============================================================

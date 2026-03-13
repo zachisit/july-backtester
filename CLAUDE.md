@@ -60,6 +60,7 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "num_mc_simulations": 1000
 "wfa_split_ratio": 0.80          # 0.80 = 80% IS / 20% OOS; None or 0 = disabled
 "noise_injection_pct": 0.0       # 0.0 = disabled (default, stress testing is opt-in). Set to e.g. 0.01 for ±1% stress test.
+"risk_free_rate": 0.05           # annual, used in Sharpe calculation (default 5% — US T-bill proxy)
 ```
 
 ## Architecture Notes
