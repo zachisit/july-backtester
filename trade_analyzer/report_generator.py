@@ -189,6 +189,28 @@ def generate_overall_metrics_summary(
         add_line("Total Duration:", duration_text)
         add_line("Average Trades per Year:", trades_per_year, fmt_spec="{:.1f}")
         add_line("CAGR:", cagr, is_pct=True)
+
+        # --- After-Tax CAGR (30% flat rate on net profits) ---
+        total_profit = core_metrics.get('total_profit', 0) or 0
+        if pd.notna(total_profit) and total_profit > 0:
+            after_tax_profit = total_profit * 0.70
+        else:
+            after_tax_profit = total_profit
+        after_tax_equity = initial_equity + after_tax_profit
+        after_tax_cagr = calculations.calculate_cagr(initial_equity, after_tax_equity, total_duration_years)
+        add_line("Estimated After-Tax CAGR (30% tax):", after_tax_cagr, is_pct=True)
+
+        # --- Annual Turnover % ---
+        annual_turnover_pct = np.nan
+        price_col = 'Price' if 'Price' in trades_df.columns else None
+        shares_col = 'Shares' if 'Shares' in trades_df.columns else None
+        if price_col and shares_col and total_duration_years > 1e-6 and initial_equity > 0:
+            price_series = pd.to_numeric(trades_df[price_col], errors='coerce')
+            shares_series = pd.to_numeric(trades_df[shares_col], errors='coerce')
+            total_deployed = (price_series * shares_series).sum()
+            if pd.notna(total_deployed):
+                annual_turnover_pct = (total_deployed / initial_equity) / total_duration_years * 100
+        add_line("Annual Turnover:", annual_turnover_pct, is_raw_pct_val=True)
         summary_lines.append("")
         # --- Risk & Ratio Metrics ---
         add_line(f"Sharpe Ratio (Ann., Portfolio Daily, Rf={risk_free_rate*100:.1f}%):", annualized_portfolio_sharpe, fmt_spec="{:.2f}")

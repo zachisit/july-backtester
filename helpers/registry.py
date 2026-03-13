@@ -22,9 +22,12 @@ REGISTRY  -> StrategyRegistry       (dict-like view, read-only)
 from __future__ import annotations
 
 import importlib.util
+import logging
 import os
 import sys
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Internal backing store
@@ -221,12 +224,19 @@ def load_strategies(directory: str) -> int:
 
 
 def get_active_strategies(directory: str = "custom_strategies") -> dict:
-    """Return all registered strategies as a plain ``{name: config}`` dict.
+    """Return the active strategies as a plain ``{name: config}`` dict.
 
     Calls :func:`load_strategies` on *directory* first so that any plugin
     files not yet imported are discovered and their ``@register_strategy``
     decorators fire.  Subsequent calls are fast because modules already in
     ``sys.modules`` are skipped by :func:`load_strategies`.
+
+    The returned set is then filtered by ``CONFIG["strategies"]``:
+
+    * ``"all"`` (or ``None``) — returns every registered strategy.
+    * A list of strings — returns only the named strategies.  Any name not
+      found in the registry is logged as a ``WARNING`` and skipped; a typo
+      will not cause a crash.
 
     Parameters
     ----------
@@ -237,9 +247,38 @@ def get_active_strategies(directory: str = "custom_strategies") -> dict:
     Returns
     -------
     dict
-        Shallow copy of the current registry: ``{strategy_name: config_dict}``.
+        Filtered copy of the registry: ``{strategy_name: config_dict}``.
         Each value has the shape ``{"logic": callable, "dependencies": list,
         "params": dict}`` — identical to the old ``STRATEGIES`` dict format.
     """
     load_strategies(directory)
-    return dict(_REGISTRY)
+
+    # Lazy import avoids a circular dependency at module load time
+    # (config.py does not import from helpers/).
+    from config import CONFIG  # noqa: PLC0415
+    selection = CONFIG.get("strategies", "all")
+
+    if selection == "all" or selection is None:
+        return dict(_REGISTRY)
+
+    # --- Filtered mode ---
+    if not isinstance(selection, list):
+        logger.warning(
+            "[WARNING] CONFIG['strategies'] must be 'all' or a list of names. "
+            "Got %r — falling back to 'all'.",
+            selection,
+        )
+        return dict(_REGISTRY)
+
+    result = {}
+    for name in selection:
+        if name in _REGISTRY:
+            result[name] = _REGISTRY[name]
+        else:
+            logger.warning(
+                "[WARNING] Strategy '%s' requested in config but no matching "
+                "plugin was found. Check the name matches the @register_strategy "
+                "decorator exactly (case-sensitive).",
+                name,
+            )
+    return result

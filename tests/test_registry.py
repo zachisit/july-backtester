@@ -298,13 +298,22 @@ class TestIntegration:
 
     @pytest.fixture(autouse=True)
     def _clean_registry(self):
-        """Override the module-level autouse fixture for integration tests."""
+        """Override the module-level autouse fixture for integration tests.
+
+        Also saves/restores CONFIG['strategies'] so tests are independent of
+        whatever filter value the user currently has in config.py.
+        """
+        from config import CONFIG
+        _saved_strategies = CONFIG.get("strategies", "all")
+        CONFIG["strategies"] = "all"
+
         # Force-evict custom_strategies modules so they are re-imported fresh.
         for key in list(sys.modules.keys()):
             if key.startswith("custom_strategies."):
                 del sys.modules[key]
         yield
         _REGISTRY.clear()
+        CONFIG["strategies"] = _saved_strategies
 
     def test_sma_strategies_are_registered(self):
         """get_active_strategies() must discover and return both SMA strategies."""
@@ -369,7 +378,9 @@ class TestIntegration:
         result = get_active_strategies()
         assert type(result) is dict  # noqa: E721
 
-    def test_returns_two_strategies(self):
-        """custom_strategies/ ships with exactly 2 SMA strategies."""
+    def test_returns_expected_strategy_count(self):
+        """custom_strategies/ ships with the full strategy library (35 on daily timeframe)."""
         strategies = get_active_strategies()
-        assert len(strategies) == 2
+        # 2 SMA + 3 RSI + 6 MACD/EMA + 24 mean-reversion = 35 on daily timeframe.
+        # Sub-daily strategies (scalping) are gated by _TF == "MIN" and excluded on "D".
+        assert len(strategies) >= 35

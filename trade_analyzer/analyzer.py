@@ -296,11 +296,41 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
         else:
             report_sections.append({'type': 'text', 'title': 'Profit Distribution Analysis', 'data': "Skipped: '% Profit' missing."})
 
+        # --- R-Multiple Histogram ---
+        if 'RMultiple' in trades_df.columns and pd.api.types.is_numeric_dtype(trades_df['RMultiple']):
+            _r_vals = trades_df['RMultiple'].dropna()
+            if len(_r_vals) >= 2:
+                try:
+                    _expectancy = float(_r_vals.mean())
+                    _sqn_n = len(_r_vals)
+                    _sqn_std = float(_r_vals.std(ddof=1))
+                    _sqn = (_expectancy / _sqn_std) * np.sqrt(_sqn_n) if _sqn_std > 0 else 0.0
+                    fig_r, ax_r = plt.subplots(figsize=(10, 4), dpi=150)
+                    ax_r.hist(_r_vals, bins=30, color='purple', alpha=0.7, edgecolor='black')
+                    ax_r.axvline(0, color='red', linestyle='--', linewidth=1.5, label='Breakeven (0R)')
+                    ax_r.axvline(_expectancy, color='limegreen', linestyle='--', linewidth=1.5,
+                                 label=f'Expectancy: {_expectancy:.3f}R  |  SQN: {_sqn:.2f}  |  n={_sqn_n}')
+                    ax_r.set_xlabel('R-Multiple')
+                    ax_r.set_ylabel('Number of Trades')
+                    ax_r.set_title('Risk Profile — R-Multiple Distribution')
+                    ax_r.legend()
+                    fig_r.tight_layout()
+                    report_sections.append({'type': 'plot', 'title': 'Risk Profile — R-Multiple Distribution', 'data': fig_r})
+                except Exception as _r_err:
+                    report_sections.append({'type': 'text', 'title': 'Risk Profile — R-Multiple Distribution', 'data': f"Error: {_r_err}"})
+            else:
+                report_sections.append({'type': 'text', 'title': 'Risk Profile — R-Multiple Distribution', 'data': "Skipped: fewer than 2 R-Multiple values."})
+        else:
+            report_sections.append({'type': 'text', 'title': 'Risk Profile — R-Multiple Distribution', 'data': "Skipped: 'RMultiple' column not present in trade data."})
+
         fig_bench = plotting.plot_benchmark_comparison(daily_equity, benchmark_df, benchmark_ticker)
         report_sections.append({'type': 'plot', 'title': f"Strategy Equity vs {benchmark_ticker}", 'data': fig_bench})
 
         fig_eq_dd = plotting.plot_equity_and_drawdown(trades_df, equity_dd_percent, wfa_split_date)
         report_sections.append({'type': 'plot', 'title': 'Equity Curve and Drawdown Plot', 'data': fig_eq_dd})
+
+        fig_underwater = plotting.plot_underwater(trades_df, equity_dd_percent)
+        report_sections.append({'type': 'plot', 'title': 'Underwater Plot (Drawdown & Duration)', 'data': fig_underwater})
 
         trades_per_year_rolling = 0
         if total_duration_years > 1e-6:

@@ -133,6 +133,49 @@ def plot_equity_and_drawdown(
     return fig
 
 
+def plot_underwater(
+    trades_df: pd.DataFrame,
+    equity_dd_percent: pd.Series,
+) -> Optional[plt.Figure]:
+    """Generates a short, wide underwater (drawdown) banner chart.
+
+    Parameters
+    ----------
+    trades_df        : cleaned trades DataFrame (must have a numeric index).
+    equity_dd_percent: positive drawdown percentage series (0–100 scale, aligned
+                       to ``trades_df.index``).  Values are negated internally so
+                       the curve descends below the zero line.
+    """
+    title = "Underwater Plot (Drawdown & Duration)"
+    fig = None
+    try:
+        if not isinstance(equity_dd_percent, pd.Series) or equity_dd_percent.empty or not pd.api.types.is_numeric_dtype(equity_dd_percent):
+            return create_placeholder_figure(title, "Plot Skipped: Drawdown data missing or invalid.")
+
+        x = trades_df.index
+        underwater = -equity_dd_percent  # Negate: descends below the zero baseline
+
+        fig, ax_uw = plt.subplots(figsize=(10, 3), dpi=150)
+        ax_uw.plot(x, underwater, color='red', linewidth=1.0)
+        ax_uw.fill_between(x, underwater, 0, color='red', alpha=0.3)
+        ax_uw.axhline(0, color='black', linestyle='--', linewidth=0.8)
+        ax_uw.set_title(title)
+        ax_uw.set_xlabel('Trade Number')
+        ax_uw.set_ylabel('Drawdown (%)')
+        ax_uw.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
+        ax_uw.grid(True, linestyle='--', alpha=0.5)
+        fig.tight_layout()
+
+    except Exception as e:
+        print(f"ERROR generating '{title}' plot: {e}")
+        traceback.print_exc()
+        if fig:
+            plt.close(fig)
+        fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
+
+    return fig
+
+
 def plot_duration_histogram(trades_df: pd.DataFrame) -> Optional[plt.Figure]:
     """Generates the histogram for trade duration (# bars)."""
     title = 'Distribution of Trade Duration (# bars)'

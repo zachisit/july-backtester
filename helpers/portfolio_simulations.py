@@ -94,16 +94,28 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             cumulative_profit += net_pnl
             duration = (exit_date - pos['entry_date']).days
             position_value = pos['shares'] * pos['entry_price']
-            
+
+            # --- Initial Risk and R-Multiple ---
+            _initial_sl = pos.get('initial_stop_loss_level')
+            if pd.notna(_initial_sl) and _initial_sl > 0 and _initial_sl < pos['entry_price']:
+                _initial_risk_per_share = pos['entry_price'] - _initial_sl
+            else:
+                _initial_risk_per_share = pos['entry_price'] * 0.01
+            _r_multiple = (net_pnl / (_initial_risk_per_share * pos['shares'])
+                           if _initial_risk_per_share > 0 and pos['shares'] > 0 else None)
+
             log_entry = {
                 'Symbol': symbol, 'Trade': f"Long {trade_counter}",
                 'EntryDate': pos['entry_date'].strftime('%Y-%m-%d'), 'EntryPrice': pos['entry_price'],
                 'ExitDate': exit_date.strftime('%Y-%m-%d'), 'ExitPrice': exit_price,
                 'Profit': net_pnl, 'ProfitPct': net_pnl / position_value if position_value > 0 else 0,
+                'Shares': pos['shares'],
                 'is_win': 1 if net_pnl > 0 else 0,
                 'HoldDuration': duration,
                 'MAE_pct': mae_pct, 'MFE_pct': mfe_pct,
-                'ExitReason': exit_reason
+                'ExitReason': exit_reason,
+                'InitialRisk': _initial_risk_per_share,
+                'RMultiple': _r_multiple,
             }
             log_entry.update(pos.get('features', {}))
             trade_log.append(log_entry)
@@ -138,7 +150,17 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             if entry_price > 0 and capital_to_allocate > 0:
                 # Calculate ideal shares based on the capital allocation
                 shares = capital_to_allocate / entry_price
-                
+
+                # --- VOLUME-BASED LIQUIDITY FILTER ---
+                max_pct_adv = CONFIG.get('max_pct_adv') or 0
+                if max_pct_adv > 0 and 'Volume' in df.columns:
+                    adv_20 = df['Volume'].rolling(window=20, min_periods=1).mean().get(entry_exec_date, np.nan)
+                    if pd.notna(adv_20) and adv_20 > 0:
+                        max_shares_allowed = adv_20 * max_pct_adv
+                        if max_shares_allowed <= 0:
+                            continue
+                        shares = min(shares, max_shares_allowed)
+
                 # Calculate the total cost including commission for this ideal share size
                 commission_cost = shares * CONFIG['commission_per_share']
                 total_cost = (shares * entry_price) + commission_cost
@@ -218,9 +240,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                 stop_loss_level = close_before_entry - (atr_before_entry * stop_config.get("multiplier", 3.0))
 
                     positions[symbol] = {
-                        'shares': shares, 'entry_price': entry_price, 
+                        'shares': shares, 'entry_price': entry_price,
                         'entry_date': entry_exec_date, 'features': features,
-                        'stop_loss_level': stop_loss_level
+                        'stop_loss_level': stop_loss_level,
+                        'initial_stop_loss_level': stop_loss_level,
                     }
                     cash -= total_cost
     
@@ -244,7 +267,17 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 commission = pos['shares'] * CONFIG['commission_per_share']
                 # We don't add to cash as this is a hypothetical close
                 net_pnl = ((exit_price - pos['entry_price']) * pos['shares']) - (2 * commission)
-                log_entry = {'Symbol': symbol, 'Trade': f"Long {trade_counter}", 'EntryDate': pos['entry_date'].strftime('%Y-%m-%d'), 'EntryPrice': pos['entry_price'], 'ExitDate': exit_date.strftime('%Y-%m-%d'), 'ExitPrice': exit_price, 'Profit': net_pnl, 'ProfitPct': net_pnl / (pos['shares'] * pos['entry_price']), 'is_win': 1 if net_pnl > 0 else 0, 'HoldDuration': (exit_date - pos['entry_date']).days, 'MAE_pct': mae_pct, 'MFE_pct': mfe_pct, 'ExitReason': exit_reason, **pos.get('features', {})}
+
+                # --- Initial Risk and R-Multiple ---
+                _initial_sl = pos.get('initial_stop_loss_level')
+                if pd.notna(_initial_sl) and _initial_sl > 0 and _initial_sl < pos['entry_price']:
+                    _initial_risk_per_share = pos['entry_price'] - _initial_sl
+                else:
+                    _initial_risk_per_share = pos['entry_price'] * 0.01
+                _r_multiple = (net_pnl / (_initial_risk_per_share * pos['shares'])
+                               if _initial_risk_per_share > 0 and pos['shares'] > 0 else None)
+
+                log_entry = {'Symbol': symbol, 'Trade': f"Long {trade_counter}", 'EntryDate': pos['entry_date'].strftime('%Y-%m-%d'), 'EntryPrice': pos['entry_price'], 'ExitDate': exit_date.strftime('%Y-%m-%d'), 'ExitPrice': exit_price, 'Profit': net_pnl, 'ProfitPct': net_pnl / (pos['shares'] * pos['entry_price']), 'Shares': pos['shares'], 'is_win': 1 if net_pnl > 0 else 0, 'HoldDuration': (exit_date - pos['entry_date']).days, 'MAE_pct': mae_pct, 'MFE_pct': mfe_pct, 'ExitReason': exit_reason, 'InitialRisk': _initial_risk_per_share, 'RMultiple': _r_multiple, **pos.get('features', {})}
                 trade_log.append(log_entry)
     # --- END: MARK-TO-MARKET LOGIC ---
 

@@ -171,7 +171,13 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.10, 
+    "allocation_per_trade": 0.10,
+
+    # --- Volume-Based Liquidity Filter ---
+    # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
+    # order is allowed to consume.  0.05 = no position may exceed 5 % of ADV.
+    # Set to None or 0 to disable the filter entirely.
+    "max_pct_adv": 0.05,
 
     # --- Allocation Per Trade Settings ---
     # At what time do you want the fill to occur.
@@ -241,6 +247,25 @@ CONFIG = {
     # 0.0 = disabled (default). 0.01 = ±1% uniform noise per bar per price.
     # Use this to test whether a strategy is robust to small data perturbations.
     "noise_injection_pct": 0.01,
+
+    # ============================================================
+    # SECTION 13: STRATEGY SELECTION
+    # ============================================================
+    # Controls which registered plugins are actually run.
+    #
+    # "all"  → run every strategy discovered in custom_strategies/  (default)
+    #
+    # list   → run only the named strategies, e.g.:
+    #   "strategies": [
+    #       "SMA Crossover (20d/50d)",
+    #       "RSI Mean Reversion (14/30)",
+    #       "EMA Crossover w/ SPY+VIX Filter",
+    #   ],
+    #
+    # Names must match the 'name' argument passed to @register_strategy exactly
+    # (case-sensitive). Any name not found in the registry logs a WARNING and is
+    # skipped — a typo will not cause a crash.
+    "strategies": ["SMA Crossover (20d/50d)"],
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

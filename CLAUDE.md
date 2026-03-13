@@ -107,6 +107,16 @@ def my_strategy(df, **kwargs):
 
 **Active strategies public API:** `from helpers.registry import get_active_strategies` — returns `{name: {logic, dependencies, params}}`. This is what `main.py` uses instead of the old `STRATEGIES` dict.
 
+**Strategy selection filter:** `CONFIG["strategies"]` controls which registered plugins are returned by `get_active_strategies()`. Set to `"all"` (default) to run everything, or a list of exact names to run a subset. Any requested name not found in the registry logs a `[WARNING]` and is skipped — a typo will not crash the run. Implemented via lazy `from config import CONFIG` inside `get_active_strategies()` to avoid a circular import.
+
+**Sub-daily strategy guard:** Strategies using `get_bars_for_period("Nmin", ...)` are wrapped in `if _TF == "MIN":` at module level so they are not registered (and do not raise `ValueError`) when `timeframe = "D"`.
+
+**Plugin library:** All legacy `_STATIC_STRATEGIES` entries have been migrated to:
+
+- `custom_strategies/rsi_strategies.py` — RSI Mean Reversion (14/30), (7/20), w/ SMA200 Filter, 1m Extreme Fade
+- `custom_strategies/macd_strategies.py` — MACD Crossover, MACD+RSI Confirmation, all EMA Crossover variants (Unfiltered, SPY-only, VIX-only, SPY+VIX), 1m EMA Scalp
+- `custom_strategies/mean_reversion.py` — Bollinger Band family, Stochastic, CMF, OBV, MA Bounce, SMA Trend, all MA Confluence variants, Donchian, Keltner, ATR variants, calendar/overnight strategies
+
 **Do Not Touch:** `helpers/indicators.py` strategy logic (all working correctly). The plugin system wraps around it.
 
 ## Output Structure (Run-First / Experiment Tracking)
@@ -210,6 +220,99 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 - **"Likely Overfitted" triggers**: (1) IS P&L > 0 and OOS P&L < 0 (sign flip); (2) OOS annualised return degraded > 75% vs IS annualised return. Both require `_MIN_OOS_TRADES = 5` minimum OOS trades; fewer → "N/A".
 - **Summary columns**: `OOS P&L (%)` (formatted `{:+.2%}`) and `WFA Verdict` appear in all 4 summary functions in `helpers/summary.py`, placed before `MC Verdict`.
 - **Tests**: `tests/test_wfa.py` — 39 tests, 5 test classes. No I/O, no network. All deterministic.
+
+## R-Multiple, Expectancy, and SQN
+
+### Per-Trade Fields (trade_log)
+
+- **`InitialRisk`** (float, per share): captured in `helpers/portfolio_simulations.py` at trade close.
+  - Formula: `entry_price - initial_stop_loss_level`
+  - Fallback (no stop, stop is NaN/0, or stop ≥ entry): `entry_price * 0.01` (1% proxy)
+  - `initial_stop_loss_level` is stored separately from `stop_loss_level` so trailing-stop updates don't corrupt it.
+- **`RMultiple`** (float or None): `net_pnl / (InitialRisk * shares)`. `None` when InitialRisk or shares ≤ 0.
+- Both fields appear in all trade_log entries, including mark-to-market closes at end-of-backtest.
+- Both fields pass through to analyzer CSVs (not in `COLUMN_MAP`, so kept as-is).
+
+### Per-Strategy Metrics (result dict)
+
+Computed in `run_single_simulation` in `main.py` immediately after WFA:
+
+- **`expectancy`**: `mean(R-Multiples)` — average R gained per trade risked. `None` if < 2 trades have a non-null RMultiple.
+- **`sqn`**: `(expectancy / std(R-Multiples, ddof=1)) * sqrt(N)`. `0.0` if std is zero. `None` if < 2 trades.
+- Both formatted in all 4 summary functions (`helpers/summary.py`): `expectancy → "{:.3f}"`, `sqn → "{:.2f}"`, column headers `Expectancy (R)` and `SQN`.
+
+### PDF Report
+
+`trade_analyzer/analyzer.py` checks for a `RMultiple` column after the profit distribution plot:
+
+- Purple histogram (30 bins), red dashed breakeven line at 0R, green dashed expectancy line.
+- Legend shows `Expectancy: X.XXXr | SQN: X.XX | n=N`.
+- Section title: `"Risk Profile — R-Multiple Distribution"`.
+- Skipped gracefully if column absent or fewer than 2 values.
+
+### Tests
+
+`tests/test_r_multiple.py` — 22 tests, 4 test classes:
+
+- `TestInitialRisk` — correct risk with stop, 1% proxy for None/NaN/0/above-entry
+- `TestRMultiple` — winning/losing/breakeven trades, ZeroDivisionError guards, proxy path
+- `TestExpectancyAndSQN` — formula validation, 0/1/2 trade edge cases, std=0 guard, growth with N
+- `TestTradeLogHasRMultipleFields` — integration: fields present in live simulation output, percentage stop sets correct InitialRisk
+
+## Annual Turnover & After-Tax CAGR Metrics
+
+Added to the **Overall Performance Metrics** section of the PDF tearsheet (and text output).
+
+### Annual Turnover %
+
+`Annual Turnover % = (Σ(Price × Shares) / initial_equity) / duration_years × 100`
+
+- Requires `Price` (entry price) and `Shares` columns in `trades_df`; shows `N/A` if absent.
+- Zero duration or zero initial equity also yields `N/A`.
+
+### Estimated After-Tax CAGR (30% flat tax)
+
+- If `total_profit > 0`: `after_tax_profit = total_profit × 0.70`
+- If `total_profit ≤ 0`: `after_tax_profit = total_profit` (losses pass through unchanged)
+- `after_tax_equity = initial_equity + after_tax_profit`
+- CAGR computed via the standard `calculations.calculate_cagr()` on the after-tax equity.
+- Placed immediately below the gross CAGR line.
+
+### Implementation
+
+`trade_analyzer/report_generator.py` — `generate_overall_metrics_summary()`, in the Duration/CAGR block after the `CAGR:` line.
+
+### Tests
+
+`tests/test_new_metrics.py` — 14 tests across two classes:
+
+- `TestAnnualTurnover` — exact value, single trade, duration scaling, 100% rotation, missing-column and zero-duration guards.
+- `TestAfterTaxCagr` — positive profit (tax applied), negative profit (no haircut), zero profit, after-tax < gross, 1-year exact, zero duration, explicit 30% arithmetic.
+
+## Underwater Plot (Drawdown Visualisation)
+
+Added to the PDF tearsheet immediately after the combined `Equity Curve and Drawdown` chart.
+
+### What it is
+
+A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full drawdown history as a red-filled area descending below a zero baseline. Depth = how far equity fell from the prior peak. Width = how long the drawdown lasted.
+
+### Implementation
+
+- **`trade_analyzer/plotting.py`** — `plot_underwater(trades_df, equity_dd_percent)`.
+  - Receives the same `equity_dd_percent` series (positive, 0–100 scale) that feeds the lower subplot of the existing equity+drawdown chart.
+  - Negates the series internally (`underwater = -equity_dd_percent`) so the curve descends below zero.
+  - `fill_between(x, underwater, 0, color='red', alpha=0.3)` fills the "underwater" area.
+  - Y-axis formatted with `PercentFormatter(xmax=100.0, decimals=1)` → labels like `-10.0%`, `-25.0%`.
+  - Black dashed `axhline` at `y=0` as the baseline.
+- **`trade_analyzer/analyzer.py`** — called right after `plot_equity_and_drawdown`; result appended to `report_sections` with title `"Underwater Plot (Drawdown & Duration)"`.
+
+### Underwater Plot Tests
+
+`tests/test_underwater_plot.py` — 12 tests across two classes:
+
+- `TestHighWaterMark` — verifies `cummax()` logic (rising, declining, flat, single-element equity curves).
+- `TestDrawdownPct` — verifies `(equity - hwm) / hwm` fractional values against hand-computed exact results for `[100, 110, 90, 105, 120]` and edge cases (always-rising, full recovery, trough fraction, single-element).
 
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
