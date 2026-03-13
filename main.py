@@ -6,6 +6,7 @@ import os
 import sys
 import time
 import argparse
+import numpy as np
 import pandas as pd
 from config import CONFIG
 from services import get_data_service
@@ -121,6 +122,18 @@ def run_single_simulation(args):
                 result.update(_evaluate_wfa(_is, _oos, result['initial_capital']))
             else:
                 result.update({'oos_pnl_pct': None, 'wfa_verdict': 'N/A'})
+
+            # --- Expectancy and SQN (from R-Multiples) ---
+            _r_vals = [t['RMultiple'] for t in result.get('trade_log', [])
+                       if t.get('RMultiple') is not None]
+            if len(_r_vals) >= 2:
+                _exp = float(np.mean(_r_vals))
+                _std = float(np.std(_r_vals, ddof=1))
+                result['expectancy'] = _exp
+                result['sqn'] = (_exp / _std) * np.sqrt(len(_r_vals)) if _std > 0 else 0.0
+            else:
+                result['expectancy'] = None
+                result['sqn'] = None
 
             return result
             
