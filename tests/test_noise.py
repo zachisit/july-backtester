@@ -24,6 +24,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from config import CONFIG
 from helpers.noise import inject_price_noise, generate_noise_chart_from_csv
 
 
@@ -45,6 +46,24 @@ def _make_df(n: int = 50) -> pd.DataFrame:
         },
         index=rng,
     )
+
+
+# ---------------------------------------------------------------------------
+# Config defaults
+# ---------------------------------------------------------------------------
+
+class TestConfigDefaults:
+
+    def test_noise_injection_pct_default_is_zero(self):
+        """noise_injection_pct must default to 0.0 so stress testing is opt-in."""
+        assert CONFIG["noise_injection_pct"] == 0.0
+
+    def test_zero_noise_config_returns_identical_df(self):
+        """inject_price_noise with the default config value returns the same object unchanged."""
+        df = _make_df()
+        result = inject_price_noise(df, CONFIG["noise_injection_pct"])
+        assert result is df
+        pd.testing.assert_frame_equal(result, df)
 
 
 # ---------------------------------------------------------------------------

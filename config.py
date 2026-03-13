@@ -232,7 +232,7 @@ CONFIG = {
     "wfa_split_ratio": 0.80,
 
     # ============================================================
-    # SECTION 11: TRADING COST SETTINGS
+    # SECTION 12: TRADING COST SETTINGS
     # ============================================================
     # --- Slippage Percentage ---
     "slippage_pct": 0.0005,
@@ -241,15 +241,15 @@ CONFIG = {
     "commission_per_share": 0.002,
 
     # ============================================================
-    # SECTION 12: STRESS TESTING — PRICE NOISE INJECTION
+    # SECTION 13: STRESS TESTING — PRICE NOISE INJECTION
     # ============================================================
     # Inject random noise into OHLC price data before running strategies.
     # 0.0 = disabled (default). 0.01 = ±1% uniform noise per bar per price.
     # Use this to test whether a strategy is robust to small data perturbations.
-    "noise_injection_pct": 0.01,
+    "noise_injection_pct": 0.0,
 
     # ============================================================
-    # SECTION 13: STRATEGY SELECTION
+    # SECTION 14: STRATEGY SELECTION
     # ============================================================
     # Controls which registered plugins are actually run.
     #
