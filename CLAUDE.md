@@ -259,6 +259,36 @@ Computed in `run_single_simulation` in `main.py` immediately after WFA:
 - `TestExpectancyAndSQN` — formula validation, 0/1/2 trade edge cases, std=0 guard, growth with N
 - `TestTradeLogHasRMultipleFields` — integration: fields present in live simulation output, percentage stop sets correct InitialRisk
 
+## Annual Turnover & After-Tax CAGR Metrics
+
+Added to the **Overall Performance Metrics** section of the PDF tearsheet (and text output).
+
+### Annual Turnover %
+
+`Annual Turnover % = (Σ(Price × Shares) / initial_equity) / duration_years × 100`
+
+- Requires `Price` (entry price) and `Shares` columns in `trades_df`; shows `N/A` if absent.
+- Zero duration or zero initial equity also yields `N/A`.
+
+### Estimated After-Tax CAGR (30% flat tax)
+
+- If `total_profit > 0`: `after_tax_profit = total_profit × 0.70`
+- If `total_profit ≤ 0`: `after_tax_profit = total_profit` (losses pass through unchanged)
+- `after_tax_equity = initial_equity + after_tax_profit`
+- CAGR computed via the standard `calculations.calculate_cagr()` on the after-tax equity.
+- Placed immediately below the gross CAGR line.
+
+### Implementation
+
+`trade_analyzer/report_generator.py` — `generate_overall_metrics_summary()`, in the Duration/CAGR block after the `CAGR:` line.
+
+### Tests
+
+`tests/test_new_metrics.py` — 14 tests across two classes:
+
+- `TestAnnualTurnover` — exact value, single trade, duration scaling, 100% rotation, missing-column and zero-duration guards.
+- `TestAfterTaxCagr` — positive profit (tax applied), negative profit (no haircut), zero profit, after-tax < gross, 1-year exact, zero duration, explicit 30% arithmetic.
+
 ## Underwater Plot (Drawdown Visualisation)
 
 Added to the PDF tearsheet immediately after the combined `Equity Curve and Drawdown` chart.

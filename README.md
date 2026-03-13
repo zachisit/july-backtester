@@ -449,6 +449,14 @@ SMA Crossover (50d/200d)       +74.1%   +12.1%   38.2%    0.98    0.65     46.1%
 | MC Verdict | Robustness classification from Monte Carlo analysis |
 | MC Score | Numeric robustness score (see below) |
 
+### Additional Metrics in the PDF Report
+
+The **Overall Performance Metrics** page of the PDF tearsheet includes two additional derived metrics not shown in the terminal table:
+
+- **Annual Turnover %** — `(Σ(entry_price × shares) / initial_capital) / years × 100`. Measures how many times the full portfolio is recycled per year. A turnover of 200% means the equivalent of the entire account was deployed twice over. Requires `Price` and `Shares` columns in the trade data; shows `N/A` otherwise.
+
+- **Estimated After-Tax CAGR (30% tax)** — applies a flat 30% short-term capital gains rate to any net profit before computing CAGR. Formula: `after_tax_equity = initial_capital + max(net_profit, 0) × 0.70 + min(net_profit, 0)`. Losses are carried through unchanged (no tax benefit assumed). Placed directly below the standard CAGR line for easy comparison.
+
 ### Monte Carlo Score Explained
 
 Every strategy with 50+ trades is stress-tested with 1,000 simulations that randomly reshuffle the historical trade sequence. This reveals whether results depend on lucky ordering or are genuinely robust.
