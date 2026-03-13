@@ -221,6 +221,44 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 - **Summary columns**: `OOS P&L (%)` (formatted `{:+.2%}`) and `WFA Verdict` appear in all 4 summary functions in `helpers/summary.py`, placed before `MC Verdict`.
 - **Tests**: `tests/test_wfa.py` — 39 tests, 5 test classes. No I/O, no network. All deterministic.
 
+## R-Multiple, Expectancy, and SQN
+
+### Per-Trade Fields (trade_log)
+
+- **`InitialRisk`** (float, per share): captured in `helpers/portfolio_simulations.py` at trade close.
+  - Formula: `entry_price - initial_stop_loss_level`
+  - Fallback (no stop, stop is NaN/0, or stop ≥ entry): `entry_price * 0.01` (1% proxy)
+  - `initial_stop_loss_level` is stored separately from `stop_loss_level` so trailing-stop updates don't corrupt it.
+- **`RMultiple`** (float or None): `net_pnl / (InitialRisk * shares)`. `None` when InitialRisk or shares ≤ 0.
+- Both fields appear in all trade_log entries, including mark-to-market closes at end-of-backtest.
+- Both fields pass through to analyzer CSVs (not in `COLUMN_MAP`, so kept as-is).
+
+### Per-Strategy Metrics (result dict)
+
+Computed in `run_single_simulation` in `main.py` immediately after WFA:
+
+- **`expectancy`**: `mean(R-Multiples)` — average R gained per trade risked. `None` if < 2 trades have a non-null RMultiple.
+- **`sqn`**: `(expectancy / std(R-Multiples, ddof=1)) * sqrt(N)`. `0.0` if std is zero. `None` if < 2 trades.
+- Both formatted in all 4 summary functions (`helpers/summary.py`): `expectancy → "{:.3f}"`, `sqn → "{:.2f}"`, column headers `Expectancy (R)` and `SQN`.
+
+### PDF Report
+
+`trade_analyzer/analyzer.py` checks for a `RMultiple` column after the profit distribution plot:
+
+- Purple histogram (30 bins), red dashed breakeven line at 0R, green dashed expectancy line.
+- Legend shows `Expectancy: X.XXXr | SQN: X.XX | n=N`.
+- Section title: `"Risk Profile — R-Multiple Distribution"`.
+- Skipped gracefully if column absent or fewer than 2 values.
+
+### Tests
+
+`tests/test_r_multiple.py` — 22 tests, 4 test classes:
+
+- `TestInitialRisk` — correct risk with stop, 1% proxy for None/NaN/0/above-entry
+- `TestRMultiple` — winning/losing/breakeven trades, ZeroDivisionError guards, proxy path
+- `TestExpectancyAndSQN` — formula validation, 0/1/2 trade edge cases, std=0 guard, growth with N
+- `TestTradeLogHasRMultipleFields` — integration: fields present in live simulation output, percentage stop sets correct InitialRisk
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float

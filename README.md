@@ -444,6 +444,8 @@ SMA Crossover (50d/200d)       +74.1%   +12.1%   38.2%    0.98    0.65     46.1%
 | Sharpe | Risk-adjusted return relative to volatility (above 1.0 is generally considered good; above 2.0 is strong) |
 | Win Rate | Percentage of trades that were profitable |
 | Trades | Total number of completed trades |
+| Expectancy (R) | Average R-Multiple per trade — how many R the strategy earns per unit risked (see below) |
+| SQN | System Quality Number — statistical confidence in the edge (see below) |
 | MC Verdict | Robustness classification from Monte Carlo analysis |
 | MC Score | Numeric robustness score (see below) |
 
@@ -483,6 +485,45 @@ Every strategy result includes two WFA columns alongside the Monte Carlo output:
 - **N/A** — WFA is disabled (`wfa_split_ratio` is `None` or `0`), or the OOS window contains fewer than 5 completed trades (insufficient data for a meaningful verdict).
 
 **Disabling WFA:** Set `"wfa_split_ratio": None` (or `0`) in `config.py`. Both `OOS P&L (%)` and `WFA Verdict` will show `N/A` for all strategies.
+
+### R-Multiple, Expectancy, and SQN
+
+> **Why this matters:** Win rate and P&L tell you *what* happened. R-Multiple metrics tell you *why* — how well you are managing risk per trade. A strategy with 40% win rate but an average winner of 3R and an average loser of −1R is far superior to a 60% winner that earns only 0.5R per win.
+
+**How R-Multiple is calculated:**
+
+1. **Initial Risk (per share)** — captured at trade entry: `entry_price − initial_stop_loss_price`
+   - If no stop loss is configured, a **1% proxy** is used: `entry_price × 0.01`
+   - The initial stop is frozen at entry; trailing-stop updates do not affect it.
+2. **R-Multiple** — calculated at trade close: `net_pnl / (initial_risk_per_share × shares)`
+   - A trade that earns exactly 1× the amount risked = `1R`
+   - A trade that loses the full stop = `−1R`
+   - Both `InitialRisk` and `RMultiple` are written to every row of the trade CSV.
+
+**Expectancy (Avg. R per trade):**
+
+`Expectancy = mean(all R-Multiples)`
+
+This answers: *"On average, how many R do I earn per trade?"* Positive is good. A value above `0.5R` is generally considered a solid edge.
+
+**SQN (System Quality Number):**
+
+`SQN = (Expectancy / StdDev(R-Multiples)) × √N`
+
+Developed by Van Tharp. It normalises expectancy by the consistency of the R distribution and scales with sample size. Rule of thumb:
+
+| SQN | Quality |
+| --- | --- |
+| < 1.6 | Poor — not tradeable |
+| 1.6 – 1.9 | Below average |
+| 2.0 – 2.4 | Average |
+| 2.5 – 2.9 | Good |
+| 3.0 – 5.0 | Excellent |
+| > 5.0 | Holy Grail (verify for overfitting) |
+
+Both `Expectancy (R)` and `SQN` show `N/A` for strategies with fewer than 2 completed trades.
+
+**PDF report:** when a strategy CSV contains an `RMultiple` column, the detailed report includes a purple histogram of the full R distribution with a red breakeven line (0R) and a green expectancy line annotated with Expectancy, SQN, and trade count.
 
 ### Price Noise Injection (Stress Testing)
 
