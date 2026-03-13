@@ -298,13 +298,22 @@ class TestIntegration:
 
     @pytest.fixture(autouse=True)
     def _clean_registry(self):
-        """Override the module-level autouse fixture for integration tests."""
+        """Override the module-level autouse fixture for integration tests.
+
+        Also saves/restores CONFIG['strategies'] so tests are independent of
+        whatever filter value the user currently has in config.py.
+        """
+        from config import CONFIG
+        _saved_strategies = CONFIG.get("strategies", "all")
+        CONFIG["strategies"] = "all"
+
         # Force-evict custom_strategies modules so they are re-imported fresh.
         for key in list(sys.modules.keys()):
             if key.startswith("custom_strategies."):
                 del sys.modules[key]
         yield
         _REGISTRY.clear()
+        CONFIG["strategies"] = _saved_strategies
 
     def test_sma_strategies_are_registered(self):
         """get_active_strategies() must discover and return both SMA strategies."""
