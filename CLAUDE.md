@@ -59,6 +59,8 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "min_trades_for_mc": 50
 "num_mc_simulations": 1000
 "wfa_split_ratio": 0.80          # 0.80 = 80% IS / 20% OOS; None or 0 = disabled
+"noise_injection_pct": 0.0       # 0.0 = disabled (default, stress testing is opt-in). Set to e.g. 0.01 for ±1% stress test.
+"risk_free_rate": 0.05           # annual, used in Sharpe calculation (default 5% — US T-bill proxy)
 ```
 
 ## Architecture Notes
@@ -147,6 +149,8 @@ output/
 - `tickers_to_scan/` JSON files
 - The multiprocessing architecture (`init_worker`, `run_single_simulation`, `Pool`)
 
+> **`helpers/summary.py`** — can be touched; actively maintained. `save_only_filtered_trades` now correctly filters by the display criteria captured in Step 2 of `generate_per_portfolio_summary` (see Known Issues Fixed below).
+
 ## Data Providers
 
 ### Yahoo Finance (`data_provider = "yahoo"`)
@@ -211,6 +215,7 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 - **Threshold**: default `0.85` (absolute Pearson). Pairs with `|r| > 0.85` are logged as `[WARNING]` lines via `logger.warning`.
 - **Skipped silently** when fewer than 2 strategies have non-empty trade logs (returns empty DataFrame + empty list, no CSV written).
 - **Tests**: `tests/test_correlation.py` — covers `_build_daily_pnl_series`, `build_daily_pnl_matrix`, `compute_correlation_matrix`, `find_high_correlation_pairs`, and `run_correlation_analysis` (with `tmp_path` file I/O). No network, no randomness.
+- **Known Limitations**: Correlation is measured on **exit-date P&L only**, not daily mark-to-market. Two strategies that hold the same stock simultaneously but exit on different days will appear uncorrelated (or even negatively correlated), so the matrix is a **lower bound on true correlation** — it systematically understates relatedness for overlapping concurrent positions. `run_correlation_analysis` logs a `WARNING` once per call documenting this bias.
 
 ## Walk-Forward Analysis (WFA)
 
@@ -218,6 +223,7 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 - **Split date source**: computed from `spy_df` actual start/end dates (not `config.start_date`) in `main.py` after the SPY fetch. Stored as a plain `str` and passed as the last element of each task tuple so Windows spawn workers receive it.
 - **Placement in pipeline**: `run_single_simulation` in `main.py` calls `evaluate_wfa` after Monte Carlo, before `return result`. Adds `oos_pnl_pct` and `wfa_verdict` to the result dict.
 - **"Likely Overfitted" triggers**: (1) IS P&L > 0 and OOS P&L < 0 (sign flip); (2) OOS annualised return degraded > 75% vs IS annualised return. Both require `_MIN_OOS_TRADES = 5` minimum OOS trades; fewer → "N/A".
+- **Annualised return now uses CAGR formula (compound), not simple division**: `(1 + total_pnl_frac) ** (1/years) - 1`. Guard: if `(1 + total_pnl_frac) <= 0` (bust), returns `None`.
 - **Summary columns**: `OOS P&L (%)` (formatted `{:+.2%}`) and `WFA Verdict` appear in all 4 summary functions in `helpers/summary.py`, placed before `MC Verdict`.
 - **Tests**: `tests/test_wfa.py` — 39 tests, 5 test classes. No I/O, no network. All deterministic.
 
@@ -320,3 +326,24 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 - `apply_stop_loss(df, stop_config)` takes the dict, not a percentage float
 - Norgate portfolios use `"norgate:WatchlistName"` string prefix; JSON files use `"filename.json"`; inline lists use a Python list
 - `execution_time: "open"` means signals are generated on day N and filled at day N+1 open — the simulator handles the 1-day lag via `prev_trading_dates`
+
+## Known Issues Fixed
+
+### ATR Column Name Mismatch (fixed 2026-03-13)
+
+`main.py` writes the 14-period ATR column as `ATR_14`, but `helpers/portfolio_simulations.py` had two `.get('ATR')` calls that silently returned `NaN`:
+
+1. **Entry path** (initial stop calculation): `day_before_data.get('ATR')` — stop was never set, making all ATR stop configs behave identically to `{"type": "none"}`.
+2. **Daily trailing loop**: `portfolio_data[symbol].loc[date].get('ATR')` — even if the initial stop had been set by some other means, the trailing update would never fire.
+
+**Fix**: both calls changed to `.get('ATR_14')` to match the column written by `main.py`.
+
+**Regression test**: `tests/test_atr_logic.py::TestSimulationAtrColumnName::test_atr_stop_triggered_on_crash` — builds a portfolio_data dict with `ATR_14` populated (no `ATR` column), runs a simulation with `stop_config={"type": "atr", ...}`, and asserts the trade exits with `"Stop Loss"` when price crashes below the ATR stop. This test failed before the fix and passes after.
+
+### `save_only_filtered_trades` saved all trades, not filtered ones (fixed 2026-03-13)
+
+In `helpers/summary.py::generate_per_portfolio_summary()`, Step 4b's `save_only_filtered_trades` branch rebuilt `display_df` from the raw `portfolio_results` list (overwriting the already-filtered Step 2 `display_df`), so all strategies were saved regardless of whether they passed the display filters (max drawdown, min P&L, min MC score, etc.).
+
+**Fix**: after Step 2 produces the filtered `display_df`, capture `passed_display_filter = set(display_df['Strategy'].tolist())`. Step 4b now filters via `[r for r in portfolio_results if r['Strategy'] in passed_display_filter]` — no DataFrame rebuild needed.
+
+**Regression tests**: `tests/test_save_filtered_trades.py::TestSaveOnlyFilteredTrades` — three tests confirm `save_trades_to_csv` is called exactly once (the passing strategy) when `save_only_filtered_trades=True` and one result fails `min_pandl_to_show_in_summary`, and called twice when the flag is `False`.

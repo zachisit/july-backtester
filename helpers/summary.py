@@ -220,6 +220,9 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         (summary_df['vs_qqq_benchmark'] * 100 >= min_vs_qqq)
     ].copy()
 
+    # Capture the set of strategy names that passed the display filter for use in Step 4b.
+    passed_display_filter = set(display_df['Strategy'].tolist())
+
     # --- Step 3: Use the filtered display_df to show the summary table ---
     if display_df.empty:
         print(f"\nNo strategies for {portfolio_name} met the required display criteria.")
@@ -250,13 +253,17 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         else:
             display_df['avg_corr'] = 'N/A'
 
+        # Sort by numeric mc_score BEFORE the formatting loop converts it to a string.
+        display_df.sort_values(by='mc_score', ascending=False, inplace=True)
+        display_df.reset_index(drop=True, inplace=True)
+
         # Formatting logic
         for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"), ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}")]:
             if col in display_df.columns: display_df[col] = display_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
         if 'avg_trade_duration' in display_df.columns: display_df['avg_trade_duration'] = display_df['avg_trade_duration'].apply(lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x)
         display_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'avg_corr': 'Avg. Corr', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN'}, inplace=True)
         report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Avg. Corr', 'MC Verdict', 'MC Score']
-        summary_df_display = display_df.reindex(columns=report_cols).fillna('N/A').sort_values(by='MC Score', ascending=False).reset_index(drop=True)
+        summary_df_display = display_df.reindex(columns=report_cols).fillna('N/A').reset_index(drop=True)
         print(f"\n--- Strategy Comparison for {portfolio_name} (filtered, sorted by MC Score) ---")
         print(summary_df_display.to_string(index=False))
 
@@ -318,11 +325,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         results_to_save = []
         if CONFIG.get("save_only_filtered_trades", False):
             print(f"{action} filtered trade logs for portfolio: {portfolio_name}...")
-            # Get the list of strategy names that passed the filter
-            # (Need to define display_df earlier in the function if it's not already)
-            display_df = pd.DataFrame(portfolio_results) # Or use the filtered one if available
-            filtered_strategy_names = display_df['Strategy'].tolist()
-            results_to_save = [r for r in portfolio_results if r['Strategy'] in filtered_strategy_names]
+            results_to_save = [r for r in portfolio_results if r['Strategy'] in passed_display_filter]
         else:
             print(f"{action} all valid trade logs for portfolio: {portfolio_name}...")
             results_to_save = portfolio_results
@@ -388,6 +391,10 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
         print("\nNo strategies met the final filtering criteria.")
         return
 
+    # Sort by numeric mc_score BEFORE the formatting loop converts it to a string.
+    filtered_df.sort_values(by='mc_score', ascending=False, inplace=True)
+    filtered_df.reset_index(drop=True, inplace=True)
+
     # --- Formatting and Renaming Section ---
     for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"),
                        ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"),
@@ -410,8 +417,8 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
 
     report_cols = ['Portfolio', 'Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'MC Verdict', 'MC Score']
     summary_df_display = filtered_df.reindex(columns=report_cols).fillna('N/A')
-    
-    summary_df_sorted = summary_df_display.sort_values(by='MC Score', ascending=False)
+
+    summary_df_sorted = summary_df_display
     
     print("\n--- Strategy Comparison Across All Portfolios (filtered, sorted by MC Score) ---")
     print(summary_df_sorted.to_string(index=False))

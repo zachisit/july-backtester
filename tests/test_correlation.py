@@ -405,6 +405,17 @@ class TestRunCorrelationAnalysis:
                 # Should have at most 4 decimal places
                 assert round(float(val), 4) == pytest.approx(float(val))
 
+    def test_warning_logged_once_per_call(self, tmp_path, caplog):
+        """run_correlation_analysis must emit exactly one WARNING about exit-date limitation."""
+        import logging
+        results = [_result("A", _TRADES_A), _result("B", _TRADES_B)]
+        output_path = str(tmp_path / "corr.csv")
+        with caplog.at_level(logging.WARNING, logger="helpers.correlation"):
+            run_correlation_analysis(results, output_path)
+        warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert len(warning_messages) == 1
+        assert "exit-date P&L only" in warning_messages[0]
+
     def test_three_strategies_two_correlated_one_not(self, tmp_path):
         """A and B are perfectly correlated; C trades entirely different dates.
 
@@ -423,3 +434,92 @@ class TestRunCorrelationAnalysis:
         flagged = [set(p[:2]) for p in pairs]
         # A and B must always be flagged (r = 1.0)
         assert {"A", "B"} in flagged
+
+
+# ---------------------------------------------------------------------------
+# TestExitDateLimitation — documents the measurement bias
+# ---------------------------------------------------------------------------
+
+class TestExitDateLimitation:
+    """
+    Demonstrates that correlation is measured on exit-date P&L only, which
+    systematically understates true correlation between strategies that trade
+    the same underlying at overlapping times but exit on different days.
+    """
+
+    # Two strategies with identical position sizes and identical profit amounts,
+    # but Strategy B exits exactly 1 calendar day after Strategy A.
+    # True correlation (same positions, same trade) should be ~1.0.
+    # Measured correlation (exit-date P&L, non-overlapping) is near 0.
+    #
+    # Construction: 5 trades each; after zero-filling the 6-row matrix is:
+    #   Day 0: A=100,  B=0
+    #   Day 1: A=200,  B=100
+    #   Day 2: A=100,  B=200
+    #   Day 3: A=150,  B=100
+    #   Day 4: A=50,   B=150
+    #   Day 5: A=0,    B=50
+    # Pearson(A, B) ≈ 0.10 — near 0, far from the true 1.0.
+    _TRADES_SAME_A = [
+        _trade("2023-01-02", 100.0),
+        _trade("2023-01-03", 200.0),
+        _trade("2023-01-04", 100.0),
+        _trade("2023-01-05", 150.0),
+        _trade("2023-01-06", 50.0),
+    ]
+    _TRADES_SAME_B = [
+        _trade("2023-01-03", 100.0),   # same profits, exit 1 day later
+        _trade("2023-01-04", 200.0),
+        _trade("2023-01-05", 100.0),
+        _trade("2023-01-06", 150.0),
+        _trade("2023-01-09", 50.0),    # 2023-01-07/08 are weekend, next trading day
+    ]
+
+    def test_identical_positions_staggered_by_1day_appears_near_zero(self, tmp_path):
+        """
+        True correlation = 1.0 (identical positions/profits), but the
+        exit-date-only measurement produces a correlation well below 0.5,
+        demonstrating the lower-bound bias of this approach.
+        """
+        results = [
+            _result("Strategy-A", self._TRADES_SAME_A),
+            _result("Strategy-B", self._TRADES_SAME_B),
+        ]
+        output_path = str(tmp_path / "limit_corr.csv")
+        corr_matrix, _ = run_correlation_analysis(results, output_path)
+
+        measured = corr_matrix.loc["Strategy-A", "Strategy-B"]
+        assert measured < 0.5, (
+            f"Expected measured correlation < 0.5 (demonstrating lower-bound bias); "
+            f"got {measured:.4f}. True correlation of identical positions should be 1.0."
+        )
+
+    def test_limitation_warning_is_logged(self, tmp_path, caplog):
+        """The per-call WARNING about exit-date limitation must be emitted."""
+        import logging
+        results = [
+            _result("Strategy-A", self._TRADES_SAME_A),
+            _result("Strategy-B", self._TRADES_SAME_B),
+        ]
+        output_path = str(tmp_path / "limit_corr.csv")
+        with caplog.at_level(logging.WARNING, logger="helpers.correlation"):
+            run_correlation_analysis(results, output_path)
+        messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("exit-date P&L only" in m for m in messages)
+
+    def test_true_same_day_exits_show_high_correlation(self, tmp_path):
+        """
+        Baseline: when both strategies exit on IDENTICAL dates, measured
+        correlation = 1.0, confirming the limitation is the exit-date mismatch,
+        not some other artefact.
+        """
+        results = [
+            _result("Strategy-A", self._TRADES_SAME_A),
+            _result("Strategy-A-Clone", self._TRADES_SAME_A),  # exact copy
+        ]
+        output_path = str(tmp_path / "same_day_corr.csv")
+        corr_matrix, _ = run_correlation_analysis(results, output_path)
+        measured = corr_matrix.loc["Strategy-A", "Strategy-A-Clone"]
+        assert measured == pytest.approx(1.0), (
+            "Same-day exits must produce correlation 1.0 (no mismatch)."
+        )

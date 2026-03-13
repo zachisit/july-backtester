@@ -209,6 +209,38 @@ class TestAnnualisedReturn:
         trades = _make_trades([("2015-01-01", 1000.0), ("2015-01-01", 2000.0)])
         assert _annualised_return(trades, 100_000.0) is None
 
+    def test_cagr_100pct_over_2_years_returns_approx_0414(self):
+        """
+        100 % gain over ~2 years must use CAGR: sqrt(2) - 1 ≈ 0.414, not 0.5.
+
+        Simple division would give 1.0 / 2 = 0.50 — the regression proof that
+        the old formula is gone.
+        """
+        trades = _make_trades([
+            ("2020-01-01", 0.0),          # anchor start date
+            ("2022-01-01", 100_000.0),    # 100 % profit over ~2 years
+        ])
+        result = _annualised_return(trades, 100_000.0)
+        # sqrt(2) - 1 ≈ 0.41421; simple division would give 0.5
+        assert result == pytest.approx(0.414, abs=0.005)
+        assert result < 0.42, "CAGR must be less than the simple-division value of 0.5"
+
+    def test_bust_100pct_loss_returns_none(self):
+        """A strategy that loses 100 % of capital has undefined CAGR → None."""
+        trades = _make_trades([
+            ("2020-01-01", 0.0),
+            ("2022-01-01", -100_000.0),   # total loss = initial capital
+        ])
+        assert _annualised_return(trades, 100_000.0) is None
+
+    def test_bust_more_than_100pct_loss_returns_none(self):
+        """Losses exceeding 100 % are also bust → None."""
+        trades = _make_trades([
+            ("2020-01-01", 0.0),
+            ("2022-01-01", -150_000.0),
+        ])
+        assert _annualised_return(trades, 100_000.0) is None
+
 
 # ---------------------------------------------------------------------------
 # TestEvaluateWfa — main verdict logic
@@ -282,6 +314,23 @@ class TestEvaluateWfaLikelyOverfitted:
         capital = 100_000.0
         is_trades  = _year_range_trades(2000, 2009, 10_000.0)
         oos_trades = _year_range_trades(2010, 2014, 100.0)
+        result = evaluate_wfa(is_trades, oos_trades, capital)
+        assert result["wfa_verdict"] == "Likely Overfitted"
+
+    def test_likely_overfitted_still_triggers_with_cagr_formula(self):
+        """
+        Regression: switching _annualised_return to CAGR must not break the
+        severe-degradation detection path in evaluate_wfa.
+
+        IS: 200 % gain over 5 years  → CAGR ≈ 24.6 %
+        OOS: 5 % gain over 5 years   → CAGR ≈  1.0 %
+        Degradation ≈ 96 % > 75 % threshold → Likely Overfitted.
+        """
+        capital = 100_000.0
+        # IS: 5 trades, $40k profit each, spread over 2000–2004 (200% total)
+        is_trades = _year_range_trades(2000, 2004, 40_000.0)
+        # OOS: 5 trades, $1k profit each, spread over 2005–2009 (5% total)
+        oos_trades = _year_range_trades(2005, 2009, 1_000.0)
         result = evaluate_wfa(is_trades, oos_trades, capital)
         assert result["wfa_verdict"] == "Likely Overfitted"
 

@@ -20,7 +20,9 @@ def calculate_advanced_metrics(pnl_list, portfolio_timeline, duration_list):
     if not portfolio_timeline.empty and len(portfolio_timeline) > 1:
         daily_returns = portfolio_timeline.pct_change().dropna()
         if len(daily_returns) > 1:
-            metrics["sharpe_ratio"] = (daily_returns.mean() / daily_returns.std()) * np.sqrt(252) if daily_returns.std() > 0 else 0
+            rf_daily = (1 + CONFIG.get("risk_free_rate", 0.05)) ** (1 / 252) - 1
+            excess_returns = daily_returns - rf_daily
+            metrics["sharpe_ratio"] = (excess_returns.mean() / excess_returns.std()) * np.sqrt(252) if excess_returns.std() > 0 else 0
         
         running_peak = portfolio_timeline.expanding(min_periods=1).max()
         drawdown = (portfolio_timeline - running_peak) / running_peak

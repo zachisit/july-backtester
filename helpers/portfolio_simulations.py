@@ -71,7 +71,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             if pd.isna(raw_exit_price):
                 if stop_config.get("type") == "atr" and pd.notna(pos.get('stop_loss_level')):
                     current_close = portfolio_data[symbol].loc[date].get('Close')
-                    current_atr = portfolio_data[symbol].loc[date].get('ATR') 
+                    current_atr = portfolio_data[symbol].loc[date].get('ATR_14')
                     if pd.notna(current_close) and pd.notna(current_atr):
                         new_stop_level = current_close - (current_atr * stop_config.get("multiplier", 3.0))
                         pos['stop_loss_level'] = max(pos['stop_loss_level'], new_stop_level)
@@ -231,7 +231,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         
                         if pd.notna(day_before_entry) and day_before_entry in df.index:
                             day_before_data = df.loc[day_before_entry]
-                            atr_before_entry = day_before_data.get('ATR')
+                            atr_before_entry = day_before_data.get('ATR_14')
                             close_before_entry = day_before_data.get('Close')
                             
                             if pd.notna(atr_before_entry) and pd.notna(close_before_entry):
