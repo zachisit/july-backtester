@@ -215,6 +215,7 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 - **Threshold**: default `0.85` (absolute Pearson). Pairs with `|r| > 0.85` are logged as `[WARNING]` lines via `logger.warning`.
 - **Skipped silently** when fewer than 2 strategies have non-empty trade logs (returns empty DataFrame + empty list, no CSV written).
 - **Tests**: `tests/test_correlation.py` — covers `_build_daily_pnl_series`, `build_daily_pnl_matrix`, `compute_correlation_matrix`, `find_high_correlation_pairs`, and `run_correlation_analysis` (with `tmp_path` file I/O). No network, no randomness.
+- **Known Limitations**: Correlation is measured on **exit-date P&L only**, not daily mark-to-market. Two strategies that hold the same stock simultaneously but exit on different days will appear uncorrelated (or even negatively correlated), so the matrix is a **lower bound on true correlation** — it systematically understates relatedness for overlapping concurrent positions. `run_correlation_analysis` logs a `WARNING` once per call documenting this bias.
 
 ## Walk-Forward Analysis (WFA)
 

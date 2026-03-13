@@ -13,10 +13,13 @@ run_correlation_analysis(strategy_results, output_path, threshold) -> (matrix, p
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
 
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 # Default threshold above which two strategies are considered highly correlated.
@@ -219,7 +222,22 @@ def run_correlation_analysis(
                           (empty when fewer than 2 strategies have trade data).
         ``high_pairs``  : list of ``(strategy_a, strategy_b, correlation)`` tuples
                           for pairs exceeding ``threshold``.
+
+    Notes
+    -----
+    **Measurement limitation**: Correlation is computed on exit-date P&L only,
+    not daily mark-to-market.  Two strategies holding the same stock
+    simultaneously will appear uncorrelated (or even negatively correlated) if
+    they exit on different days.  Treat this matrix as a lower bound on true
+    correlation — it will systematically *understate* how related two strategies
+    are when they trade the same underlying at overlapping times.
     """
+    logger.warning(
+        "NOTE: Correlation is computed on exit-date P&L only, not daily "
+        "mark-to-market. Two strategies holding the same stock simultaneously "
+        "will appear uncorrelated if they exit on different days. Treat this "
+        "matrix as a lower bound on true correlation."
+    )
     daily_pnl_df = build_daily_pnl_matrix(strategy_results)
     corr_matrix  = compute_correlation_matrix(daily_pnl_df)
     save_correlation_csv(corr_matrix, output_path)
