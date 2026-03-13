@@ -320,6 +320,26 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 - `TestHighWaterMark` — verifies `cummax()` logic (rising, declining, flat, single-element equity curves).
 - `TestDrawdownPct` — verifies `(equity - hwm) / hwm` fractional values against hand-computed exact results for `[100, 110, 90, 105, 120]` and edge cases (always-rising, full recovery, trough fraction, single-element).
 
+## Parameter Sensitivity Sweep
+
+- **`helpers/sensitivity.py`** — pure, stateless module. Public entry points: `build_param_grid`, `label_for_params`, `is_sweep_enabled`.
+- **Purpose**: detects p-hacking by varying each numeric param in a strategy's `@register_strategy(params={...})` dict by ±pct across ±steps steps and printing a fragility verdict.
+- **How it works**: `build_param_grid` takes a base params dict and returns the cartesian product of all per-param value ranges. Only `int`/`float` values are varied; strings, bools, and `None` pass through unchanged. Values are floored at `sensitivity_sweep_min_val`.
+- **Config keys**:
+
+  | Key | Default | Description |
+  | --- | --- | --- |
+  | `sensitivity_sweep_enabled` | `False` | Opt-in — disabled by default |
+  | `sensitivity_sweep_pct` | `0.20` | ±20% per step |
+  | `sensitivity_sweep_steps` | `2` | 2 steps each side → 5 values per param |
+  | `sensitivity_sweep_min_val` | `2` | Floor prevents e.g. SMA period = 0 |
+
+- **Strategy naming convention**: when enabled, each variant is named `StrategyName [(base)]` for the base params and `StrategyName [fast=16]` for changed keys. Only changed keys appear in the label.
+- **Fragility threshold**: `< 30%` of variants profitable → `*** FRAGILE ***` printed in the sensitivity report. ≥ 30% → `Robust`.
+- **Performance note**: 2 params × `steps=2` produces 25 grid points (5² cartesian). Keep disabled for normal runs; enable only for targeted fragility checks.
+- **No-regression guarantee**: when `sensitivity_sweep_enabled: False` (default), `param_variants = [base_params]` — identical to pre-sweep behaviour. The existing task-building loop runs exactly as before.
+- **Tests**: `tests/test_sensitivity.py` — covers `build_param_grid` (12 tests), `label_for_params`, and the no-regression default path.
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float

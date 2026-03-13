@@ -28,10 +28,11 @@
 8. [Generating Detailed Reports](#generating-detailed-reports)
 9. [Available Strategies](#available-strategies)
 10. [Configuration Reference](#configuration-reference)
-11. [Data Caching](#data-caching)
-12. [Adding Custom Strategies (Plugin System)](#adding-custom-strategies-plugin-system)
-13. [Project Structure](#project-structure)
-14. [Contributing](#contributing)
+11. [Parameter Sensitivity Sweep](#parameter-sensitivity-sweep)
+12. [Data Caching](#data-caching)
+13. [Adding Custom Strategies (Plugin System)](#adding-custom-strategies-plugin-system)
+14. [Project Structure](#project-structure)
+15. [Contributing](#contributing)
 
 ---
 
@@ -641,6 +642,72 @@ The default threshold is **0.70** (absolute value). Pairs with `|r| > 0.70` are 
 
 **When the matrix is not generated:** If fewer than 2 strategies have completed trades in a portfolio, correlation analysis is silently skipped and no CSV is written.
 
+## Parameter Sensitivity Sweep
+
+> [!IMPORTANT]
+> **Why sweep parameters?** Backtests are vulnerable to p-hacking — an intern (or an experienced analyst) who tweaks a single parameter until the equity curve looks great has almost certainly overfit to historical noise. The sensitivity sweep automatically varies every numeric param in a strategy's definition across a grid and reports what fraction of variants are profitable. A genuine edge survives parameter perturbations; a curve-fitted edge does not.
+
+Enable in `config.py`:
+
+```python
+"sensitivity_sweep_enabled": True,
+"sensitivity_sweep_pct": 0.20,    # ±20% per step
+"sensitivity_sweep_steps": 2,     # 2 steps each side → 5 values per param
+"sensitivity_sweep_min_val": 2,   # floor (prevents e.g. SMA period = 0)
+```
+
+**How it works:**
+
+For a strategy registered with `params={"fast": 20, "slow": 50}`, the sweep generates values:
+
+- `fast`: `[12, 16, 20, 24, 28]` (5 values at ±20% steps)
+- `slow`: `[30, 40, 50, 60, 70]` (5 values at ±20% steps)
+
+This produces a **25-point cartesian grid** (5 × 5). Each grid point runs as an independent simulation — they appear as separate rows in all summary tables. Non-numeric params (strings, bools) are carried through unchanged in every variant.
+
+**Strategy naming in results:**
+
+| Strategy name in output | Meaning |
+| --- | --- |
+| `SMA Crossover (20d/50d) [(base)]` | Base parameter values |
+| `SMA Crossover (20d/50d) [fast=16]` | Only `fast` changed from base |
+| `SMA Crossover (20d/50d) [fast=16 slow=40]` | Both params changed |
+
+**Sensitivity report (printed after the run):**
+
+```text
+======================================================================
+  PARAMETER SENSITIVITY REPORT
+======================================================================
+
+  SMA Crossover (20d/50d)
+  Robust — profitable in 72% of variants (18/25)
+
+  Variant                             P&L    Sharpe   Max DD   MC Score
+  ----------------------------------------------------------------------
+  (base)                            14.2%      1.42   18.3%        72 <-- base
+  fast=16                           12.8%      1.31   19.1%        65
+  fast=24                           11.4%      1.19   20.5%        58
+  fast=16 slow=40                    9.7%      1.08   22.3%        51
+  fast=12 slow=30                    2.1%      0.21   31.4%        12
+  fast=28 slow=70                   -3.4%      0.00   38.2%        -8
+  ...
+======================================================================
+```
+
+**Fragility verdict thresholds:**
+
+| % of variants profitable | Verdict |
+| --- | --- |
+| ≥ 30% | `Robust — profitable in X% of variants (Y/Z)` |
+| < 30% | `*** FRAGILE — profitable in only X% of variants ***` |
+
+**Performance note:** With 2 numeric params and `steps=2`, the sweep creates 25× more tasks. With 3 params it's 125×. Keep `sensitivity_sweep_enabled: False` for normal runs; enable only for targeted fragility checks on candidate strategies.
+
+**No-regression guarantee:** When `sensitivity_sweep_enabled: False` (default), the task-building loop is identical to pre-sweep behaviour — `param_variants = [base_params]`, one task per strategy.
+
+---
+
 ### Local Report Files
 
 | Location | Contents |
@@ -841,6 +908,10 @@ their `@register_strategy` decorator.
 | `wfa_split_ratio` | `0.80` | Walk-Forward Analysis IS/OOS split. `0.80` = first 80% of data is In-Sample, last 20% is Out-of-Sample. Set to `None` or `0` to disable. |
 | `roc_thresholds` | `[0.0, 0.5]` | Rate-of-change thresholds for ROC Momentum strategy |
 | `strategies` | `"all"` | `"all"` runs every plugin; a list of exact strategy names runs only those (see [Strategy Selection](#running-a-specific-subset-of-strategies-configpy)) |
+| `sensitivity_sweep_enabled` | `False` | Opt-in parameter sensitivity sweep — varies each numeric param ±pct across ±steps steps |
+| `sensitivity_sweep_pct` | `0.20` | Fractional step size (0.20 = ±20% per step) |
+| `sensitivity_sweep_steps` | `2` | Steps each side of base value (2 steps → 5 values per param) |
+| `sensitivity_sweep_min_val` | `2` | Floor for generated values (prevents e.g. SMA period = 0) |
 
 ---
 

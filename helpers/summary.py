@@ -448,3 +448,33 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
 
     except Exception as e:
         print(f"\n  -> WARNING: Could not save the overall portfolio summary. Error: {e}")
+
+
+def generate_sensitivity_report(all_results: list[dict], run_id: str) -> None:
+    """Print a parameter sensitivity fragility report when the sweep is enabled."""
+    from config import CONFIG
+    if not CONFIG.get("sensitivity_sweep_enabled", False) or not all_results:
+        return
+    groups = {}
+    for r in all_results:
+        base = r.get("Strategy", "").split(" [")[0]
+        groups.setdefault(base, []).append(r)
+    swept = {k: v for k, v in groups.items() if len(v) > 1}
+    if not swept:
+        return
+    print("\n" + "=" * 70)
+    print("  PARAMETER SENSITIVITY REPORT")
+    print("=" * 70)
+    for base_name, variants in swept.items():
+        profitable = [v for v in variants if v.get("pnl_percent", -1) > 0]
+        pct = len(profitable) / len(variants) * 100
+        flag = f"*** FRAGILE — profitable in only {pct:.0f}% of variants ***" if pct < 30 else \
+               f"Robust — profitable in {pct:.0f}% of variants ({len(profitable)}/{len(variants)})"
+        print(f"\n  {base_name}\n  {flag}")
+        print(f"\n  {'Variant':<35} {'P&L':>8} {'Sharpe':>8} {'Max DD':>8} {'MC Score':>9}")
+        print("  " + "-" * 70)
+        for r in sorted(variants, key=lambda x: (0 if "(base)" in x.get("Strategy", "") else 1, -x.get("pnl_percent", -999))):
+            label = r.get("Strategy", "").split(" [")[-1].rstrip("]") if " [" in r.get("Strategy", "") else "(base)"
+            mark = " <-- base" if label == "(base)" else ""
+            print(f"  {label:<35} {r.get('pnl_percent', 0):>7.1%} {r.get('sharpe_ratio', 0) or 0:>8.2f} {r.get('max_drawdown', 0) or 0:>7.1%}  {r.get('mc_score', 0) or 0:>8}{mark}")
+    print("=" * 70)

@@ -13,7 +13,8 @@ from services import get_data_service
 from helpers.indicators import calculate_sma, calculate_rsi, calculate_atr
 from helpers.registry import get_active_strategies
 from helpers.portfolio_simulations import run_portfolio_simulation
-from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary
+from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary, generate_sensitivity_report
+from helpers.sensitivity import build_param_grid, is_sweep_enabled, label_for_params
 from helpers.correlation import run_correlation_analysis, DEFAULT_THRESHOLD
 from helpers.monte_carlo import run_monte_carlo_simulation, analyze_mc_results
 from tqdm import tqdm
@@ -441,16 +442,24 @@ def main():
         # --- Generate tasks for THIS portfolio, WITHOUT the large `portfolio_data` ---
         tasks_for_this_portfolio = []
         for strat_name, strategy_config in get_active_strategies().items():
-            for stop_config in CONFIG['stop_loss_configs']:
-                # This tuple is now much smaller because `portfolio_data` is removed
-                task_args = (
-                    portfolio_name, strat_name, strategy_config["logic"],
-                    strategy_config.get("dependencies", []),
-                    stop_config, spy_buy_and_hold_return, qqq_buy_and_hold_return,
-                    strategy_config.get("params", {}),
-                    wfa_split_date,
-                )
-                tasks_for_this_portfolio.append(task_args)
+            base_params = strategy_config.get("params", {})
+            param_variants = build_param_grid(base_params) if is_sweep_enabled() and base_params else [base_params]
+
+            for variant_params in param_variants:
+                if len(param_variants) > 1:
+                    display_name = f"{strat_name} [{label_for_params(base_params, variant_params)}]"
+                else:
+                    display_name = strat_name
+
+                for stop_config in CONFIG['stop_loss_configs']:
+                    task_args = (
+                        portfolio_name, display_name, strategy_config["logic"],
+                        strategy_config.get("dependencies", []),
+                        stop_config, spy_buy_and_hold_return, qqq_buy_and_hold_return,
+                        variant_params,
+                        wfa_split_date,
+                    )
+                    tasks_for_this_portfolio.append(task_args)
 
         if not tasks_for_this_portfolio:
             logger.warning(f"No tasks generated for {portfolio_name}.")
@@ -524,6 +533,7 @@ def main():
 
     duration_seconds = time.monotonic() - start_time
     generate_portfolio_summary_report(all_portfolio_results, duration_seconds, run_folder_name)
+    generate_sensitivity_report(all_portfolio_results, run_folder_name)
     
     mins, secs = divmod(duration_seconds, 60)
     logger.info(f"All portfolio simulations complete in {int(mins)}m {secs:.2f}s.")
