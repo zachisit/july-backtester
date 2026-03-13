@@ -241,6 +241,25 @@ CONFIG = {
     # 0.0 = disabled (default). 0.01 = ±1% uniform noise per bar per price.
     # Use this to test whether a strategy is robust to small data perturbations.
     "noise_injection_pct": 0.01,
+
+    # ============================================================
+    # SECTION 13: STRATEGY SELECTION
+    # ============================================================
+    # Controls which registered plugins are actually run.
+    #
+    # "all"  → run every strategy discovered in custom_strategies/  (default)
+    #
+    # list   → run only the named strategies, e.g.:
+    #   "strategies": [
+    #       "SMA Crossover (20d/50d)",
+    #       "RSI Mean Reversion (14/30)",
+    #       "EMA Crossover w/ SPY+VIX Filter",
+    #   ],
+    #
+    # Names must match the 'name' argument passed to @register_strategy exactly
+    # (case-sensitive). Any name not found in the registry logs a WARNING and is
+    # skipped — a typo will not cause a crash.
+    "strategies": "all",
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

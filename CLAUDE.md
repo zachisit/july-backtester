@@ -107,6 +107,16 @@ def my_strategy(df, **kwargs):
 
 **Active strategies public API:** `from helpers.registry import get_active_strategies` — returns `{name: {logic, dependencies, params}}`. This is what `main.py` uses instead of the old `STRATEGIES` dict.
 
+**Strategy selection filter:** `CONFIG["strategies"]` controls which registered plugins are returned by `get_active_strategies()`. Set to `"all"` (default) to run everything, or a list of exact names to run a subset. Any requested name not found in the registry logs a `[WARNING]` and is skipped — a typo will not crash the run. Implemented via lazy `from config import CONFIG` inside `get_active_strategies()` to avoid a circular import.
+
+**Sub-daily strategy guard:** Strategies using `get_bars_for_period("Nmin", ...)` are wrapped in `if _TF == "MIN":` at module level so they are not registered (and do not raise `ValueError`) when `timeframe = "D"`.
+
+**Plugin library:** All legacy `_STATIC_STRATEGIES` entries have been migrated to:
+
+- `custom_strategies/rsi_strategies.py` — RSI Mean Reversion (14/30), (7/20), w/ SMA200 Filter, 1m Extreme Fade
+- `custom_strategies/macd_strategies.py` — MACD Crossover, MACD+RSI Confirmation, all EMA Crossover variants (Unfiltered, SPY-only, VIX-only, SPY+VIX), 1m EMA Scalp
+- `custom_strategies/mean_reversion.py` — Bollinger Band family, Stochastic, CMF, OBV, MA Bounce, SMA Trend, all MA Confluence variants, Donchian, Keltner, ATR variants, calendar/overnight strategies
+
 **Do Not Touch:** `helpers/indicators.py` strategy logic (all working correctly). The plugin system wraps around it.
 
 ## Output Structure (Run-First / Experiment Tracking)

@@ -327,7 +327,7 @@ Make sure your virtual environment is activated (`source venv/bin/activate` or t
 
 ### Portfolio Mode (Primary Use)
 
-Tests all active strategies in `strategies.py` against all uncommented portfolios in `config.py`. Uses all CPU cores.
+Tests all active strategies in `custom_strategies/` against all uncommented portfolios in `config.py`. Uses all CPU cores.
 
 ```bash
 python main.py
@@ -643,48 +643,75 @@ python report.py path/to/strategy.csv --equity 250000
 
 ## Available Strategies
 
-### Portfolio Mode — Active Strategies
+Strategies are loaded automatically from the `custom_strategies/` plugin directory.
+No file outside that directory needs to be edited to add, remove, or rename a strategy.
 
-Defined in the `STRATEGIES` dictionary in [strategies.py](strategies.py). Enable or disable strategies by commenting/uncommenting their blocks. All strategy logic lives in [helpers/indicators.py](helpers/indicators.py).
+### Currently Active (plugin files)
 
-**Currently active (uncommented):**
+| Plugin file | Registration name | Description |
+| --- | --- | --- |
+| `sma_crossovers.py` | SMA Crossover (20d/50d) | Buy when 20-bar SMA crosses above 50-bar SMA |
+| `sma_crossovers.py` | SMA Crossover (50d/200d) | Classic "golden cross" — 50-bar SMA crosses above 200-bar SMA |
 
-| Strategy | Description |
-| --- | --- |
-| SMA Crossover (20d/50d) | Buy when 20-day SMA crosses above 50-day SMA |
-| SMA Crossover (50d/200d) | Classic "golden cross" — 50-day SMA crosses above 200-day SMA |
+### Strategy Library — Full Plugin Catalogue
 
-**Available but commented out** (uncomment in `strategies.py` to enable): EMA Crossover variants (Unfiltered, SPY-Only Filter, VIX-Only Filter, SPY+VIX Filter), RSI Mean Reversion, MACD Crossover, Stochastic, OBV Trend, MA Bounce, SMA 200 Trend Filter, MACD+RSI Confirmation, ATR Trailing Stop variants, Bollinger Band variants (Fade, Breakout, Squeeze, with Regime Filter), Donchian Channel Breakout, Keltner Channel Breakout, Chaikin Money Flow, MA Confluence variants (with and without Regime Filter), Daily Overnight Hold with VIX Filter, Hold The Week, Weekend Hold, and sub-daily scalping strategies (1m EMA Scalp, 1m RSI Extreme Fade, 1m BB Squeeze).
+All strategies below are pre-built in `custom_strategies/` and inactive by default.
+To activate any strategy, simply copy the relevant `.py` file into `custom_strategies/`
+(if not already present) — the engine discovers it automatically on the next run.
+Individual strategies within a file can be commented out by removing or wrapping
+their `@register_strategy` decorator.
 
-### All Available Strategy Logic (helpers/indicators.py)
+#### RSI Strategies (`custom_strategies/rsi_strategies.py`)
 
-| Strategy | Description |
-| --- | --- |
-| SMA Crossover | Buy when fast SMA crosses above slow SMA |
-| EMA Crossover | EMA-based crossover with optional SPY and/or VIX regime filters |
-| RSI Mean Reversion | Buy when RSI drops below oversold level; exit when it recovers |
-| MACD Crossover | Buy when MACD line crosses above signal line |
-| MACD + RSI Confirmation | MACD crossover only taken when RSI is not overbought |
-| Bollinger Band Fade | Buy when price drops below lower band; exit at middle band |
-| Bollinger Band Breakout | Buy when price breaks above upper band |
-| Bollinger Band Squeeze | Enter on expansion after a low-volatility squeeze period |
-| Bollinger Band Fade w/ SPY Filter | Bollinger fade only when SPY is in an uptrend |
-| Stochastic Oscillator | Buy on oversold reading; exit at midpoint |
-| OBV Trend | On-Balance Volume trend following with moving average |
-| MA Bounce | Buy when price bounces off a moving average |
-| SMA 200 Trend Filter | Only trade when price is above the 200-day SMA |
-| MA Confluence | Requires alignment of three moving averages for entry |
-| MA Confluence w/ Regime Filter | MA Confluence with SPY+VIX regime overlay |
-| Donchian Breakout | Buy on new N-day high; exit on M-day low |
-| ATR Trailing Stop | Trend entry with an ATR-based trailing stop |
-| ATR Trailing Stop w/ Trend Filter | ATR trailing stop only taken above the 200-day SMA |
-| Keltner Channel Breakout | Buy on breakout above the Keltner Channel |
-| Chaikin Money Flow | Entry and exit based on money flow momentum |
-| Daily Overnight Hold w/ VIX Filter | Hold overnight on weekdays only when VIX is below threshold |
-| Hold The Week (Tue–Fri) | Calendar-based: buy Tuesday open, sell Friday close |
-| Weekend Hold (Fri–Mon) | Calendar-based: buy Friday close, sell Monday open |
-| EMA Scalping | Sub-daily EMA crossover for minute-level bars |
-| RSI Extreme Fade | Sub-daily RSI extreme reversal for minute-level bars |
+| Registration name | Key params | Description |
+| --- | --- | --- |
+| `RSI Mean Reversion (14/30)` | length=14d, oversold=30, exit=50 | Buy when RSI crosses back above 30; exit above 50 |
+| `RSI Mean Reversion (7/20)` | length=7d, oversold=20, exit=50 | Aggressive short-period RSI with tight oversold threshold |
+| `RSI (14d) w/ SMA200 Filter` | rsi=14d, sma=200d | RSI mean reversion, only taken when price is above 200-bar SMA |
+| `1m RSI Extreme Fade (14/20/80)` | rsi=14min, levels=20/80 | Sub-daily extreme RSI fade; requires `timeframe = "MIN"` |
+
+#### MACD & EMA Strategies (`custom_strategies/macd_strategies.py`)
+
+| Registration name | Key params | Dependencies | Description |
+| --- | --- | --- | --- |
+| `MACD Crossover (12/26/9)` | fast=12d, slow=26d, signal=9d | — | Buy when MACD line crosses above signal line |
+| `MACD+RSI Confirmation` | macd=12/26/9d, rsi=14d | — | MACD crossover gated by RSI > 50 |
+| `EMA Crossover (Unfiltered)` | fast=20d, slow=50d | — | Pure EMA crossover, no regime filter |
+| `EMA Crossover w/ SPY-Only Filter` | fast=20d, slow=50d | `spy` | EMA crossover, buys gated by SPY above 200-bar SMA |
+| `EMA Crossover w/ VIX-Only Filter` | fast=20d, slow=50d | `vix` | EMA crossover, buys gated by VIX below 30 |
+| `EMA Crossover w/ SPY+VIX Filter` | fast=20d, slow=50d | `spy`, `vix` | EMA crossover, full "Bull-Quiet" regime filter |
+| `1m EMA Scalp (5/15/50)` | emas=5/15/50min | — | Sub-daily EMA scalp; requires `timeframe = "MIN"` |
+
+#### Mean Reversion & Other Strategies (`custom_strategies/mean_reversion.py`)
+
+| Registration name | Key params | Dependencies | Description |
+| --- | --- | --- | --- |
+| `Bollinger Band Fade (20d/2.0)` | length=20d, std=2.0 | — | Buy below lower band; exit at middle SMA |
+| `Bollinger Band Fade (20d/2.5)` | length=20d, std=2.5 | — | Wider-band fade; fewer but more extreme entries |
+| `Bollinger Band Breakout (20d)` | length=20d, std=2 | — | Buy above upper band; momentum breakout direction |
+| `Bollinger Band Squeeze (20d/40d)` | length=20d, squeeze=40d | — | Enter breakout after low-volatility squeeze period |
+| `Bollinger Band Fade w/ SPY Trend Filter (20d/2.0)` | length=20d, std=2.0 | `spy` | BB fade gated by SPY above 200-bar SMA |
+| `1m BB Squeeze (10/2.0) / 20-period squeeze` | length=10min, squeeze=20min | — | Sub-daily BB squeeze; requires `timeframe = "MIN"` |
+| `1m BB Squeeze (20/2.0) / 50-period squeeze` | length=20min, squeeze=50min | — | Sub-daily BB squeeze; longer lookback variant |
+| `Stochastic Oscillator (14d)` | length=14d, oversold=20, exit=50 | — | Buy when %K crosses above 20; exit above 50 |
+| `Chaikin Money Flow (10d)` | length=10d, buy=0.0, sell=-0.05 | — | Enter on CMF crossover above 0 |
+| `Chaikin Money Flow (20d/0.05/0.05)` | length=20d, buy=0.05, sell=-0.05 | — | Symmetric CMF thresholds, slower signal |
+| `OBV Trend (20d MA)` | ma=20d | — | Long when On-Balance Volume is above its 20-bar SMA |
+| `MA Bounce (20d)` | ma=20d, filter=2 bars | — | Buy on 20-bar MA touch-and-recover pattern |
+| `SMA 200 Trend Filter (200d)` | ma=200d | — | Long when Close > 200-bar SMA; flat otherwise |
+| `MA Confluence (Full Stack)` | fast=10d, mid=20d, slow=50d | — | Enter on bullish MA stack; exit on bearish stack |
+| `MA Confluence (Fast Entry & Exit)` | fast=10d, mid=20d, slow=50d | — | Aggressive entry AND aggressive exit |
+| `MA Confluence (Fast MA Exit)` | fast=10d, mid=20d, slow=50d | — | Conservative entry; fast-MA exit |
+| `MA Confluence (Fast Entry)` | fast=10d, mid=20d, slow=50d | — | Fast entry; conservative bearish-stack exit |
+| `MA Confluence (Medium MA Exit)` | fast=10d, mid=20d, slow=50d | — | Conservative entry; medium-MA exit |
+| `MA Confluence (Full Stack) w/ Regime Filter` | fast=10d, mid=20d, slow=50d | `spy`, `vix` | MA Confluence + full SPY+VIX regime filter |
+| `Donchian Breakout (20d/10d)` | entry=20d, exit=10d | — | Buy on 20-bar high; exit on 10-bar low |
+| `Keltner Channel Breakout (20d)` | ema=20d, atr=20d, mult=2.0 | — | Buy above Keltner upper channel |
+| `ATR Trailing Stop (14/3)` | atr=14d, mult=3.0 | — | SMA-200 breakout entry with ATR trailing stop |
+| `ATR Trailing Stop w/ Trend Filter` | entry=20d, atr=14d, sma=200d | — | Donchian breakout entry + ATR trailing stop + SMA filter |
+| `Hold The Week (Tue-Fri)` | — | — | Calendar: buy Mon close, sell Thu close |
+| `Weekend Hold (Fri-Mon)` | — | — | Calendar: buy Thu close, sell Fri close |
+| `Daily Overnight Hold (weekdays) w/ VIX Filter` | — | `vix` | Weekday overnight hold when VIX < 20 |
 
 ---
 
@@ -721,6 +748,7 @@ Defined in the `STRATEGIES` dictionary in [strategies.py](strategies.py). Enable
 | `show_qqq_losers` | `False` | If False, hides strategies that underperform QQQ |
 | `wfa_split_ratio` | `0.80` | Walk-Forward Analysis IS/OOS split. `0.80` = first 80% of data is In-Sample, last 20% is Out-of-Sample. Set to `None` or `0` to disable. |
 | `roc_thresholds` | `[0.0, 0.5]` | Rate-of-change thresholds for ROC Momentum strategy |
+| `strategies` | `"all"` | `"all"` runs every plugin; a list of exact strategy names runs only those (see [Strategy Selection](#running-a-specific-subset-of-strategies-configpy)) |
 
 ---
 
@@ -745,47 +773,47 @@ Cache files are named using the pattern `{symbol}_{start}_{end}_{timeframe}_{mul
 
 The backtester uses a strategy plugin system built around `helpers/registry.py`. The `@register_strategy` decorator stores a strategy's name, logic function, dependencies, and parameters. `load_strategies("custom_strategies")` is called at startup and imports every `.py` file in that directory, triggering the decorators.
 
-### Step-by-step: add a new strategy
-
-**1. Add your signal logic to `helpers/indicators.py`** (or inline it directly):
+### Skeleton Strategy — copy and customise
 
 ```python
-# helpers/indicators.py  (or keep it inline in your plugin file)
-
-def my_roc_logic(df, length=10, threshold=0.0):
-    """Buy when Rate-of-Change crosses above threshold, exit when it falls back."""
-    df['ROC'] = df['Close'].pct_change(length)
-    df['Signal'] = 0
-    df.loc[df['ROC'] > threshold, 'Signal'] = 1
-    df.loc[df['ROC'] <= threshold, 'Signal'] = -1
-    return df
-```
-
-**2. Create a file in `custom_strategies/`** (any name, e.g. `my_roc.py`):
-
-```python
-# custom_strategies/my_roc.py
+# custom_strategies/my_strategy.py
 
 from helpers.registry import register_strategy
 from helpers.timeframe_utils import get_bars_for_period
-from helpers.indicators import my_roc_logic
 from config import CONFIG
 
 _TF  = CONFIG.get("timeframe", "D")
 _MUL = CONFIG.get("timeframe_multiplier", 1)
 
+# Optional: import a logic helper from helpers/indicators.py
+# from helpers.indicators import my_logic_function
+
 @register_strategy(
-    name="ROC Momentum (10d)",          # shown in all reports
-    dependencies=[],                    # add "spy" or "vix" if needed
+    name="My Strategy Name",           # shown in all reports and CSVs
+    dependencies=[],                   # add "spy" and/or "vix" if needed
     params={
-        "length":    get_bars_for_period("10d", _TF, _MUL),
-        "threshold": 0.0,
+        "length": get_bars_for_period("20d", _TF, _MUL),
+        # add more params here — they are merged into **kwargs at runtime
     },
 )
-def roc_momentum_10d(df, **kwargs):
-    """Rate-of-Change momentum. Timeframe-agnostic via get_bars_for_period."""
-    return my_roc_logic(df, length=kwargs["length"], threshold=kwargs["threshold"])
+def my_strategy(df, **kwargs):
+    """One-line description shown in the strategy docstring."""
+    length = kwargs["length"]
+
+    # --- your signal logic here ---
+    # df['Signal'] must be populated before returning:
+    #   1  = enter / hold long
+    #  -1  = exit / go flat
+    #   0  = no change (carry previous signal — forward-fill where needed)
+    df['Signal'] = 0  # replace with real logic
+    return df
 ```
+
+### Step-by-step: add a new strategy
+
+**1. (Optional) Add shared signal logic to `helpers/indicators.py`** if you want it reusable across multiple plugins. You can also write logic inline in the plugin file.
+
+**2. Create a `.py` file in `custom_strategies/`** using the skeleton above. Any filename works as long as it doesn't start with `_`.
 
 **3. Run the backtester** — no other files need touching:
 
@@ -794,7 +822,7 @@ python main.py --dry-run   # verify "Strategies: N" increased by 1
 python main.py
 ```
 
-That's it. The engine calls `load_strategies("custom_strategies")` at startup, imports `my_roc.py`, the decorator fires, and `"ROC Momentum (10d)"` appears in every summary table and CSV.
+That's it. The engine imports every `.py` file in `custom_strategies/` at startup, the decorator fires, and the strategy name appears in every summary table and CSV.
 
 ### Signal convention
 
@@ -806,33 +834,50 @@ That's it. The engine calls `load_strategies("custom_strategies")` at startup, i
 
 ### Strategies that need SPY or VIX data
 
-Declare `dependencies=["spy"]`, `dependencies=["vix"]`, or `dependencies=["spy", "vix"]`. The engine injects `spy_df` / `vix_df` into `**kwargs` at runtime:
+Declare `dependencies=["spy"]`, `dependencies=["vix"]`, or `dependencies=["spy", "vix"]`. The engine automatically injects `spy_df` and/or `vix_df` into `**kwargs` at runtime:
 
 ```python
 @register_strategy(
     name="EMA w/ SPY Filter",
     dependencies=["spy"],
-    params={"fast": 20, "slow": 50},
+    params={
+        "fast": get_bars_for_period("20d", _TF, _MUL),
+        "slow": get_bars_for_period("50d", _TF, _MUL),
+    },
 )
 def ema_spy_filter(df, **kwargs):
-    spy_df = kwargs["spy_df"]   # injected by main.py
+    spy_df = kwargs["spy_df"]   # injected automatically by main.py
     fast   = kwargs["fast"]
     slow   = kwargs["slow"]
-    # ... your logic using spy_df
+    # ... use spy_df in your logic
     return df
 ```
 
 ### Timeframe-agnostic bar counts
 
-Always use `get_bars_for_period("20d", TIMEFRAME, MULTIPLIER)` instead of hardcoded integers. This makes your strategy work correctly on daily, hourly, or minute data without any code changes.
+Always use `get_bars_for_period("20d", _TF, _MUL)` instead of raw integers. This converts a human-readable period string into the correct bar count for whatever timeframe is configured — the same strategy works on daily, hourly, or minute bars without any code changes.
 
-### Legacy format (strategies.py)
+### Enabling or disabling a strategy without deleting it
 
-Strategies can still be defined directly in `strategies.py` using `functools.partial` or wrapper functions (the original format). Any entry in `_STATIC_STRATEGIES` is merged with the auto-discovered registry — `_STATIC_STRATEGIES` takes precedence on name collision. Use this path only for strategies with complex wrapper requirements; prefer the plugin file approach for everything new.
+Comment out or remove the `@register_strategy(...)` decorator. The function still exists in the file but will not be registered. Alternatively, delete the file entirely to remove all strategies in it — `load_strategies` silently skips missing files.
 
-**Strategies that use SPY or VIX data** must declare them in `dependencies` and accept `**kwargs`. Create a wrapper function in `strategies.py` following the `strategy_ema_regime` pattern — this ensures the function is pickle-safe for multiprocessing. Pass the external DataFrame via kwargs inside the wrapper, then forward it to the underlying logic function. Always check with your data provider to confirm you're using the correct symbols they expect.
+### Running a specific subset of strategies (`config.py`)
 
-**Using period-based bar counts:** Always use `get_bars_for_period('20d', TIMEFRAME, MULTIPLIER)` rather than hardcoded integers for lookback periods. This ensures strategies work correctly regardless of the configured timeframe (daily, hourly, minute, etc.).
+Set the `"strategies"` key in `config.py` to run only a named subset of installed plugins without touching any plugin files:
+
+```python
+# config.py — run every registered strategy (default)
+"strategies": "all",
+
+# config.py — run only these three
+"strategies": [
+    "SMA Crossover (20d/50d)",
+    "RSI Mean Reversion (14/30)",
+    "EMA Crossover w/ SPY+VIX Filter",
+],
+```
+
+Names must match the `name` argument in `@register_strategy` **exactly** (case-sensitive). Any name that is not found in the registry logs a `[WARNING]` and is skipped — a typo will not crash the run. Confirm the active count with `--dry-run` before starting a long backtest.
 
 ---
 
@@ -841,26 +886,38 @@ Strategies can still be defined directly in `strategies.py` using `functools.par
 ```text
 july-backtester/
 ├── main.py                       # Single entry point — portfolio and single-asset mode
-├── strategies.py                 # STRATEGIES dict — enable/disable strategies here
 ├── config.py                     # All configuration — edit this before running
 ├── report.py                     # CLI tool to generate PDF/Markdown reports from CSVs
 ├── requirements.txt              # Python dependencies
 ├── .env.example                  # Copy to .env and add your Polygon API key
+├── strategies.py                 # Legacy file — static strategy definitions (still supported but not required)
+│
+├── custom_strategies/            # Plugin directory — drop *.py files here to add strategies
+│   ├── sma_crossovers.py         # SMA Crossover (20d/50d) and (50d/200d)  [active]
+│   ├── rsi_strategies.py         # RSI Mean Reversion, RSI+SMA200, RSI Scalping
+│   ├── macd_strategies.py        # MACD Crossover, MACD+RSI, EMA Crossover variants, EMA Scalp
+│   └── mean_reversion.py         # Bollinger, Stochastic, ATR, Donchian, Keltner, CMF, OBV,
+│                                 #   MA Confluence, calendar/overnight strategies
 │
 ├── helpers/
-│   ├── indicators.py             # All strategy logic and indicator calculations
+│   ├── indicators.py             # All strategy signal logic — do not edit
+│   ├── registry.py               # @register_strategy decorator, load_strategies, REGISTRY
 │   ├── simulations.py            # Single-asset trade simulation engine
 │   ├── portfolio_simulations.py  # Multi-asset portfolio simulation engine
 │   ├── monte_carlo.py            # Monte Carlo robustness analysis
 │   ├── summary.py                # Report generation, CSV export, S3 upload
 │   ├── caching.py                # Local Parquet cache (24h TTL)
 │   ├── aws_utils.py              # S3 upload helper; reads API key from env/.env
-│   └── timeframe_utils.py        # Bar period conversion utilities
+│   ├── timeframe_utils.py        # Bar period conversion utilities
+│   ├── wfa.py                    # Walk-Forward Analysis
+│   └── correlation.py            # Strategy correlation matrix
 │
 ├── services/
-│   ├── services.py               # Data provider factory (selects Polygon or Norgate)
-│   ├── polygon_service.py        # Polygon.io API integration with pagination and caching
-│   └── norgate_service.py        # Norgate Data integration
+│   ├── services.py               # Data provider factory (caching wrapper)
+│   ├── polygon_service.py        # Polygon.io API integration
+│   ├── norgate_service.py        # Norgate Data integration
+│   ├── yahoo_service.py          # Yahoo Finance via yfinance (no API key)
+│   └── csv_service.py            # Local CSV files
 │
 ├── trade_analyzer/               # Standalone report generation module
 │   ├── analyzer.py               # Main entry point for report generation
@@ -887,10 +944,11 @@ Contributions are welcome. To contribute:
 
 1. Fork the repository
 2. Create a branch: `git checkout -b feature/my-new-strategy`
-3. Add your strategy function to `helpers/indicators.py`
-4. Import it and register it in the `STRATEGIES` dictionary in `strategies.py`
-5. Run a quick validation on a small portfolio (e.g., `{"Test": ["SPY", "QQQ", "AAPL"]}`) to confirm it runs without errors
-6. Open a pull request describing the strategy logic, parameters, and any sample results
+3. Add your signal logic to `helpers/indicators.py` (or inline it in your plugin file)
+4. Create a plugin file in `custom_strategies/` using the `@register_strategy` decorator (see [Adding Custom Strategies](#adding-custom-strategies-plugin-system) above)
+5. Validate with `python main.py --dry-run` to confirm the strategy count increases
+6. Run a quick backtest on a small portfolio (e.g., `{"Test": ["SPY", "QQQ", "AAPL"]}`) to confirm it runs without errors
+7. Open a pull request describing the strategy logic, parameters, and any sample results
 
 Please do not commit API keys, `.env` files, `data_cache/` contents, or the generated `output/` folder. These are all covered by `.gitignore`.
 

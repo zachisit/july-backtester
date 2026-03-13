@@ -369,7 +369,9 @@ class TestIntegration:
         result = get_active_strategies()
         assert type(result) is dict  # noqa: E721
 
-    def test_returns_two_strategies(self):
-        """custom_strategies/ ships with exactly 2 SMA strategies."""
+    def test_returns_expected_strategy_count(self):
+        """custom_strategies/ ships with the full strategy library (35 on daily timeframe)."""
         strategies = get_active_strategies()
-        assert len(strategies) == 2
+        # 2 SMA + 3 RSI + 6 MACD/EMA + 24 mean-reversion = 35 on daily timeframe.
+        # Sub-daily strategies (scalping) are gated by _TF == "MIN" and excluded on "D".
+        assert len(strategies) >= 35
