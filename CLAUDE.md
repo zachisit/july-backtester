@@ -423,6 +423,22 @@ Interactive four-step wizard for first-time setup. Writes `config_starter.py` to
 
 **Tests:** `tests/test_init_wizard.py` — 13 tests covering `_build_config` for all four providers, required keys, mode branching, and colour helper behaviour with/without TTY.
 
+## MC Block-Bootstrap
+
+Controlled by two config keys (SECTION 18):
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `mc_sampling` | `"iid"` | `"iid"` = independent resampling (original behaviour); `"block"` = block-bootstrap |
+| `mc_block_size` | `None` | Trades per block. `None` = auto: `floor(sqrt(N))` (Politis-Romano rule of thumb) |
+
+- **`"iid"` (default)**: trades are resampled independently, each with equal probability. Fast and statistically clean for strategies with no autocorrelation.
+- **`"block"`**: consecutive blocks of `block_size` trades are sampled as a unit, preserving win/loss streaks and regime clustering. Use when the strategy shows known regime dependency (e.g., consistently loses only during bear markets / high-VIX periods identified by the Regime Heatmap).
+- **Auto block size**: `max(1, int(N ** 0.5))`. For 100 trades → blocks of 10; for 400 trades → blocks of 20.
+- **Circular wrap**: blocks that extend past the end of the trade list wrap around — no trades are omitted and edge blocks are not under-represented.
+- **No caller changes**: `run_monte_carlo_simulation` signature is unchanged. The refactor extracted a `_equity_and_drawdown` helper used by both branches.
+- **Tests**: `tests/test_mc_block_bootstrap.py` — 9 tests: config defaults, output shapes, auto block size resolution, streak divergence (>1% std difference), small trade guard, i.i.d. seed match, and no-key default.
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float

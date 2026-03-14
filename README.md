@@ -503,6 +503,13 @@ The **Overall Performance Metrics** page of the PDF tearsheet includes two addit
 
 Every strategy with 50+ trades is stress-tested with 1,000 simulations that randomly reshuffle the historical trade sequence. This reveals whether results depend on lucky ordering or are genuinely robust.
 
+**Sampling methods** (controlled by `mc_sampling` in config):
+
+| Method | Config value | Description |
+| --- | --- | --- |
+| i.i.d. (default) | `"iid"` | Each trade is resampled independently. Fast and statistically standard. Assumes no autocorrelation between trades. |
+| Block-bootstrap | `"block"` | Consecutive *blocks* of trades are sampled as a unit, preserving win/loss streaks and regime clustering. Recommended when the Regime Heatmap shows the strategy only loses in one VIX bucket. Auto block size = `floor(sqrt(N))` (Politis-Romano rule of thumb). |
+
 | Score | Verdict | What It Means |
 | --- | --- | --- |
 | 5 | Robust | Consistent across simulations. Results are likely genuine. |
@@ -915,6 +922,8 @@ their `@register_strategy` decorator.
 | `commission_per_share` | `0.002` | Commission in dollars per share |
 | `min_trades_for_mc` | `50` | Minimum trades required to run Monte Carlo |
 | `num_mc_simulations` | `1000` | Number of Monte Carlo simulations per strategy |
+| `mc_sampling` | `"iid"` | MC sampling method: `"iid"` (independent, default) or `"block"` (block-bootstrap, preserves streaks) |
+| `mc_block_size` | `None` | Block size for `"block"` sampling. `None` = auto (`floor(sqrt(N))`) |
 | `save_individual_trades` | `True` | Save per-trade CSV logs to `raw_trades/` |
 | `save_only_filtered_trades` | `False` | If True, only save logs for strategies passing the display filters |
 | `mc_score_min_to_show_in_summary` | `-9999` | Minimum MC score to include in output table |

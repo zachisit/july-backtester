@@ -295,6 +295,16 @@ CONFIG = {
     # 0.10 = 10% p.a. (hard-to-borrow small/mid cap)
     # 0.0  = disable borrow cost
     "htb_rate_annual": 0.02,
+
+    # ============================================================
+    # SECTION 18: MONTE CARLO SAMPLING METHOD
+    # ============================================================
+    # "iid"   — current default: trades resampled independently (fast, ignores streaks)
+    # "block" — block-bootstrap: samples consecutive blocks of trades, preserving
+    #            win/loss autocorrelation and regime clustering.
+    # mc_block_size: number of consecutive trades per block. None = auto (sqrt of trade count).
+    "mc_sampling": "iid",
+    "mc_block_size": None,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
