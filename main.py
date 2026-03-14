@@ -165,6 +165,19 @@ def run_single_simulation(args):
         return None
 
 def main():
+    # --- INIT WIZARD ---
+    import argparse as _argparse
+    _parser = _argparse.ArgumentParser(add_help=False)
+    _parser.add_argument("--init", action="store_true")
+    _parser.add_argument("--dry-run", action="store_true")
+    _parser.add_argument("--all", action="store_true")
+    _known, _ = _parser.parse_known_args()
+    if _known.init:
+        from helpers.init_wizard import run_init_wizard
+        run_init_wizard()
+        return
+    # --- END INIT WIZARD ---
+
     # --- S1: API KEY CHECK ---
     import os
     try:

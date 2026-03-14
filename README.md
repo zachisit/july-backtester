@@ -338,6 +338,21 @@ These control what appears in the printed summary table and which trade logs get
 
 Make sure your virtual environment is activated (`source venv/bin/activate` or the Windows equivalent) before running.
 
+> **First time?** Run the setup wizard before anything else:
+> ```bash
+> python main.py --init
+> ```
+> The wizard walks you through provider selection, API key setup, capital/dates, and symbol choice, then writes a ready-to-use `config_starter.py`. Rename it to `config.py` and you're ready to run.
+
+### CLI Flags
+
+| Flag | Description |
+| --- | --- |
+| *(none)* | Full backtest run |
+| `--init` | Launch the first-time setup wizard |
+| `--dry-run` | Validate config and print run summary without fetching data |
+| `--name <label>` | Prefix the output folder with a custom label |
+
 ### Portfolio Mode (Primary Use)
 
 Tests all active strategies in `custom_strategies/` against all uncommented portfolios in `config.py`. Uses all CPU cores.

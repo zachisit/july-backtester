@@ -398,6 +398,31 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 - **`main.py` integration**: `result["regime_heatmap"]` set in `run_single_simulation`; printed per-strategy in the `main()` loop after `generate_per_portfolio_summary`.
 - **Tests**: `tests/test_regime_heatmap.py` — 16 tests covering boundary VIX values, forward-fill, None guards, DataFrame shape, fractional P&L values, multi-year rows, and stdout content.
 
+## Init Wizard (--init)
+
+```bash
+rtk python main.py --init
+```
+
+Interactive four-step wizard for first-time setup. Writes `config_starter.py` to the project root.
+
+**Four steps:**
+1. **Data provider** — choose `yahoo` / `csv` / `polygon` / `norgate`. If Polygon is selected, optionally enter the API key (appended to `.env`).
+2. **Capital & dates** — `initial_capital` (default 100 000), `start_date` (default 2010-01-01). End date is always a dynamic `datetime.now()` expression in the written file.
+3. **What to test** — `single` (comma-separated tickers → `symbols_to_test`) or `portfolio` (nasdaq100 JSON or custom named list → `portfolios`).
+4. **Confirm & write** — shows a file list, asks for explicit `y/n` confirmation before writing anything.
+
+**Design constraints:**
+- Stdlib only (`sys`, `os`, `pathlib`, `textwrap`, `datetime`, `argparse`) — zero new dependencies.
+- No network calls.
+- Nothing written without explicit user confirmation at Step 4.
+- Will not overwrite `config.py` if it already exists; warns and instructs the user to copy sections manually.
+- Polygon API key appended to `.env` only if `POLYGON_API_KEY=` is not already present.
+
+**Interactive prompt functions** (`_ask`, `_confirm`) require a TTY and are not unit-tested. `_build_config` and colour helpers are fully unit-tested.
+
+**Tests:** `tests/test_init_wizard.py` — 13 tests covering `_build_config` for all four providers, required keys, mode branching, and colour helper behaviour with/without TTY.
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float
