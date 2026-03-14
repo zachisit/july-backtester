@@ -281,6 +281,11 @@ CONFIG = {
     "sensitivity_sweep_pct": 0.20,        # ±20% per step
     "sensitivity_sweep_steps": 2,         # 2 steps each side → 5 values per param
     "sensitivity_sweep_min_val": 2,       # floor (prevents e.g. SMA period = 0)
+
+    # ============================================================
+    # SECTION 16: ROLLING METRICS
+    # ============================================================
+    "rolling_sharpe_window": 126,         # trading days (~6 months). 0 or None to disable.
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

@@ -340,6 +340,23 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 - **No-regression guarantee**: when `sensitivity_sweep_enabled: False` (default), `param_variants = [base_params]` — identical to pre-sweep behaviour. The existing task-building loop runs exactly as before.
 - **Tests**: `tests/test_sensitivity.py` — covers `build_param_grid` (12 tests), `label_for_params`, and the no-regression default path.
 
+## Rolling Sharpe (126-Day)
+
+- **`calculate_rolling_sharpe(portfolio_timeline, window, risk_free_rate)`** in `helpers/simulations.py` — computes a rolling annualised Sharpe using excess returns (daily return minus `rf_daily`).
+- **Config key**: `rolling_sharpe_window` (default: `126` trading days ≈ 6 months). Set to `0` or `None` to disable.
+- **Three scalar columns** added to all summary tables and the overall portfolio CSV:
+
+  | Column | Key | Meaning |
+  | --- | --- | --- |
+  | `Roll.Sharpe(avg)` | `rolling_sharpe_mean` | Mean of all valid 126-day Sharpe windows |
+  | `Roll.Sharpe(min)` | `rolling_sharpe_min` | Worst 126-day window — regime stress indicator |
+  | `Roll.Sharpe(last)` | `rolling_sharpe_final` | Most recent 126-day window — current momentum |
+
+- **Interpretation**: `Roll.Sharpe(min) < -0.5` indicates a prolonged losing streak even if the overall (single-number) Sharpe looks healthy — a red flag for regime dependency.
+- **Shows `N/A`** when the equity curve has fewer bars than `rolling_sharpe_window` (insufficient history) or when the window is disabled.
+- **NaN mechanics**: `pct_change()` produces NaN at index 0, so the first valid rolling value appears at index `window` (not `window - 1`) of the equity curve.
+- **Tests**: `tests/test_rolling_sharpe.py` — 9 tests covering output length, NaN boundary at correct index, uptrend direction, rf-rate effect, and window-size comparison.
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float

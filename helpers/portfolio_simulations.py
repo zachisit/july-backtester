@@ -288,5 +288,6 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     final_pnl_percent = (portfolio_timeline.dropna().iloc[-1] / initial_capital) - 1
     metrics = calculate_advanced_metrics(pnl_list, portfolio_timeline.dropna(), duration_list)
 
-    return {**metrics, "pnl_percent": final_pnl_percent, "Trades": len(pnl_list), 
-            "trade_pnl_list": pnl_list, "trade_log": trade_log, "initial_capital": initial_capital}
+    return {**metrics, "pnl_percent": final_pnl_percent, "Trades": len(pnl_list),
+            "trade_pnl_list": pnl_list, "trade_log": trade_log, "initial_capital": initial_capital,
+            "portfolio_timeline": portfolio_timeline.dropna()}

@@ -136,6 +136,19 @@ def run_single_simulation(args):
                 result['expectancy'] = None
                 result['sqn'] = None
 
+            # --- Rolling Sharpe ---
+            from helpers.simulations import calculate_rolling_sharpe as _rs
+            _tl = result.get("portfolio_timeline")
+            _w  = CONFIG.get("rolling_sharpe_window", 126)
+            if _tl is not None and _w and len(_tl) > _w:
+                _series = _rs(_tl, window=_w)
+                _valid  = _series.dropna()
+                result["rolling_sharpe_mean"]  = float(_valid.mean())  if len(_valid) >= 2 else None
+                result["rolling_sharpe_min"]   = float(_valid.min())   if len(_valid) >= 2 else None
+                result["rolling_sharpe_final"] = float(_valid.iloc[-1]) if len(_valid) >= 1 else None
+            else:
+                result["rolling_sharpe_mean"] = result["rolling_sharpe_min"] = result["rolling_sharpe_final"] = None
+
             return result
             
     except Exception:

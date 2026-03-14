@@ -455,6 +455,9 @@ SMA Crossover (50d/200d)       +74.1%   +12.1%   38.2%    0.98    0.65     46.1%
 | Max DD | Largest peak-to-trough decline during the period |
 | Calmar | Annualized return divided by max drawdown (higher = better risk-adjusted return) |
 | Sharpe | Risk-adjusted return relative to volatility (above 1.0 is generally considered good; above 2.0 is strong) |
+| Roll.Sharpe(avg) | Mean of all 126-day rolling Sharpe windows — regime-averaged quality |
+| Roll.Sharpe(min) | Worst 126-day rolling Sharpe — reveals if there was a prolonged losing streak even when overall Sharpe looks healthy |
+| Roll.Sharpe(last) | Most recent 126-day rolling Sharpe — current momentum signal |
 | Win Rate | Percentage of trades that were profitable |
 | Trades | Total number of completed trades |
 | Expectancy (R) | Average R-Multiple per trade — how many R the strategy earns per unit risked (see below) |
@@ -912,6 +915,7 @@ their `@register_strategy` decorator.
 | `sensitivity_sweep_pct` | `0.20` | Fractional step size (0.20 = ±20% per step) |
 | `sensitivity_sweep_steps` | `2` | Steps each side of base value (2 steps → 5 values per param) |
 | `sensitivity_sweep_min_val` | `2` | Floor for generated values (prevents e.g. SMA period = 0) |
+| `rolling_sharpe_window` | `126` | Rolling Sharpe window in trading days (~6 months). Set to `0` or `None` to disable. |
 
 ---
 
