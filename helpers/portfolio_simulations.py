@@ -10,7 +10,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     (Version hardened against KeyError from misaligned dates).
     """
     execution_time = CONFIG.get("execution_time", "open").lower()
-    
+    htb_rate_annual = CONFIG.get("htb_rate_annual", 0.0)
+    htb_rate_daily  = (1.0 + htb_rate_annual) ** (1.0 / 252) - 1.0 if htb_rate_annual > 0 else 0.0
+    short_positions: dict = {}
+
     cash = initial_capital
     positions = {}
     all_dates = sorted(list(set(date for df in portfolio_data.values() for date in df.index)))
@@ -36,6 +39,12 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 last_valid_date = portfolio_data[symbol].index[portfolio_data[symbol].index < date][-1]
                 close_price = portfolio_data[symbol].loc[last_valid_date]['Close']
                 current_market_value += pos['shares'] * close_price
+
+        for symbol, spos in short_positions.items():
+            if date in portfolio_data[symbol].index:
+                cur = portfolio_data[symbol].loc[date].get('Close')
+                if pd.notna(cur):
+                    current_market_value += (spos['shares'] * spos['entry_price']) - (spos['shares'] * cur)
 
         total_equity = cash + current_market_value
         portfolio_timeline[date] = total_equity
@@ -122,7 +131,63 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             exited_symbols.append(symbol)
 
         for symbol in exited_symbols: del positions[symbol]
-        
+
+        # --- BORROW COST DEBIT (shorts held overnight) ---
+        for symbol, spos in list(short_positions.items()):
+            if htb_rate_daily > 0:
+                cost = spos['notional'] * htb_rate_daily
+                cash -= cost
+                spos['total_borrow_cost'] = spos.get('total_borrow_cost', 0.0) + cost
+
+        # --- SHORT COVER (signal = -1 while short) ---
+        short_exited = []
+        for symbol, spos in list(short_positions.items()):
+            if date not in portfolio_data[symbol].index:
+                continue
+            sig_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
+            if pd.notna(sig_date) and sig_date in signals[symbol].index and signals[symbol].loc[sig_date] < 0:
+                cover = portfolio_data[symbol].loc[date].get('Open' if execution_time == 'open' else 'Close')
+                if pd.isna(cover):
+                    continue
+                cover_slip = cover * (1 + CONFIG['slippage_pct'])
+                commission = spos['shares'] * CONFIG['commission_per_share']
+                net_pnl = (spos['shares'] * spos['entry_price']) - (spos['shares'] * cover_slip) - (2 * commission) - spos.get('total_borrow_cost', 0.0)
+                cash += spos['shares'] * (spos['entry_price'] - cover_slip) - commission
+                trade_counter += 1
+                trade_log.append({
+                    'Symbol': symbol, 'Trade': f"Short {trade_counter}",
+                    'EntryDate': spos['entry_date'].strftime('%Y-%m-%d'), 'EntryPrice': spos['entry_price'],
+                    'ExitDate': date.strftime('%Y-%m-%d'), 'ExitPrice': cover_slip,
+                    'Profit': net_pnl, 'ProfitPct': net_pnl / spos['notional'] if spos['notional'] > 0 else 0,
+                    'Shares': spos['shares'], 'is_win': 1 if net_pnl > 0 else 0,
+                    'HoldDuration': (date - spos['entry_date']).days,
+                    'MAE_pct': 0.0, 'MFE_pct': 0.0, 'ExitReason': 'Short Cover',
+                    'InitialRisk': 0.0, 'RMultiple': None,
+                })
+                short_exited.append(symbol)
+        for symbol in short_exited:
+            del short_positions[symbol]
+
+        # --- SHORT ENTRY (signal = -2, not already in any position) ---
+        for symbol, df in portfolio_data.items():
+            if date not in df.index or symbol in positions or symbol in short_positions:
+                continue
+            sig_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
+            if pd.notna(sig_date) and sig_date in signals[symbol].index and signals[symbol].loc[sig_date] == -2:
+                ep = df.loc[date].get('Open' if execution_time == 'open' else 'Close')
+                if pd.isna(ep) or ep <= 0:
+                    continue
+                alloc = min(total_equity * allocation_pct, cash)
+                if alloc <= 0:
+                    continue
+                shares = alloc / ep
+                commission = shares * CONFIG['commission_per_share']
+                cash += shares * ep - commission   # short seller receives proceeds
+                short_positions[symbol] = {
+                    'entry_date': date, 'entry_price': ep,
+                    'shares': shares, 'notional': shares * ep, 'total_borrow_cost': 0.0,
+                }
+
         # --- POSITION ENTRY LOGIC ---
         for symbol, df in portfolio_data.items():
             # <-- NEW CHECK: If the current date doesn't exist for this stock,

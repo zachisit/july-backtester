@@ -286,6 +286,15 @@ CONFIG = {
     # SECTION 16: ROLLING METRICS
     # ============================================================
     "rolling_sharpe_window": 126,         # trading days (~6 months). 0 or None to disable.
+
+    # ============================================================
+    # SECTION 17: SHORT SELLING
+    # ============================================================
+    # Hard-To-Borrow annual rate debited daily from cash while a short is open.
+    # 0.02 = 2% p.a. (easy-to-borrow large cap)
+    # 0.10 = 10% p.a. (hard-to-borrow small/mid cap)
+    # 0.0  = disable borrow cost
+    "htb_rate_annual": 0.02,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

@@ -916,6 +916,32 @@ their `@register_strategy` decorator.
 | `sensitivity_sweep_steps` | `2` | Steps each side of base value (2 steps → 5 values per param) |
 | `sensitivity_sweep_min_val` | `2` | Floor for generated values (prevents e.g. SMA period = 0) |
 | `rolling_sharpe_window` | `126` | Rolling Sharpe window in trading days (~6 months). Set to `0` or `None` to disable. |
+| `htb_rate_annual` | `0.02` | Annual Hard-To-Borrow rate (2% = easy-to-borrow large cap; 10% = HTB small/mid cap). Debited daily while a short position is held. Set to `0.0` to disable borrow cost. |
+
+---
+
+## Short Selling
+
+The engine supports short positions via the `-2` signal convention. All existing strategies use `1/0/-1` and are fully backward-compatible.
+
+| Signal | Meaning |
+| --- | --- |
+| `1` | Enter long |
+| `0` | No change |
+| `-1` | Exit long **or** cover short |
+| `-2` | Enter short |
+
+**How it works:** When a strategy emits `-2` for a symbol, a short position is opened at the next bar's Open (or Close, depending on `execution_time`). The short seller receives the proceeds into cash. Each subsequent day, a Hard-To-Borrow fee is debited: `notional × ((1 + htb_rate_annual)^(1/252) - 1)`. When the strategy emits `-1`, the position is covered and the borrow cost is netted against the P&L.
+
+**Short trades in the output:** Short trades appear in trade CSVs and summary tables with `ExitReason: "Short Cover"`. They are included in all P&L, Sharpe, and Monte Carlo calculations alongside long trades.
+
+**Configuring borrow cost:**
+
+```python
+"htb_rate_annual": 0.02,  # 2% p.a. (easy-to-borrow, e.g. large-cap S&P 500)
+"htb_rate_annual": 0.10,  # 10% p.a. (hard-to-borrow, e.g. high-short-interest small cap)
+"htb_rate_annual": 0.0,   # disabled — no borrow cost modelled
+```
 
 ---
 

@@ -357,6 +357,27 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 - **NaN mechanics**: `pct_change()` produces NaN at index 0, so the first valid rolling value appears at index `window` (not `window - 1`) of the equity curve.
 - **Tests**: `tests/test_rolling_sharpe.py` — 9 tests covering output length, NaN boundary at correct index, uptrend direction, rf-rate effect, and window-size comparison.
 
+## Short Selling & Borrow Cost
+
+**Signal convention** — all existing strategies use 1/0/−1 and are fully unaffected:
+
+| Signal | Meaning |
+| --- | --- |
+| `1` | Enter long |
+| `0` | No change |
+| `-1` | Exit long **or** cover short |
+| `-2` | Enter short |
+
+- **Borrow cost**: `htb_rate_annual` (config, default `0.02`) converted to a daily compound rate `(1 + annual)^(1/252) - 1` and debited from cash each day a short is held. Set to `0.0` to disable.
+- **Three new blocks in the daily loop** (all additive — no long-path code changed):
+  1. **Borrow cost debit**: iterates `short_positions`, subtracts `notional × htb_rate_daily` from cash and accumulates `spos['total_borrow_cost']`.
+  2. **Short cover**: on signal `< 0` for a held short, fills at Open/Close + slippage, deducts commission both sides, nets `total_borrow_cost` out of profit, logs to `trade_log`.
+  3. **Short entry**: on signal `== -2`, skips if `symbol in positions or symbol in short_positions`, allocates `min(total_equity × allocation_pct, cash)`, receives proceeds into cash.
+- **Short trades in `trade_log`**: `Trade: "Short N"`, `ExitReason: "Short Cover"`. `RMultiple` is `None` for shorts (initial risk undefined without a stop).
+- **Equity MTM for shorts**: `current_market_value += (shares × entry_price) − (shares × current_close)` — profit when price falls.
+- **Backward compatibility**: all existing 1/0/−1 strategies skip all three new blocks entirely (`short_positions` is always empty for them).
+- **Tests**: `tests/test_short_selling.py` — 7 tests covering config defaults, daily-rate arithmetic, 30-day cost estimate, and no-regression empty-shorts loop.
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float
