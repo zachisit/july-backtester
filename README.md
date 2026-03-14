@@ -945,6 +945,39 @@ The engine supports short positions via the `-2` signal convention. All existing
 
 ---
 
+## Regime Heatmap
+
+After each strategy run, the engine prints a **VIX Regime Heatmap** — a year × volatility-bucket P&L table that shows whether a strategy's edge is regime-dependent.
+
+**VIX buckets:**
+
+| Bucket | VIX range |
+| --- | --- |
+| Low (<15) | VIX below 15 — calm, low-fear environment |
+| Mid (15–25) | VIX 15 to 25 — normal / moderate volatility |
+| High (>25) | VIX above 25 — elevated fear / stress |
+
+Each trade's **entry date** is classified into a bucket using the VIX close on that date (forward-filled from the prior trading day for weekends and holidays). P&L is expressed as a fraction of initial capital.
+
+**Example terminal output:**
+
+```text
+--- REGIME HEATMAP: MA Crossover ---
+  Year        Low (<15)    Mid (15-25)     High (>25)
+----------------------------------------------------
+  2022           +0.0%         -3.4%         +1.2%
+  2023           +5.1%         +2.8%          0.0%
+  2024           +3.3%         +1.6%         -0.5%
+----------------------------------------------------
+  TOTAL          +8.4%         +1.0%         +0.7%
+```
+
+**Interpretation:** A strategy that shows strong positive returns only in `Low (<15)` and flat or negative in `High (>25)` is regime-dependent — it may struggle in volatile markets. A robust strategy should show consistent positive contribution across all three buckets.
+
+**Configuration:** The heatmap uses VIX data loaded as the `vix_df_global` ticker. No extra config keys are required — the output appears automatically whenever VIX data is available and the trade log is non-empty.
+
+---
+
 ## Data Caching
 
 Downloaded price data is cached locally in `data_cache/` as Parquet files with a 24-hour TTL.

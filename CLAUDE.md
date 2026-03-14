@@ -378,6 +378,26 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 - **Backward compatibility**: all existing 1/0/−1 strategies skip all three new blocks entirely (`short_positions` is always empty for them).
 - **Tests**: `tests/test_short_selling.py` — 7 tests covering config defaults, daily-rate arithmetic, 30-day cost estimate, and no-regression empty-shorts loop.
 
+## Regime Heatmap
+
+`helpers/regime.py` — pure reporting layer; no engine changes, no strategy signals modified.
+
+**VIX buckets**:
+
+| Bucket | Condition | Constant |
+| --- | --- | --- |
+| Low | VIX < 15 | `REGIME_LOW` |
+| Mid | 15 ≤ VIX ≤ 25 | `REGIME_MID` |
+| High | VIX > 25 | `REGIME_HIGH` |
+| Unknown | No prior data | `REGIME_UNK` |
+
+- **Classification date**: each trade's `EntryDate` is used for regime lookup (not an average over the hold period).
+- **Forward-fill**: weekends and holidays inherit the most recent prior VIX close. The lookup date is unioned into the series as NaN then `ffill()` is applied, so no date is ever artificially inserted into real data.
+- **`build_regime_heatmap(trade_log, vix_df, initial_capital)`**: returns a `year × regime` DataFrame where each cell is `sum(Profit) / initial_capital`. Returns `None` if `trade_log` is empty, `vix_df` is None/empty, or `initial_capital ≤ 0`. All three regime columns are always present even when no trades fall in a bucket.
+- **`print_regime_heatmap(heatmap, strategy_name)`**: prints a formatted year × bucket table to stdout. Silent when `heatmap` is None.
+- **`main.py` integration**: `result["regime_heatmap"]` set in `run_single_simulation`; printed per-strategy in the `main()` loop after `generate_per_portfolio_summary`.
+- **Tests**: `tests/test_regime_heatmap.py` — 16 tests covering boundary VIX values, forward-fill, None guards, DataFrame shape, fractional P&L values, multi-year rows, and stdout content.
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float

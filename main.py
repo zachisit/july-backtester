@@ -149,6 +149,14 @@ def run_single_simulation(args):
             else:
                 result["rolling_sharpe_mean"] = result["rolling_sharpe_min"] = result["rolling_sharpe_final"] = None
 
+            # --- Regime Heatmap ---
+            from helpers.regime import build_regime_heatmap as _build_heatmap
+            result["regime_heatmap"] = _build_heatmap(
+                result.get("trade_log", []),
+                vix_df_global,
+                result.get("initial_capital", CONFIG["initial_capital"]),
+            )
+
             return result
             
     except Exception:
@@ -543,6 +551,11 @@ def main():
             logger.warning(f"  Correlation analysis skipped for '{p_name}': {_corr_err}")
 
         generate_per_portfolio_summary(p_results, p_name, spy_buy_and_hold_return, qqq_buy_and_hold_return, run_folder_name, corr_matrix=corr_matrix)
+
+        from helpers.regime import print_regime_heatmap as _print_heatmap
+        for _r in p_results:
+            if _r.get("regime_heatmap") is not None:
+                _print_heatmap(_r["regime_heatmap"], _r.get("Strategy", "Unknown"))
 
     duration_seconds = time.monotonic() - start_time
     generate_portfolio_summary_report(all_portfolio_results, duration_seconds, run_folder_name)
