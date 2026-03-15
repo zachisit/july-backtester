@@ -21,6 +21,7 @@ helpers/portfolio_simulations.py   # Multi-asset portfolio simulation engine
 helpers/monte_carlo.py             # Monte Carlo robustness scoring
 helpers/summary.py                 # Report generation, S3 upload
 helpers/wfa.py                     # Walk-Forward Analysis (get_split_date, split_trades, evaluate_wfa)
+helpers/ml_export.py               # ML trade feature export (export_trade_features)
 helpers/correlation.py             # Strategy correlation matrix (run_correlation_analysis, compute_avg_correlations)
 helpers/caching.py                 # Local Parquet cache (24h TTL)
 helpers/aws_utils.py               # S3 upload helper (upload_file_to_s3); reads API key from env or .env via get_secret
@@ -61,6 +62,7 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "wfa_split_ratio": 0.80          # 0.80 = 80% IS / 20% OOS; None or 0 = disabled
 "wfa_folds": None                # None = rolling WFA disabled; int >= 2 = number of folds
 "wfa_min_fold_trades": 5         # min OOS trades per fold to score it (rolling WFA only)
+"export_ml_features": False      # True = write ml_features.parquet after the run (requires pyarrow)
 "noise_injection_pct": 0.0       # 0.0 = disabled (default, stress testing is opt-in). Set to e.g. 0.01 for ±1% stress test.
 "risk_free_rate": 0.05           # annual, used in Sharpe calculation (default 5% — US T-bill proxy)
 ```
@@ -497,6 +499,24 @@ Controlled by two config keys in SECTION 11 (opt-in — keep disabled for normal
 - **`main.py` task tuple**: `spy_actual_start` and `spy_actual_end` are the last two elements of every task tuple (appended after `wfa_split_date`). They are passed at task-creation time from the `_spy_actual_start` / `_spy_actual_end` variables computed after the SPY fetch.
 - **Result key**: `wfa_rolling_verdict` → summary column `Rolling WFA`, placed after `WFA Verdict` in all four summary functions.
 - **Tests**: `tests/test_wfa_rolling.py` — 11 tests across 3 classes: `TestConfigDefaults`, `TestGetFoldDates`, `TestEvaluateRollingWfa`.
+
+## ML Trade Feature Export
+
+Controlled by `export_ml_features` in config (SECTION 20). Default `False` = disabled.
+
+**Output**: `output/runs/<run_id>/ml_features.parquet` — one row per trade, all strategies and portfolios consolidated.
+
+**ML target column**: `is_win` (int8, 1 = profitable trade, 0 = loss).
+
+**Column schema** (canonical order): `Strategy`, `Portfolio`, `Symbol`, `EntryDate` (Timestamp), `ExitDate` (Timestamp), `HoldDuration`, `EntryPrice`, `ExitPrice`, `Profit`, `ProfitPct`, `Shares`, `is_win` (int8), `RMultiple`, `MAE_pct`, `MFE_pct`, `ExitReason`, `InitialRisk`, then all `entry_*` feature columns (`entry_RSI_14`, `entry_ATR_14_pct`, `entry_SMA200_dist_pct`, `entry_Volume_Spike`, `entry_SPY_RSI_14`, `entry_SPY_SMA200_dist_pct`, `entry_VIX_Close`, `entry_TNX_Close`), then any remaining columns.
+
+The internal `Trade` counter column is always dropped.
+
+**Dependency**: `pyarrow` or `fastparquet` required for Parquet output. If neither is installed, logs a warning and writes a CSV fallback to the same path with a `.csv` extension.
+
+**`helpers/ml_export.py`** — `export_trade_features(all_results, output_path) -> int`. Returns the number of rows written (0 if no trades found).
+
+**Tests**: `tests/test_ml_export.py` — 8 tests: empty results (returns 0), row count, `is_win` presence, Strategy/Portfolio injection, readable Parquet, `Trade` column dropped, CSV fallback on ImportError, config default False.
 
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes

@@ -320,6 +320,14 @@ CONFIG = {
     # 0.0 = disabled (default). 0.1 = mild impact. 0.5 = aggressive.
     # Only fires when Volume data is available and adv_20 > 0.
     "volume_impact_coeff": 0.0,
+
+    # ============================================================
+    # SECTION 20: ML TRADE FEATURE EXPORT
+    # ============================================================
+    # When True, writes a consolidated Parquet file of all trades (all strategies,
+    # all portfolios) to output/runs/<run_id>/ml_features.parquet after the run.
+    # Requires pyarrow or fastparquet: pip install pyarrow
+    "export_ml_features": False,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
