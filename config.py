@@ -231,6 +231,12 @@ CONFIG = {
     #   None or 0 → WFA disabled; OOS P&L and WFA Verdict show "N/A"
     "wfa_split_ratio": 0.80,
 
+    # Rolling multi-fold WFA (opt-in — keep None for normal runs).
+    # wfa_folds: None or 0 → disabled; int >= 2 → number of equal-width OOS folds.
+    # wfa_min_fold_trades: minimum OOS trades required to score a fold.
+    "wfa_folds": None,
+    "wfa_min_fold_trades": 5,
+
     # ============================================================
     # SECTION 12: TRADING COST SETTINGS
     # ============================================================

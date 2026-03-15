@@ -4,7 +4,7 @@
 
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
-![Tests: 456/456 Passing](https://img.shields.io/badge/Tests-456%2F456%20Passing-brightgreen)
+![Tests: 566/566 Passing](https://img.shields.io/badge/Tests-566%2F566%20Passing-brightgreen)
 
 ---
 
@@ -560,6 +560,25 @@ Every strategy result includes two WFA columns alongside the Monte Carlo output:
 
 **Disabling WFA:** Set `"wfa_split_ratio": None` (or `0`) in `config.py`. Both `OOS P&L (%)` and `WFA Verdict` will show `N/A` for all strategies.
 
+#### Rolling Multi-Fold WFA (opt-in)
+
+For a more rigorous overfitting check, enable rolling k-fold WFA by setting `wfa_folds` to an integer ≥ 2 in `config.py`. This is independent of `wfa_split_ratio` — both can be active simultaneously.
+
+```python
+"wfa_folds": 5,           # divide the period into 5 equal OOS windows
+"wfa_min_fold_trades": 5, # skip folds with fewer than 5 OOS trades
+```
+
+**How it works:** The full period is split into *k* equal-width windows. For fold *i*, the IS window is everything before that fold's start date and the OOS window is the fold itself. Each fold is scored independently using the same `Pass / Likely Overfitted` logic as the single-split WFA. A fold with fewer than `wfa_min_fold_trades` OOS trades is skipped (not counted).
+
+**`Rolling WFA` column verdict:**
+
+| Verdict | Meaning |
+| --- | --- |
+| `Pass` | ≥ 60% of scorable folds pass individually |
+| `Fail` | < 60% of scorable folds pass |
+| `N/A` | Fewer than 2 folds had enough trades to score, or `wfa_folds` is not set |
+
 ### R-Multiple, Expectancy, and SQN
 
 > [!TIP]
@@ -949,6 +968,8 @@ their `@register_strategy` decorator.
 | `min_performance_vs_qqq` | `-9999` | Minimum outperformance vs QQQ to include in output table |
 | `show_qqq_losers` | `False` | If False, hides strategies that underperform QQQ |
 | `wfa_split_ratio` | `0.80` | Walk-Forward Analysis IS/OOS split. `0.80` = first 80% of data is In-Sample, last 20% is Out-of-Sample. Set to `None` or `0` to disable. |
+| `wfa_folds` | `None` | Rolling multi-fold WFA. `None` = disabled; integer ≥ 2 = number of equal-width OOS folds. Adds a `Rolling WFA` column to all summary tables. |
+| `wfa_min_fold_trades` | `5` | Minimum OOS trades required to score a fold in rolling WFA. Folds with fewer trades are skipped. |
 | `roc_thresholds` | `[0.0, 0.5]` | Rate-of-change thresholds for ROC Momentum strategy |
 | `strategies` | `"all"` | `"all"` runs every plugin; a list of exact strategy names runs only those (see [Strategy Selection](#running-a-specific-subset-of-strategies-configpy)) |
 | `sensitivity_sweep_enabled` | `False` | Opt-in parameter sensitivity sweep — varies each numeric param ±pct across ±steps steps |
@@ -1184,7 +1205,8 @@ july-backtester/
 │   ├── caching.py                # Local Parquet cache (24h TTL)
 │   ├── aws_utils.py              # S3 upload helper; reads API key from env/.env
 │   ├── timeframe_utils.py        # Bar period conversion utilities
-│   ├── wfa.py                    # Walk-Forward Analysis
+│   ├── wfa.py                    # Walk-Forward Analysis (single-split)
+│   ├── wfa_rolling.py            # Rolling multi-fold WFA
 │   └── correlation.py            # Strategy correlation matrix
 │
 ├── services/

@@ -59,6 +59,8 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "min_trades_for_mc": 50
 "num_mc_simulations": 1000
 "wfa_split_ratio": 0.80          # 0.80 = 80% IS / 20% OOS; None or 0 = disabled
+"wfa_folds": None                # None = rolling WFA disabled; int >= 2 = number of folds
+"wfa_min_fold_trades": 5         # min OOS trades per fold to score it (rolling WFA only)
 "noise_injection_pct": 0.0       # 0.0 = disabled (default, stress testing is opt-in). Set to e.g. 0.01 for ±1% stress test.
 "risk_free_rate": 0.05           # annual, used in Sharpe calculation (default 5% — US T-bill proxy)
 ```
@@ -478,6 +480,23 @@ Applied on top of the flat `slippage_pct`:
 **Guard**: only fires when `Volume` column is present in the symbol's DataFrame and `adv_20 > 0`. Silent no-op otherwise.
 
 **Tests**: `tests/test_volume_impact.py` — 7 tests: config defaults, sqrt formula at 1%/5% ADV, zero coeff produces zero, monotonicity, and no-regression entry price unchanged at coeff=0.
+
+## WFA Rolling Folds
+
+Controlled by two config keys in SECTION 11 (opt-in — keep disabled for normal runs):
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `wfa_folds` | `None` | `None` or `0` = rolling WFA disabled; `int >= 2` = number of equal-width OOS folds |
+| `wfa_min_fold_trades` | `5` | Minimum OOS trades required to score a fold |
+
+- **Single-split WFA is unchanged**: `wfa_split_ratio` and the `oos_pnl_pct` / `wfa_verdict` result keys continue to work exactly as before. Rolling folds is purely additive.
+- **How it works**: the full period is divided into *k* equal-width OOS windows. For fold *i*, IS = all trades with `ExitDate < oos_start`. A fold is *scorable* when its OOS trade count ≥ `wfa_min_fold_trades`. Folds with fewer OOS trades are skipped.
+- **Verdict logic**: "Pass" when ≥ 60% of scorable folds pass `evaluate_wfa()` individually. "Fail" otherwise. "N/A" when fewer than 2 folds are scorable.
+- **`helpers/wfa_rolling.py`** — `get_fold_dates(actual_start, actual_end, k)` and `evaluate_rolling_wfa(trade_log, fold_dates, initial_capital, min_fold_trades=5)`.
+- **`main.py` task tuple**: `spy_actual_start` and `spy_actual_end` are the last two elements of every task tuple (appended after `wfa_split_date`). They are passed at task-creation time from the `_spy_actual_start` / `_spy_actual_end` variables computed after the SPY fetch.
+- **Result key**: `wfa_rolling_verdict` → summary column `Rolling WFA`, placed after `WFA Verdict` in all four summary functions.
+- **Tests**: `tests/test_wfa_rolling.py` — 11 tests across 3 classes: `TestConfigDefaults`, `TestGetFoldDates`, `TestEvaluateRollingWfa`.
 
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
