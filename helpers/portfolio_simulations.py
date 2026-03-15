@@ -97,6 +97,18 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 
             trade_counter += 1
             exit_price = raw_exit_price * (1 - CONFIG['slippage_pct'])
+
+            # --- VOLUME-BASED MARKET IMPACT (exit) ---
+            exit_impact_bps = 0.0
+            _exit_impact_coeff = CONFIG.get('volume_impact_coeff', 0.0)
+            if _exit_impact_coeff > 0 and 'Volume' in portfolio_data[symbol].columns:
+                _adv_exit = portfolio_data[symbol]['Volume'].rolling(window=20, min_periods=1).mean().get(date, np.nan)
+                if pd.notna(_adv_exit) and _adv_exit > 0:
+                    _order_pct = pos['shares'] / _adv_exit
+                    _impact = _exit_impact_coeff * np.sqrt(_order_pct)
+                    exit_price = exit_price * (1 - _impact)
+                    exit_impact_bps = round(_impact * 10000, 1)
+
             commission = pos['shares'] * CONFIG['commission_per_share']
             cash += (pos['shares'] * exit_price) - commission
             net_pnl = ((exit_price - pos['entry_price']) * pos['shares']) - (2 * commission)
@@ -125,6 +137,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 'ExitReason': exit_reason,
                 'InitialRisk': _initial_risk_per_share,
                 'RMultiple': _r_multiple,
+                'VolumeImpact_bps': round(pos.get('entry_impact_bps', 0.0) + exit_impact_bps, 1),
             }
             log_entry.update(pos.get('features', {}))
             trade_log.append(log_entry)
@@ -226,6 +239,17 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             continue
                         shares = min(shares, max_shares_allowed)
 
+                # --- VOLUME-BASED MARKET IMPACT ---
+                entry_impact_bps = 0.0
+                impact_coeff = CONFIG.get('volume_impact_coeff', 0.0)
+                if impact_coeff > 0 and 'Volume' in df.columns:
+                    adv_20_impact = df['Volume'].rolling(window=20, min_periods=1).mean().get(entry_exec_date, np.nan)
+                    if pd.notna(adv_20_impact) and adv_20_impact > 0:
+                        order_pct_of_adv = shares / adv_20_impact
+                        impact_additional = impact_coeff * np.sqrt(order_pct_of_adv)
+                        entry_price = entry_price * (1 + impact_additional)
+                        entry_impact_bps = round(impact_additional * 10000, 1)
+
                 # Calculate the total cost including commission for this ideal share size
                 commission_cost = shares * CONFIG['commission_per_share']
                 total_cost = (shares * entry_price) + commission_cost
@@ -309,6 +333,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         'entry_date': entry_exec_date, 'features': features,
                         'stop_loss_level': stop_loss_level,
                         'initial_stop_loss_level': stop_loss_level,
+                        'entry_impact_bps': entry_impact_bps,
                     }
                     cash -= total_cost
     

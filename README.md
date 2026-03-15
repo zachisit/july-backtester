@@ -316,9 +316,21 @@ Include multiple entries to test each strategy with each stop type in the same r
 ### Slippage and Commission
 
 ```python
-"slippage_pct": 0.0005,          # 0.05% slippage per fill (5 basis points)
+"slippage_pct": 0.0005,          # 0.05% flat slippage per fill (5 basis points)
 "commission_per_share": 0.002,   # $0.002 per share commission
+"max_pct_adv": 0.05,             # cap position at 5% of 20-day average daily volume
+"volume_impact_coeff": 0.0,      # market impact coefficient (0.0 = disabled)
 ```
+
+There are three independent cost controls:
+
+| Control | Key | Models |
+| --- | --- | --- |
+| Flat slippage | `slippage_pct` | Bid/ask spread cost on every fill, regardless of size |
+| Position size cap | `max_pct_adv` | Prevents unrealistically large orders by capping shares at X% of ADV — does **not** change cost |
+| Market impact | `volume_impact_coeff` | Square-root price impact: `coeff × sqrt(shares / adv_20)`. Larger orders relative to ADV incur more slippage. `0.0` = disabled (default). `0.1` = mild (institutional). `0.5` = aggressive (small-cap). |
+
+The market impact formula — a square-root model widely used in academic market microstructure — recognises that consuming 5% of ADV moves the price more than consuming 0.1% of ADV. Example at `coeff=0.1`: 1% ADV order → +1 bp impact; 5% ADV order → +2.2 bp impact.
 
 ### Output Filters
 
@@ -920,8 +932,10 @@ their `@register_strategy` decorator.
 | `allocation_per_trade` | `0.10` | Fraction of equity per new position (0.10 = 10%) |
 | `execution_time` | `"open"` | Fill at next-day open price |
 | `stop_loss_configs` | `[{"type": "none"}]` | List of stop-loss configurations to test |
-| `slippage_pct` | `0.0005` | Slippage as fraction of price (0.0005 = 5 basis points) |
+| `slippage_pct` | `0.0005` | Flat slippage as fraction of price applied to every fill (0.0005 = 5 basis points) |
 | `commission_per_share` | `0.002` | Commission in dollars per share |
+| `max_pct_adv` | `0.05` | Position size cap: no order may exceed this fraction of 20-day average daily volume |
+| `volume_impact_coeff` | `0.0` | Square-root market impact added on top of `slippage_pct`. `0.0` = disabled. See note below. |
 | `min_trades_for_mc` | `50` | Minimum trades required to run Monte Carlo |
 | `num_mc_simulations` | `1000` | Number of Monte Carlo simulations per strategy |
 | `mc_sampling` | `"iid"` | MC sampling method: `"iid"` (independent, default) or `"block"` (block-bootstrap, preserves streaks) |

@@ -450,6 +450,35 @@ Controlled by two config keys (SECTION 18):
 - **No config keys**: always computed when the equity curve has ≥ 2 bars.
 - **Tests**: `tests/test_recovery_time.py` — 6 tests: flat/uptrend → None, single dip-and-recover, open drawdown at end → None, max ≥ avg, known calendar-day value, and summary column presence.
 
+## Volume-Based Market Impact Slippage
+
+Controlled by `volume_impact_coeff` in config (SECTION 19). Default `0.0` = disabled.
+
+**Formula**: `impact_additional = volume_impact_coeff × sqrt(shares / adv_20)`
+
+Applied on top of the flat `slippage_pct`:
+
+- **Entry**: `entry_price = raw_entry_price × (1 + slippage_pct) × (1 + impact_additional)`
+- **Exit**: `exit_price = raw_exit_price × (1 - slippage_pct) × (1 - impact_additional)`
+
+**Three independent slippage controls:**
+
+| Config key | What it models |
+| --- | --- |
+| `slippage_pct` | Flat bid/ask spread cost on every trade (default 0.05%) |
+| `max_pct_adv` | Position size cap — no order may exceed X% of ADV (default 5%) |
+| `volume_impact_coeff` | Square-root market impact — larger orders relative to ADV cost more (default 0.0 = off) |
+
+**Typical values**: `0.1` = mild (institutional estimate); `0.5` = aggressive (small-cap / illiquid).
+
+**Example** (coeff=0.1, order consumes 1% of ADV): additional slippage = 0.1 × √0.01 = **1 bp**. At 5% of ADV: **~2.2 bp**.
+
+**`VolumeImpact_bps` field** in trade log: entry impact bps + exit impact bps, rounded to 1 decimal place. Zero when `volume_impact_coeff=0.0`. Useful for identifying which trades were most penalised by market impact.
+
+**Guard**: only fires when `Volume` column is present in the symbol's DataFrame and `adv_20 > 0`. Silent no-op otherwise.
+
+**Tests**: `tests/test_volume_impact.py` — 7 tests: config defaults, sqrt formula at 1%/5% ADV, zero coeff produces zero, monotonicity, and no-regression entry price unchanged at coeff=0.
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float

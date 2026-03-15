@@ -305,6 +305,15 @@ CONFIG = {
     # mc_block_size: number of consecutive trades per block. None = auto (sqrt of trade count).
     "mc_sampling": "iid",
     "mc_block_size": None,
+
+    # ============================================================
+    # SECTION 19: VOLUME-BASED MARKET IMPACT SLIPPAGE
+    # ============================================================
+    # Adds a square-root market impact on top of slippage_pct.
+    # impact_slippage = volume_impact_coeff * sqrt(shares / adv_20)
+    # 0.0 = disabled (default). 0.1 = mild impact. 0.5 = aggressive.
+    # Only fires when Volume data is available and adv_20 > 0.
+    "volume_impact_coeff": 0.0,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
