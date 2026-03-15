@@ -33,6 +33,39 @@ def calculate_advanced_metrics(pnl_list, portfolio_timeline, duration_list):
             annual_return = (portfolio_timeline.iloc[-1] / portfolio_timeline.iloc[0]) ** (1 / duration_years) - 1
             metrics["calmar_ratio"] = annual_return / metrics["max_drawdown"] if metrics["max_drawdown"] > 0 else np.inf
 
+        # --- Recovery time ---
+        # For each drawdown trough, find how many calendar days until equity returns to the prior peak.
+        metrics["max_recovery_days"] = None
+        metrics["avg_recovery_days"] = None
+        in_drawdown = portfolio_timeline < running_peak
+        recovery_days_list = []
+        i = 0
+        tl_vals = portfolio_timeline.values
+        tl_idx  = portfolio_timeline.index
+        n = len(tl_vals)
+        while i < n:
+            if in_drawdown.iloc[i]:
+                # Find trough start
+                dd_start = i
+                # Scan forward until recovery (equity >= peak at dd_start) or end of series
+                peak_val = running_peak.iloc[dd_start]
+                j = dd_start + 1
+                while j < n and tl_vals[j] < peak_val:
+                    j += 1
+                if j < n:  # full recovery found
+                    days = (tl_idx[j] - tl_idx[dd_start]).days
+                    if days > 0:
+                        recovery_days_list.append(days)
+                i = j + 1
+            else:
+                i += 1
+        if recovery_days_list:
+            metrics["max_recovery_days"] = int(max(recovery_days_list))
+            metrics["avg_recovery_days"] = round(float(np.mean(recovery_days_list)), 1)
+    else:
+        metrics["max_recovery_days"] = None
+        metrics["avg_recovery_days"] = None
+
     return metrics
 
 

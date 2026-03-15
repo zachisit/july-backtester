@@ -468,6 +468,8 @@ SMA Crossover (50d/200d)       +74.1%   +12.1%   38.2%    0.98    0.65     46.1%
 | P&L (%) | Total return over the full backtest period |
 | vs. SPY / vs. QQQ | Outperformance vs buy-and-hold of those indices |
 | Max DD | Largest peak-to-trough decline during the period |
+| Max Rcvry (d) | Longest calendar-day gap from any drawdown trough back to the prior equity peak. `N/A` if the curve ends in an open drawdown. |
+| Avg Rcvry (d) | Mean calendar days across all completed recoveries. `N/A` if the curve ends in an open drawdown. |
 | Calmar | Annualized return divided by max drawdown (higher = better risk-adjusted return) |
 | Sharpe | Risk-adjusted return relative to volatility (above 1.0 is generally considered good; above 2.0 is strong) |
 | Roll.Sharpe(avg) | Mean of all 126-day rolling Sharpe windows — regime-averaged quality |

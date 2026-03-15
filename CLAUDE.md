@@ -439,6 +439,17 @@ Controlled by two config keys (SECTION 18):
 - **No caller changes**: `run_monte_carlo_simulation` signature is unchanged. The refactor extracted a `_equity_and_drawdown` helper used by both branches.
 - **Tests**: `tests/test_mc_block_bootstrap.py` — 9 tests: config defaults, output shapes, auto block size resolution, streak divergence (>1% std difference), small trade guard, i.i.d. seed match, and no-key default.
 
+## Recovery Time
+
+`max_recovery_days` and `avg_recovery_days` are computed inside `calculate_advanced_metrics` in `helpers/simulations.py` and surface in all four summary functions.
+
+- **`max_recovery_days`**: longest calendar-day gap from any drawdown trough back to the prior equity peak.
+- **`avg_recovery_days`**: mean calendar days across all completed recoveries (rounded to 1 decimal).
+- Both are `None` when the equity curve ends in an open drawdown (never fully recovered to its prior peak). `fillna('N/A')` in the summary display pipeline shows them as `N/A` in that case.
+- **Algorithm**: linear scan with two pointers — outer loop finds the start of each drawdown period; inner loop scans forward to the first bar that reaches or exceeds the peak value at drawdown start. Only completed recoveries (where `j < n`) contribute to the list. A recovery of 0 calendar days (same-bar artefact) is excluded.
+- **No config keys**: always computed when the equity curve has ≥ 2 bars.
+- **Tests**: `tests/test_recovery_time.py` — 6 tests: flat/uptrend → None, single dip-and-recover, open drawdown at end → None, max ≥ avg, known calendar-day value, and summary column presence.
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float
