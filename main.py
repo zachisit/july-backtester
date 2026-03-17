@@ -602,7 +602,7 @@ def main():
         _ml_path = os.path.join("output", "runs", run_folder_name, "ml_features.parquet")
         _n_rows = _ml_export(all_portfolio_results, _ml_path)
         if _n_rows > 0:
-            logger.info(f"  ML feature export: {_n_rows} trades → {_ml_path}")
+            logger.info(f"  ML feature export: {_n_rows} trades -> {_ml_path}")
 
     mins, secs = divmod(duration_seconds, 60)
     logger.info(f"All portfolio simulations complete in {int(mins)}m {secs:.2f}s.")
