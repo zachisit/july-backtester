@@ -183,3 +183,21 @@ class TestPrintRegimeHeatmap:
         with redirect_stdout(buf):
             print_regime_heatmap(None, "My Strategy")
         assert buf.getvalue() == ""
+
+
+class TestTimezoneHandling:
+
+    def test_tz_aware_vix_series_classifies_correctly(self):
+        """VIX series with tz-aware UTC index must classify correctly."""
+        idx = pd.DatetimeIndex(["2023-01-03"]).tz_localize("UTC")
+        s = pd.Series([12.0], index=idx)
+        # Trade date is a plain string — this is the exact form the trade log uses
+        result = classify_vix_regime(s, "2023-01-03")
+        assert result == REGIME_LOW, f"Expected REGIME_LOW, got {result}"
+
+    def test_mixed_tz_does_not_raise(self):
+        """tz-aware VIX series + tz-naive trade date must not raise, must not return REGIME_UNK."""
+        idx = pd.DatetimeIndex(["2023-01-03"]).tz_localize("UTC")
+        s = pd.Series([30.0], index=idx)
+        result = classify_vix_regime(s, "2023-01-03")
+        assert result != REGIME_UNK

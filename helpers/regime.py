@@ -54,6 +54,13 @@ def classify_vix_regime(vix_series, date) -> str:
 
     try:
         ts = pd.Timestamp(date)
+        # Normalize: strip timezone from both sides so tz-aware Yahoo Finance
+        # data aligns correctly with tz-naive trade log dates.
+        if vix_series.index.tz is not None:
+            vix_series = vix_series.copy()
+            vix_series.index = vix_series.index.tz_localize(None)
+        if ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
         # Add the lookup date to the index (as NaN) so ffill can propagate to it
         if ts not in vix_series.index:
             vix_series = pd.concat([vix_series, pd.Series([float("nan")], index=[ts])])

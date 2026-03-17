@@ -400,7 +400,8 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 - **`build_regime_heatmap(trade_log, vix_df, initial_capital)`**: returns a `year × regime` DataFrame where each cell is `sum(Profit) / initial_capital`. Returns `None` if `trade_log` is empty, `vix_df` is None/empty, or `initial_capital ≤ 0`. All three regime columns are always present even when no trades fall in a bucket.
 - **`print_regime_heatmap(heatmap, strategy_name)`**: prints a formatted year × bucket table to stdout. Silent when `heatmap` is None.
 - **`main.py` integration**: `result["regime_heatmap"]` set in `run_single_simulation`; printed per-strategy in the `main()` loop after `generate_per_portfolio_summary`.
-- **Tests**: `tests/test_regime_heatmap.py` — 16 tests covering boundary VIX values, forward-fill, None guards, DataFrame shape, fractional P&L values, multi-year rows, and stdout content.
+- **VIX timezone handling**: Yahoo Finance returns tz-aware UTC timestamps. `classify_vix_regime()` strips timezone info from both the series index and the lookup date before comparison to ensure correct alignment regardless of data provider. Without this, `pd.concat` raises `TypeError` (caught silently), every trade returns `REGIME_UNK`, and all heatmap cells show 0.0%.
+- **Tests**: `tests/test_regime_heatmap.py` — 18 tests covering boundary VIX values, forward-fill, None guards, DataFrame shape, fractional P&L values, multi-year rows, stdout content, and tz-aware index handling.
 
 ## Init Wizard (--init)
 
