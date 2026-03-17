@@ -21,6 +21,11 @@ helpers/portfolio_simulations.py   # Multi-asset portfolio simulation engine
 helpers/monte_carlo.py             # Monte Carlo robustness scoring
 helpers/summary.py                 # Report generation, S3 upload
 helpers/wfa.py                     # Walk-Forward Analysis (get_split_date, split_trades, evaluate_wfa)
+helpers/wfa_rolling.py             # Rolling multi-fold WFA (get_fold_dates, evaluate_rolling_wfa)
+helpers/ml_export.py               # ML trade feature export (export_trade_features)
+helpers/sensitivity.py             # Parameter sensitivity sweep (build_param_grid, label_for_params, is_sweep_enabled)
+helpers/regime.py                  # VIX regime heatmap (build_regime_heatmap, print_regime_heatmap, classify_vix_regime)
+helpers/init_wizard.py             # First-time setup wizard invoked via python main.py --init
 helpers/correlation.py             # Strategy correlation matrix (run_correlation_analysis, compute_avg_correlations)
 helpers/caching.py                 # Local Parquet cache (24h TTL)
 helpers/aws_utils.py               # S3 upload helper (upload_file_to_s3); reads API key from env or .env via get_secret
@@ -59,8 +64,20 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "min_trades_for_mc": 50
 "num_mc_simulations": 1000
 "wfa_split_ratio": 0.80          # 0.80 = 80% IS / 20% OOS; None or 0 = disabled
+"wfa_folds": None                # None = rolling WFA disabled; int >= 2 = number of folds
+"wfa_min_fold_trades": 5         # min OOS trades per fold to score it (rolling WFA only)
+"export_ml_features": False      # True = write ml_features.parquet after the run (requires pyarrow)
 "noise_injection_pct": 0.0       # 0.0 = disabled (default, stress testing is opt-in). Set to e.g. 0.01 for ±1% stress test.
 "risk_free_rate": 0.05           # annual, used in Sharpe calculation (default 5% — US T-bill proxy)
+"sensitivity_sweep_enabled": False  # opt-in parameter fragility sweep
+"sensitivity_sweep_pct": 0.20    # ±20% per step
+"sensitivity_sweep_steps": 2     # 2 steps each side → 5 values per param
+"sensitivity_sweep_min_val": 2   # floor for generated values (prevents SMA period = 0)
+"rolling_sharpe_window": 126     # rolling Sharpe window in trading days; 0 or None = disable
+"htb_rate_annual": 0.02          # annual hard-to-borrow rate debited daily on short positions
+"mc_sampling": "iid"             # "iid" = independent resampling; "block" = block-bootstrap
+"mc_block_size": None            # block size for block-bootstrap; None = auto floor(sqrt(N))
+"volume_impact_coeff": 0.0       # square-root market impact coefficient; 0.0 = disabled
 ```
 
 ## Architecture Notes
@@ -423,6 +440,97 @@ Interactive four-step wizard for first-time setup. Writes `config_starter.py` to
 **Interactive prompt functions** (`_ask`, `_confirm`) require a TTY and are not unit-tested. `_build_config` and colour helpers are fully unit-tested.
 
 **Tests:** `tests/test_init_wizard.py` — 13 tests covering `_build_config` for all four providers, required keys, mode branching, and colour helper behaviour with/without TTY.
+
+## MC Block-Bootstrap
+
+Controlled by two config keys (SECTION 18):
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `mc_sampling` | `"iid"` | `"iid"` = independent resampling (original behaviour); `"block"` = block-bootstrap |
+| `mc_block_size` | `None` | Trades per block. `None` = auto: `floor(sqrt(N))` (Politis-Romano rule of thumb) |
+
+- **`"iid"` (default)**: trades are resampled independently, each with equal probability. Fast and statistically clean for strategies with no autocorrelation.
+- **`"block"`**: consecutive blocks of `block_size` trades are sampled as a unit, preserving win/loss streaks and regime clustering. Use when the strategy shows known regime dependency (e.g., consistently loses only during bear markets / high-VIX periods identified by the Regime Heatmap).
+- **Auto block size**: `max(1, int(N ** 0.5))`. For 100 trades → blocks of 10; for 400 trades → blocks of 20.
+- **Circular wrap**: blocks that extend past the end of the trade list wrap around — no trades are omitted and edge blocks are not under-represented.
+- **No caller changes**: `run_monte_carlo_simulation` signature is unchanged. The refactor extracted a `_equity_and_drawdown` helper used by both branches.
+- **Tests**: `tests/test_mc_block_bootstrap.py` — 9 tests: config defaults, output shapes, auto block size resolution, streak divergence (>1% std difference), small trade guard, i.i.d. seed match, and no-key default.
+
+## Recovery Time
+
+`max_recovery_days` and `avg_recovery_days` are computed inside `calculate_advanced_metrics` in `helpers/simulations.py` and surface in all four summary functions.
+
+- **`max_recovery_days`**: longest calendar-day gap from any drawdown trough back to the prior equity peak.
+- **`avg_recovery_days`**: mean calendar days across all completed recoveries (rounded to 1 decimal).
+- Both are `None` when the equity curve ends in an open drawdown (never fully recovered to its prior peak). `fillna('N/A')` in the summary display pipeline shows them as `N/A` in that case.
+- **Algorithm**: linear scan with two pointers — outer loop finds the start of each drawdown period; inner loop scans forward to the first bar that reaches or exceeds the peak value at drawdown start. Only completed recoveries (where `j < n`) contribute to the list. A recovery of 0 calendar days (same-bar artefact) is excluded.
+- **No config keys**: always computed when the equity curve has ≥ 2 bars.
+- **Tests**: `tests/test_recovery_time.py` — 6 tests: flat/uptrend → None, single dip-and-recover, open drawdown at end → None, max ≥ avg, known calendar-day value, and summary column presence.
+
+## Volume-Based Market Impact Slippage
+
+Controlled by `volume_impact_coeff` in config (SECTION 19). Default `0.0` = disabled.
+
+**Formula**: `impact_additional = volume_impact_coeff × sqrt(shares / adv_20)`
+
+Applied on top of the flat `slippage_pct`:
+
+- **Entry**: `entry_price = raw_entry_price × (1 + slippage_pct) × (1 + impact_additional)`
+- **Exit**: `exit_price = raw_exit_price × (1 - slippage_pct) × (1 - impact_additional)`
+
+**Three independent slippage controls:**
+
+| Config key | What it models |
+| --- | --- |
+| `slippage_pct` | Flat bid/ask spread cost on every trade (default 0.05%) |
+| `max_pct_adv` | Position size cap — no order may exceed X% of ADV (default 5%) |
+| `volume_impact_coeff` | Square-root market impact — larger orders relative to ADV cost more (default 0.0 = off) |
+
+**Typical values**: `0.1` = mild (institutional estimate); `0.5` = aggressive (small-cap / illiquid).
+
+**Example** (coeff=0.1, order consumes 1% of ADV): additional slippage = 0.1 × √0.01 = **1 bp**. At 5% of ADV: **~2.2 bp**.
+
+**`VolumeImpact_bps` field** in trade log: entry impact bps + exit impact bps, rounded to 1 decimal place. Zero when `volume_impact_coeff=0.0`. Useful for identifying which trades were most penalised by market impact.
+
+**Guard**: only fires when `Volume` column is present in the symbol's DataFrame and `adv_20 > 0`. Silent no-op otherwise.
+
+**Tests**: `tests/test_volume_impact.py` — 7 tests: config defaults, sqrt formula at 1%/5% ADV, zero coeff produces zero, monotonicity, and no-regression entry price unchanged at coeff=0.
+
+## WFA Rolling Folds
+
+Controlled by two config keys in SECTION 11 (opt-in — keep disabled for normal runs):
+
+| Key | Default | Description |
+| --- | --- | --- |
+| `wfa_folds` | `None` | `None` or `0` = rolling WFA disabled; `int >= 2` = number of equal-width OOS folds |
+| `wfa_min_fold_trades` | `5` | Minimum OOS trades required to score a fold |
+
+- **Single-split WFA is unchanged**: `wfa_split_ratio` and the `oos_pnl_pct` / `wfa_verdict` result keys continue to work exactly as before. Rolling folds is purely additive.
+- **How it works**: the full period is divided into *k* equal-width OOS windows. For fold *i*, IS = all trades with `ExitDate < oos_start`. A fold is *scorable* when its OOS trade count ≥ `wfa_min_fold_trades`. Folds with fewer OOS trades are skipped.
+- **Verdict logic**: "Pass" when ≥ 60% of scorable folds pass `evaluate_wfa()` individually. "Fail" otherwise. "N/A" when fewer than 2 folds are scorable.
+- **`helpers/wfa_rolling.py`** — `get_fold_dates(actual_start, actual_end, k)` and `evaluate_rolling_wfa(trade_log, fold_dates, initial_capital, min_fold_trades=5)`.
+- **`main.py` task tuple**: `spy_actual_start` and `spy_actual_end` are the last two elements of every task tuple (appended after `wfa_split_date`). They are passed at task-creation time from the `_spy_actual_start` / `_spy_actual_end` variables computed after the SPY fetch.
+- **Result key**: `wfa_rolling_verdict` → summary column `Rolling WFA`, placed after `WFA Verdict` in all four summary functions.
+- **Tests**: `tests/test_wfa_rolling.py` — 11 tests across 3 classes: `TestConfigDefaults`, `TestGetFoldDates`, `TestEvaluateRollingWfa`.
+
+## ML Trade Feature Export
+
+Controlled by `export_ml_features` in config (SECTION 20). Default `False` = disabled.
+
+**Output**: `output/runs/<run_id>/ml_features.parquet` — one row per trade, all strategies and portfolios consolidated.
+
+**ML target column**: `is_win` (int8, 1 = profitable trade, 0 = loss).
+
+**Column schema** (canonical order): `Strategy`, `Portfolio`, `Symbol`, `EntryDate` (Timestamp), `ExitDate` (Timestamp), `HoldDuration`, `EntryPrice`, `ExitPrice`, `Profit`, `ProfitPct`, `Shares`, `is_win` (int8), `RMultiple`, `MAE_pct`, `MFE_pct`, `ExitReason`, `InitialRisk`, then all `entry_*` feature columns (`entry_RSI_14`, `entry_ATR_14_pct`, `entry_SMA200_dist_pct`, `entry_Volume_Spike`, `entry_SPY_RSI_14`, `entry_SPY_SMA200_dist_pct`, `entry_VIX_Close`, `entry_TNX_Close`), then any remaining columns.
+
+The internal `Trade` counter column is always dropped.
+
+**Dependency**: `pyarrow` or `fastparquet` required for Parquet output. If neither is installed, logs a warning and writes a CSV fallback to the same path with a `.csv` extension.
+
+**`helpers/ml_export.py`** — `export_trade_features(all_results, output_path) -> int`. Returns the number of rows written (0 if no trades found).
+
+**Tests**: `tests/test_ml_export.py` — 8 tests: empty results (returns 0), row count, `is_win` presence, Strategy/Portfolio injection, readable Parquet, `Trade` column dropped, CSV fallback on ImportError, config default False.
 
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
