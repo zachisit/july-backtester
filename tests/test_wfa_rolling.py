@@ -107,7 +107,9 @@ class TestEvaluateRollingWfa:
         all_trades = _make_trades("2000-01-01", "2020-01-01", n=200, profit=100.0)
         fold_dates = get_fold_dates("2000-01-01", "2020-01-01", k=3)
         result = evaluate_rolling_wfa(all_trades, fold_dates, 100_000, min_fold_trades=5)
-        assert result["wfa_rolling_verdict"] == "Pass"
+        verdict = result["wfa_rolling_verdict"]
+        assert verdict.startswith("Pass"), f"Expected 'Pass (K/N)', got: {verdict}"
+        assert "/" in verdict, f"Expected K/N fraction in verdict, got: {verdict}"
 
     def test_majority_fail_folds_returns_fail(self):
         """
@@ -131,7 +133,9 @@ class TestEvaluateRollingWfa:
         fold_dates = get_fold_dates("2000-01-01", "2018-01-01", k=3)
 
         result = evaluate_rolling_wfa(all_trades, fold_dates, 100_000, min_fold_trades=5)
-        assert result["wfa_rolling_verdict"] == "Fail"
+        verdict = result["wfa_rolling_verdict"]
+        assert verdict.startswith("Fail"), f"Expected 'Fail (K/N)', got: {verdict}"
+        assert "/" in verdict, f"Expected K/N fraction in verdict, got: {verdict}"
 
     def test_insufficient_scorable_folds_returns_na(self):
         """

@@ -116,5 +116,6 @@ def evaluate_rolling_wfa(
     if scored_count < 2:
         return {"wfa_rolling_verdict": "N/A"}
 
-    verdict = "Pass" if (pass_count / scored_count) >= _PASS_THRESHOLD else "Fail"
+    label   = "Pass" if (pass_count / scored_count) >= _PASS_THRESHOLD else "Fail"
+    verdict = f"{label} ({pass_count}/{scored_count})"
     return {"wfa_rolling_verdict": verdict}
