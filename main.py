@@ -214,7 +214,7 @@ def main():
     if not (0 < alloc <= 1.0):
         errors.append(f"  - allocation_per_trade ({alloc}) must be between 0 (exclusive) and 1.0 (inclusive)")
 
-    if not CONFIG.get("portfolios"):
+    if not CONFIG.get("portfolios") and not CONFIG.get("symbols_to_test"):
         errors.append("  - portfolios is empty. Add at least one portfolio entry to run.")
 
     if errors:
