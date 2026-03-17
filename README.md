@@ -4,7 +4,7 @@
 
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
-![Tests: 574/574 Passing](https://img.shields.io/badge/Tests-574%2F574%20Passing-brightgreen)
+![Tests: 562/562 Passing](https://img.shields.io/badge/Tests-562%2F562%20Passing-brightgreen)
 
 ---
 
@@ -492,8 +492,11 @@ SMA Crossover (50d/200d)       +74.1%   +12.1%   38.2%    0.98    0.65     46.1%
 | Trades | Total number of completed trades |
 | Expectancy (R) | Average R-Multiple per trade — how many R the strategy earns per unit risked (see below) |
 | SQN | System Quality Number — statistical confidence in the edge (see below) |
+| WFA Verdict | Single-split Walk-Forward Analysis pass/fail verdict |
+| Rolling WFA | Rolling k-fold WFA verdict — `Pass (K/N)`, `Fail (K/N)`, or `N/A`. Only present when `wfa_folds` is set. |
 | MC Verdict | Robustness classification from Monte Carlo analysis |
 | MC Score | Numeric robustness score (see below) |
+| VolumeImpact_bps | Total market impact cost in basis points (entry + exit). Only present in trade CSVs when `volume_impact_coeff > 0`. |
 
 ### Core Metrics Glossary
 
@@ -576,8 +579,8 @@ For a more rigorous overfitting check, enable rolling k-fold WFA by setting `wfa
 
 | Verdict | Meaning |
 | --- | --- |
-| `Pass` | ≥ 60% of scorable folds pass individually |
-| `Fail` | < 60% of scorable folds pass |
+| `Pass (K/N)` | ≥ 60% of scorable folds pass individually (K = passing folds, N = total scorable folds) |
+| `Fail (K/N)` | < 60% of scorable folds pass |
 | `N/A` | Fewer than 2 folds had enough trades to score, or `wfa_folds` is not set |
 
 ### R-Multiple, Expectancy, and SQN

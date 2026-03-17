@@ -21,7 +21,11 @@ helpers/portfolio_simulations.py   # Multi-asset portfolio simulation engine
 helpers/monte_carlo.py             # Monte Carlo robustness scoring
 helpers/summary.py                 # Report generation, S3 upload
 helpers/wfa.py                     # Walk-Forward Analysis (get_split_date, split_trades, evaluate_wfa)
+helpers/wfa_rolling.py             # Rolling multi-fold WFA (get_fold_dates, evaluate_rolling_wfa)
 helpers/ml_export.py               # ML trade feature export (export_trade_features)
+helpers/sensitivity.py             # Parameter sensitivity sweep (build_param_grid, label_for_params, is_sweep_enabled)
+helpers/regime.py                  # VIX regime heatmap (build_regime_heatmap, print_regime_heatmap, classify_vix_regime)
+helpers/init_wizard.py             # First-time setup wizard invoked via python main.py --init
 helpers/correlation.py             # Strategy correlation matrix (run_correlation_analysis, compute_avg_correlations)
 helpers/caching.py                 # Local Parquet cache (24h TTL)
 helpers/aws_utils.py               # S3 upload helper (upload_file_to_s3); reads API key from env or .env via get_secret
@@ -65,6 +69,15 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "export_ml_features": False      # True = write ml_features.parquet after the run (requires pyarrow)
 "noise_injection_pct": 0.0       # 0.0 = disabled (default, stress testing is opt-in). Set to e.g. 0.01 for ±1% stress test.
 "risk_free_rate": 0.05           # annual, used in Sharpe calculation (default 5% — US T-bill proxy)
+"sensitivity_sweep_enabled": False  # opt-in parameter fragility sweep
+"sensitivity_sweep_pct": 0.20    # ±20% per step
+"sensitivity_sweep_steps": 2     # 2 steps each side → 5 values per param
+"sensitivity_sweep_min_val": 2   # floor for generated values (prevents SMA period = 0)
+"rolling_sharpe_window": 126     # rolling Sharpe window in trading days; 0 or None = disable
+"htb_rate_annual": 0.02          # annual hard-to-borrow rate debited daily on short positions
+"mc_sampling": "iid"             # "iid" = independent resampling; "block" = block-bootstrap
+"mc_block_size": None            # block size for block-bootstrap; None = auto floor(sqrt(N))
+"volume_impact_coeff": 0.0       # square-root market impact coefficient; 0.0 = disabled
 ```
 
 ## Architecture Notes
