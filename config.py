@@ -231,6 +231,12 @@ CONFIG = {
     #   None or 0 → WFA disabled; OOS P&L and WFA Verdict show "N/A"
     "wfa_split_ratio": 0.80,
 
+    # Rolling multi-fold WFA (opt-in — keep None for normal runs).
+    # wfa_folds: None or 0 → disabled; int >= 2 → number of equal-width OOS folds.
+    # wfa_min_fold_trades: minimum OOS trades required to score a fold.
+    "wfa_folds": None,
+    "wfa_min_fold_trades": 5,
+
     # ============================================================
     # SECTION 12: TRADING COST SETTINGS
     # ============================================================
@@ -295,6 +301,33 @@ CONFIG = {
     # 0.10 = 10% p.a. (hard-to-borrow small/mid cap)
     # 0.0  = disable borrow cost
     "htb_rate_annual": 0.02,
+
+    # ============================================================
+    # SECTION 18: MONTE CARLO SAMPLING METHOD
+    # ============================================================
+    # "iid"   — current default: trades resampled independently (fast, ignores streaks)
+    # "block" — block-bootstrap: samples consecutive blocks of trades, preserving
+    #            win/loss autocorrelation and regime clustering.
+    # mc_block_size: number of consecutive trades per block. None = auto (sqrt of trade count).
+    "mc_sampling": "iid",
+    "mc_block_size": None,
+
+    # ============================================================
+    # SECTION 19: VOLUME-BASED MARKET IMPACT SLIPPAGE
+    # ============================================================
+    # Adds a square-root market impact on top of slippage_pct.
+    # impact_slippage = volume_impact_coeff * sqrt(shares / adv_20)
+    # 0.0 = disabled (default). 0.1 = mild impact. 0.5 = aggressive.
+    # Only fires when Volume data is available and adv_20 > 0.
+    "volume_impact_coeff": 0.0,
+
+    # ============================================================
+    # SECTION 20: ML TRADE FEATURE EXPORT
+    # ============================================================
+    # When True, writes a consolidated Parquet file of all trades (all strategies,
+    # all portfolios) to output/runs/<run_id>/ml_features.parquet after the run.
+    # Requires pyarrow or fastparquet: pip install pyarrow
+    "export_ml_features": False,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

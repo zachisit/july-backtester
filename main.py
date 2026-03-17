@@ -52,7 +52,8 @@ def run_single_simulation(args):
 
     # 1. Unpack the arguments. `portfolio_data` has been REMOVED from the tuple.
     portfolio_name, name, logic_func, dependencies, stop_config, \
-    spy_buy_and_hold_return, qqq_buy_and_hold_return, strategy_params, wfa_split_date = args
+    spy_buy_and_hold_return, qqq_buy_and_hold_return, strategy_params, wfa_split_date, \
+    spy_actual_start, spy_actual_end = args
     
     # Assign the global data to a local variable for clarity
     portfolio_data = portfolio_data_global
@@ -123,6 +124,22 @@ def run_single_simulation(args):
                 result.update(_evaluate_wfa(_is, _oos, result['initial_capital']))
             else:
                 result.update({'oos_pnl_pct': None, 'wfa_verdict': 'N/A'})
+
+            # --- Rolling WFA ---
+            _wfa_folds = CONFIG.get("wfa_folds")
+            if _wfa_folds and int(_wfa_folds) >= 2 and result.get('trade_log') \
+                    and spy_actual_start and spy_actual_end:
+                from helpers.wfa_rolling import (
+                    get_fold_dates as _get_fold_dates,
+                    evaluate_rolling_wfa as _eval_rolling_wfa,
+                )
+                _min_fold = CONFIG.get("wfa_min_fold_trades", 5)
+                _fold_dates = _get_fold_dates(spy_actual_start, spy_actual_end, int(_wfa_folds))
+                result.update(_eval_rolling_wfa(
+                    result['trade_log'], _fold_dates, result['initial_capital'], _min_fold
+                ))
+            else:
+                result.update({'wfa_rolling_verdict': 'N/A'})
 
             # --- Expectancy and SQN (from R-Multiples) ---
             _r_vals = [t['RMultiple'] for t in result.get('trade_log', [])
@@ -497,6 +514,7 @@ def main():
                         stop_config, spy_buy_and_hold_return, qqq_buy_and_hold_return,
                         variant_params,
                         wfa_split_date,
+                        _spy_actual_start, _spy_actual_end,
                     )
                     tasks_for_this_portfolio.append(task_args)
 
@@ -578,7 +596,14 @@ def main():
     duration_seconds = time.monotonic() - start_time
     generate_portfolio_summary_report(all_portfolio_results, duration_seconds, run_folder_name)
     generate_sensitivity_report(all_portfolio_results, run_folder_name)
-    
+
+    if CONFIG.get("export_ml_features", False):
+        from helpers.ml_export import export_trade_features as _ml_export
+        _ml_path = os.path.join("output", "runs", run_folder_name, "ml_features.parquet")
+        _n_rows = _ml_export(all_portfolio_results, _ml_path)
+        if _n_rows > 0:
+            logger.info(f"  ML feature export: {_n_rows} trades -> {_ml_path}")
+
     mins, secs = divmod(duration_seconds, 60)
     logger.info(f"All portfolio simulations complete in {int(mins)}m {secs:.2f}s.")
 
