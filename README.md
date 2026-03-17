@@ -28,10 +28,11 @@
 8. [Generating Detailed Reports](#generating-detailed-reports)
 9. [Available Strategies](#available-strategies)
 10. [Configuration Reference](#configuration-reference)
-11. [Data Caching](#data-caching)
-12. [Adding Custom Strategies (Plugin System)](#adding-custom-strategies-plugin-system)
-13. [Project Structure](#project-structure)
-14. [Contributing](#contributing)
+11. [Parameter Sensitivity Sweep](#parameter-sensitivity-sweep)
+12. [Data Caching](#data-caching)
+13. [Adding Custom Strategies (Plugin System)](#adding-custom-strategies-plugin-system)
+14. [Project Structure](#project-structure)
+15. [Contributing](#contributing)
 
 ---
 
@@ -337,6 +338,21 @@ These control what appears in the printed summary table and which trade logs get
 
 Make sure your virtual environment is activated (`source venv/bin/activate` or the Windows equivalent) before running.
 
+> **First time?** Run the setup wizard before anything else:
+> ```bash
+> python main.py --init
+> ```
+> The wizard walks you through provider selection, API key setup, capital/dates, and symbol choice, then writes a ready-to-use `config_starter.py`. Rename it to `config.py` and you're ready to run.
+
+### CLI Flags
+
+| Flag | Description |
+| --- | --- |
+| *(none)* | Full backtest run |
+| `--init` | Launch the first-time setup wizard |
+| `--dry-run` | Validate config and print run summary without fetching data |
+| `--name <label>` | Prefix the output folder with a custom label |
+
 ### Portfolio Mode (Primary Use)
 
 Tests all active strategies in `custom_strategies/` against all uncommented portfolios in `config.py`. Uses all CPU cores.
@@ -454,6 +470,9 @@ SMA Crossover (50d/200d)       +74.1%   +12.1%   38.2%    0.98    0.65     46.1%
 | Max DD | Largest peak-to-trough decline during the period |
 | Calmar | Annualized return divided by max drawdown (higher = better risk-adjusted return) |
 | Sharpe | Risk-adjusted return relative to volatility (above 1.0 is generally considered good; above 2.0 is strong) |
+| Roll.Sharpe(avg) | Mean of all 126-day rolling Sharpe windows — regime-averaged quality |
+| Roll.Sharpe(min) | Worst 126-day rolling Sharpe — reveals if there was a prolonged losing streak even when overall Sharpe looks healthy |
+| Roll.Sharpe(last) | Most recent 126-day rolling Sharpe — current momentum signal |
 | Win Rate | Percentage of trades that were profitable |
 | Trades | Total number of completed trades |
 | Expectancy (R) | Average R-Multiple per trade — how many R the strategy earns per unit risked (see below) |
@@ -640,6 +659,72 @@ Each strategy shows its mean absolute Pearson correlation against all other stra
 The default threshold is **0.70** (absolute value). Pairs with `|r| > 0.70` are flagged as `HIGH CORRELATION ALERT` warnings.
 
 **When the matrix is not generated:** If fewer than 2 strategies have completed trades in a portfolio, correlation analysis is silently skipped and no CSV is written.
+
+## Parameter Sensitivity Sweep
+
+> [!IMPORTANT]
+> **Why sweep parameters?** Backtests are vulnerable to p-hacking — an intern (or an experienced analyst) who tweaks a single parameter until the equity curve looks great has almost certainly overfit to historical noise. The sensitivity sweep automatically varies every numeric param in a strategy's definition across a grid and reports what fraction of variants are profitable. A genuine edge survives parameter perturbations; a curve-fitted edge does not.
+
+Enable in `config.py`:
+
+```python
+"sensitivity_sweep_enabled": True,
+"sensitivity_sweep_pct": 0.20,    # ±20% per step
+"sensitivity_sweep_steps": 2,     # 2 steps each side → 5 values per param
+"sensitivity_sweep_min_val": 2,   # floor (prevents e.g. SMA period = 0)
+```
+
+**How it works:**
+
+For a strategy registered with `params={"fast": 20, "slow": 50}`, the sweep generates values:
+
+- `fast`: `[12, 16, 20, 24, 28]` (5 values at ±20% steps)
+- `slow`: `[30, 40, 50, 60, 70]` (5 values at ±20% steps)
+
+This produces a **25-point cartesian grid** (5 × 5). Each grid point runs as an independent simulation — they appear as separate rows in all summary tables. Non-numeric params (strings, bools) are carried through unchanged in every variant.
+
+**Strategy naming in results:**
+
+| Strategy name in output | Meaning |
+| --- | --- |
+| `SMA Crossover (20d/50d) [(base)]` | Base parameter values |
+| `SMA Crossover (20d/50d) [fast=16]` | Only `fast` changed from base |
+| `SMA Crossover (20d/50d) [fast=16 slow=40]` | Both params changed |
+
+**Sensitivity report (printed after the run):**
+
+```text
+======================================================================
+  PARAMETER SENSITIVITY REPORT
+======================================================================
+
+  SMA Crossover (20d/50d)
+  Robust — profitable in 72% of variants (18/25)
+
+  Variant                             P&L    Sharpe   Max DD   MC Score
+  ----------------------------------------------------------------------
+  (base)                            14.2%      1.42   18.3%        72 <-- base
+  fast=16                           12.8%      1.31   19.1%        65
+  fast=24                           11.4%      1.19   20.5%        58
+  fast=16 slow=40                    9.7%      1.08   22.3%        51
+  fast=12 slow=30                    2.1%      0.21   31.4%        12
+  fast=28 slow=70                   -3.4%      0.00   38.2%        -8
+  ...
+======================================================================
+```
+
+**Fragility verdict thresholds:**
+
+| % of variants profitable | Verdict |
+| --- | --- |
+| ≥ 30% | `Robust — profitable in X% of variants (Y/Z)` |
+| < 30% | `*** FRAGILE — profitable in only X% of variants ***` |
+
+**Performance note:** With 2 numeric params and `steps=2`, the sweep creates 25× more tasks. With 3 params it's 125×. Keep `sensitivity_sweep_enabled: False` for normal runs; enable only for targeted fragility checks on candidate strategies.
+
+**No-regression guarantee:** When `sensitivity_sweep_enabled: False` (default), the task-building loop is identical to pre-sweep behaviour — `param_variants = [base_params]`, one task per strategy.
+
+---
 
 ### Local Report Files
 
@@ -841,6 +926,70 @@ their `@register_strategy` decorator.
 | `wfa_split_ratio` | `0.80` | Walk-Forward Analysis IS/OOS split. `0.80` = first 80% of data is In-Sample, last 20% is Out-of-Sample. Set to `None` or `0` to disable. |
 | `roc_thresholds` | `[0.0, 0.5]` | Rate-of-change thresholds for ROC Momentum strategy |
 | `strategies` | `"all"` | `"all"` runs every plugin; a list of exact strategy names runs only those (see [Strategy Selection](#running-a-specific-subset-of-strategies-configpy)) |
+| `sensitivity_sweep_enabled` | `False` | Opt-in parameter sensitivity sweep — varies each numeric param ±pct across ±steps steps |
+| `sensitivity_sweep_pct` | `0.20` | Fractional step size (0.20 = ±20% per step) |
+| `sensitivity_sweep_steps` | `2` | Steps each side of base value (2 steps → 5 values per param) |
+| `sensitivity_sweep_min_val` | `2` | Floor for generated values (prevents e.g. SMA period = 0) |
+| `rolling_sharpe_window` | `126` | Rolling Sharpe window in trading days (~6 months). Set to `0` or `None` to disable. |
+| `htb_rate_annual` | `0.02` | Annual Hard-To-Borrow rate (2% = easy-to-borrow large cap; 10% = HTB small/mid cap). Debited daily while a short position is held. Set to `0.0` to disable borrow cost. |
+
+---
+
+## Short Selling
+
+The engine supports short positions via the `-2` signal convention. All existing strategies use `1/0/-1` and are fully backward-compatible.
+
+| Signal | Meaning |
+| --- | --- |
+| `1` | Enter long |
+| `0` | No change |
+| `-1` | Exit long **or** cover short |
+| `-2` | Enter short |
+
+**How it works:** When a strategy emits `-2` for a symbol, a short position is opened at the next bar's Open (or Close, depending on `execution_time`). The short seller receives the proceeds into cash. Each subsequent day, a Hard-To-Borrow fee is debited: `notional × ((1 + htb_rate_annual)^(1/252) - 1)`. When the strategy emits `-1`, the position is covered and the borrow cost is netted against the P&L.
+
+**Short trades in the output:** Short trades appear in trade CSVs and summary tables with `ExitReason: "Short Cover"`. They are included in all P&L, Sharpe, and Monte Carlo calculations alongside long trades.
+
+**Configuring borrow cost:**
+
+```python
+"htb_rate_annual": 0.02,  # 2% p.a. (easy-to-borrow, e.g. large-cap S&P 500)
+"htb_rate_annual": 0.10,  # 10% p.a. (hard-to-borrow, e.g. high-short-interest small cap)
+"htb_rate_annual": 0.0,   # disabled — no borrow cost modelled
+```
+
+---
+
+## Regime Heatmap
+
+After each strategy run, the engine prints a **VIX Regime Heatmap** — a year × volatility-bucket P&L table that shows whether a strategy's edge is regime-dependent.
+
+**VIX buckets:**
+
+| Bucket | VIX range |
+| --- | --- |
+| Low (<15) | VIX below 15 — calm, low-fear environment |
+| Mid (15–25) | VIX 15 to 25 — normal / moderate volatility |
+| High (>25) | VIX above 25 — elevated fear / stress |
+
+Each trade's **entry date** is classified into a bucket using the VIX close on that date (forward-filled from the prior trading day for weekends and holidays). P&L is expressed as a fraction of initial capital.
+
+**Example terminal output:**
+
+```text
+--- REGIME HEATMAP: MA Crossover ---
+  Year        Low (<15)    Mid (15-25)     High (>25)
+----------------------------------------------------
+  2022           +0.0%         -3.4%         +1.2%
+  2023           +5.1%         +2.8%          0.0%
+  2024           +3.3%         +1.6%         -0.5%
+----------------------------------------------------
+  TOTAL          +8.4%         +1.0%         +0.7%
+```
+
+**Interpretation:** A strategy that shows strong positive returns only in `Low (<15)` and flat or negative in `High (>25)` is regime-dependent — it may struggle in volatile markets. A robust strategy should show consistent positive contribution across all three buckets.
+
+**Configuration:** The heatmap uses VIX data loaded as the `vix_df_global` ticker. No extra config keys are required — the output appears automatically whenever VIX data is available and the trade log is non-empty.
 
 ---
 

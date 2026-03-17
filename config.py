@@ -270,6 +270,31 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": ["SMA Crossover (20d/50d)"],
+
+    # ============================================================
+    # SECTION 15: PARAMETER SENSITIVITY SWEEP
+    # ============================================================
+    # Automatically varies each numeric param in a strategy's @register_strategy
+    # params dict by ±pct across ±steps steps, then prints a fragility verdict.
+    # Opt-in only — keep disabled for normal runs (multiplies task count).
+    "sensitivity_sweep_enabled": False,   # opt-in
+    "sensitivity_sweep_pct": 0.20,        # ±20% per step
+    "sensitivity_sweep_steps": 2,         # 2 steps each side → 5 values per param
+    "sensitivity_sweep_min_val": 2,       # floor (prevents e.g. SMA period = 0)
+
+    # ============================================================
+    # SECTION 16: ROLLING METRICS
+    # ============================================================
+    "rolling_sharpe_window": 126,         # trading days (~6 months). 0 or None to disable.
+
+    # ============================================================
+    # SECTION 17: SHORT SELLING
+    # ============================================================
+    # Hard-To-Borrow annual rate debited daily from cash while a short is open.
+    # 0.02 = 2% p.a. (easy-to-borrow large cap)
+    # 0.10 = 10% p.a. (hard-to-borrow small/mid cap)
+    # 0.0  = disable borrow cost
+    "htb_rate_annual": 0.02,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

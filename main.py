@@ -13,7 +13,8 @@ from services import get_data_service
 from helpers.indicators import calculate_sma, calculate_rsi, calculate_atr
 from helpers.registry import get_active_strategies
 from helpers.portfolio_simulations import run_portfolio_simulation
-from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary
+from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary, generate_sensitivity_report
+from helpers.sensitivity import build_param_grid, is_sweep_enabled, label_for_params
 from helpers.correlation import run_correlation_analysis, DEFAULT_THRESHOLD
 from helpers.monte_carlo import run_monte_carlo_simulation, analyze_mc_results
 from tqdm import tqdm
@@ -135,6 +136,27 @@ def run_single_simulation(args):
                 result['expectancy'] = None
                 result['sqn'] = None
 
+            # --- Rolling Sharpe ---
+            from helpers.simulations import calculate_rolling_sharpe as _rs
+            _tl = result.get("portfolio_timeline")
+            _w  = CONFIG.get("rolling_sharpe_window", 126)
+            if _tl is not None and _w and len(_tl) > _w:
+                _series = _rs(_tl, window=_w)
+                _valid  = _series.dropna()
+                result["rolling_sharpe_mean"]  = float(_valid.mean())  if len(_valid) >= 2 else None
+                result["rolling_sharpe_min"]   = float(_valid.min())   if len(_valid) >= 2 else None
+                result["rolling_sharpe_final"] = float(_valid.iloc[-1]) if len(_valid) >= 1 else None
+            else:
+                result["rolling_sharpe_mean"] = result["rolling_sharpe_min"] = result["rolling_sharpe_final"] = None
+
+            # --- Regime Heatmap ---
+            from helpers.regime import build_regime_heatmap as _build_heatmap
+            result["regime_heatmap"] = _build_heatmap(
+                result.get("trade_log", []),
+                vix_df_global,
+                result.get("initial_capital", CONFIG["initial_capital"]),
+            )
+
             return result
             
     except Exception:
@@ -143,6 +165,19 @@ def run_single_simulation(args):
         return None
 
 def main():
+    # --- INIT WIZARD ---
+    import argparse as _argparse
+    _parser = _argparse.ArgumentParser(add_help=False)
+    _parser.add_argument("--init", action="store_true")
+    _parser.add_argument("--dry-run", action="store_true")
+    _parser.add_argument("--all", action="store_true")
+    _known, _ = _parser.parse_known_args()
+    if _known.init:
+        from helpers.init_wizard import run_init_wizard
+        run_init_wizard()
+        return
+    # --- END INIT WIZARD ---
+
     # --- S1: API KEY CHECK ---
     import os
     try:
@@ -179,7 +214,7 @@ def main():
     if not (0 < alloc <= 1.0):
         errors.append(f"  - allocation_per_trade ({alloc}) must be between 0 (exclusive) and 1.0 (inclusive)")
 
-    if not CONFIG.get("portfolios"):
+    if not CONFIG.get("portfolios") and not CONFIG.get("symbols_to_test"):
         errors.append("  - portfolios is empty. Add at least one portfolio entry to run.")
 
     if errors:
@@ -226,13 +261,18 @@ def main():
         ],
     )
 
+    # --- Single-asset mode: wrap symbols_to_test as a synthetic portfolio ---
+    _portfolios = CONFIG.get("portfolios") or {}
+    if not _portfolios and CONFIG.get("symbols_to_test"):
+        _portfolios = {"Single Asset": CONFIG["symbols_to_test"]}
+
     # --- U1: RUN SUMMARY ---
     total_stop_configs = len(CONFIG.get("stop_loss_configs", []))
     total_strategies = len(get_active_strategies())
 
     # Count total symbols across all portfolios to estimate task count
     _symbol_counts = {}
-    for _pname, _pvalue in CONFIG.get("portfolios", {}).items():
+    for _pname, _pvalue in _portfolios.items():
         if isinstance(_pvalue, list):
             _symbol_counts[_pname] = len(_pvalue)
         elif isinstance(_pvalue, str) and _pvalue.endswith(".json"):
@@ -345,7 +385,7 @@ def main():
     logger.info("=" * 25 + " PROCESSING PORTFOLIOS " + "=" * 25)
     noise_data_saved = False  # Save one noise sample CSV per run (first symbol with noise > 0)
     # Loop through each portfolio sequentially
-    for portfolio_name, value in CONFIG['portfolios'].items():
+    for portfolio_name, value in _portfolios.items():
         logger.info(f"--> Preparing and running portfolio: {portfolio_name}")
         
         # --- Data fetching for the current portfolio (no changes) ---
@@ -441,16 +481,24 @@ def main():
         # --- Generate tasks for THIS portfolio, WITHOUT the large `portfolio_data` ---
         tasks_for_this_portfolio = []
         for strat_name, strategy_config in get_active_strategies().items():
-            for stop_config in CONFIG['stop_loss_configs']:
-                # This tuple is now much smaller because `portfolio_data` is removed
-                task_args = (
-                    portfolio_name, strat_name, strategy_config["logic"],
-                    strategy_config.get("dependencies", []),
-                    stop_config, spy_buy_and_hold_return, qqq_buy_and_hold_return,
-                    strategy_config.get("params", {}),
-                    wfa_split_date,
-                )
-                tasks_for_this_portfolio.append(task_args)
+            base_params = strategy_config.get("params", {})
+            param_variants = build_param_grid(base_params) if is_sweep_enabled() and base_params else [base_params]
+
+            for variant_params in param_variants:
+                if len(param_variants) > 1:
+                    display_name = f"{strat_name} [{label_for_params(base_params, variant_params)}]"
+                else:
+                    display_name = strat_name
+
+                for stop_config in CONFIG['stop_loss_configs']:
+                    task_args = (
+                        portfolio_name, display_name, strategy_config["logic"],
+                        strategy_config.get("dependencies", []),
+                        stop_config, spy_buy_and_hold_return, qqq_buy_and_hold_return,
+                        variant_params,
+                        wfa_split_date,
+                    )
+                    tasks_for_this_portfolio.append(task_args)
 
         if not tasks_for_this_portfolio:
             logger.warning(f"No tasks generated for {portfolio_name}.")
@@ -522,8 +570,14 @@ def main():
 
         generate_per_portfolio_summary(p_results, p_name, spy_buy_and_hold_return, qqq_buy_and_hold_return, run_folder_name, corr_matrix=corr_matrix)
 
+        from helpers.regime import print_regime_heatmap as _print_heatmap
+        for _r in p_results:
+            if _r.get("regime_heatmap") is not None:
+                _print_heatmap(_r["regime_heatmap"], _r.get("Strategy", "Unknown"))
+
     duration_seconds = time.monotonic() - start_time
     generate_portfolio_summary_report(all_portfolio_results, duration_seconds, run_folder_name)
+    generate_sensitivity_report(all_portfolio_results, run_folder_name)
     
     mins, secs = divmod(duration_seconds, 60)
     logger.info(f"All portfolio simulations complete in {int(mins)}m {secs:.2f}s.")

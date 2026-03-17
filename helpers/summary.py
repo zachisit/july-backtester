@@ -77,13 +77,13 @@ def generate_single_asset_summary_report(symbol_results, spy_benchmark_result, q
               f"vs SPY >= {min_vs_spy:.2f}%, vs QQQ >= {min_vs_qqq:.2f}%)")
     else:
         # (Formatting logic is fine)
-        for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"), ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}")]:
+        for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"), ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"), ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"), ('rolling_sharpe_final', "{:.2f}")]:
             if col in filtered_df.columns:
                 filtered_df[col] = filtered_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
         if 'avg_trade_duration' in filtered_df.columns:
             filtered_df['avg_trade_duration'] = filtered_df['avg_trade_duration'].apply(lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x)
-        filtered_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN'}, inplace=True)
-        report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'MC Verdict', 'MC Score']
+        filtered_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN', 'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)'}, inplace=True)
+        report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'MC Verdict', 'MC Score']
         summary_df_display = filtered_df.reindex(columns=report_cols).fillna('N/A').sort_values(by='MC Score', ascending=False).reset_index(drop=True)
         print(f"\n--- Strategy Comparison for {symbol} (filtered, sorted by MC Score) ---")
         print(summary_df_display.to_string(index=False))
@@ -149,7 +149,8 @@ def generate_final_summary(all_results):
     for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"),
                        ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"),
                        ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"),
-                       ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}")]:
+                       ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"),
+                       ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"), ('rolling_sharpe_final', "{:.2f}")]:
         if col in final_df.columns:
             final_df[col] = final_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
     if 'avg_trade_duration' in final_df.columns:
@@ -163,9 +164,10 @@ def generate_final_summary(all_results):
         'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)',
         'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict',
         'expectancy': 'Expectancy (R)', 'sqn': 'SQN',
+        'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)',
     }, inplace=True)
 
-    report_cols = ['Symbol', 'Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'MC Verdict', 'MC Score']
+    report_cols = ['Symbol', 'Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'MC Verdict', 'MC Score']
     final_df_display = final_df.reindex(columns=report_cols).fillna('N/A')
     
     print("\nBased on all filters, the most promising single-asset combinations are:\n")
@@ -258,11 +260,11 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         display_df.reset_index(drop=True, inplace=True)
 
         # Formatting logic
-        for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"), ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}")]:
+        for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"), ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"), ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"), ('rolling_sharpe_final', "{:.2f}")]:
             if col in display_df.columns: display_df[col] = display_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
         if 'avg_trade_duration' in display_df.columns: display_df['avg_trade_duration'] = display_df['avg_trade_duration'].apply(lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x)
-        display_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'avg_corr': 'Avg. Corr', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN'}, inplace=True)
-        report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Avg. Corr', 'MC Verdict', 'MC Score']
+        display_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'avg_corr': 'Avg. Corr', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN', 'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)'}, inplace=True)
+        report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Avg. Corr', 'MC Verdict', 'MC Score']
         summary_df_display = display_df.reindex(columns=report_cols).fillna('N/A').reset_index(drop=True)
         print(f"\n--- Strategy Comparison for {portfolio_name} (filtered, sorted by MC Score) ---")
         print(summary_df_display.to_string(index=False))
@@ -398,7 +400,8 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
     # --- Formatting and Renaming Section ---
     for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"),
                        ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"),
-                       ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}")]:
+                       ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"),
+                       ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"), ('rolling_sharpe_final', "{:.2f}")]:
         if col in filtered_df.columns:
             filtered_df[col] = filtered_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
 
@@ -413,9 +416,10 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
         'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)',
         'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict',
         'expectancy': 'Expectancy (R)', 'sqn': 'SQN',
+        'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)',
     }, inplace=True)
 
-    report_cols = ['Portfolio', 'Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'MC Verdict', 'MC Score']
+    report_cols = ['Portfolio', 'Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'MC Verdict', 'MC Score']
     summary_df_display = filtered_df.reindex(columns=report_cols).fillna('N/A')
 
     summary_df_sorted = summary_df_display
@@ -448,3 +452,33 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
 
     except Exception as e:
         print(f"\n  -> WARNING: Could not save the overall portfolio summary. Error: {e}")
+
+
+def generate_sensitivity_report(all_results: list[dict], run_id: str) -> None:
+    """Print a parameter sensitivity fragility report when the sweep is enabled."""
+    from config import CONFIG
+    if not CONFIG.get("sensitivity_sweep_enabled", False) or not all_results:
+        return
+    groups = {}
+    for r in all_results:
+        base = r.get("Strategy", "").split(" [")[0]
+        groups.setdefault(base, []).append(r)
+    swept = {k: v for k, v in groups.items() if len(v) > 1}
+    if not swept:
+        return
+    print("\n" + "=" * 70)
+    print("  PARAMETER SENSITIVITY REPORT")
+    print("=" * 70)
+    for base_name, variants in swept.items():
+        profitable = [v for v in variants if v.get("pnl_percent", -1) > 0]
+        pct = len(profitable) / len(variants) * 100
+        flag = f"*** FRAGILE — profitable in only {pct:.0f}% of variants ***" if pct < 30 else \
+               f"Robust — profitable in {pct:.0f}% of variants ({len(profitable)}/{len(variants)})"
+        print(f"\n  {base_name}\n  {flag}")
+        print(f"\n  {'Variant':<35} {'P&L':>8} {'Sharpe':>8} {'Max DD':>8} {'MC Score':>9}")
+        print("  " + "-" * 70)
+        for r in sorted(variants, key=lambda x: (0 if "(base)" in x.get("Strategy", "") else 1, -x.get("pnl_percent", -999))):
+            label = r.get("Strategy", "").split(" [")[-1].rstrip("]") if " [" in r.get("Strategy", "") else "(base)"
+            mark = " <-- base" if label == "(base)" else ""
+            print(f"  {label:<35} {r.get('pnl_percent', 0):>7.1%} {r.get('sharpe_ratio', 0) or 0:>8.2f} {r.get('max_drawdown', 0) or 0:>7.1%}  {r.get('mc_score', 0) or 0:>8}{mark}")
+    print("=" * 70)

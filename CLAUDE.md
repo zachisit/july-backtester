@@ -320,6 +320,110 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 - `TestHighWaterMark` — verifies `cummax()` logic (rising, declining, flat, single-element equity curves).
 - `TestDrawdownPct` — verifies `(equity - hwm) / hwm` fractional values against hand-computed exact results for `[100, 110, 90, 105, 120]` and edge cases (always-rising, full recovery, trough fraction, single-element).
 
+## Parameter Sensitivity Sweep
+
+- **`helpers/sensitivity.py`** — pure, stateless module. Public entry points: `build_param_grid`, `label_for_params`, `is_sweep_enabled`.
+- **Purpose**: detects p-hacking by varying each numeric param in a strategy's `@register_strategy(params={...})` dict by ±pct across ±steps steps and printing a fragility verdict.
+- **How it works**: `build_param_grid` takes a base params dict and returns the cartesian product of all per-param value ranges. Only `int`/`float` values are varied; strings, bools, and `None` pass through unchanged. Values are floored at `sensitivity_sweep_min_val`.
+- **Config keys**:
+
+  | Key | Default | Description |
+  | --- | --- | --- |
+  | `sensitivity_sweep_enabled` | `False` | Opt-in — disabled by default |
+  | `sensitivity_sweep_pct` | `0.20` | ±20% per step |
+  | `sensitivity_sweep_steps` | `2` | 2 steps each side → 5 values per param |
+  | `sensitivity_sweep_min_val` | `2` | Floor prevents e.g. SMA period = 0 |
+
+- **Strategy naming convention**: when enabled, each variant is named `StrategyName [(base)]` for the base params and `StrategyName [fast=16]` for changed keys. Only changed keys appear in the label.
+- **Fragility threshold**: `< 30%` of variants profitable → `*** FRAGILE ***` printed in the sensitivity report. ≥ 30% → `Robust`.
+- **Performance note**: 2 params × `steps=2` produces 25 grid points (5² cartesian). Keep disabled for normal runs; enable only for targeted fragility checks.
+- **No-regression guarantee**: when `sensitivity_sweep_enabled: False` (default), `param_variants = [base_params]` — identical to pre-sweep behaviour. The existing task-building loop runs exactly as before.
+- **Tests**: `tests/test_sensitivity.py` — covers `build_param_grid` (12 tests), `label_for_params`, and the no-regression default path.
+
+## Rolling Sharpe (126-Day)
+
+- **`calculate_rolling_sharpe(portfolio_timeline, window, risk_free_rate)`** in `helpers/simulations.py` — computes a rolling annualised Sharpe using excess returns (daily return minus `rf_daily`).
+- **Config key**: `rolling_sharpe_window` (default: `126` trading days ≈ 6 months). Set to `0` or `None` to disable.
+- **Three scalar columns** added to all summary tables and the overall portfolio CSV:
+
+  | Column | Key | Meaning |
+  | --- | --- | --- |
+  | `Roll.Sharpe(avg)` | `rolling_sharpe_mean` | Mean of all valid 126-day Sharpe windows |
+  | `Roll.Sharpe(min)` | `rolling_sharpe_min` | Worst 126-day window — regime stress indicator |
+  | `Roll.Sharpe(last)` | `rolling_sharpe_final` | Most recent 126-day window — current momentum |
+
+- **Interpretation**: `Roll.Sharpe(min) < -0.5` indicates a prolonged losing streak even if the overall (single-number) Sharpe looks healthy — a red flag for regime dependency.
+- **Shows `N/A`** when the equity curve has fewer bars than `rolling_sharpe_window` (insufficient history) or when the window is disabled.
+- **NaN mechanics**: `pct_change()` produces NaN at index 0, so the first valid rolling value appears at index `window` (not `window - 1`) of the equity curve.
+- **Tests**: `tests/test_rolling_sharpe.py` — 9 tests covering output length, NaN boundary at correct index, uptrend direction, rf-rate effect, and window-size comparison.
+
+## Short Selling & Borrow Cost
+
+**Signal convention** — all existing strategies use 1/0/−1 and are fully unaffected:
+
+| Signal | Meaning |
+| --- | --- |
+| `1` | Enter long |
+| `0` | No change |
+| `-1` | Exit long **or** cover short |
+| `-2` | Enter short |
+
+- **Borrow cost**: `htb_rate_annual` (config, default `0.02`) converted to a daily compound rate `(1 + annual)^(1/252) - 1` and debited from cash each day a short is held. Set to `0.0` to disable.
+- **Three new blocks in the daily loop** (all additive — no long-path code changed):
+  1. **Borrow cost debit**: iterates `short_positions`, subtracts `notional × htb_rate_daily` from cash and accumulates `spos['total_borrow_cost']`.
+  2. **Short cover**: on signal `< 0` for a held short, fills at Open/Close + slippage, deducts commission both sides, nets `total_borrow_cost` out of profit, logs to `trade_log`.
+  3. **Short entry**: on signal `== -2`, skips if `symbol in positions or symbol in short_positions`, allocates `min(total_equity × allocation_pct, cash)`, receives proceeds into cash.
+- **Short trades in `trade_log`**: `Trade: "Short N"`, `ExitReason: "Short Cover"`. `RMultiple` is `None` for shorts (initial risk undefined without a stop).
+- **Equity MTM for shorts**: `current_market_value += (shares × entry_price) − (shares × current_close)` — profit when price falls.
+- **Backward compatibility**: all existing 1/0/−1 strategies skip all three new blocks entirely (`short_positions` is always empty for them).
+- **Tests**: `tests/test_short_selling.py` — 7 tests covering config defaults, daily-rate arithmetic, 30-day cost estimate, and no-regression empty-shorts loop.
+
+## Regime Heatmap
+
+`helpers/regime.py` — pure reporting layer; no engine changes, no strategy signals modified.
+
+**VIX buckets**:
+
+| Bucket | Condition | Constant |
+| --- | --- | --- |
+| Low | VIX < 15 | `REGIME_LOW` |
+| Mid | 15 ≤ VIX ≤ 25 | `REGIME_MID` |
+| High | VIX > 25 | `REGIME_HIGH` |
+| Unknown | No prior data | `REGIME_UNK` |
+
+- **Classification date**: each trade's `EntryDate` is used for regime lookup (not an average over the hold period).
+- **Forward-fill**: weekends and holidays inherit the most recent prior VIX close. The lookup date is unioned into the series as NaN then `ffill()` is applied, so no date is ever artificially inserted into real data.
+- **`build_regime_heatmap(trade_log, vix_df, initial_capital)`**: returns a `year × regime` DataFrame where each cell is `sum(Profit) / initial_capital`. Returns `None` if `trade_log` is empty, `vix_df` is None/empty, or `initial_capital ≤ 0`. All three regime columns are always present even when no trades fall in a bucket.
+- **`print_regime_heatmap(heatmap, strategy_name)`**: prints a formatted year × bucket table to stdout. Silent when `heatmap` is None.
+- **`main.py` integration**: `result["regime_heatmap"]` set in `run_single_simulation`; printed per-strategy in the `main()` loop after `generate_per_portfolio_summary`.
+- **VIX timezone handling**: Yahoo Finance returns tz-aware UTC timestamps. `classify_vix_regime()` strips timezone info from both the series index and the lookup date before comparison to ensure correct alignment regardless of data provider. Without this, `pd.concat` raises `TypeError` (caught silently), every trade returns `REGIME_UNK`, and all heatmap cells show 0.0%.
+- **Tests**: `tests/test_regime_heatmap.py` — 18 tests covering boundary VIX values, forward-fill, None guards, DataFrame shape, fractional P&L values, multi-year rows, stdout content, and tz-aware index handling.
+
+## Init Wizard (--init)
+
+```bash
+rtk python main.py --init
+```
+
+Interactive four-step wizard for first-time setup. Writes `config_starter.py` to the project root.
+
+**Four steps:**
+1. **Data provider** — choose `yahoo` / `csv` / `polygon` / `norgate`. If Polygon is selected, optionally enter the API key (appended to `.env`).
+2. **Capital & dates** — `initial_capital` (default 100 000), `start_date` (default 2010-01-01). End date is always a dynamic `datetime.now()` expression in the written file.
+3. **What to test** — `single` (comma-separated tickers → `symbols_to_test`) or `portfolio` (nasdaq100 JSON or custom named list → `portfolios`).
+4. **Confirm & write** — shows a file list, asks for explicit `y/n` confirmation before writing anything.
+
+**Design constraints:**
+- Stdlib only (`sys`, `os`, `pathlib`, `textwrap`, `datetime`, `argparse`) — zero new dependencies.
+- No network calls.
+- Nothing written without explicit user confirmation at Step 4.
+- Will not overwrite `config.py` if it already exists; warns and instructs the user to copy sections manually.
+- Polygon API key appended to `.env` only if `POLYGON_API_KEY=` is not already present.
+
+**Interactive prompt functions** (`_ask`, `_confirm`) require a TTY and are not unit-tested. `_build_config` and colour helpers are fully unit-tested.
+
+**Tests:** `tests/test_init_wizard.py` — 13 tests covering `_build_config` for all four providers, required keys, mode branching, and colour helper behaviour with/without TTY.
+
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
 - Stop-loss config is a dict `{"type": "none"}` or `{"type": "percentage", "value": 0.05}` — not a float
