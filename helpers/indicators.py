@@ -399,6 +399,31 @@ def bollinger_band_logic(df, length=20, std_dev=2.0):
     return df
 
 def stochastic_logic(df, length, k_smooth, oversold, exit_level):
+    """
+    Stochastic Oscillator mean-reversion strategy.
+
+    Buys when %K crosses back up above the oversold level, exits when %K
+    crosses up above the exit level. Signal is forward-filled to maintain
+    position state between events.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'High', 'Low', and 'Close' columns.
+    length : int
+        Lookback period for the highest high and lowest low.
+    k_smooth : int
+        Smoothing period for the %D line (SMA of %K).
+    oversold : float
+        %K level below which the asset is considered oversold (buy trigger).
+    exit_level : float
+        %K level above which the position is exited.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     df['L14'] = df['Low'].rolling(length).min()
     df['H14'] = df['High'].rolling(length).max()
     df['%K'] = 100 * ((df['Close'] - df['L14']) / (df['H14'] - df['L14']))
@@ -412,6 +437,27 @@ def stochastic_logic(df, length, k_smooth, oversold, exit_level):
     return df
 
 def bollinger_breakout_logic(df, length, std_dev):
+    """
+    Bollinger Band breakout (momentum) strategy.
+
+    Buys when the close breaks above the upper Bollinger Band, exits when
+    the close drops below the middle SMA. Signal is forward-filled to
+    maintain position state.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    length : int
+        Lookback period for the SMA and standard deviation calculation.
+    std_dev : float
+        Number of standard deviations for the upper band.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     df['SMA'] = df['Close'].rolling(length).mean()
     df['StdDev'] = df['Close'].rolling(length).std()
     df['UpperBand'] = df['SMA'] + (df['StdDev'] * std_dev)
@@ -422,6 +468,26 @@ def bollinger_breakout_logic(df, length, std_dev):
     return df
 
 def roc_logic(df, length, threshold=0):
+    """
+    Rate of Change (ROC) momentum strategy.
+
+    Computes the percentage change over a lookback period. Signal is 1 (long)
+    when ROC exceeds the threshold, and -1 (flat) when below.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    length : int
+        Number of bars for the ROC calculation.
+    threshold : float, optional
+        Minimum ROC value to trigger a long signal (default 0).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1 or -1).
+    """
     df['ROC'] = df['Close'].pct_change(periods=length) * 100
     df['Signal'] = np.where(df['ROC'] > threshold, 1, -1)
     return df
