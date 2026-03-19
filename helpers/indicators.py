@@ -694,6 +694,29 @@ def macd_rsi_filter_logic(df, macd_fast, macd_slow, macd_signal, rsi_length):
     return df
 
 def ma_bounce_logic(df, ma_length=20, filter_bars=2):
+    """
+    Moving Average bounce strategy.
+
+    Buys when price touches the MA and recovers (closes back above it),
+    provided the stock has not been in a confirmed downtrend (consecutive
+    closes below the MA). Exits when the downtrend is confirmed.
+    Signal is forward-filled to maintain position state.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'Low' and 'Close' columns.
+    ma_length : int, optional
+        Lookback period for the moving average (default 20).
+    filter_bars : int, optional
+        Number of consecutive closes below the MA required to confirm
+        a downtrend and trigger an exit (default 2).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     df['MA'] = df['Close'].rolling(ma_length).mean()
     is_below_ma = df['Close'] < df['MA']
     df['consecutive_below'] = is_below_ma.rolling(window=filter_bars).sum()
@@ -706,7 +729,25 @@ def ma_bounce_logic(df, ma_length=20, filter_bars=2):
     return df
 
 def weekday_overnight_logic(df):
-    """Generates a stateful signal to be long Mon-Thu nights."""
+    """
+    Weekday overnight hold strategy.
+
+    Generates a stateful signal to be long Monday through Thursday nights
+    and flat on Friday nights (avoiding weekend risk). Uses the day-of-week
+    index to determine signal.
+
+    Signal convention: 1 on Mon/Tue/Wed/Thu (hold overnight), -1 on Fri.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a DatetimeIndex.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1 or -1).
+    """
     df['weekday'] = df.index.dayofweek
     buy_days = [0, 1, 2, 3] # Mon, Tue, Wed, Thu
     df['Signal'] = np.where(df['weekday'].isin(buy_days), 1, -1)
