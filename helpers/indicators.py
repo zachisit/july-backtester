@@ -296,6 +296,26 @@ def ema_regime_crossover_logic(df, spy_df, vix_df, fast_ema=20, slow_ema=50, reg
     return df
 
 def sma_crossover_logic(df, fast, slow):
+    """
+    Simple Moving Average crossover strategy.
+
+    Computes a fast SMA and a slow SMA on the Close price. Signal is 1 (long)
+    when the fast SMA is above the slow SMA, and -1 (flat) when below.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    fast : int
+        Lookback period for the fast SMA.
+    slow : int
+        Lookback period for the slow SMA.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1 or -1).
+    """
     df['SMA_fast'] = df['Close'].rolling(fast).mean()
     df['SMA_slow'] = df['Close'].rolling(slow).mean()
     df['Signal'] = np.where(df['SMA_fast'] > df['SMA_slow'], 1, -1)
@@ -964,7 +984,31 @@ def ema_crossover_unfiltered_logic(df, fast_ema, slow_ema):
     return df
 
 def ema_crossover_spy_only_logic(df, spy_df, fast_ema, slow_ema, regime_ma=200):
-    """EMA Crossover, filtered ONLY by a SPY trend regime."""
+    """
+    EMA Crossover filtered by a SPY trend regime.
+
+    Uses the unfiltered EMA crossover as the base signal, then suppresses
+    buy signals when SPY is below its long-term SMA (bear market filter).
+    Sell signals are never filtered — exits always fire.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame for the target symbol.
+    spy_df : pd.DataFrame
+        OHLCV DataFrame for SPY (injected via dependencies=["spy"]).
+    fast_ema : int
+        Lookback period for the fast EMA.
+    slow_ema : int
+        Lookback period for the slow EMA.
+    regime_ma : int, optional
+        SMA lookback for the SPY trend filter (default 200).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     # Get the base signal from the unfiltered version
     df = ema_crossover_unfiltered_logic(df, fast_ema, slow_ema)
     original_signal = df['Signal'].copy()
@@ -983,7 +1027,31 @@ def ema_crossover_spy_only_logic(df, spy_df, fast_ema, slow_ema, regime_ma=200):
     return df
 
 def ema_crossover_vix_only_logic(df, vix_df, fast_ema, slow_ema, vix_threshold=30):
-    """EMA Crossover, filtered ONLY by a VIX volatility regime."""
+    """
+    EMA Crossover filtered by a VIX volatility regime.
+
+    Uses the unfiltered EMA crossover as the base signal, then suppresses
+    buy signals when VIX is above the threshold (high-fear filter).
+    Sell signals are never filtered — exits always fire.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame for the target symbol.
+    vix_df : pd.DataFrame
+        OHLCV DataFrame for VIX (injected via dependencies=["vix"]).
+    fast_ema : int
+        Lookback period for the fast EMA.
+    slow_ema : int
+        Lookback period for the slow EMA.
+    vix_threshold : float, optional
+        VIX level above which buy signals are suppressed (default 30).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     df = ema_crossover_unfiltered_logic(df, fast_ema, slow_ema)
     original_signal = df['Signal'].copy()
     
