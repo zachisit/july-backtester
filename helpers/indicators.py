@@ -322,6 +322,29 @@ def sma_crossover_logic(df, fast, slow):
     return df
 
 def rsi_logic(df, length, oversold, exit_level):
+    """
+    RSI mean-reversion strategy.
+
+    Buys when RSI crosses back up above the oversold level, exits when RSI
+    crosses up above the exit level (return to mean). Signal is forward-filled
+    to maintain position state between events.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    length : int
+        RSI lookback period.
+    oversold : float
+        RSI level below which the asset is considered oversold (buy trigger).
+    exit_level : float
+        RSI level above which the position is exited (e.g., 50 for midline).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     delta = df['Close'].diff()
     gain = delta.where(delta > 0, 0).ewm(alpha=1/length, adjust=False).mean()
     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/length, adjust=False).mean()
@@ -336,6 +359,29 @@ def rsi_logic(df, length, oversold, exit_level):
     return df
 
 def macd_crossover_logic(df, fast, slow, signal):
+    """
+    MACD crossover strategy.
+
+    Computes the MACD line (fast EMA minus slow EMA) and a signal line
+    (EMA of the MACD). Signal is 1 (long) when MACD is above the signal
+    line, and -1 (flat) when below.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    fast : int
+        Lookback period for the fast EMA.
+    slow : int
+        Lookback period for the slow EMA.
+    signal : int
+        Lookback period for the signal line EMA.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1 or -1).
+    """
     df['EMA_fast'] = df['Close'].ewm(span=fast, adjust=False).mean()
     df['EMA_slow'] = df['Close'].ewm(span=slow, adjust=False).mean()
     df['MACD'] = df['EMA_fast'] - df['EMA_slow']
@@ -540,6 +586,31 @@ def obv_confirmation_period_logic(df, ma_length=20, confirmation_days=2):
     return df
 
 def macd_rsi_filter_logic(df, macd_fast, macd_slow, macd_signal, rsi_length):
+    """
+    MACD crossover strategy with RSI confirmation filter.
+
+    Buys when the MACD line crosses above the signal line AND RSI is above 50
+    (confirming momentum). Exits on MACD cross below the signal line regardless
+    of RSI. Signal is forward-filled to maintain position state.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    macd_fast : int
+        Lookback period for the fast MACD EMA.
+    macd_slow : int
+        Lookback period for the slow MACD EMA.
+    macd_signal : int
+        Lookback period for the MACD signal line EMA.
+    rsi_length : int
+        RSI lookback period for the confirmation filter.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     df['EMA_fast'] = df['Close'].ewm(span=macd_fast, adjust=False).mean()
     df['EMA_slow'] = df['Close'].ewm(span=macd_slow, adjust=False).mean()
     df['MACD'] = df['EMA_fast'] - df['EMA_slow']
