@@ -24,9 +24,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt || true
-          pip install pandas_ta --no-deps || pip install git+https://github.com/twopirllc/pandas-ta.git --no-deps || true
-          pip install pytest
+          pip install pandas "numpy<2.0" tqdm boto3 requests python-dotenv orjson pyarrow yfinance matplotlib pytest
+          pip install pandas_ta || pip install git+https://github.com/twopirllc/pandas-ta.git || echo "pandas-ta install failed, continuing"
 
       - name: Run tests
         run: pytest --tb=short -q --ignore=tests/test_progress_tracking.py
