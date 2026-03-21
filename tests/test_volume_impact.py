@@ -117,3 +117,162 @@ class TestNoRegressionZeroCoeff:
         assert price == pytest.approx(expected, rel=1e-12), (
             f"Expected entry price {expected}, got {price} — market impact must be zero"
         )
+
+
+# ---------------------------------------------------------------------------
+# TestVolumeImpactEndToEnd (Task 9)
+# ---------------------------------------------------------------------------
+
+class TestVolumeImpactEndToEnd:
+    """
+    End-to-end tests that run a full simulation with volume_impact_coeff
+    enabled and verify the impact flows through to the trade log and P&L.
+    """
+
+    @staticmethod
+    def _make_ohlcv(n=60, start_price=100.0, trend=0.003):
+        """Build synthetic OHLCV data with realistic volume."""
+        import pandas as pd
+        dates = pd.bdate_range(start="2023-01-02", periods=n, freq="B")
+        closes = [start_price * (1 + trend) ** i for i in range(n)]
+        df = pd.DataFrame({
+            "Open":   [c * 0.999 for c in closes],
+            "High":   [c * 1.01 for c in closes],
+            "Low":    [c * 0.99 for c in closes],
+            "Close":  closes,
+            "Volume": [500_000] * n,
+        }, index=dates)
+        df.index.name = "Datetime"
+        return df
+
+    @staticmethod
+    def _make_spy(n=60):
+        import pandas as pd
+        dates = pd.bdate_range(start="2023-01-02", periods=n, freq="B")
+        closes = [400.0 * (1.001 ** i) for i in range(n)]
+        df = pd.DataFrame({
+            "Open": closes, "High": [c * 1.005 for c in closes],
+            "Low": [c * 0.995 for c in closes], "Close": closes,
+            "Volume": [1_000_000] * n,
+        }, index=dates)
+        df.index.name = "Datetime"
+        return df
+
+    @staticmethod
+    def _make_vix(n=60):
+        import pandas as pd
+        dates = pd.bdate_range(start="2023-01-02", periods=n, freq="B")
+        df = pd.DataFrame({
+            "Open": [18.0] * n, "High": [19.0] * n,
+            "Low": [17.0] * n, "Close": [18.0] * n,
+            "Volume": [0] * n,
+        }, index=dates)
+        df.index.name = "Datetime"
+        return df
+
+    @staticmethod
+    def _run_sim(volume_impact_coeff):
+        """Run a full simulation with the given impact coefficient."""
+        from unittest.mock import patch
+        from helpers.portfolio_simulations import run_portfolio_simulation
+        from helpers.indicators import sma_crossover_logic
+
+        n = 60
+        sym = TestVolumeImpactEndToEnd._make_ohlcv(n)
+        spy = TestVolumeImpactEndToEnd._make_spy(n)
+        vix = TestVolumeImpactEndToEnd._make_vix(n)
+
+        df_copy = sym.copy()
+        df_copy = sma_crossover_logic(df_copy, fast=5, slow=10)
+        signals = {"TEST": df_copy["Signal"]}
+
+        test_config = {
+            "slippage_pct": 0.0005,
+            "commission_per_share": 0.002,
+            "execution_time": "open",
+            "max_pct_adv": 0.05,
+            "volume_impact_coeff": volume_impact_coeff,
+            "risk_free_rate": 0.05,
+            "htb_rate_annual": 0.0,
+        }
+
+        with patch.dict("config.CONFIG", test_config):
+            result = run_portfolio_simulation(
+                portfolio_data={"TEST": sym},
+                signals=signals,
+                initial_capital=100_000.0,
+                allocation_pct=0.10,
+                spy_df=spy,
+                vix_df=vix,
+                tnx_df=None,
+                stop_config={"type": "none"},
+            )
+        return result
+
+    def test_volume_impact_bps_exists_in_trade_log(self):
+        """With coeff=0.1, VolumeImpact_bps must be present in strategy-exit trades.
+
+        End-of-backtest mark-to-market closes may not include this field,
+        so we check only trades with a normal ExitReason.
+        """
+        result = self._run_sim(volume_impact_coeff=0.1)
+        assert result is not None, "Simulation returned None"
+        normal_exits = [t for t in result["trade_log"] if t["ExitReason"] != "End of Backtest"]
+        if normal_exits:
+            for trade in normal_exits:
+                assert "VolumeImpact_bps" in trade, f"Trade missing VolumeImpact_bps: {trade}"
+        else:
+            # If all trades are end-of-backtest, just verify P&L was affected
+            result_zero = self._run_sim(volume_impact_coeff=0.0)
+            assert result_zero is not None
+            assert result["pnl_percent"] != result_zero["pnl_percent"]
+
+    def test_volume_impact_bps_has_nonzero_value(self):
+        """With coeff=0.1, at least one trade should have VolumeImpact_bps > 0.
+
+        Only checks trades that went through the normal exit path (not
+        end-of-backtest mark-to-market closes).
+        """
+        result = self._run_sim(volume_impact_coeff=0.1)
+        assert result is not None, "Simulation returned None"
+        normal_exits = [t for t in result["trade_log"] if t["ExitReason"] != "End of Backtest"]
+        if normal_exits:
+            bps_values = [t.get("VolumeImpact_bps", 0) for t in normal_exits]
+            assert any(v > 0 for v in bps_values), f"All VolumeImpact_bps are zero: {bps_values}"
+        else:
+            # Verify impact still affected pricing via P&L comparison
+            result_zero = self._run_sim(volume_impact_coeff=0.0)
+            assert result_zero is not None
+            assert result["pnl_percent"] < result_zero["pnl_percent"]
+
+    def test_pnl_differs_with_impact_vs_without(self):
+        """P&L with coeff=0.1 must differ from P&L with coeff=0.0."""
+        result_with = self._run_sim(volume_impact_coeff=0.1)
+        result_without = self._run_sim(volume_impact_coeff=0.0)
+        assert result_with is not None, "Sim with impact returned None"
+        assert result_without is not None, "Sim without impact returned None"
+        assert result_with["pnl_percent"] != result_without["pnl_percent"], (
+            f"P&L should differ: with={result_with['pnl_percent']}, "
+            f"without={result_without['pnl_percent']}"
+        )
+
+    def test_impact_reduces_pnl(self):
+        """Market impact is a cost — P&L with coeff=0.1 should be lower than with coeff=0.0."""
+        result_with = self._run_sim(volume_impact_coeff=0.1)
+        result_without = self._run_sim(volume_impact_coeff=0.0)
+        assert result_with is not None and result_without is not None
+        assert result_with["pnl_percent"] < result_without["pnl_percent"], (
+            f"Impact should reduce P&L: with={result_with['pnl_percent']:.4f}, "
+            f"without={result_without['pnl_percent']:.4f}"
+        )
+
+    def test_zero_coeff_volume_impact_bps_all_zero(self):
+        """With coeff=0.0, all VolumeImpact_bps values should be 0.
+
+        Uses .get() with default 0 to handle end-of-backtest trades that
+        may not include the field.
+        """
+        result = self._run_sim(volume_impact_coeff=0.0)
+        assert result is not None, "Simulation returned None"
+        bps_values = [t.get("VolumeImpact_bps", 0) for t in result["trade_log"]]
+        assert all(v == 0 for v in bps_values), f"Expected all zero bps: {bps_values}"
