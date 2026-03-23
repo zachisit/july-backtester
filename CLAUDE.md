@@ -160,7 +160,7 @@ output/
 - S3 uploads (if configured) use the same `<run_id>/` prefix as the key root.
 
 ## Do Not Touch
-- `helpers/indicators.py` strategy logic (all working correctly)
+- `helpers/indicators.py` strategy **logic** (all working correctly) — docstring additions and documentation improvements are permitted provided no signal logic, parameter handling, imports, or formatting is changed
 - `helpers/simulations.py` and `helpers/portfolio_simulations.py` simulation engines
 - `helpers/monte_carlo.py`
 - `tickers_to_scan/` JSON files
