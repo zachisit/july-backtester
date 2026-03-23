@@ -398,6 +398,81 @@ def bollinger_band_logic(df, length=20, std_dev=2.0):
     df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
     return df
 
+def bollinger_mean_reversion_atr_stop_logic(df, length=20, std_dev=2.0, atr_period=14, atr_multiplier=2.0):
+    """
+    Bollinger Band Mean Reversion strategy with an ATR-based stop loss.
+
+    Combines the existing Bollinger Band and ATR indicators into a single
+    mean-reversion strategy. Entry occurs when price touches the lower band
+    (oversold); exit occurs when price reaches the middle band (mean reversion
+    target). A 2x ATR stop below entry protects against trend continuation.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'Open', 'High', 'Low', 'Close', 'Volume' columns.
+    length : int
+        Lookback period for the Bollinger Band SMA and standard deviation.
+    std_dev : float
+        Number of standard deviations for the bands.
+    atr_period : int
+        Lookback period for the ATR calculation.
+    atr_multiplier : float
+        Multiplier applied to ATR for the stop distance below entry price.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
+    # 1. Calculate indicators using existing helper functions
+    df = calculate_bollinger_bands(df, length, std_dev)
+    df = calculate_atr(df, period=atr_period)
+
+    # 2. Stateful loop — track entry price and ATR stop
+    signals = pd.Series(0, index=df.index)
+    in_position = False
+    stop_price = 0.0
+
+    for i in range(1, len(df)):
+        # Skip if indicators haven't warmed up
+        if pd.isna(df[f'SMA_{length}'].iloc[i]) or pd.isna(df['ATR'].iloc[i]):
+            continue
+
+        # --- CHECK EXIT FIRST ---
+        if in_position:
+            # Exit 1: Stop loss hit (Low breaches the ATR stop)
+            if df['Low'].iloc[i] < stop_price:
+                signals.iloc[i] = -1
+                in_position = False
+                stop_price = 0.0
+                continue
+
+            # Exit 2: Mean reversion target reached (Close >= middle band)
+            if df['Close'].iloc[i] >= df[f'SMA_{length}'].iloc[i]:
+                signals.iloc[i] = -1
+                in_position = False
+                stop_price = 0.0
+                continue
+
+            # Still in position
+            signals.iloc[i] = 1
+            continue
+
+        # --- CHECK ENTRY ---
+        # Entry: Close touches or crosses below the lower Bollinger Band
+        if df['Close'].iloc[i] < df['LowerBand'].iloc[i]:
+            in_position = True
+            entry_price = df['Close'].iloc[i]
+            stop_price = entry_price - (df['ATR'].iloc[i] * atr_multiplier)
+            signals.iloc[i] = 1
+
+    # Convert events to stateful signal
+    df['Signal'] = signals.replace(0, np.nan).ffill().fillna(0)
+    return df
+
+
+
 def stochastic_logic(df, length, k_smooth, oversold, exit_level):
     """
     Stochastic Oscillator mean-reversion strategy.
