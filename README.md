@@ -5,7 +5,6 @@
 ![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 [![Tests](https://github.com/zachisit/july-backtester/actions/workflows/tests.yml/badge.svg)](https://github.com/zachisit/july-backtester/actions/workflows/tests.yml)
-![Tests: 562/562 Passing](https://img.shields.io/badge/Tests-562%2F562%20Passing-brightgreen)
 
 ---
 
