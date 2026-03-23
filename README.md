@@ -8,28 +8,25 @@
 
 ---
 
-**What it does:**
+Tests trading strategies against full historical US equity data, runs 1,000-path Monte Carlo simulation and Walk-Forward Analysis to separate genuine edges from curve-fitting, and produces a summary table with Sharpe, Calmar, Win Rate, MC Score, WFA Verdict, and SPY/QQQ outperformance. Detailed PDF tearsheets include equity curves, drawdown plots, R-Multiple histograms, and VIX regime heatmaps.
 
-- Tests trading strategies against full historical US equity data (Polygon, Norgate, Yahoo Finance, or local CSV)
-- Runs Monte Carlo simulation (1,000 reshuffles per strategy) and Walk-Forward Analysis to distinguish genuine edges from luck
-- Produces a summary table with Sharpe, Calmar, Win Rate, MC Score, WFA Verdict, and SPY/QQQ outperformance
-- Generates detailed PDF tearsheets with equity curves, drawdown plots, R-Multiple histograms, and VIX regime heatmaps
+Supports Polygon, Norgate, Yahoo Finance, and local CSV. Free to run against Yahoo Finance with no API key.
 
-Full documentation: [docs/README_full.md](docs/README_full.md)
+Full reference: [docs/README_full.md](docs/README_full.md)
 
 ---
 
 ## Installation
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/zachisit/july-backtester.git
 cd july-backtester
 python -m venv venv
 source venv/bin/activate   # Windows: venv\Scripts\activate.bat
 pip install -r requirements.txt
 ```
 
-Add your Polygon.io API key to a `.env` file (copy `.env.example` to get started):
+For Polygon data, add your API key to `.env` (copy `.env.example` to get started):
 
 ```env
 POLYGON_API_KEY=your_key_here
@@ -37,9 +34,15 @@ POLYGON_API_KEY=your_key_here
 
 ---
 
-## Quick Example — Yahoo Finance (no API key required)
+## Quick Start
 
-Set these four lines in `config.py`:
+**First time?** Run the setup wizard:
+
+```bash
+python main.py --init
+```
+
+**Or manually** — set these lines in `config.py` and run:
 
 ```python
 "data_provider": "yahoo",
@@ -48,31 +51,13 @@ Set these four lines in `config.py`:
 "initial_capital": 100000.0,
 ```
 
-Run:
-
 ```bash
 python main.py
 ```
 
 The engine runs every strategy in `custom_strategies/` against SPY, prints a results table, and writes output to `output/runs/<timestamp>/`.
 
----
-
-## First Time?
-
-Run the interactive setup wizard to generate a ready-to-use `config.py`:
-
-```bash
-python main.py --init
-```
-
-The wizard walks you through provider selection, API key setup, capital and date range, and symbol choice, then writes a `config_starter.py`. Rename it to `config.py` and you're ready to run.
-
----
-
-## Portfolio Run
-
-To test all strategies against the Nasdaq 100, set `portfolios` in `config.py`:
+**Portfolio run** — test all strategies against the Nasdaq 100:
 
 ```python
 "data_provider": "polygon",
@@ -81,13 +66,9 @@ To test all strategies against the Nasdaq 100, set `portfolios` in `config.py`:
 },
 ```
 
-Then run `python main.py`. Results appear in the terminal and in `output/runs/<run_id>/`.
+Validate before a long run: `python main.py --dry-run`
 
-Validate your config before a long run:
-
-```bash
-python main.py --dry-run
-```
+See [examples/](examples/) for ready-to-use config files and annotated strategy examples.
 
 ---
 
@@ -102,34 +83,9 @@ python main.py --dry-run
 
 ---
 
-## Documentation
-
-Full reference including all configuration options, feature deep-dives, and the strategy plugin guide:
-
-**[docs/README_full.md](docs/README_full.md)**
-
-Covers:
-- All configuration keys and defaults
-- Monte Carlo block-bootstrap sampling
-- Walk-Forward Analysis — single-split and rolling multi-fold
-- Parameter sensitivity sweep
-- VIX regime heatmap
-- Short selling with borrow cost
-- ML trade feature export
-- Data provider setup (Polygon, Norgate, Yahoo Finance, CSV)
-- Strategy plugin system — adding custom strategies
-- Output files reference
-
----
-
 ## Contributing
 
-1. Fork the repository and create a branch
-2. Add a strategy plugin in `custom_strategies/` — see the [Plugin System](docs/README_full.md#adding-custom-strategies-plugin-system) guide
-3. Validate with `python main.py --dry-run` and run a quick backtest
-4. Open a pull request
-
-Please do not commit `.env` files, `data_cache/`, or `output/`.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for dev setup, how to add a strategy plugin, and the PR checklist.
 
 ---
 
