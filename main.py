@@ -549,6 +549,35 @@ def main():
         # Add the results to the main list
         all_portfolio_results.extend([r for r in results_this_portfolio if r is not None])
 
+        # --- AUTORESEARCH HOOK: save equity curves for iteration tracking ---
+        if os.environ.get("AUTORESEARCH") == "1":
+            for r in results_this_portfolio:
+                if r is not None and r.get("portfolio_timeline") is not None:
+                    import json as _json
+                    _ec = r["portfolio_timeline"]
+                    _ec_data = {
+                        "strategy": r.get("Strategy", "unknown"),
+                        "portfolio": r.get("Portfolio", "unknown"),
+                        "sharpe_ratio": round(r.get("sharpe_ratio", 0) or 0, 4),
+                        "pnl_percent": round(r.get("pnl_percent", 0) or 0, 4),
+                        "max_drawdown": round(r.get("max_drawdown", 0) or 0, 4),
+                        "trades": r.get("Trades", 0),
+                        "win_rate": round(r.get("win_rate", 0) or 0, 4),
+                        "equity_curve": [
+                            {"date": str(d), "value": round(float(v), 2)}
+                            for d, v in _ec.items()
+                        ],
+                    }
+                    _ar_dir = "autoresearch_runs"
+                    os.makedirs(_ar_dir, exist_ok=True)
+                    _iter_num = len([
+                        f for f in os.listdir(_ar_dir)
+                        if f.startswith("iteration_") and f.endswith(".json")
+                    ])
+                    _ar_path = os.path.join(_ar_dir, f"iteration_{_iter_num:03d}.json")
+                    with open(_ar_path, "w") as _af:
+                        _json.dump(_ec_data, _af, indent=2)
+
     # --- FINAL REPORTING (No changes needed here) ---
     if not all_portfolio_results:
         logger.warning("No simulation tasks were generated or completed successfully.")
