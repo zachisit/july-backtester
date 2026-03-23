@@ -39,3 +39,6 @@ data_cache/
 output/
 
 tools/watchlists
+
+# Claude AI internal config
+.claude/
