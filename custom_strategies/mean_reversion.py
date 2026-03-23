@@ -42,6 +42,7 @@ are required to add, remove, or rename them.
 from helpers.registry import register_strategy
 from helpers.timeframe_utils import get_bars_for_period
 from helpers.indicators import (
+    williams_r_logic,
     bollinger_band_logic,
     bollinger_breakout_logic,
     bollinger_band_squeeze_logic,
@@ -652,3 +653,29 @@ def overnight_hold_vix(df, **kwargs):
     ``vix_df`` is injected automatically by the engine (declared in dependencies).
     """
     return weekday_overnight_with_vix_filter_logic(df, vix_df=kwargs["vix_df"])
+
+
+@register_strategy(
+    name="Williams %R Oversold Bounce (14d/-80/-50)",
+    dependencies=[],
+    params={
+        "length": get_bars_for_period("14d", _TF, _MUL),
+        "oversold": -80,
+        "exit_level": -50,
+    },
+)
+def williams_r_oversold_bounce(df, **kwargs):
+    """Williams %R Oversold Bounce strategy.
+
+    Entry: Williams %R crosses back up above -80 (leaving oversold territory).
+    Exit: Williams %R crosses up above -50 (mean reversion target reached).
+
+    Williams %R ranges from -100 (most oversold) to 0 (most overbought).
+    This is functionally similar to Stochastic but on an inverted scale.
+    """
+    return williams_r_logic(
+        df,
+        length=kwargs["length"],
+        oversold=kwargs["oversold"],
+        exit_level=kwargs["exit_level"],
+    )
