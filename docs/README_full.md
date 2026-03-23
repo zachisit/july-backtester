@@ -60,7 +60,7 @@ Before starting, you will need:
 ### Step 1 — Clone the Repository
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/zachisit/july-backtester.git
 cd july-backtester
 ```
 
