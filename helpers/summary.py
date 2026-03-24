@@ -8,6 +8,12 @@ import numpy as np
 from helpers.aws_utils import upload_file_to_s3
 from helpers.correlation import compute_avg_correlations, DEFAULT_THRESHOLD
 
+# Columns shown in compact mode (default). --verbose reveals all 23 columns.
+_DEFAULT_COLS = [
+    'Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'Sharpe',
+    'Max DD', 'MC Score', 'WFA Verdict',
+]
+
 def save_trades_to_csv(result, local_folder, run_id):
     """Saves the trade log locally and optionally uploads it to S3."""
     if not result.get('trade_log') or result.get('Trades', 0) == 0:
@@ -86,7 +92,12 @@ def generate_single_asset_summary_report(symbol_results, spy_benchmark_result, q
         report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'MC Verdict', 'MC Score']
         summary_df_display = filtered_df.reindex(columns=report_cols).fillna('N/A').sort_values(by='MC Score', ascending=False).reset_index(drop=True)
         print(f"\n--- Strategy Comparison for {symbol} (filtered, sorted by MC Score) ---")
-        print(summary_df_display.to_string(index=False))
+        if CONFIG.get("verbose_output", False):
+            print(summary_df_display.to_string(index=False))
+        else:
+            _compact_cols = [c for c in _DEFAULT_COLS if c in summary_df_display.columns]
+            print(summary_df_display[_compact_cols].to_string(index=False))
+            print("  (use --verbose for the full table)")
     
     if CONFIG.get("save_individual_trades", False):
         print("\n" + "-" * 80)
@@ -173,7 +184,13 @@ def generate_final_summary(all_results):
     final_df_display = final_df.reindex(columns=report_cols).fillna('N/A')
     
     print("\nBased on all filters, the most promising single-asset combinations are:\n")
-    print(final_df_display.to_string(index=False))
+    if CONFIG.get("verbose_output", False):
+        print(final_df_display.to_string(index=False))
+    else:
+        _prefix = [c for c in report_cols[:1] if c not in _DEFAULT_COLS]
+        _compact_cols = _prefix + [c for c in _DEFAULT_COLS if c in final_df_display.columns]
+        print(final_df_display[_compact_cols].to_string(index=False))
+        print("  (use --verbose for the full table)")
     
     try:
         output_dir = "output"
@@ -269,7 +286,12 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'Avg. Corr', 'MC Verdict', 'MC Score']
         summary_df_display = display_df.reindex(columns=report_cols).fillna('N/A').reset_index(drop=True)
         print(f"\n--- Strategy Comparison for {portfolio_name} (filtered, sorted by MC Score) ---")
-        print(summary_df_display.to_string(index=False))
+        if CONFIG.get("verbose_output", False):
+            print(summary_df_display.to_string(index=False))
+        else:
+            _compact_cols = [c for c in _DEFAULT_COLS if c in summary_df_display.columns]
+            print(summary_df_display[_compact_cols].to_string(index=False))
+            print("  (use --verbose for the full table)")
 
     # --- Step 4a: Export analyzer-compatible CSVs ---
     portfolio_name_safe = portfolio_name.replace(" ", "_")
@@ -429,7 +451,13 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
     summary_df_sorted = summary_df_display
     
     print("\n--- Strategy Comparison Across All Portfolios (filtered, sorted by MC Score) ---")
-    print(summary_df_sorted.to_string(index=False))
+    if CONFIG.get("verbose_output", False):
+        print(summary_df_sorted.to_string(index=False))
+    else:
+        _prefix = [c for c in report_cols[:1] if c not in _DEFAULT_COLS]
+        _compact_cols = _prefix + [c for c in _DEFAULT_COLS if c in summary_df_sorted.columns]
+        print(summary_df_sorted[_compact_cols].to_string(index=False))
+        print("  (use --verbose for the full table)")
 
     try:
         output_dir = os.path.join("output", "runs", run_id) if run_id else "output"

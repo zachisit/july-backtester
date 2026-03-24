@@ -9,6 +9,7 @@ Python backtesting engine for US equities. Tests 20+ technical strategies across
 - `main.py` — portfolio mode (default), multiprocessing across all CPU cores
 - `main.py --mode single` — single-asset mode, all strategies vs `symbols_to_test`
 - `main.py --name "run-name"` — optional prefix for report folder and S3 path
+- `main.py --verbose` — show all 23 columns in summary table (default: compact 7-column view)
 
 ## Key Files
 ```
@@ -67,6 +68,7 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "wfa_folds": None                # None = rolling WFA disabled; int >= 2 = number of folds
 "wfa_min_fold_trades": 5         # min OOS trades per fold to score it (rolling WFA only)
 "export_ml_features": False      # True = write ml_features.parquet after the run (requires pyarrow)
+"verbose_output": False          # True = show all 23 columns; --verbose overrides at runtime
 "noise_injection_pct": 0.0       # 0.0 = disabled (default, stress testing is opt-in). Set to e.g. 0.01 for ±1% stress test.
 "risk_free_rate": 0.05           # annual, used in Sharpe calculation (default 5% — US T-bill proxy)
 "sensitivity_sweep_enabled": False  # opt-in parameter fragility sweep

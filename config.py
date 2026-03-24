@@ -328,6 +328,16 @@ CONFIG = {
     # all portfolios) to output/runs/<run_id>/ml_features.parquet after the run.
     # Requires pyarrow or fastparquet: pip install pyarrow
     "export_ml_features": False,
+
+    # ============================================================
+    # SECTION 21: VERBOSE SUMMARY TABLE
+    # ============================================================
+    # When False (default), terminal summary tables show a compact
+    # 7-column view: Strategy, P&L (%), vs. SPY (B&H), Sharpe,
+    # Max DD, MC Score, WFA Verdict.
+    # When True, all 23 columns are displayed.
+    # Override at runtime with: python main.py --verbose
+    "verbose_output": False,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
