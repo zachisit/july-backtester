@@ -123,7 +123,7 @@ graph TD
 | `--init` | Launch the first-time setup wizard |
 | `--dry-run` | Validate config and print run summary without fetching data |
 | `--name <label>` | Prefix the output folder with a custom label |
-| `--verbose` | Show all 23 columns in the summary table (default: compact 7-column view) |
+| `--verbose` | Print Extended Metrics and Robustness tables beneath the default Core Performance table |
 
 ---
 
