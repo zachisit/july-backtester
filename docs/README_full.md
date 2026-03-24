@@ -1147,6 +1147,7 @@ Names must match the `name` argument in `@register_strategy` exactly (case-sensi
 ## Engine Architecture
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 flowchart LR
     A[main.py reads config] --> B[Fetch Benchmark Data SPY / VIX]
     B --> C[Loop through Portfolios]

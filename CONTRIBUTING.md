@@ -33,6 +33,7 @@ You should see a "RUN SUMMARY" box with strategy count, portfolio size, and task
 The backtester uses a plugin system — no core files need editing. There are four steps:
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 graph TD
     A[Create new .py file in custom_strategies/] --> B[Import @register_strategy]
     B --> C[Define Params & Dependencies]

@@ -37,6 +37,7 @@ POLYGON_API_KEY=your_key_here
 ## Quick Start
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 graph TD
     A[Clone Repository] --> B[Create & Activate Virtual Environment]
     B --> C[pip install -r requirements.txt]
@@ -56,6 +57,7 @@ python main.py --init
 ```
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 graph TD
     A[python main.py --init] --> B
 
@@ -132,6 +134,7 @@ See [examples/](examples/) for ready-to-use config files and annotated strategy 
 ### The Backtesting Lifecycle
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 graph TD
     A[Edit config.py] -->|Set portfolios, dates, capital| B[Run: python main.py]
     B --> C{Execution Engine}
