@@ -32,6 +32,17 @@ You should see a "RUN SUMMARY" box with strategy count, portfolio size, and task
 
 The backtester uses a plugin system — no core files need editing. There are four steps:
 
+```mermaid
+graph TD
+    A[Create new .py file in custom_strategies/] --> B[Import @register_strategy]
+    B --> C[Define Params & Dependencies]
+    C -->|Dependencies e.g., 'spy', 'vix'| D[Write Signal Logic inside function]
+    D -->|1 = Long, -1 = Close, -2 = Short, 0 = Hold| E[Return modified DataFrame]
+    E --> F[Save File]
+    F --> G[Run main.py]
+    G --> H[Engine Auto-Discovers & Runs Strategy]
+```
+
 ### Step 1: Write the signal logic
 
 If your logic is reusable across multiple strategies, add a function to `helpers/indicators.py`. Otherwise, write it inline in your plugin file (Step 2).

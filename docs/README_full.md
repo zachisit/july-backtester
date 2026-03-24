@@ -1144,6 +1144,23 @@ Names must match the `name` argument in `@register_strategy` exactly (case-sensi
 
 ---
 
+## Engine Architecture
+
+```mermaid
+flowchart LR
+    A[main.py reads config] --> B[Fetch Benchmark Data SPY / VIX]
+    B --> C[Loop through Portfolios]
+    C --> D[Generate Task Grid]
+    D -->|Strategies x Symbols x Stop Losses| E[Multiprocessing Pool]
+    E -->|Worker Core| F[Simulate Task A]
+    E -->|Worker Core| G[Simulate Task B]
+    F & G --> H[Aggregate Trade Results]
+    H --> I[Apply Output Filters]
+    I --> J[Save to output/runs/]
+```
+
+---
+
 ## Project Structure
 
 ```text

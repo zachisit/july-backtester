@@ -36,6 +36,19 @@ POLYGON_API_KEY=your_key_here
 
 ## Quick Start
 
+```mermaid
+graph TD
+    A[Clone Repository] --> B[Create & Activate Virtual Environment]
+    B --> C[pip install -r requirements.txt]
+    C --> D{Choose Data Provider}
+    D -->|Polygon.io| E[Add POLYGON_API_KEY to .env file]
+    D -->|Yahoo / Norgate / CSV| F[No API Key Needed]
+    E --> G[Run Setup Wizard: python main.py --init]
+    F --> G
+    G --> H[Review generated config.py]
+    H --> I[Ready to Backtest]
+```
+
 **First time?** Run the setup wizard:
 
 ```bash
@@ -69,6 +82,21 @@ The engine runs every strategy in `custom_strategies/` against SPY, prints a res
 Validate before a long run: `python main.py --dry-run`
 
 See [examples/](examples/) for ready-to-use config files and annotated strategy examples.
+
+### The Backtesting Lifecycle
+
+```mermaid
+graph TD
+    A[Edit config.py] -->|Set portfolios, dates, capital| B[Run: python main.py]
+    B --> C{Execution Engine}
+    C -->|Fetches/Loads Data| D[(Local Data Cache)]
+    C -->|Calculates Edge| E[Monte Carlo & Walk-Forward Analysis]
+    E --> F[Output Folder created: output/runs/RUN_ID/]
+    F -->|Terminal Output| G[Summary Table & Correlation Matrix]
+    F -->|Raw Trade Data| H[analyzer_csvs/ Portfolio / Strategy.csv]
+    H --> I[Run: python report.py --all output/runs/RUN_ID]
+    I --> J[PDF & Markdown Reports generated in detailed_reports/]
+```
 
 ---
 
