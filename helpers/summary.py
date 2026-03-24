@@ -24,6 +24,24 @@ _T2_COLS = ['Strategy', 'vs. QQQ (B&H)', 'Calmar', 'Roll.Sharpe(avg)',
 _T3_COLS = ['Strategy', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
             'Avg. Corr', 'MC Verdict', 'MC Score']
 
+# Short display names for verbose tables only (T2 and T3).
+# Core Performance (T1) headers are already short and stay unchanged.
+_VERBOSE_SHORT_NAMES = {
+    'vs. QQQ (B&H)':    'vs. QQQ',
+    'Roll.Sharpe(avg)':  'RS(avg)',
+    'Roll.Sharpe(min)':  'RS(min)',
+    'Roll.Sharpe(last)': 'RS(last)',
+    'Max Rcvry (d)':     'MaxRcvry',
+    'Avg Rcvry (d)':     'AvgRcvry',
+    'Profit Factor':     'PF',
+    'Win Rate':          'WinRate',
+    'Expectancy (R)':    'Expct(R)',
+    'OOS P&L (%)':       'OOS P&L',
+    'Rolling WFA':       'RollWFA',
+    'Avg. Corr':         'Corr',
+    'MC Verdict':        'MC',
+}
+
 
 def _print_table(df, title):
     """Print a DataFrame as a bordered terminal table with visible dividers."""
@@ -125,10 +143,10 @@ def generate_single_asset_summary_report(symbol_results, spy_benchmark_result, q
         if CONFIG.get("verbose_output", False):
             _t2 = [c for c in _T2_COLS if c in summary_df_display.columns]
             if len(_t2) > 1:
-                _print_table(summary_df_display[_t2], "--- Extended Metrics ---")
+                _print_table(summary_df_display[_t2].rename(columns=_VERBOSE_SHORT_NAMES), "--- Extended Metrics ---")
             _t3 = [c for c in _T3_COLS if c in summary_df_display.columns]
             if len(_t3) > 1:
-                _print_table(summary_df_display[_t3], "--- Robustness ---")
+                _print_table(summary_df_display[_t3].rename(columns=_VERBOSE_SHORT_NAMES), "--- Robustness ---")
         else:
             print("\n  Run with --verbose for extended metrics and robustness scores.")
     
@@ -223,10 +241,10 @@ def generate_final_summary(all_results):
     if CONFIG.get("verbose_output", False):
         _t2 = list(dict.fromkeys(_pfx + [c for c in _T2_COLS if c in final_df_display.columns]))
         if len(_t2) > len(_pfx) + 1:
-            _print_table(final_df_display[_t2], "--- Extended Metrics ---")
+            _print_table(final_df_display[_t2].rename(columns=_VERBOSE_SHORT_NAMES), "--- Extended Metrics ---")
         _t3 = list(dict.fromkeys(_pfx + [c for c in _T3_COLS if c in final_df_display.columns]))
         if len(_t3) > len(_pfx) + 1:
-            _print_table(final_df_display[_t3], "--- Robustness ---")
+            _print_table(final_df_display[_t3].rename(columns=_VERBOSE_SHORT_NAMES), "--- Robustness ---")
     else:
         print("\n  Run with --verbose for extended metrics and robustness scores.")
     
@@ -328,10 +346,10 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         if CONFIG.get("verbose_output", False):
             _t2 = [c for c in _T2_COLS if c in summary_df_display.columns]
             if len(_t2) > 1:
-                _print_table(summary_df_display[_t2], "--- Extended Metrics ---")
+                _print_table(summary_df_display[_t2].rename(columns=_VERBOSE_SHORT_NAMES), "--- Extended Metrics ---")
             _t3 = [c for c in _T3_COLS if c in summary_df_display.columns]
             if len(_t3) > 1:
-                _print_table(summary_df_display[_t3], "--- Robustness ---")
+                _print_table(summary_df_display[_t3].rename(columns=_VERBOSE_SHORT_NAMES), "--- Robustness ---")
         else:
             print("\n  Run with --verbose for extended metrics and robustness scores.")
 
@@ -498,10 +516,10 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
     if CONFIG.get("verbose_output", False):
         _t2 = list(dict.fromkeys(_pfx + [c for c in _T2_COLS if c in summary_df_sorted.columns]))
         if len(_t2) > len(_pfx) + 1:
-            _print_table(summary_df_sorted[_t2], "--- Extended Metrics ---")
+            _print_table(summary_df_sorted[_t2].rename(columns=_VERBOSE_SHORT_NAMES), "--- Extended Metrics ---")
         _t3 = list(dict.fromkeys(_pfx + [c for c in _T3_COLS if c in summary_df_sorted.columns]))
         if len(_t3) > len(_pfx) + 1:
-            _print_table(summary_df_sorted[_t3], "--- Robustness ---")
+            _print_table(summary_df_sorted[_t3].rename(columns=_VERBOSE_SHORT_NAMES), "--- Robustness ---")
     else:
         print("\n  Run with --verbose for extended metrics and robustness scores.")
 

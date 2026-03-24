@@ -17,7 +17,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import config as _config_module
-from helpers.summary import _T1_COLS, _T2_COLS, _T3_COLS, generate_per_portfolio_summary
+from helpers.summary import _T1_COLS, _T2_COLS, _T3_COLS, _VERBOSE_SHORT_NAMES, generate_per_portfolio_summary
 
 
 # ---------------------------------------------------------------------------
@@ -114,13 +114,14 @@ class TestVerboseMode:
         out = capsys.readouterr().out
         assert "--- Robustness ---" in out
 
-    def test_verbose_shows_t2_cols(self, monkeypatch, capsys):
-        """verbose_output=True must include T2 columns (Calmar, Roll.Sharpe(avg))."""
+    def test_verbose_shows_t2_cols_shortened(self, monkeypatch, capsys):
+        """verbose_output=True shows T2 columns with shortened headers (RS(avg) not Roll.Sharpe(avg))."""
         monkeypatch.setitem(_config_module.CONFIG, "verbose_output", True)
         generate_per_portfolio_summary([_make_result()], "TestPort", 0.12, 0.15, "run_001")
         out = capsys.readouterr().out
-        assert "Calmar" in out
-        assert "Roll.Sharpe(avg)" in out
+        assert "Calmar" in out          # not in short-names map, stays as-is
+        assert "RS(avg)" in out         # shortened from Roll.Sharpe(avg)
+        assert "Roll.Sharpe(avg)" not in out  # full name must not appear
 
     def test_verbose_omits_hint(self, monkeypatch, capsys):
         """verbose_output=True must NOT print the '--verbose' hint line."""

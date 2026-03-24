@@ -172,5 +172,6 @@ class TestRecoveryInSummary:
             )
 
         output = buf.getvalue()
-        assert "Max Rcvry (d)" in output, "Expected 'Max Rcvry (d)' in summary output"
-        assert "Avg Rcvry (d)" in output, "Expected 'Avg Rcvry (d)' in summary output"
+        # Verbose mode shortens column headers via _VERBOSE_SHORT_NAMES
+        assert "MaxRcvry" in output, "Expected 'MaxRcvry' (shortened 'Max Rcvry (d)') in verbose summary output"
+        assert "AvgRcvry" in output, "Expected 'AvgRcvry' (shortened 'Avg Rcvry (d)') in verbose summary output"
