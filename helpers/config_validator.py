@@ -86,6 +86,8 @@ KNOWN_KEYS: set[str] = {
     "volume_impact_coeff",
     # SECTION 20: ML Export
     "export_ml_features",
+    # SECTION 21: Verbose Summary Table
+    "verbose_output",
     # S3
     "s3_reports_bucket",
     "upload_to_s3",
