@@ -8,11 +8,40 @@ import numpy as np
 from helpers.aws_utils import upload_file_to_s3
 from helpers.correlation import compute_avg_correlations, DEFAULT_THRESHOLD
 
-# Columns shown in compact mode (default). --verbose reveals all 23 columns.
-_DEFAULT_COLS = [
-    'Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'Sharpe',
-    'Max DD', 'MC Score', 'WFA Verdict',
-]
+# ---------------------------------------------------------------------------
+# Table column definitions for tiered terminal output.
+# Table 1 is always shown; Tables 2 and 3 only appear with --verbose.
+# Strategy is the join key and appears in every table.
+# ---------------------------------------------------------------------------
+_T1_COLS = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'Sharpe',
+            'Max DD', 'MC Score', 'WFA Verdict']
+
+_T2_COLS = ['Strategy', 'vs. QQQ (B&H)', 'Calmar', 'Roll.Sharpe(avg)',
+            'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Max Rcvry (d)',
+            'Avg Rcvry (d)', 'Profit Factor', 'Win Rate', 'Trades',
+            'Expectancy (R)', 'SQN']
+
+_T3_COLS = ['Strategy', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
+            'Avg. Corr', 'MC Verdict', 'MC Score']
+
+
+def _print_table(df, title):
+    """Print a DataFrame as a bordered terminal table with visible dividers."""
+    if df.empty:
+        return
+    col_widths = {col: max(len(col), df[col].astype(str).str.len().max())
+                  for col in df.columns}
+    row_width = sum(col_widths.values()) + 3 * (len(df.columns) - 1)
+    divider = "-" * row_width
+    header = "   ".join(col.ljust(col_widths[col]) for col in df.columns)
+    print(f"\n{title}")
+    print(divider)
+    print(header)
+    print(divider)
+    for _, row in df.iterrows():
+        print("   ".join(str(row[col]).ljust(col_widths[col]) for col in df.columns))
+    print(divider)
+
 
 def save_trades_to_csv(result, local_folder, run_id):
     """Saves the trade log locally and optionally uploads it to S3."""
@@ -91,13 +120,17 @@ def generate_single_asset_summary_report(symbol_results, spy_benchmark_result, q
         filtered_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'wfa_rolling_verdict': 'Rolling WFA', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN', 'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)', 'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)'}, inplace=True)
         report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'MC Verdict', 'MC Score']
         summary_df_display = filtered_df.reindex(columns=report_cols).fillna('N/A').sort_values(by='MC Score', ascending=False).reset_index(drop=True)
-        print(f"\n--- Strategy Comparison for {symbol} (filtered, sorted by MC Score) ---")
+        _t1 = [c for c in _T1_COLS if c in summary_df_display.columns]
+        _print_table(summary_df_display[_t1], f"--- Core Performance: {symbol} ---")
         if CONFIG.get("verbose_output", False):
-            print(summary_df_display.to_string(index=False))
+            _t2 = [c for c in _T2_COLS if c in summary_df_display.columns]
+            if len(_t2) > 1:
+                _print_table(summary_df_display[_t2], "--- Extended Metrics ---")
+            _t3 = [c for c in _T3_COLS if c in summary_df_display.columns]
+            if len(_t3) > 1:
+                _print_table(summary_df_display[_t3], "--- Robustness ---")
         else:
-            _compact_cols = [c for c in _DEFAULT_COLS if c in summary_df_display.columns]
-            print(summary_df_display[_compact_cols].to_string(index=False))
-            print("  (use --verbose for the full table)")
+            print("\n  Run with --verbose for extended metrics and robustness scores.")
     
     if CONFIG.get("save_individual_trades", False):
         print("\n" + "-" * 80)
@@ -183,14 +216,19 @@ def generate_final_summary(all_results):
     report_cols = ['Symbol', 'Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'MC Verdict', 'MC Score']
     final_df_display = final_df.reindex(columns=report_cols).fillna('N/A')
     
-    print("\nBased on all filters, the most promising single-asset combinations are:\n")
+    print("\nBased on all filters, the most promising single-asset combinations are:")
+    _pfx = ['Symbol'] if 'Symbol' in final_df_display.columns else []
+    _t1 = list(dict.fromkeys(_pfx + [c for c in _T1_COLS if c in final_df_display.columns]))
+    _print_table(final_df_display[_t1], "--- Core Performance ---")
     if CONFIG.get("verbose_output", False):
-        print(final_df_display.to_string(index=False))
+        _t2 = list(dict.fromkeys(_pfx + [c for c in _T2_COLS if c in final_df_display.columns]))
+        if len(_t2) > len(_pfx) + 1:
+            _print_table(final_df_display[_t2], "--- Extended Metrics ---")
+        _t3 = list(dict.fromkeys(_pfx + [c for c in _T3_COLS if c in final_df_display.columns]))
+        if len(_t3) > len(_pfx) + 1:
+            _print_table(final_df_display[_t3], "--- Robustness ---")
     else:
-        _prefix = [c for c in report_cols[:1] if c not in _DEFAULT_COLS]
-        _compact_cols = _prefix + [c for c in _DEFAULT_COLS if c in final_df_display.columns]
-        print(final_df_display[_compact_cols].to_string(index=False))
-        print("  (use --verbose for the full table)")
+        print("\n  Run with --verbose for extended metrics and robustness scores.")
     
     try:
         output_dir = "output"
@@ -285,13 +323,17 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         display_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'wfa_rolling_verdict': 'Rolling WFA', 'avg_corr': 'Avg. Corr', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN', 'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)', 'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)'}, inplace=True)
         report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'Avg. Corr', 'MC Verdict', 'MC Score']
         summary_df_display = display_df.reindex(columns=report_cols).fillna('N/A').reset_index(drop=True)
-        print(f"\n--- Strategy Comparison for {portfolio_name} (filtered, sorted by MC Score) ---")
+        _t1 = [c for c in _T1_COLS if c in summary_df_display.columns]
+        _print_table(summary_df_display[_t1], f"--- Core Performance: {portfolio_name} ---")
         if CONFIG.get("verbose_output", False):
-            print(summary_df_display.to_string(index=False))
+            _t2 = [c for c in _T2_COLS if c in summary_df_display.columns]
+            if len(_t2) > 1:
+                _print_table(summary_df_display[_t2], "--- Extended Metrics ---")
+            _t3 = [c for c in _T3_COLS if c in summary_df_display.columns]
+            if len(_t3) > 1:
+                _print_table(summary_df_display[_t3], "--- Robustness ---")
         else:
-            _compact_cols = [c for c in _DEFAULT_COLS if c in summary_df_display.columns]
-            print(summary_df_display[_compact_cols].to_string(index=False))
-            print("  (use --verbose for the full table)")
+            print("\n  Run with --verbose for extended metrics and robustness scores.")
 
     # --- Step 4a: Export analyzer-compatible CSVs ---
     portfolio_name_safe = portfolio_name.replace(" ", "_")
@@ -450,14 +492,18 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
 
     summary_df_sorted = summary_df_display
     
-    print("\n--- Strategy Comparison Across All Portfolios (filtered, sorted by MC Score) ---")
+    _pfx = ['Portfolio'] if 'Portfolio' in summary_df_sorted.columns else []
+    _t1 = list(dict.fromkeys(_pfx + [c for c in _T1_COLS if c in summary_df_sorted.columns]))
+    _print_table(summary_df_sorted[_t1], "--- Core Performance: All Portfolios ---")
     if CONFIG.get("verbose_output", False):
-        print(summary_df_sorted.to_string(index=False))
+        _t2 = list(dict.fromkeys(_pfx + [c for c in _T2_COLS if c in summary_df_sorted.columns]))
+        if len(_t2) > len(_pfx) + 1:
+            _print_table(summary_df_sorted[_t2], "--- Extended Metrics ---")
+        _t3 = list(dict.fromkeys(_pfx + [c for c in _T3_COLS if c in summary_df_sorted.columns]))
+        if len(_t3) > len(_pfx) + 1:
+            _print_table(summary_df_sorted[_t3], "--- Robustness ---")
     else:
-        _prefix = [c for c in report_cols[:1] if c not in _DEFAULT_COLS]
-        _compact_cols = _prefix + [c for c in _DEFAULT_COLS if c in summary_df_sorted.columns]
-        print(summary_df_sorted[_compact_cols].to_string(index=False))
-        print("  (use --verbose for the full table)")
+        print("\n  Run with --verbose for extended metrics and robustness scores.")
 
     try:
         output_dir = os.path.join("output", "runs", run_id) if run_id else "output"

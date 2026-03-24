@@ -3,8 +3,8 @@
 Unit tests for verbose summary table toggle (SECTION 21).
 
 Covers:
-  TestCompactMode  — default compact display shows only _DEFAULT_COLS
-  TestVerboseMode  — --verbose shows the full extended table
+  TestCompactMode  — default view shows Table 1 only (bordered, ~80 chars)
+  TestVerboseMode  — --verbose shows three stacked tables with section headers
 """
 
 import os
@@ -17,7 +17,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 import config as _config_module
-from helpers.summary import _DEFAULT_COLS, generate_per_portfolio_summary
+from helpers.summary import _T1_COLS, _T2_COLS, _T3_COLS, generate_per_portfolio_summary
 
 
 # ---------------------------------------------------------------------------
@@ -63,16 +63,16 @@ def _make_result(strategy="TestStrat", n_trades=5):
 
 class TestCompactMode:
 
-    def test_compact_shows_default_cols(self, monkeypatch, capsys):
-        """Default (verbose_output=False) prints only _DEFAULT_COLS headers."""
+    def test_compact_shows_t1_cols(self, monkeypatch, capsys):
+        """Default (verbose_output=False) prints Table 1 column headers."""
         monkeypatch.setitem(_config_module.CONFIG, "verbose_output", False)
         generate_per_portfolio_summary([_make_result()], "TestPort", 0.12, 0.15, "run_001")
         out = capsys.readouterr().out
-        for col in _DEFAULT_COLS:
-            assert col in out, f"Expected default col '{col}' in compact output"
+        for col in _T1_COLS:
+            assert col in out, f"Expected T1 col '{col}' in compact output"
 
     def test_compact_omits_extended_cols(self, monkeypatch, capsys):
-        """Compact mode must NOT show columns outside _DEFAULT_COLS (e.g. Calmar)."""
+        """Compact mode must NOT show T2/T3-only columns (e.g. Calmar, Roll.Sharpe(avg))."""
         monkeypatch.setitem(_config_module.CONFIG, "verbose_output", False)
         generate_per_portfolio_summary([_make_result()], "TestPort", 0.12, 0.15, "run_001")
         out = capsys.readouterr().out
@@ -80,11 +80,18 @@ class TestCompactMode:
         assert "Roll.Sharpe(avg)" not in out
 
     def test_compact_prints_verbose_hint(self, monkeypatch, capsys):
-        """Compact mode must append a line containing '--verbose'."""
+        """Compact mode must print a hint containing '--verbose'."""
         monkeypatch.setitem(_config_module.CONFIG, "verbose_output", False)
         generate_per_portfolio_summary([_make_result()], "TestPort", 0.12, 0.15, "run_001")
         out = capsys.readouterr().out
         assert "--verbose" in out
+
+    def test_compact_output_has_divider_lines(self, monkeypatch, capsys):
+        """Table 1 must be wrapped with visible divider lines (---)."""
+        monkeypatch.setitem(_config_module.CONFIG, "verbose_output", False)
+        generate_per_portfolio_summary([_make_result()], "TestPort", 0.12, 0.15, "run_001")
+        out = capsys.readouterr().out
+        assert "---" in out
 
 
 # ---------------------------------------------------------------------------
@@ -93,8 +100,22 @@ class TestCompactMode:
 
 class TestVerboseMode:
 
-    def test_verbose_shows_extended_cols(self, monkeypatch, capsys):
-        """verbose_output=True must include columns beyond _DEFAULT_COLS."""
+    def test_verbose_shows_extended_metrics_header(self, monkeypatch, capsys):
+        """verbose_output=True must print '--- Extended Metrics ---' section header."""
+        monkeypatch.setitem(_config_module.CONFIG, "verbose_output", True)
+        generate_per_portfolio_summary([_make_result()], "TestPort", 0.12, 0.15, "run_001")
+        out = capsys.readouterr().out
+        assert "--- Extended Metrics ---" in out
+
+    def test_verbose_shows_robustness_header(self, monkeypatch, capsys):
+        """verbose_output=True must print '--- Robustness ---' section header."""
+        monkeypatch.setitem(_config_module.CONFIG, "verbose_output", True)
+        generate_per_portfolio_summary([_make_result()], "TestPort", 0.12, 0.15, "run_001")
+        out = capsys.readouterr().out
+        assert "--- Robustness ---" in out
+
+    def test_verbose_shows_t2_cols(self, monkeypatch, capsys):
+        """verbose_output=True must include T2 columns (Calmar, Roll.Sharpe(avg))."""
         monkeypatch.setitem(_config_module.CONFIG, "verbose_output", True)
         generate_per_portfolio_summary([_make_result()], "TestPort", 0.12, 0.15, "run_001")
         out = capsys.readouterr().out
