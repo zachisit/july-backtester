@@ -120,11 +120,14 @@ class TestRecoveryTimeCalculation:
 
 class TestRecoveryInSummary:
 
-    def test_columns_in_report_cols(self):
+    def test_columns_in_report_cols(self, monkeypatch):
         """
         generate_single_asset_summary_report must include 'Max Rcvry (d)' and
         'Avg Rcvry (d)' in the printed output when results carry those keys.
+        Recovery columns are in the extended block, so verbose_output=True is required.
         """
+        import config as _config_module
+        monkeypatch.setitem(_config_module.CONFIG, "verbose_output", True)
         from helpers.summary import generate_single_asset_summary_report
 
         mock_result = {
@@ -169,5 +172,6 @@ class TestRecoveryInSummary:
             )
 
         output = buf.getvalue()
-        assert "Max Rcvry (d)" in output, "Expected 'Max Rcvry (d)' in summary output"
-        assert "Avg Rcvry (d)" in output, "Expected 'Avg Rcvry (d)' in summary output"
+        # Verbose mode shortens column headers via _VERBOSE_SHORT_NAMES
+        assert "MaxRcvry" in output, "Expected 'MaxRcvry' (shortened 'Max Rcvry (d)') in verbose summary output"
+        assert "AvgRcvry" in output, "Expected 'AvgRcvry' (shortened 'Avg Rcvry (d)') in verbose summary output"

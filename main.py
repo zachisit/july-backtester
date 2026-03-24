@@ -246,7 +246,9 @@ def main():
     parser = argparse.ArgumentParser(description="Portfolio Backtester")
     parser.add_argument("--name", type=str, help="An optional name for the backtest run, used as a prefix for the report folder.")
     parser.add_argument("--dry-run", action="store_true", help="Validate config and print run summary without fetching data or running simulations.")
+    parser.add_argument("--verbose", action="store_true", help="Show all table columns in the summary (default: compact 7-column view).")
     args = parser.parse_args()
+    CONFIG["verbose_output"] = args.verbose
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_folder_name = f"{args.name}_{timestamp}" if args.name else timestamp
     start_time = time.monotonic()

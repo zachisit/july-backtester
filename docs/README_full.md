@@ -351,6 +351,7 @@ Make sure your virtual environment is activated (`source venv/bin/activate` or t
 | `--init` | Launch the first-time setup wizard |
 | `--dry-run` | Validate config and print run summary without fetching data |
 | `--name <label>` | Prefix the output folder with a custom label |
+| `--verbose` | Print Extended Metrics and Robustness tables beneath the default Core Performance table |
 
 ### Portfolio Mode (Primary Use)
 
@@ -451,39 +452,69 @@ After benchmark data (SPY) has been fetched, a second line is logged:
 - The data provider does not have data going back to your requested `start_date` (e.g. free-tier API limits, or a ticker that was listed later)
 - The `end_date` falls on a weekend or holiday, so the last available bar is a trading day before it
 
-### Terminal Summary Table
+### Terminal Summary Tables
 
-After each portfolio finishes, a results table is printed to the terminal:
+After each portfolio finishes, a **Core Performance** table is printed to the terminal:
 
 ```text
-Strategy                      P&L (%)  vs. SPY  Max DD  Calmar  Sharpe  Win Rate  Trades  MC Verdict   MC Score
-SMA Crossover (20d/50d)        +89.4%   +21.3%   41.5%    1.12    0.71     48.9%     287   Mod. Tail Risk     2
-SMA Crossover (50d/200d)       +74.1%   +12.1%   38.2%    0.98    0.65     46.1%     214   Good               3
+--- Core Performance: Nasdaq 100 ---
+---------------------------------------------------------------------------------------------
+Strategy                   P&L (%)   vs. SPY (B&H)   Sharpe   Max DD   MC Score   WFA Verdict
+---------------------------------------------------------------------------------------------
+SMA Crossover (20d/50d)    18.70%    +4.30%          1.41     11.20%   78         Pass
+SMA Crossover (50d/200d)   9.40%     -5.20%          0.98     8.80%    55         Fail
+---------------------------------------------------------------------------------------------
+
+  Run with --verbose for extended metrics and robustness scores.
 ```
 
-**Column definitions:**
+Run with `--verbose` to print two additional tables beneath it:
 
-| Column | Meaning |
+```bash
+python main.py --verbose
+```
+
+**Core Performance** — always printed:
+
+| Column | Description |
 | --- | --- |
-| P&L (%) | Total return over the full backtest period |
-| vs. SPY / vs. QQQ | Outperformance vs buy-and-hold of those indices |
-| Max DD | Largest peak-to-trough decline during the period |
-| Max Rcvry (d) | Longest calendar-day gap from any drawdown trough back to the prior equity peak. `N/A` if the curve ends in an open drawdown. |
-| Avg Rcvry (d) | Mean calendar days across all completed recoveries. `N/A` if the curve ends in an open drawdown. |
-| Calmar | Annualized return divided by max drawdown (higher = better risk-adjusted return) |
-| Sharpe | Risk-adjusted return relative to volatility (above 1.0 is generally considered good; above 2.0 is strong) |
-| Roll.Sharpe(avg) | Mean of all 126-day rolling Sharpe windows — regime-averaged quality |
-| Roll.Sharpe(min) | Worst 126-day rolling Sharpe — reveals if there was a prolonged losing streak even when overall Sharpe looks healthy |
-| Roll.Sharpe(last) | Most recent 126-day rolling Sharpe — current momentum signal |
-| Win Rate | Percentage of trades that were profitable |
+| Strategy | Strategy name (with variant suffix if sensitivity sweep is on) |
+| P&L (%) | Total return over the backtest period |
+| vs. SPY (B&H) | Outperformance vs SPY buy-and-hold |
+| Sharpe | Annualised Sharpe ratio (risk-free rate subtracted) |
+| Max DD | Maximum peak-to-trough drawdown |
+| MC Score | Monte Carlo robustness score (-999 to 100) |
+| WFA Verdict | Walk-Forward Analysis result (Pass / Fail / N/A) |
+
+**Extended Metrics** — printed with `--verbose`:
+
+| Column | Description |
+| --- | --- |
+| vs. QQQ | Outperformance vs QQQ buy-and-hold |
+| Calmar | Annualised return divided by max drawdown (higher = better) |
+| RS(avg) | Mean of all 126-day rolling Sharpe windows — regime-averaged quality |
+| RS(min) | Worst 126-day rolling Sharpe — reveals prolonged losing streaks |
+| RS(last) | Most recent 126-day rolling Sharpe — current momentum signal |
+| MaxRcvry | Longest calendar days from drawdown trough to new equity peak. `N/A` if curve ends in open drawdown. |
+| AvgRcvry | Mean recovery time across all completed drawdowns. `N/A` if curve ends in open drawdown. |
+| PF | Profit Factor (gross profit / gross loss) |
+| WinRate | Percentage of trades that were profitable |
 | Trades | Total number of completed trades |
-| Expectancy (R) | Average R-Multiple per trade — how many R the strategy earns per unit risked (see below) |
-| SQN | System Quality Number — statistical confidence in the edge (see below) |
-| WFA Verdict | Single-split Walk-Forward Analysis pass/fail verdict |
-| Rolling WFA | Rolling k-fold WFA verdict — `Pass (K/N)`, `Fail (K/N)`, or `N/A`. Only present when `wfa_folds` is set. |
-| MC Verdict | Robustness classification from Monte Carlo analysis |
-| MC Score | Numeric robustness score (see below) |
-| VolumeImpact_bps | Total market impact cost in basis points (entry + exit). Only present in trade CSVs when `volume_impact_coeff > 0`. |
+| Expct(R) | Expectancy in R-multiples — average R earned per trade risked |
+| SQN | System Quality Number — `(Expectancy / StdDev(R)) × sqrt(N)`. 2.5+ = Good, 3.0+ = Excellent. |
+
+**Robustness** — printed with `--verbose`:
+
+| Column | Description |
+| --- | --- |
+| OOS P&L | Out-of-sample P&L from Walk-Forward Analysis |
+| WFA Verdict | Single-split WFA result (Pass / Fail / N/A) |
+| RollWFA | Rolling k-fold WFA verdict — `Pass (K/N)`, `Fail (K/N)`, or `N/A`. Requires `wfa_folds` to be set. |
+| Corr | Average pairwise correlation with other strategies in the portfolio |
+| MC | Monte Carlo verdict (Robust / High Tail Risk / etc.) |
+| MC Score | Numeric MC robustness score (see Monte Carlo Score Explained below) |
+
+> **Note:** `VolumeImpact_bps` (total market impact cost in basis points) only appears in trade CSVs when `volume_impact_coeff > 0` — it is not shown in any terminal table.
 
 ### Core Metrics Glossary
 
