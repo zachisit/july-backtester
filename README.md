@@ -36,10 +36,37 @@ POLYGON_API_KEY=your_key_here
 
 ## Quick Start
 
+```mermaid
+%%{init: {'theme': 'neutral'}}%%
+graph TD
+    A[Clone Repository] --> B[Create & Activate Virtual Environment]
+    B --> C[pip install -r requirements.txt]
+    C --> D{Choose Data Provider}
+    D -->|Polygon.io| E[Add POLYGON_API_KEY to .env file]
+    D -->|Yahoo / Norgate / CSV| F[No API Key Needed]
+    E --> G[Run Setup Wizard: python main.py --init]
+    F --> G
+    G --> H[Review generated config.py]
+    H --> I[Ready to Backtest]
+```
+
 **First time?** Run the setup wizard:
 
 ```bash
 python main.py --init
+```
+
+```mermaid
+graph TD
+    A[Run Setup Wizard: python main.py --init] --> B{Select Data Provider}
+    B -->|Polygon.io| C[Enter API Key]
+    B -->|Yahoo / Norgate / CSV| D[No API Key Needed]
+    C --> E[Configure Account]
+    D --> E
+    E -->|Set Capital, Dates, & Slippage| F[Select Initial Portfolio]
+    F -->|Choose Nasdaq 100, S&P 500, etc.| G[Wizard Generates config_starter.py]
+    G --> H[Rename to config.py]
+    H --> I[Setup Complete - Ready to Run]
 ```
 
 **Or manually** — set these lines in `config.py` and run:
@@ -69,6 +96,22 @@ The engine runs every strategy in `custom_strategies/` against SPY, prints a res
 Validate before a long run: `python main.py --dry-run`
 
 See [examples/](examples/) for ready-to-use config files and annotated strategy examples.
+
+### The Backtesting Lifecycle
+
+```mermaid
+%%{init: {'theme': 'neutral'}}%%
+graph TD
+    A[Edit config.py] -->|Set portfolios, dates, capital| B[Run: python main.py]
+    B --> C{Execution Engine}
+    C -->|Fetches/Loads Data| D[(Local Data Cache)]
+    C -->|Calculates Edge| E[Monte Carlo & Walk-Forward Analysis]
+    E --> F[Output Folder created: output/runs/RUN_ID/]
+    F -->|Terminal Output| G[Summary Table & Correlation Matrix]
+    F -->|Raw Trade Data| H[analyzer_csvs/ Portfolio / Strategy.csv]
+    H --> I[Run: python report.py --all output/runs/RUN_ID]
+    I --> J[PDF & Markdown Reports generated in detailed_reports/]
+```
 
 ---
 
