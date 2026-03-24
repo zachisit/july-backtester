@@ -577,6 +577,24 @@ def main():
                     _ar_path = os.path.join(_ar_dir, f"iteration_{_iter_num:03d}.json")
                     with open(_ar_path, "w") as _af:
                         _json.dump(_ec_data, _af, indent=2)
+                        # --- Append to iteration log TSV ---
+                        _log_path = os.path.join(_ar_dir, "iteration_log.tsv")
+                        _log_exists = os.path.exists(_log_path)
+                        with open(_log_path, "a") as _lf:
+                            if not _log_exists:
+                                _lf.write("iteration\ttimestamp\tstrategy\tscore\tsharpe\ttrades\twin_rate\tmax_dd\truntime_sec\n")
+                            _runtime = round(time.monotonic() - start_time, 1)
+                            _lf.write(
+                                f"{_iter_num}\t"
+                                f"{datetime.now().isoformat()}\t"
+                                f"{r.get('Strategy', 'unknown')}\t"
+                                f"{round(_ec_data['pnl_percent'], 2)}\t"
+                                f"{round(_ec_data['sharpe_ratio'], 4)}\t"
+                                f"{_ec_data['trades']}\t"
+                                f"{round(_ec_data['win_rate'], 4)}\t"
+                                f"{round(_ec_data['max_drawdown'], 4)}\t"
+                                f"{_runtime}\n"
+                            )
 
     # --- FINAL REPORTING (No changes needed here) ---
     if not all_portfolio_results:
