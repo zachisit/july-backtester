@@ -55,6 +55,52 @@ graph TD
 python main.py --init
 ```
 
+```mermaid
+graph TD
+    A[python main.py --init] --> B
+
+    subgraph Step1 [Step 1 of 4 — Data Provider]
+        B{Which provider?} -->|yahoo| C[No API key needed]
+        B -->|csv| C
+        B -->|norgate| C
+        B -->|polygon| D[Enter Polygon API key\noptional — skip to add later]
+    end
+
+    C --> E
+    D --> E
+
+    subgraph Step2 [Step 2 of 4 — Capital & Dates]
+        E[Enter initial capital\ndefault: 100 000] --> F[Enter start date\ndefault: 2010-01-01]
+        F --> G[End date: always today\nset dynamically]
+    end
+
+    G --> H
+
+    subgraph Step3 [Step 3 of 4 — What to Test]
+        H{Single symbol\nor portfolio?} -->|single| I[Enter ticker symbols\ne.g. AAPL MSFT]
+        H -->|portfolio| J{Portfolio type?}
+        J -->|nasdaq100| K[Uses bundled nasdaq_100.json]
+        J -->|custom| L[Enter tickers + portfolio name]
+    end
+
+    I --> M
+    K --> M
+    L --> M
+
+    subgraph Step4 [Step 4 of 4 — Review & Write]
+        M[Preview files to be written] --> N{Confirm?}
+        N -->|No| O[Aborted — no files written]
+        N -->|Yes| P[Write config_starter.py]
+        P --> Q{Polygon key\nprovided?}
+        Q -->|Yes| R[Append POLYGON_API_KEY to .env]
+        Q -->|No| S[Done]
+        R --> S
+    end
+
+    S --> T[Rename config_starter.py to config.py]
+    T --> U[Run: python main.py]
+```
+
 **Or manually** — set these lines in `config.py` and run:
 
 ```python
