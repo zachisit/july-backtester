@@ -208,7 +208,7 @@ CONFIG = {
     # and "atr" types of stops
     #   {"type": "atr", "period": 14, "multiplier": 3.0}
     "stop_loss_configs": [
-        {"type": "percentage", "value": 0.05},
+        {"type": "none"},
     ],
 
     # ============================================================
