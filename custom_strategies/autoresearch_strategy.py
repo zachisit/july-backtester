@@ -4,7 +4,7 @@ Starting point: simple SMA Crossover (20/50).
 """
 
 from helpers.registry import register_strategy
-from helpers.indicators import ema_crossover_unfiltered_logic
+from helpers.indicators import bollinger_breakout_logic
 
 
 @register_strategy(
@@ -13,7 +13,7 @@ from helpers.indicators import ema_crossover_unfiltered_logic
 )
 def autoresearch_sma(df, **kwargs):
     """
-    EMA Crossover (12/26) - faster signals than SMA 20/50.
+    Bollinger Breakout (20/2.0) - momentum breakout.
     """
-    df = ema_crossover_unfiltered_logic(df, fast_ema=15, slow_ema=50)
+    df = bollinger_breakout_logic(df, length=20, std_dev=2.0)
     return df
