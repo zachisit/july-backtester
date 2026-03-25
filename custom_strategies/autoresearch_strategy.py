@@ -4,7 +4,7 @@ Starting point: simple SMA Crossover (20/50).
 """
 
 from helpers.registry import register_strategy
-from helpers.indicators import roc_logic
+from helpers.indicators import ema_crossover_unfiltered_logic
 
 
 @register_strategy(
@@ -13,7 +13,7 @@ from helpers.indicators import roc_logic
 )
 def autoresearch_sma(df, **kwargs):
     """
-    ROC momentum strategy - long when 20-day ROC > 0.
+    EMA Crossover (12/26) - faster signals than SMA 20/50.
     """
-    df = roc_logic(df, length=20, threshold=0)
+    df = ema_crossover_unfiltered_logic(df, fast_ema=15, slow_ema=50)
     return df
