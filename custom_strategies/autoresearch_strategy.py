@@ -15,5 +15,5 @@ def autoresearch_sma(df, **kwargs):
     """
     EMA Crossover (12/26) - faster signals than SMA 20/50.
     """
-    df = ema_crossover_unfiltered_logic(df, fast_ema=12, slow_ema=26)
+    df = ema_crossover_unfiltered_logic(df, fast_ema=10, slow_ema=30)
     return df
