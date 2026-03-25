@@ -239,7 +239,7 @@ CONFIG = {
     # SECTION 12: TRADING COST SETTINGS
     # ============================================================
     # --- Slippage Percentage ---
-    "slippage_pct": 0.0005,
+    "slippage_pct": 0.0001,
     
     # --- Commission Per Trade ---
     "commission_per_share": 0.002,
