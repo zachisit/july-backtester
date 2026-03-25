@@ -4,7 +4,7 @@ Starting point: simple SMA Crossover (20/50).
 """
 
 from helpers.registry import register_strategy
-from helpers.indicators import ema_crossover_unfiltered_logic
+from helpers.indicators import macd_crossover_logic
 
 
 @register_strategy(
@@ -13,7 +13,7 @@ from helpers.indicators import ema_crossover_unfiltered_logic
 )
 def autoresearch_sma(df, **kwargs):
     """
-    Iteration 1: EMA crossover (10/50) for faster trend detection.
+    Iteration 2: MACD crossover (12/26/9) - classic momentum indicator.
     """
-    df = ema_crossover_unfiltered_logic(df, fast_ema=10, slow_ema=50)
+    df = macd_crossover_logic(df, fast=12, slow=26, signal=9)
     return df
