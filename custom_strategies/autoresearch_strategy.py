@@ -11,6 +11,6 @@ from helpers.indicators import ema_crossover_unfiltered_logic
     dependencies=[],
 )
 def autoresearch_sma(df, **kwargs):
-    """EMA Crossover (12/50) — faster entry via EMA."""
-    df = ema_crossover_unfiltered_logic(df, fast_ema=12, slow_ema=50)
+    """EMA Crossover (8/30) — tighter crossover for faster signals."""
+    df = ema_crossover_unfiltered_logic(df, fast_ema=8, slow_ema=30)
     return df
