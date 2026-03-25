@@ -13,7 +13,7 @@ from helpers.indicators import ema_crossover_unfiltered_logic
 )
 def autoresearch_sma(df, **kwargs):
     """
-    Iteration 3: EMA crossover (8/30) - tighter params for faster signals.
+    Iteration 1: EMA crossover (10/50) for faster trend detection.
     """
-    df = ema_crossover_unfiltered_logic(df, fast_ema=8, slow_ema=30)
+    df = ema_crossover_unfiltered_logic(df, fast_ema=10, slow_ema=50)
     return df
