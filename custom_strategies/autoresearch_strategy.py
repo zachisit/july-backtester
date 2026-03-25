@@ -20,7 +20,7 @@ def autoresearch_sma(df, **kwargs):
     df = ema_crossover_unfiltered_logic(df, fast_ema=15, slow_ema=50)
     if 'Volume' in df.columns:
         avg_vol = df['Volume'].rolling(20).mean()
-        low_vol = df['Volume'] < avg_vol * 0.5
+        low_vol = df['Volume'] < avg_vol * 0.3
         # On very low volume crossover days, suppress entry signal
         df.loc[low_vol & (df['Signal'] == 1), 'Signal'] = 0
     return df
