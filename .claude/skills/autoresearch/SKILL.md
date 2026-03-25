@@ -16,10 +16,16 @@ Total return % (higher is better). Measured by: `python autoresearch_score.py`
 - `helpers/portfolio_simulations.py`
 - `autoresearch_score.py`
 
+## CRITICAL RULES
+- NEVER delete iteration JSON files from autoresearch_runs/. Each run appends a new file.
+- The scoring script always reads the LATEST iteration file automatically.
+- Do NOT run rm, del, or any cleanup on autoresearch_runs/ between iterations.
+- Each iteration produces a new iteration_NNN.json file. All must be preserved for the chart.
+
 ## How to run a single iteration
 1. Make ONE focused change to the strategy file
 2. Git commit the change
-3. Run: `$env:AUTORESEARCH = "1"; python main.py`
+3. Run: `AUTORESEARCH=1 python main.py`
 4. Run: `python autoresearch_score.py`
 5. If SCORE improved → keep. If worse → `git revert HEAD --no-edit`
 6. Log the result
@@ -39,6 +45,7 @@ The strategy must use the `@register_strategy` decorator and set `df["Signal"]` 
 
 ## Variables to experiment with
 - SMA lookback periods (fast: 5-50, slow: 20-200)
+- EMA lookback periods (fast: 5-50, slow: 20-200)
 - RSI filter (only enter when RSI < 30, or RSI > 50)
 - VIX regime filter (only trade when VIX < 20)
 - Stop loss type (none, percentage 2-10%, ATR-based)
