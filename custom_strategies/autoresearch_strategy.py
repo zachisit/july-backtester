@@ -4,7 +4,7 @@ Starting point: simple SMA Crossover (20/50).
 """
 
 from helpers.registry import register_strategy
-from helpers.indicators import ema_crossover_unfiltered_logic
+from helpers.indicators import sma_trend_filter_logic
 
 
 @register_strategy(
@@ -13,8 +13,7 @@ from helpers.indicators import ema_crossover_unfiltered_logic
 )
 def autoresearch_sma(df, **kwargs):
     """
-    Base strategy: EMA Crossover.
-    Claude will iterate on this to improve total return.
+    Strategy: SMA200 trend filter — buy when above SMA200, sell when below.
     """
-    df = ema_crossover_unfiltered_logic(df, fast_ema=13, slow_ema=120)
+    df = sma_trend_filter_logic(df, ma_length=200)
     return df
