@@ -4,7 +4,7 @@ Starting point: simple SMA Crossover (20/50).
 """
 
 from helpers.registry import register_strategy
-from helpers.indicators import donchian_channel_breakout_logic
+from helpers.indicators import ema_crossover_unfiltered_logic
 
 
 @register_strategy(
@@ -13,7 +13,8 @@ from helpers.indicators import donchian_channel_breakout_logic
 )
 def autoresearch_sma(df, **kwargs):
     """
-    Strategy: Donchian Channel Breakout (50/25).
+    Base strategy: EMA Crossover.
+    Claude will iterate on this to improve total return.
     """
-    df = donchian_channel_breakout_logic(df, entry_period=50, exit_period=25)
+    df = ema_crossover_unfiltered_logic(df, fast_ema=12, slow_ema=120)
     return df
