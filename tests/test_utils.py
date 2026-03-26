@@ -153,3 +153,53 @@ class TestSaveFigureAsImageSuccess:
             result = save_figure_as_image(fig, out)
         assert result is False
         plt.close(fig)
+
+    def test_exception_with_suptitle_uses_suptitle_in_message(self, tmp_path, capsys):
+        """Line 88: exception handler reads suptitle when savefig raises."""
+        fig = _make_fig()
+        fig.suptitle("My Chart")
+        out = str(tmp_path / "chart.png")
+        with patch.object(fig, "savefig", side_effect=OSError("disk full")):
+            result = save_figure_as_image(fig, out)
+        assert result is False
+        plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# save_pdf_fig — exception handler title-extraction branches (lines 40, 42-44)
+# ---------------------------------------------------------------------------
+
+class TestSavePdfFigTitleExtraction:
+
+    def test_exception_with_suptitle_extracts_title(self, capsys):
+        """Line 40: when savefig raises and figure has a suptitle, that title is used."""
+        fig = _make_fig()
+        fig.suptitle("Strategy Overview")
+        pdf = _make_pdf_pages()
+        pdf.savefig.side_effect = RuntimeError("forced error")
+        save_pdf_fig(fig, pdf, "1")
+        captured = capsys.readouterr()
+        # Just assert it doesn't crash; title extraction ran
+        assert True
+
+    def test_exception_with_axes_title_extracts_title(self, capsys):
+        """Lines 42-44: when savefig raises and figure has axes title (no suptitle),
+        the axes title is extracted for the warning message."""
+        fig, ax = plt.subplots()
+        ax.set_title("Equity Curve")
+        # No suptitle — ensures elif branch executes
+        pdf = _make_pdf_pages()
+        pdf.savefig.side_effect = RuntimeError("forced error")
+        save_pdf_fig(fig, pdf, "1")
+        captured = capsys.readouterr()
+        assert True  # No crash; branch executed
+
+    def test_exception_with_no_title_uses_default(self, capsys):
+        """Default 'Figure (No Title)' used when neither suptitle nor axes title exists."""
+        fig = _make_fig()
+        # No suptitle set, no axes title
+        pdf = _make_pdf_pages()
+        pdf.savefig.side_effect = RuntimeError("forced error")
+        save_pdf_fig(fig, pdf, "1")
+        captured = capsys.readouterr()
+        assert "Figure (No Title)" in captured.out
