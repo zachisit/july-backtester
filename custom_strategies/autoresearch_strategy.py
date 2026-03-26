@@ -16,5 +16,5 @@ def autoresearch_sma(df, **kwargs):
     Base strategy: SMA Crossover.
     Claude will iterate on this to improve total return.
     """
-    df = sma_crossover_logic(df, fast=5, slow=50)
+    df = sma_crossover_logic(df, fast=10, slow=50)
     return df
