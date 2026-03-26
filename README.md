@@ -46,8 +46,7 @@ graph TD
     D -->|Yahoo / Norgate / CSV| F[No API Key Needed]
     E --> G[Run Setup Wizard: python main.py --init]
     F --> G
-    G --> H[Review generated config.py]
-    H --> I[Ready to Backtest]
+    G --> H[config.py written - Ready to Backtest]
 ```
 
 **First time?** Run the setup wizard:
@@ -64,9 +63,8 @@ graph TD
     C --> E[Configure Account]
     D --> E
     E -->|Set Capital, Dates, & Slippage| F[Select Initial Portfolio]
-    F -->|Choose Nasdaq 100, S&P 500, etc.| G[Wizard Generates config_starter.py]
-    G --> H[Rename to config.py]
-    H --> I[Setup Complete - Ready to Run]
+    F -->|Choose Nasdaq 100, S&P 500, etc.| G[Wizard Writes config.py]
+    G --> I[Setup Complete - Ready to Run]
 ```
 
 **Or manually** — set these lines in `config.py` and run:

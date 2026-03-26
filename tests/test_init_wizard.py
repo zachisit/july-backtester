@@ -3,10 +3,13 @@
 Unit tests for helpers/init_wizard.py.
 
 Covers:
-  TestBuildConfig     — _build_config output: valid Python, required keys,
-                        provider/capital/date presence, mode branching
-  TestColourHelpers   — bold/green/yellow/cyan/red return strings,
-                        plain text when _USE_COLOR is False
+  TestBuildConfig          — _build_config output: valid Python, required keys,
+                             provider/capital/date presence, mode branching
+  TestPatchExistingConfig  — _patch_existing_config: in-place key patching,
+                             non-destructive behaviour, missing-key tolerance,
+                             valid Python output
+  TestColourHelpers        — bold/green/yellow/cyan/red return strings,
+                             plain text when _USE_COLOR is False
 """
 
 import ast
@@ -21,6 +24,7 @@ if PROJECT_ROOT not in sys.path:
 
 from helpers.init_wizard import (
     _build_config,
+    _patch_existing_config,
     bold,
     cyan,
     green,
@@ -123,6 +127,123 @@ class TestBuildConfig:
         """No POLYGON_API_KEY note when provider is yahoo."""
         text = _cfg(provider="yahoo")
         assert "POLYGON_API_KEY" not in text
+
+
+# ---------------------------------------------------------------------------
+# TestPatchExistingConfig
+# ---------------------------------------------------------------------------
+
+class TestPatchExistingConfig:
+    """Tests for _patch_existing_config — in-place patching of an existing config.py."""
+
+    # Minimal config snippets used across tests
+    _FULL_SNIPPET = (
+        '    "data_provider": "polygon",\n'
+        '    "initial_capital": 100000.0,\n'
+        '    "start_date": "2004-01-01",\n'
+        '    "symbols_to_test": [\'BITB\'],\n'
+        '    "commission_per_share": 0.002,\n'
+    )
+
+    def _make(self, tmp_path, content=None):
+        p = tmp_path / "config.py"
+        p.write_text(content or self._FULL_SNIPPET, encoding="utf-8")
+        return p
+
+    # --- individual key patches ---
+
+    def test_patches_data_provider(self, tmp_path):
+        p = self._make(tmp_path)
+        text, changes = _patch_existing_config(p, "yahoo", 100_000.0, "2004-01-01", "single", ["SPY"])
+        assert '"data_provider": "yahoo"' in text
+        assert any("data_provider" in c for c in changes)
+
+    def test_patches_initial_capital(self, tmp_path):
+        p = self._make(tmp_path)
+        text, changes = _patch_existing_config(p, "polygon", 250_000.0, "2004-01-01", "single", ["SPY"])
+        assert "250000.0" in text
+        assert any("initial_capital" in c for c in changes)
+
+    def test_patches_start_date(self, tmp_path):
+        p = self._make(tmp_path)
+        text, changes = _patch_existing_config(p, "polygon", 100_000.0, "2015-06-01", "single", ["SPY"])
+        assert '"start_date": "2015-06-01"' in text
+        assert any("start_date" in c for c in changes)
+
+    def test_patches_symbols_to_test_single_mode(self, tmp_path):
+        p = self._make(tmp_path)
+        text, changes = _patch_existing_config(p, "polygon", 100_000.0, "2004-01-01", "single", ["AAPL", "MSFT"])
+        assert "AAPL" in text
+        assert "MSFT" in text
+        assert any("symbols_to_test" in c for c in changes)
+
+    def test_patches_portfolios_portfolio_mode(self, tmp_path):
+        content = (
+            '    "portfolios": {\n'
+            '        "Old Portfolio": "old.json",\n'
+            '    },\n'
+        )
+        p = self._make(tmp_path, content)
+        portfolio = {"Nasdaq 100": "nasdaq_100.json"}
+        text, changes = _patch_existing_config(p, "polygon", 100_000.0, "2004-01-01", "portfolio", portfolio)
+        assert "nasdaq_100.json" in text
+        assert "Old Portfolio" not in text
+        assert any("portfolios" in c for c in changes)
+
+    # --- non-destructive behaviour ---
+
+    def test_unrelated_keys_are_preserved(self, tmp_path):
+        """Keys the wizard doesn't ask about must survive unchanged."""
+        p = self._make(tmp_path)
+        text, _ = _patch_existing_config(p, "yahoo", 100_000.0, "2004-01-01", "single", ["SPY"])
+        assert '"commission_per_share": 0.002' in text
+
+    def test_old_provider_value_is_gone_after_patch(self, tmp_path):
+        p = self._make(tmp_path)
+        text, _ = _patch_existing_config(p, "yahoo", 100_000.0, "2004-01-01", "single", ["SPY"])
+        assert '"data_provider": "polygon"' not in text
+
+    def test_all_four_keys_patched_in_one_call(self, tmp_path):
+        p = self._make(tmp_path)
+        text, changes = _patch_existing_config(p, "yahoo", 50_000.0, "2020-01-01", "single", ["QQQ"])
+        assert '"data_provider": "yahoo"' in text
+        assert "50000.0" in text
+        assert '"start_date": "2020-01-01"' in text
+        assert "QQQ" in text
+        assert len(changes) == 4
+
+    # --- missing-key tolerance ---
+
+    def test_missing_data_provider_skipped_not_crash(self, tmp_path):
+        p = self._make(tmp_path, '    "initial_capital": 100000.0,\n')
+        text, changes = _patch_existing_config(p, "yahoo", 100_000.0, "2010-01-01", "single", ["SPY"])
+        assert not any("data_provider" in c for c in changes)
+
+    def test_missing_symbols_skipped_not_crash(self, tmp_path):
+        p = self._make(tmp_path, '    "data_provider": "polygon",\n')
+        text, changes = _patch_existing_config(p, "yahoo", 100_000.0, "2010-01-01", "single", ["AAPL"])
+        assert not any("symbols_to_test" in c for c in changes)
+
+    def test_empty_changes_list_when_nothing_matches(self, tmp_path):
+        p = self._make(tmp_path, '# nothing here\n')
+        _, changes = _patch_existing_config(p, "yahoo", 100_000.0, "2010-01-01", "single", ["SPY"])
+        assert changes == []
+
+    # --- output validity ---
+
+    def test_patched_full_config_is_valid_python(self, tmp_path):
+        """Patching a full _build_config output must still produce valid Python."""
+        base = _build_config(
+            "polygon", 100_000.0, "2004-01-01",
+            'datetime.now().strftime("%Y-%m-%d")',
+            "single", ["SPY"],
+        )
+        p = self._make(tmp_path, base)
+        text, _ = _patch_existing_config(p, "yahoo", 250_000.0, "2015-01-01", "single", ["AAPL"])
+        try:
+            ast.parse(text)
+        except SyntaxError as exc:
+            pytest.fail(f"Patched config is not valid Python: {exc}")
 
 
 # ---------------------------------------------------------------------------
