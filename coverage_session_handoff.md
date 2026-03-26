@@ -11,7 +11,7 @@
 
 ---
 
-## What Was Accomplished (13 commits total)
+## What Was Accomplished (14 commits total)
 
 ### Session 1 (8 commits — baseline 64% → 74%)
 
@@ -27,6 +27,12 @@
 | `tests/test_summary_functions.py` | 22 | `format_duration`, sensitivity report, save CSV, guard conditions |
 | `tests/test_custom_strategy_execution.py` | 140 | 35 daily strategies × 4 assertions (parametrized) |
 | `tests/test_services_caching_wrapper.py` | 7 | `services/services.py` cache hit/miss, None/empty not cached |
+
+### Session 3 (1 commit — continuing from ~80%)
+
+| File | Tests | Focus |
+|------|-------|-------|
+| `tests/test_main_functions.py` | 28 | `init_worker` globals, `run_single_simulation` guard clauses (result=None, empty pnl, exception, no-trades, few-trades, benchmark/WFA verdicts), `main()` early exits (--init wizard, polygon API key guard, S2 config validation — 8 error branches) |
 
 ### Session 2 (4 commits — continuing from 74%)
 
