@@ -4,7 +4,7 @@ Starting point: simple SMA Crossover (20/50).
 """
 
 from helpers.registry import register_strategy
-from helpers.indicators import ema_crossover_unfiltered_logic
+from helpers.indicators import macd_crossover_logic
 
 
 @register_strategy(
@@ -13,8 +13,8 @@ from helpers.indicators import ema_crossover_unfiltered_logic
 )
 def autoresearch_sma(df, **kwargs):
     """
-    Base strategy: EMA Crossover.
+    Strategy: MACD Crossover.
     Claude will iterate on this to improve total return.
     """
-    df = ema_crossover_unfiltered_logic(df, fast_ema=12, slow_ema=120)
+    df = macd_crossover_logic(df, fast=12, slow=120, signal=9)
     return df
