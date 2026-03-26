@@ -16,7 +16,7 @@ CONFIG = {
     # SECTION 1: DATA PROVIDER
     # ============================================================
     # Options: "polygon", "norgate", "yahoo", "csv"
-    "data_provider": "polygon",
+    "data_provider": "yahoo",
 
     # --- CSV Data Directory (only used when data_provider = "csv") ---
     # Path to the folder containing per-symbol CSV files.
