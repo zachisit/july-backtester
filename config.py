@@ -169,7 +169,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.33,
+    "allocation_per_trade": 0.10,
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -239,7 +239,7 @@ CONFIG = {
     # SECTION 12: TRADING COST SETTINGS
     # ============================================================
     # --- Slippage Percentage ---
-    "slippage_pct": 0.0001,
+    "slippage_pct": 0.0005,
     
     # --- Commission Per Trade ---
     "commission_per_share": 0.002,
