@@ -225,3 +225,102 @@ class TestRunAnalysisOSError:
         with patch("trade_analyzer.analyzer.os.makedirs", side_effect=OSError("no space")):
             # Should return early, not raise
             analyzer._run_analysis(_make_trades_df(), str(tmp_path), "oserror_run", {})
+
+
+# ---------------------------------------------------------------------------
+# _run_analysis — WFA branch
+# ---------------------------------------------------------------------------
+
+class TestRunAnalysisWfaBranch:
+
+    def test_wfa_branch_executes_with_valid_split_ratio(self, tmp_path):
+        """WFA_SPLIT_RATIO in (0, 1) triggers the WFA computation path."""
+        with _stub_downstream():
+            # Should not raise — WFA helpers run on synthetic trade data
+            analyzer._run_analysis(
+                _make_trades_df(n=5),
+                str(tmp_path),
+                "wfa_run",
+                config_params={"WFA_SPLIT_RATIO": 0.7},
+            )
+
+    def test_wfa_branch_skipped_when_ratio_is_zero(self, tmp_path):
+        """WFA_SPLIT_RATIO == 0 → branch not entered, no WFA computation."""
+        with _stub_downstream():
+            analyzer._run_analysis(
+                _make_trades_df(n=5),
+                str(tmp_path),
+                "wfa_zero",
+                config_params={"WFA_SPLIT_RATIO": 0},
+            )
+
+    def test_wfa_exception_handled_silently(self, tmp_path):
+        """An error in the WFA block is caught and printed as a warning."""
+        with _stub_downstream(), \
+             patch("helpers.wfa.get_split_date", side_effect=RuntimeError("wfa boom")):
+            # Should not propagate — exception is caught inside _run_analysis
+            analyzer._run_analysis(
+                _make_trades_df(n=5),
+                str(tmp_path),
+                "wfa_exc",
+                config_params={"WFA_SPLIT_RATIO": 0.7},
+            )
+
+
+# ---------------------------------------------------------------------------
+# _run_analysis — noise CSV branch
+# ---------------------------------------------------------------------------
+
+class TestRunAnalysisNoiseBranch:
+
+    def _write_noise_csv(self, tmp_path):
+        """Create a minimal noise_sample_data.csv for the noise branch."""
+        import numpy as np
+        n = 10
+        closes = np.linspace(100.0, 110.0, n)
+        rows = {
+            "Symbol":      ["TEST"] * n,
+            "Clean_Open":  closes * 0.99,
+            "Clean_High":  closes * 1.01,
+            "Clean_Low":   closes * 0.98,
+            "Clean_Close": closes,
+            "Noisy_Open":  closes * 0.995,
+            "Noisy_High":  closes * 1.005,
+            "Noisy_Low":   closes * 0.985,
+            "Noisy_Close": closes * 1.001,
+        }
+        idx = pd.date_range("2021-01-04", periods=n, freq="B")
+        csv_path = tmp_path / "noise_sample.csv"
+        pd.DataFrame(rows, index=idx).to_csv(csv_path)
+        return str(csv_path)
+
+    def test_noise_branch_executes_when_csv_exists(self, tmp_path):
+        """NOISE_CSV_PATH pointing to a valid CSV runs the noise overlay path."""
+        csv_path = self._write_noise_csv(tmp_path)
+        with _stub_downstream():
+            analyzer._run_analysis(
+                _make_trades_df(n=5),
+                str(tmp_path),
+                "noise_run",
+                config_params={"NOISE_CSV_PATH": csv_path},
+            )
+
+    def test_noise_branch_skipped_when_path_absent(self, tmp_path):
+        """NOISE_CSV_PATH = None → noise branch skipped, no error."""
+        with _stub_downstream():
+            analyzer._run_analysis(
+                _make_trades_df(n=5),
+                str(tmp_path),
+                "no_noise",
+                config_params={"NOISE_CSV_PATH": None},
+            )
+
+    def test_noise_branch_skipped_when_file_missing(self, tmp_path):
+        """NOISE_CSV_PATH pointing to a nonexistent file → branch skipped."""
+        with _stub_downstream():
+            analyzer._run_analysis(
+                _make_trades_df(n=5),
+                str(tmp_path),
+                "missing_noise",
+                config_params={"NOISE_CSV_PATH": str(tmp_path / "does_not_exist.csv")},
+            )
