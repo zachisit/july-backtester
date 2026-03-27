@@ -43,6 +43,7 @@ from helpers.registry import register_strategy
 from helpers.timeframe_utils import get_bars_for_period
 from helpers.indicators import (
     bollinger_mean_reversion_atr_stop_logic,
+    volume_weighted_rsi_logic,
     williams_r_logic,
     bollinger_band_logic,
     bollinger_breakout_logic,
@@ -704,6 +705,34 @@ def williams_r_oversold_bounce(df, **kwargs):
     This is functionally similar to Stochastic but on an inverted scale.
     """
     return williams_r_logic(
+        df,
+        length=kwargs["length"],
+        oversold=kwargs["oversold"],
+        exit_level=kwargs["exit_level"],
+    )
+
+
+@register_strategy(
+    name="Volume-Weighted RSI (14/30)",
+    dependencies=[],
+    params={
+        "length": get_bars_for_period("14d", _TF, _MUL),
+        "oversold": 30,
+        "exit_level": 50,
+    },
+)
+def volume_weighted_rsi(df, **kwargs):
+    """Volume-Weighted RSI mean-reversion strategy.
+
+    RSI calculated on volume-weighted returns rather than raw close-to-close
+    returns. Produces a distinct signal from standard RSI — tends to fire
+    earlier on institutional accumulation days where heavy volume accompanies
+    price moves.
+
+    Entry: VWRSI crosses back up above 30 (oversold bounce).
+    Exit: VWRSI crosses up above 50 (return to mean).
+    """
+    return volume_weighted_rsi_logic(
         df,
         length=kwargs["length"],
         oversold=kwargs["oversold"],

@@ -1393,3 +1393,87 @@ def williams_r_logic(df, length=14, oversold=-80, exit_level=-50):
     df['Signal'] = np.where(buy_signal, 1, np.where(sell_signal, -1, 0))
     df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
     return df
+
+
+def calculate_volume_weighted_rsi(df, length=14):
+    """
+    Calculates RSI on volume-weighted returns and adds a 'VWRSI_{length}' column.
+
+    Instead of using raw close-to-close returns (standard RSI), this variant
+    weights each bar's return by its relative volume. Bars with higher volume
+    contribute more to the gain/loss averages. This produces a distinct signal
+    from standard RSI — it tends to fire earlier on institutional accumulation
+    days where heavy volume accompanies price moves.
+
+    Formula:
+        volume_weight = Volume / Volume.rolling(length).mean()
+        weighted_return = close_to_close_return × volume_weight
+        Then standard RSI EWM calculation on the weighted returns.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'Close' and 'Volume' columns.
+    length : int
+        RSI lookback period.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'VWRSI_{length}' column added.
+    """
+    col_name = f'VWRSI_{length}'
+    if col_name not in df.columns:
+        # Calculate volume-weighted returns
+        raw_return = df['Close'].diff()
+        avg_volume = df['Volume'].rolling(window=length).mean()
+        # Avoid division by zero
+        volume_weight = df['Volume'] / avg_volume.replace(0, np.nan)
+        volume_weight = volume_weight.fillna(1.0)
+        weighted_return = raw_return * volume_weight
+
+        # Standard RSI calculation on weighted returns
+        gain = weighted_return.where(weighted_return > 0, 0).ewm(alpha=1/length, adjust=False).mean()
+        loss = (-weighted_return.where(weighted_return < 0, 0)).ewm(alpha=1/length, adjust=False).mean()
+        rs = gain / loss.replace(0, np.nan)
+        df[col_name] = 100 - (100 / (1 + rs))
+    return df
+
+
+def volume_weighted_rsi_logic(df, length=14, oversold=30, exit_level=50):
+    """
+    Volume-Weighted RSI mean-reversion strategy.
+
+    Buys when Volume-Weighted RSI crosses back up above the oversold level,
+    exits when VWRSI crosses up above the exit level. Identical signal logic
+    to the standard RSI strategy but uses volume-weighted returns as input,
+    which tends to fire earlier on institutional accumulation days.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'Close' and 'Volume' columns.
+    length : int
+        RSI lookback period.
+    oversold : float
+        VWRSI level below which the asset is considered oversold (buy trigger).
+    exit_level : float
+        VWRSI level above which the position is exited.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
+    df = calculate_volume_weighted_rsi(df, length)
+    col_name = f'VWRSI_{length}'
+
+    # Buy when VWRSI crosses back UP above the oversold line
+    buy_signal = (df[col_name].shift(1) < oversold) & (df[col_name] >= oversold)
+
+    # Exit when VWRSI crosses back UP above the exit level
+    sell_signal = (df[col_name].shift(1) < exit_level) & (df[col_name] >= exit_level)
+
+    df['Signal'] = np.where(buy_signal, 1, np.where(sell_signal, -1, 0))
+    df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
+    return df
