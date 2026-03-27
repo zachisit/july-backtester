@@ -1318,3 +1318,78 @@ def ema_crossover_vix_only_logic(df, vix_df, fast_ema, slow_ema, vix_threshold=3
     df['Signal'] = np.where((original_signal == 1) & is_market_calm, 1, original_signal)
     df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
     return df
+
+
+def calculate_williams_r(df, length=14):
+    """
+    Calculates Williams %R and adds a 'WilliamsR_{length}' column to the DataFrame.
+
+    Williams %R is a momentum oscillator that measures overbought/oversold levels.
+    It ranges from -100 (oversold) to 0 (overbought), which is the inverse of
+    the Stochastic Oscillator's scale.
+
+    Formula: %R = (Highest High - Close) / (Highest High - Lowest Low) × -100
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'High', 'Low', and 'Close' columns.
+    length : int
+        Lookback period for the highest high and lowest low.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'WilliamsR_{length}' column added.
+    """
+    col_name = f'WilliamsR_{length}'
+    if col_name not in df.columns:
+        highest_high = df['High'].rolling(window=length).max()
+        lowest_low = df['Low'].rolling(window=length).min()
+        df[col_name] = ((highest_high - df['Close']) / (highest_high - lowest_low)) * -100
+    return df
+
+
+def williams_r_logic(df, length=14, oversold=-80, exit_level=-50):
+    """
+    Williams %R Oversold Bounce strategy.
+
+    Buys when Williams %R crosses back up above the oversold level (e.g., -80),
+    indicating a potential reversal from oversold conditions. Exits when %R
+    crosses up above the exit level (e.g., -50), capturing the mean reversion.
+
+    Signal is forward-filled to maintain position state between events.
+
+    Note: Williams %R ranges from -100 (most oversold) to 0 (most overbought).
+    The oversold parameter should be a negative number (e.g., -80).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'High', 'Low', and 'Close' columns.
+    length : int
+        Lookback period for the Williams %R calculation.
+    oversold : float
+        %R level below which the asset is considered oversold (buy trigger).
+        Typically -80 (default). Must be negative.
+    exit_level : float
+        %R level above which the position is exited (return to mean).
+        Typically -50 (default). Must be negative and > oversold.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
+    df = calculate_williams_r(df, length)
+    col_name = f'WilliamsR_{length}'
+
+    # Buy when %R crosses back UP above the oversold line
+    buy_signal = (df[col_name].shift(1) < oversold) & (df[col_name] >= oversold)
+
+    # Exit when %R crosses back UP above the exit level (return to mean)
+    sell_signal = (df[col_name].shift(1) < exit_level) & (df[col_name] >= exit_level)
+
+    df['Signal'] = np.where(buy_signal, 1, np.where(sell_signal, -1, 0))
+    df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
+    return df
