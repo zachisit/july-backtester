@@ -398,6 +398,81 @@ def bollinger_band_logic(df, length=20, std_dev=2.0):
     df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
     return df
 
+def bollinger_mean_reversion_atr_stop_logic(df, length=20, std_dev=2.0, atr_period=14, atr_multiplier=2.0):
+    """
+    Bollinger Band Mean Reversion strategy with an ATR-based stop loss.
+
+    Combines the existing Bollinger Band and ATR indicators into a single
+    mean-reversion strategy. Entry occurs when price touches the lower band
+    (oversold); exit occurs when price reaches the middle band (mean reversion
+    target). A 2x ATR stop below entry protects against trend continuation.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'Open', 'High', 'Low', 'Close', 'Volume' columns.
+    length : int
+        Lookback period for the Bollinger Band SMA and standard deviation.
+    std_dev : float
+        Number of standard deviations for the bands.
+    atr_period : int
+        Lookback period for the ATR calculation.
+    atr_multiplier : float
+        Multiplier applied to ATR for the stop distance below entry price.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
+    # 1. Calculate indicators using existing helper functions
+    df = calculate_bollinger_bands(df, length, std_dev)
+    df = calculate_atr(df, period=atr_period)
+
+    # 2. Stateful loop — track entry price and ATR stop
+    signals = pd.Series(0, index=df.index)
+    in_position = False
+    stop_price = 0.0
+
+    for i in range(1, len(df)):
+        # Skip if indicators haven't warmed up
+        if pd.isna(df[f'SMA_{length}'].iloc[i]) or pd.isna(df['ATR'].iloc[i]):
+            continue
+
+        # --- CHECK EXIT FIRST ---
+        if in_position:
+            # Exit 1: Stop loss hit (Low breaches the ATR stop)
+            if df['Low'].iloc[i] < stop_price:
+                signals.iloc[i] = -1
+                in_position = False
+                stop_price = 0.0
+                continue
+
+            # Exit 2: Mean reversion target reached (Close >= middle band)
+            if df['Close'].iloc[i] >= df[f'SMA_{length}'].iloc[i]:
+                signals.iloc[i] = -1
+                in_position = False
+                stop_price = 0.0
+                continue
+
+            # Still in position
+            signals.iloc[i] = 1
+            continue
+
+        # --- CHECK ENTRY ---
+        # Entry: Close touches or crosses below the lower Bollinger Band
+        if df['Close'].iloc[i] < df['LowerBand'].iloc[i]:
+            in_position = True
+            entry_price = df['Close'].iloc[i]
+            stop_price = entry_price - (df['ATR'].iloc[i] * atr_multiplier)
+            signals.iloc[i] = 1
+
+    # Convert events to stateful signal
+    df['Signal'] = signals.replace(0, np.nan).ffill().fillna(0)
+    return df
+
+
+
 def stochastic_logic(df, length, k_smooth, oversold, exit_level):
     """
     Stochastic Oscillator mean-reversion strategy.
@@ -1241,6 +1316,81 @@ def ema_crossover_vix_only_logic(df, vix_df, fast_ema, slow_ema, vix_threshold=3
 
     # Apply the filter only to buy signals
     df['Signal'] = np.where((original_signal == 1) & is_market_calm, 1, original_signal)
+    df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
+    return df
+
+
+def calculate_williams_r(df, length=14):
+    """
+    Calculates Williams %R and adds a 'WilliamsR_{length}' column to the DataFrame.
+
+    Williams %R is a momentum oscillator that measures overbought/oversold levels.
+    It ranges from -100 (oversold) to 0 (overbought), which is the inverse of
+    the Stochastic Oscillator's scale.
+
+    Formula: %R = (Highest High - Close) / (Highest High - Lowest Low) × -100
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'High', 'Low', and 'Close' columns.
+    length : int
+        Lookback period for the highest high and lowest low.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'WilliamsR_{length}' column added.
+    """
+    col_name = f'WilliamsR_{length}'
+    if col_name not in df.columns:
+        highest_high = df['High'].rolling(window=length).max()
+        lowest_low = df['Low'].rolling(window=length).min()
+        df[col_name] = ((highest_high - df['Close']) / (highest_high - lowest_low)) * -100
+    return df
+
+
+def williams_r_logic(df, length=14, oversold=-80, exit_level=-50):
+    """
+    Williams %R Oversold Bounce strategy.
+
+    Buys when Williams %R crosses back up above the oversold level (e.g., -80),
+    indicating a potential reversal from oversold conditions. Exits when %R
+    crosses up above the exit level (e.g., -50), capturing the mean reversion.
+
+    Signal is forward-filled to maintain position state between events.
+
+    Note: Williams %R ranges from -100 (most oversold) to 0 (most overbought).
+    The oversold parameter should be a negative number (e.g., -80).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'High', 'Low', and 'Close' columns.
+    length : int
+        Lookback period for the Williams %R calculation.
+    oversold : float
+        %R level below which the asset is considered oversold (buy trigger).
+        Typically -80 (default). Must be negative.
+    exit_level : float
+        %R level above which the position is exited (return to mean).
+        Typically -50 (default). Must be negative and > oversold.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
+    df = calculate_williams_r(df, length)
+    col_name = f'WilliamsR_{length}'
+
+    # Buy when %R crosses back UP above the oversold line
+    buy_signal = (df[col_name].shift(1) < oversold) & (df[col_name] >= oversold)
+
+    # Exit when %R crosses back UP above the exit level (return to mean)
+    sell_signal = (df[col_name].shift(1) < exit_level) & (df[col_name] >= exit_level)
+
+    df['Signal'] = np.where(buy_signal, 1, np.where(sell_signal, -1, 0))
     df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
     return df
 
