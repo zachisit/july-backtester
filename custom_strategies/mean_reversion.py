@@ -42,6 +42,7 @@ are required to add, remove, or rename them.
 from helpers.registry import register_strategy
 from helpers.timeframe_utils import get_bars_for_period
 from helpers.indicators import (
+    bollinger_mean_reversion_atr_stop_logic,
     bollinger_band_logic,
     bollinger_breakout_logic,
     bollinger_band_squeeze_logic,
@@ -652,3 +653,32 @@ def overnight_hold_vix(df, **kwargs):
     ``vix_df`` is injected automatically by the engine (declared in dependencies).
     """
     return weekday_overnight_with_vix_filter_logic(df, vix_df=kwargs["vix_df"])
+
+
+@register_strategy(
+    name="Bollinger Mean Reversion w/ ATR Stop (20d/2.0/2xATR)",
+    dependencies=[],
+    params={
+        "length": get_bars_for_period("20d", _TF, _MUL),
+        "std_dev": 2.0,
+        "atr_period": get_bars_for_period("14d", _TF, _MUL),
+        "atr_multiplier": 2.0,
+    },
+)
+def bollinger_mean_reversion_atr_stop(df, **kwargs):
+    """Bollinger Band Mean Reversion with ATR stop loss.
+
+    Entry: price touches lower Bollinger Band (oversold).
+    Stop: 2x ATR below entry price (frozen at entry, no trailing).
+    Exit: price reaches middle band (SMA) — mean reversion target.
+
+    Combines existing bollinger_band and calculate_atr indicators into a
+    single mean-reversion strategy with downside protection.
+    """
+    return bollinger_mean_reversion_atr_stop_logic(
+        df,
+        length=kwargs["length"],
+        std_dev=kwargs["std_dev"],
+        atr_period=kwargs["atr_period"],
+        atr_multiplier=kwargs["atr_multiplier"],
+    )
