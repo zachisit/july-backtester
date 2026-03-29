@@ -638,7 +638,7 @@ def main():
                 _print_heatmap(_r["regime_heatmap"], _r.get("Strategy", "Unknown"))
 
     duration_seconds = time.monotonic() - start_time
-    generate_portfolio_summary_report(all_portfolio_results, duration_seconds, run_folder_name)
+    generate_portfolio_summary_report(all_portfolio_results, benchmark_returns, duration_seconds, run_folder_name)
     generate_sensitivity_report(all_portfolio_results, run_folder_name)
 
     if CONFIG.get("export_ml_features", False):
