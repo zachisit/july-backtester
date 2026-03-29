@@ -102,11 +102,14 @@ def split_trades(
     A trade belongs to OOS if its ``ExitDate`` is on or after *split_date*;
     all earlier exits are IS.
 
+    Handles both date-only strings (``"2024-01-15"``) and datetime strings
+    (``"2024-01-15T10:30:00"``) by converting to pd.Timestamp for comparison.
+
     Parameters
     ----------
     trade_log   : list[dict]
         List of trade dicts produced by the simulation engine.
-        Each dict must have an ``"ExitDate"`` key (ISO date string).
+        Each dict must have an ``"ExitDate"`` key (ISO date/datetime string).
     split_date  : str
         ISO date string of the IS/OOS boundary (inclusive start of OOS).
 
@@ -114,8 +117,21 @@ def split_trades(
     -------
     (is_trades, oos_trades) : tuple[list[dict], list[dict]]
     """
-    is_trades  = [t for t in trade_log if t["ExitDate"] <  split_date]
-    oos_trades = [t for t in trade_log if t["ExitDate"] >= split_date]
+    # Convert split_date string to pd.Timestamp for proper comparison
+    split_ts = pd.Timestamp(split_date)
+
+    is_trades = []
+    oos_trades = []
+
+    for t in trade_log:
+        # Convert ExitDate string to pd.Timestamp
+        exit_ts = pd.Timestamp(t["ExitDate"])
+
+        if exit_ts < split_ts:
+            is_trades.append(t)
+        else:
+            oos_trades.append(t)
+
     return is_trades, oos_trades
 
 
@@ -136,13 +152,17 @@ def _annualised_return(trades: list[dict], initial_capital: float) -> Optional[f
     Uses the earliest and latest ``ExitDate`` in the bucket as the window
     boundaries.  Returns ``None`` when fewer than 2 distinct days exist or
     when the strategy went bust (total equity <= 0).
+
+    Handles both date-only strings (``"2024-01-15"``) and datetime strings
+    (``"2024-01-15T10:30:00"``) by converting to pd.Timestamp.
     """
     if not trades:
         return None
-    dates = sorted(t["ExitDate"] for t in trades)
-    start = date.fromisoformat(dates[0])
-    end   = date.fromisoformat(dates[-1])
-    days  = (end - start).days
+    # Convert ExitDate strings to pd.Timestamp for datetime handling
+    exit_timestamps = sorted(pd.Timestamp(t["ExitDate"]) for t in trades)
+    start_ts = exit_timestamps[0]
+    end_ts = exit_timestamps[-1]
+    days = (end_ts - start_ts).days
     if days < 1:
         return None
     years          = days / 365.25
