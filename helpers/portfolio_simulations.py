@@ -5,13 +5,19 @@ from .simulations import calculate_advanced_metrics
 
 def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config):
     """
-    Runs a portfolio simulation with integrated stop-loss handling and logs 
+    Runs a portfolio simulation with integrated stop-loss handling and logs
     a rich set of features for each trade for future machine learning analysis.
     (Version hardened against KeyError from misaligned dates).
     """
+    from helpers.timeframe_utils import get_bars_per_year
+
     execution_time = CONFIG.get("execution_time", "open").lower()
     htb_rate_annual = CONFIG.get("htb_rate_annual", 0.0)
-    htb_rate_daily  = (1.0 + htb_rate_annual) ** (1.0 / 252) - 1.0 if htb_rate_annual > 0 else 0.0
+
+    # Dynamic HTB rate compounding based on timeframe (fixes issue #55)
+    bars_per_year = get_bars_per_year(CONFIG)
+    htb_rate_per_bar = (1.0 + htb_rate_annual) ** (1.0 / bars_per_year) - 1.0 if htb_rate_annual > 0 else 0.0
+
     short_positions: dict = {}
 
     cash = initial_capital
@@ -147,8 +153,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
         # --- BORROW COST DEBIT (shorts held overnight) ---
         for symbol, spos in list(short_positions.items()):
-            if htb_rate_daily > 0:
-                cost = spos['notional'] * htb_rate_daily
+            if htb_rate_per_bar > 0:
+                cost = spos['notional'] * htb_rate_per_bar
                 cash -= cost
                 spos['total_borrow_cost'] = spos.get('total_borrow_cost', 0.0) + cost
 
