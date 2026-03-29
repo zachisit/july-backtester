@@ -66,3 +66,67 @@ def get_bars_for_period(period_str: str, timeframe: str, multiplier: int = 1) ->
             
     else:
         raise ValueError(f"Unsupported timeframe in config: {timeframe}")
+
+
+def get_bars_per_year(config: dict) -> int:
+    """
+    Calculate the number of trading bars per year based on timeframe config.
+
+    This is critical for correct annualization of metrics (Sharpe ratio, Sortino
+    ratio, Alpha, Beta) when backtesting on intraday timeframes.
+
+    Args:
+        config (dict): The CONFIG dictionary containing 'timeframe' and
+                       optionally 'timeframe_multiplier'.
+
+    Returns:
+        int: Number of trading bars per year for the given timeframe.
+
+    Examples:
+        >>> get_bars_per_year({"timeframe": "D"})
+        252
+        >>> get_bars_per_year({"timeframe": "H", "timeframe_multiplier": 1})
+        1638
+        >>> get_bars_per_year({"timeframe": "MIN", "timeframe_multiplier": 5})
+        19656
+        >>> get_bars_per_year({"timeframe": "W"})
+        52
+        >>> get_bars_per_year({"timeframe": "M"})
+        12
+
+    Notes:
+        - Assumes 252 trading days per year (NYSE/NASDAQ standard)
+        - Assumes 6.5 trading hours per day (9:30 AM - 4:00 PM ET)
+        - For minute bars: bars_per_year = 252 * 6.5 * 60 / multiplier
+        - For hourly bars: bars_per_year = 252 * 6.5 / multiplier
+
+    Raises:
+        ValueError: If timeframe is not supported.
+    """
+    TRADING_DAYS_PER_YEAR = 252
+    HOURS_PER_DAY = 6.5  # NYSE/NASDAQ standard (9:30 AM - 4:00 PM ET)
+    MINUTES_PER_HOUR = 60
+
+    timeframe = config.get("timeframe", "D").upper()
+    multiplier = int(config.get("timeframe_multiplier", 1))
+
+    if multiplier <= 0:
+        raise ValueError(f"timeframe_multiplier must be > 0, got {multiplier}")
+
+    if timeframe == "D":
+        return TRADING_DAYS_PER_YEAR
+    elif timeframe == "H":
+        bars_per_day = HOURS_PER_DAY / multiplier
+        return int(TRADING_DAYS_PER_YEAR * bars_per_day)
+    elif timeframe == "MIN":
+        bars_per_day = (HOURS_PER_DAY * MINUTES_PER_HOUR) / multiplier
+        return int(TRADING_DAYS_PER_YEAR * bars_per_day)
+    elif timeframe == "W":
+        return 52  # ~52 weeks per year
+    elif timeframe == "M":
+        return 12  # 12 months per year
+    else:
+        raise ValueError(
+            f"Unsupported timeframe '{timeframe}'. "
+            f"Must be one of: D, H, MIN, W, M"
+        )

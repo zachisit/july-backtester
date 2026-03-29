@@ -50,6 +50,14 @@ CONFIG = {
     # For most providers the values can be swapped out based on
     #   'daily' or a specific time series. Refer to what is possible
     #   with your connected Data
+    #
+    # IMPORTANT: Changing to intraday timeframes (H, MIN) affects metric
+    # calculations. Sharpe ratio, Sortino ratio, and other annualized metrics
+    # are automatically adjusted based on bars-per-year:
+    #   - Daily (D): 252 bars/year
+    #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
+    #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
+    # HTB (short selling) fees are also compounded per bar instead of per day.
     "timeframe": "D",  # Daily
     #"timeframe": "H",  # Hourly
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
