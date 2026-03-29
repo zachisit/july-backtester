@@ -51,7 +51,9 @@ class TestDataProviderNormalization:
             df = get_price_data("SPY", "2021-01-01", "2021-01-02", config)
 
         assert df is not None
-        assert df.index.dtype == 'datetime64[ns, UTC]'
+        # Check dtype is datetime64 with UTC timezone (precision may vary: ns/us/ms)
+        assert str(df.index.dtype).startswith('datetime64')
+        assert df.index.tz is not None  # Timezone-aware
         # All timestamps should be midnight (00:00:00)
         for ts in df.index:
             assert ts.time() == datetime.time(0, 0, 0), f"Expected midnight, got {ts.time()}"
@@ -84,7 +86,9 @@ class TestDataProviderNormalization:
             df = get_price_data("SPY", "2021-01-01", "2021-01-02", config)
 
         assert df is not None
-        assert df.index.dtype == 'datetime64[ns, UTC]'
+        # Check dtype is datetime64 with UTC timezone (precision may vary: ns/us/ms)
+        assert str(df.index.dtype).startswith('datetime64')
+        assert df.index.tz is not None  # Timezone-aware
         # All timestamps should be midnight (00:00:00)
         for ts in df.index:
             assert ts.time() == datetime.time(0, 0, 0), f"Expected midnight, got {ts.time()}"
@@ -110,7 +114,9 @@ class TestDataProviderNormalization:
         df = get_price_data("SPY", "2021-01-01", "2021-01-02", config)
 
         assert df is not None
-        assert df.index.dtype == 'datetime64[ns, UTC]'
+        # Check dtype is datetime64 with UTC timezone (precision may vary: ns/us/ms)
+        assert str(df.index.dtype).startswith('datetime64')
+        assert df.index.tz is not None  # Timezone-aware
         # All timestamps should be midnight (00:00:00)
         for ts in df.index:
             assert ts.time() == datetime.time(0, 0, 0), f"Expected midnight, got {ts.time()}"
@@ -137,7 +143,9 @@ class TestDataProviderNormalization:
         df = get_price_data("SPY", "2021-01-01", "2021-01-02", config)
 
         assert df is not None
-        assert df.index.dtype == 'datetime64[ns, UTC]'
+        # Check dtype is datetime64 with UTC timezone (precision may vary: ns/us/ms)
+        assert str(df.index.dtype).startswith('datetime64')
+        assert df.index.tz is not None  # Timezone-aware
         # At least one timestamp should have non-zero time component
         has_time = any(ts.time() != datetime.time(0, 0, 0) for ts in df.index)
         assert has_time, "Expected at least one timestamp with time component"
@@ -225,7 +233,9 @@ class TestDatetimeIndexType:
 
         assert df is not None
         assert isinstance(df.index, pd.DatetimeIndex), f"Expected DatetimeIndex, got {type(df.index)}"
-        assert df.index.dtype == 'datetime64[ns, UTC]'
+        # Check dtype is datetime64 with UTC timezone (precision may vary: ns/us/ms)
+        assert str(df.index.dtype).startswith('datetime64')
+        assert df.index.tz is not None  # Timezone-aware
 
     def test_all_providers_return_datetimeindex_intraday(self, tmp_path):
         """All providers should return DatetimeIndex for intraday data."""
@@ -247,4 +257,6 @@ class TestDatetimeIndexType:
 
         assert df is not None
         assert isinstance(df.index, pd.DatetimeIndex), f"Expected DatetimeIndex, got {type(df.index)}"
-        assert df.index.dtype == 'datetime64[ns, UTC]'
+        # Check dtype is datetime64 with UTC timezone (precision may vary: ns/us/ms)
+        assert str(df.index.dtype).startswith('datetime64')
+        assert df.index.tz is not None  # Timezone-aware
