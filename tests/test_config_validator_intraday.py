@@ -67,39 +67,40 @@ class TestValidateIntradayConfig:
         assert len(warnings) == 1
         assert "timeframe=MIN" in warnings[0]
 
-    def test_hourly_with_wfa_warns_about_limitations(self):
-        """Hourly + WFA should produce both info + WFA warning."""
+    def test_hourly_with_wfa_shows_info_only(self):
+        """Hourly + WFA should produce info only (Phase 2 fixed WFA limitations)."""
         config = {"timeframe": "H", "timeframe_multiplier": 1, "wfa_split_ratio": 0.80}
         warnings = validate_intraday_config(config)
-        assert len(warnings) == 2
-        # First warning: info about intraday
+        assert len(warnings) == 1
+        # Info message mentions WFA bar-count splitting
         assert "INFO: Intraday backtesting detected" in warnings[0]
-        # Second warning: WFA limitation
-        assert "WARNING: Walk-Forward Analysis with intraday data" in warnings[1]
-        assert "calendar days, not trading bars" in warnings[1]
-        assert "issue #55 Phase 2" in warnings[1]
+        assert "WFA splits are calculated by bar count" in warnings[0]
+        # No WARNING messages
+        assert "WARNING" not in warnings[0]
 
-    def test_minute_with_wfa_warns_about_limitations(self):
-        """5-minute + WFA should produce both info + WFA warning."""
+    def test_minute_with_wfa_shows_info_only(self):
+        """5-minute + WFA should produce info only (no WFA warning after Phase 2)."""
         config = {"timeframe": "MIN", "timeframe_multiplier": 5, "wfa_split_ratio": 0.80}
         warnings = validate_intraday_config(config)
-        assert len(warnings) == 2
+        assert len(warnings) == 1
         assert "INFO:" in warnings[0]
-        assert "WARNING: Walk-Forward Analysis" in warnings[1]
+        assert "WFA splits are calculated by bar count" in warnings[0]
+        assert "WARNING" not in warnings[0]
 
-    def test_intraday_with_wfa_disabled_no_wfa_warning(self):
-        """Intraday with WFA disabled (None or 0) should not warn about WFA."""
+    def test_intraday_with_wfa_disabled(self):
+        """Intraday with WFA disabled still shows intraday info."""
         config = {"timeframe": "H", "wfa_split_ratio": None}
         warnings = validate_intraday_config(config)
         assert len(warnings) == 1
         assert "INFO:" in warnings[0]
-        assert "WFA" not in warnings[0]
+        assert "Intraday backtesting detected" in warnings[0]
 
-    def test_intraday_with_wfa_zero_no_wfa_warning(self):
-        """Intraday with wfa_split_ratio=0 should not warn about WFA."""
+    def test_intraday_with_wfa_zero(self):
+        """Intraday with wfa_split_ratio=0 shows intraday info."""
         config = {"timeframe": "MIN", "timeframe_multiplier": 5, "wfa_split_ratio": 0}
         warnings = validate_intraday_config(config)
         assert len(warnings) == 1
+        assert "INFO" in warnings[0]
         assert "WARNING" not in warnings[0]
 
     def test_weekly_timeframe_no_warnings(self):

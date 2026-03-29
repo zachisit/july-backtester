@@ -155,16 +155,8 @@ def validate_intraday_config(config: dict) -> list[str]:
         warnings.append(
             f"INFO: Intraday backtesting detected (timeframe={tf_desc}). "
             "Metrics (Sharpe, Sortino, HTB fees) are automatically adjusted for bars-per-year. "
+            "WFA splits are calculated by bar count for accurate IS/OOS ratios. "
             "Ensure your data provider supports intraday data."
         )
-
-        # WFA warning - Phase 2 of issue #55 is not yet implemented
-        if config.get("wfa_split_ratio") is not None and config.get("wfa_split_ratio") > 0:
-            warnings.append(
-                "WARNING: Walk-Forward Analysis with intraday data has limitations. "
-                "The IS/OOS split uses calendar days, not trading bars. "
-                "This may result in uneven splits (e.g., 80/20 by calendar days != 80/20 by bar count). "
-                "Consider disabling WFA for intraday backtests until issue #55 Phase 2 is complete."
-            )
 
     return warnings
