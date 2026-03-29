@@ -27,6 +27,8 @@ import os
 
 import pandas as pd
 
+from helpers.ticker_normalizer import normalize_ticker
+
 logger = logging.getLogger(__name__)
 
 # Project root = parent of this services/ package
@@ -159,18 +161,35 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     pd.DataFrame with columns [Open, High, Low, Close, Volume] and a
     UTC DatetimeIndex named 'Datetime', or None on any error / no data.
     """
+    # Normalize ticker for CSV format (e.g., "^VIX" → "VIX", "I:VIX" → "VIX")
+    csv_symbol = normalize_ticker(symbol, "csv")
+
     csv_dir = _resolve_dir(config)
-    filepath = _find_csv(symbol, csv_dir)
+    # First try normalized symbol (e.g., VIX.csv)
+    filepath = _find_csv(csv_symbol, csv_dir)
+
+    # Backward compatibility: if normalized lookup fails, try original symbol
+    # This handles legacy CSV files that may be named I_VIX.csv instead of VIX.csv
+    if filepath is None and csv_symbol != symbol:
+        filepath = _find_csv(symbol, csv_dir)
+        if filepath is not None:
+            logger.debug(
+                f"Found CSV using original symbol '{symbol}' instead of normalized '{csv_symbol}'. "
+                f"Consider renaming to {_sanitize_filename(csv_symbol)}.csv for consistency."
+            )
 
     if filepath is None:
-        safe = _sanitize_filename(symbol)
+        safe_normalized = _sanitize_filename(csv_symbol)
+        safe_original = _sanitize_filename(symbol)
         candidates = [
-            os.path.join(csv_dir, f"{safe.upper()}.csv"),
-            os.path.join(csv_dir, f"{safe.lower()}.csv"),
+            os.path.join(csv_dir, f"{safe_normalized.upper()}.csv"),
+            os.path.join(csv_dir, f"{safe_normalized.lower()}.csv"),
+            os.path.join(csv_dir, f"{safe_original.upper()}.csv"),
+            os.path.join(csv_dir, f"{safe_original.lower()}.csv"),
         ]
         logger.warning(
-            f"CSV file not found for '{symbol}' "
-            f"(filename base: '{safe}'). Looked in: {candidates}"
+            f"CSV file not found for '{symbol}' (normalized to '{csv_symbol}'). "
+            f"Tried: {', '.join(candidates)}"
         )
         return None
 
