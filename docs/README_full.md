@@ -990,8 +990,8 @@ their `@register_strategy` decorator.
 | `start_date` | `"2004-01-01"` | Backtest start date (YYYY-MM-DD) |
 | `end_date` | Today | Backtest end date |
 | `initial_capital` | `100000.0` | Starting account size in dollars |
-| `timeframe` | `"D"` | Bar frequency: `"D"` daily, `"H"` hourly, `"MIN"` minute, `"W"` weekly, `"M"` monthly |
-| `timeframe_multiplier` | `1` | For sub-daily bars only — e.g., `5` with `"MIN"` gives 5-minute bars |
+| `timeframe` | `"D"` | Bar frequency: `"D"` daily, `"H"` hourly, `"MIN"` minute, `"W"` weekly, `"M"` monthly. **Intraday support**: metrics (Sharpe, Sortino, HTB fees) automatically adjust for bars-per-year (252 for daily, 1,638 for 1H, 409 for 4H, 6,552 for 15m, etc.) |
+| `timeframe_multiplier` | `1` | For sub-daily bars only — e.g., `5` with `"MIN"` gives 5-minute bars, `4` with `"H"` gives 4-hour bars |
 | `price_adjustment` | `"total_return"` | `"total_return"` (dividend-adjusted) or `"none"` |
 | `benchmark_symbol` | `"SPY"` | Primary benchmark ticker |
 | `symbols_to_test` | `['BITB']` | Tickers for single-asset mode |
@@ -1160,6 +1160,8 @@ Declare `dependencies=["spy"]`, `dependencies=["vix"]`, or `dependencies=["spy",
 ### Timeframe-agnostic bar counts
 
 Always use `get_bars_for_period("20d", _TF, _MUL)` instead of raw integers. This converts a human-readable period string into the correct bar count for whatever timeframe is configured — the same strategy works on daily, hourly, or minute bars without any code changes.
+
+**For metrics annualization**: The engine automatically uses `get_bars_per_year(config)` to adjust Sharpe ratio, Sortino ratio, Alpha, Beta, and HTB (hard-to-borrow) fee compounding for intraday timeframes. Your strategies don't need to do anything special — just set `timeframe` and `timeframe_multiplier` in config.py.
 
 ### Running a specific subset of strategies (`config.py`)
 
