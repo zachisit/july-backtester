@@ -6,9 +6,13 @@ Splits a strategy's completed trade log into an In-Sample (IS) window and an
 Out-of-Sample (OOS) window based on a chronological date split, then evaluates
 whether the OOS performance supports or undermines the IS results.
 
+For intraday backtests (hourly, minute timeframes), the split is calculated based
+on bar count to ensure accurate IS/OOS ratios (e.g., 80/20 by bar count, not
+calendar days which include weekends/holidays).
+
 Public API
 ----------
-get_split_date(actual_start, actual_end, ratio)       -> str
+get_split_date(actual_start, actual_end, ratio, df=None, config=None) -> str
 split_trades(trade_log, split_date)                   -> (is_trades, oos_trades)
 evaluate_wfa(is_trades, oos_trades, initial_capital)  -> dict
 """
@@ -17,14 +21,27 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from typing import Optional
+import pandas as pd
 
 # Minimum number of OOS trades required to issue a verdict.
 # Fewer than this → "N/A" (insufficient data to draw a conclusion).
 _MIN_OOS_TRADES = 5
 
 
-def get_split_date(actual_start: str, actual_end: str, ratio: float) -> str:
+def get_split_date(
+    actual_start: str,
+    actual_end: str,
+    ratio: float,
+    df: Optional[pd.DataFrame] = None,
+    config: Optional[dict] = None,
+) -> str:
     """Return the ISO date string that marks the IS/OOS boundary.
+
+    For intraday timeframes (H, MIN), splits by bar count when df and config are
+    provided. This ensures accurate IS/OOS ratios (e.g., 80% of bars, not 80% of
+    calendar days which include weekends/holidays).
+
+    For daily+ timeframes, uses calendar day splitting (existing behavior).
 
     Parameters
     ----------
@@ -34,17 +51,41 @@ def get_split_date(actual_start: str, actual_end: str, ratio: float) -> str:
         ISO date of the last available data bar.
     ratio        : float
         Fraction of the total period allocated to In-Sample (e.g. ``0.80``).
+    df : pd.DataFrame, optional
+        Dataframe with DatetimeIndex containing all bars. Required for intraday
+        bar-count splitting. If None, falls back to calendar day splitting.
+    config : dict, optional
+        CONFIG dict containing timeframe settings. Required for intraday detection.
+        If None, falls back to calendar day splitting.
 
     Returns
     -------
     str
-        ISO date string of the first OOS day.
+        ISO date string of the first OOS day (or datetime string for intraday).
 
     Examples
     --------
+    >>> # Daily: calendar day split
     >>> get_split_date("2004-01-01", "2024-01-01", 0.80)
     '2020-01-01'
+
+    >>> # Intraday: bar-count split (requires df and config)
+    >>> get_split_date("2020-01-01", "2020-12-31", 0.80, df=hourly_df, config={"timeframe": "H"})
+    '2020-10-15'  # 80% of bars, not 80% of calendar days
     """
+    # Intraday bar-count split (Phase 2)
+    if df is not None and config is not None:
+        timeframe = config.get("timeframe", "D").upper()
+        if timeframe in ("H", "MIN"):
+            # Split by bar count for accurate intraday IS/OOS ratios
+            split_idx = int(len(df) * ratio)
+            # Clamp to valid range (edge case: ratio=1.0 would cause IndexError)
+            split_idx = min(split_idx, len(df) - 1)
+            split_timestamp = df.index[split_idx]
+            # Return ISO date string (YYYY-MM-DD) for consistency with trade log ExitDate
+            return split_timestamp.strftime("%Y-%m-%d")
+
+    # Daily+ calendar day split (existing logic)
     start = date.fromisoformat(actual_start)
     end   = date.fromisoformat(actual_end)
     total_days = (end - start).days
@@ -61,11 +102,14 @@ def split_trades(
     A trade belongs to OOS if its ``ExitDate`` is on or after *split_date*;
     all earlier exits are IS.
 
+    Handles both date-only strings (``"2024-01-15"``) and datetime strings
+    (``"2024-01-15T10:30:00"``) by converting to pd.Timestamp for comparison.
+
     Parameters
     ----------
     trade_log   : list[dict]
         List of trade dicts produced by the simulation engine.
-        Each dict must have an ``"ExitDate"`` key (ISO date string).
+        Each dict must have an ``"ExitDate"`` key (ISO date/datetime string).
     split_date  : str
         ISO date string of the IS/OOS boundary (inclusive start of OOS).
 
@@ -73,8 +117,21 @@ def split_trades(
     -------
     (is_trades, oos_trades) : tuple[list[dict], list[dict]]
     """
-    is_trades  = [t for t in trade_log if t["ExitDate"] <  split_date]
-    oos_trades = [t for t in trade_log if t["ExitDate"] >= split_date]
+    # Convert split_date string to pd.Timestamp for proper comparison
+    split_ts = pd.Timestamp(split_date)
+
+    is_trades = []
+    oos_trades = []
+
+    for t in trade_log:
+        # Convert ExitDate string to pd.Timestamp
+        exit_ts = pd.Timestamp(t["ExitDate"])
+
+        if exit_ts < split_ts:
+            is_trades.append(t)
+        else:
+            oos_trades.append(t)
+
     return is_trades, oos_trades
 
 
@@ -95,13 +152,17 @@ def _annualised_return(trades: list[dict], initial_capital: float) -> Optional[f
     Uses the earliest and latest ``ExitDate`` in the bucket as the window
     boundaries.  Returns ``None`` when fewer than 2 distinct days exist or
     when the strategy went bust (total equity <= 0).
+
+    Handles both date-only strings (``"2024-01-15"``) and datetime strings
+    (``"2024-01-15T10:30:00"``) by converting to pd.Timestamp.
     """
     if not trades:
         return None
-    dates = sorted(t["ExitDate"] for t in trades)
-    start = date.fromisoformat(dates[0])
-    end   = date.fromisoformat(dates[-1])
-    days  = (end - start).days
+    # Convert ExitDate strings to pd.Timestamp for datetime handling
+    exit_timestamps = sorted(pd.Timestamp(t["ExitDate"]) for t in trades)
+    start_ts = exit_timestamps[0]
+    end_ts = exit_timestamps[-1]
+    days = (end_ts - start_ts).days
     if days < 1:
         return None
     years          = days / 365.25

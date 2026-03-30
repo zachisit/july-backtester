@@ -125,3 +125,38 @@ def validate_config(config: dict) -> list[str]:
             logger.warning(msg)
 
     return warnings
+
+
+def validate_intraday_config(config: dict) -> list[str]:
+    """
+    Validate intraday-specific configuration and warn about potential issues.
+
+    Checks for intraday timeframes (H, MIN) and provides warnings about:
+    - Metrics annualization (now supported via get_bars_per_year)
+    - WFA compatibility (limited support - splits by calendar days)
+
+    Parameters
+    ----------
+    config : dict
+        The CONFIG dictionary from config.py.
+
+    Returns
+    -------
+    list[str]
+        List of info/warning message strings. Empty if using daily timeframe.
+    """
+    warnings = []
+    timeframe = config.get("timeframe", "D").upper()
+
+    if timeframe in ("H", "MIN"):
+        multiplier = config.get("timeframe_multiplier", 1)
+        tf_desc = f"{multiplier}{timeframe.lower()}" if multiplier != 1 else timeframe
+
+        warnings.append(
+            f"INFO: Intraday backtesting detected (timeframe={tf_desc}). "
+            "Metrics (Sharpe, Sortino, HTB fees) are automatically adjusted for bars-per-year. "
+            "WFA splits are calculated by bar count for accurate IS/OOS ratios. "
+            "Ensure your data provider supports intraday data."
+        )
+
+    return warnings
