@@ -28,6 +28,7 @@ if PROJECT_ROOT not in sys.path:
 class TestDataProviderNormalization:
     """Test that all data providers normalize indexes correctly."""
 
+    @patch.dict(os.environ, {"POLYGON_API_KEY": "test"})
     def test_polygon_daily_normalized_to_midnight(self):
         """Polygon daily data should have time component set to 00:00:00."""
         from services.polygon_service import get_price_data
