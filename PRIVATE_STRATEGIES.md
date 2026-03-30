@@ -26,13 +26,16 @@ Ask Zach to add you to the private repository. You'll receive an invitation emai
 
 ### Step 3: Initialize Private Strategies
 
-After you have access, run this command:
+After you have access, run these commands:
 
 ```bash
 git submodule update --init --recursive
+cd custom_strategies/private/
+git checkout main
+cd ../..
 ```
 
-This downloads the private strategies folder. You'll now see a `custom_strategies/private/` directory.
+This downloads the private strategies folder and puts you on the main branch (important for pushing later).
 
 ### Step 4: Verify It Worked
 
@@ -95,25 +98,33 @@ def my_rsi_strategy(df, **kwargs):
 cd custom_strategies/private/
 ```
 
-### Step 2: Check What Changed
+### Step 2: Make Sure You're on Main Branch
+
+```bash
+git checkout main
+```
+
+(This ensures you're not in "detached HEAD" state)
+
+### Step 3: Check What Changed
 
 ```bash
 git status
 ```
 
-### Step 3: Add Your File
+### Step 4: Add Your File
 
 ```bash
 git add my_strategy.py
 ```
 
-### Step 4: Commit
+### Step 5: Commit
 
 ```bash
 git commit -m "Add my strategy"
 ```
 
-### Step 5: Push
+### Step 6: Push
 
 ```bash
 git push
@@ -166,6 +177,18 @@ git submodule update --init --recursive
 ### "Permission denied when I try to push"
 
 You don't have access to the private repo yet. Ask Zach to add you.
+
+### "git push says 'You are not currently on a branch'"
+
+This means you're in "detached HEAD" state. Fix it:
+
+```bash
+cd custom_strategies/private/
+git checkout main
+git push
+```
+
+Always run `git checkout main` before pushing.
 
 ### "My strategy doesn't show up in the backtester"
 
