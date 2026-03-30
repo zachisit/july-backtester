@@ -16,7 +16,7 @@ CONFIG = {
     # SECTION 1: DATA PROVIDER
     # ============================================================
     # Options: "polygon", "norgate", "yahoo", "csv"
-    "data_provider": "polygon",
+    "data_provider": "yahoo",
 
     # --- CSV Data Directory (only used when data_provider = "csv") ---
     # Path to the folder containing per-symbol CSV files.
@@ -50,6 +50,14 @@ CONFIG = {
     # For most providers the values can be swapped out based on
     #   'daily' or a specific time series. Refer to what is possible
     #   with your connected Data
+    #
+    # IMPORTANT: Changing to intraday timeframes (H, MIN) affects metric
+    # calculations. Sharpe ratio, Sortino ratio, and other annualized metrics
+    # are automatically adjusted based on bars-per-year:
+    #   - Daily (D): 252 bars/year
+    #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
+    #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
+    # HTB (short selling) fees are also compounded per bar instead of per day.
     "timeframe": "D",  # Daily
     #"timeframe": "H",  # Hourly
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
@@ -328,6 +336,16 @@ CONFIG = {
     # all portfolios) to output/runs/<run_id>/ml_features.parquet after the run.
     # Requires pyarrow or fastparquet: pip install pyarrow
     "export_ml_features": False,
+
+    # ============================================================
+    # SECTION 21: VERBOSE SUMMARY TABLE
+    # ============================================================
+    # When False (default), terminal summary tables show a compact
+    # 7-column view: Strategy, P&L (%), vs. SPY (B&H), Sharpe,
+    # Max DD, MC Score, WFA Verdict.
+    # When True, all 23 columns are displayed.
+    # Override at runtime with: python main.py --verbose
+    "verbose_output": False,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

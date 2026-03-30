@@ -136,6 +136,11 @@ def get_price_data(symbol, start_date, end_date, config):
     expected_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
     available_cols = [col for col in expected_cols if col in df.columns]
 
+    # Normalize datetime index for daily data (set time to midnight)
+    # This ensures consistent datetime handling across daily and intraday timeframes
+    if config.get("timeframe", "D").upper() == "D":
+        df.index = df.index.normalize()
+
     if not df.empty:
         set_cached_data(df, symbol, start_date, end_date, timespan, multiplier)
 

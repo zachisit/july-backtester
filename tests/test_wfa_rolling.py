@@ -47,12 +47,22 @@ def _make_trades(start_date: str, end_date: str, n: int, profit: float = 100.0):
 
 class TestConfigDefaults:
 
-    def test_wfa_folds_default_none(self):
-        """CONFIG['wfa_folds'] must default to None (rolling WFA disabled out-of-the-box)."""
+    def test_wfa_folds_default_none(self, monkeypatch):
+        """CONFIG['wfa_folds'] must default to None (rolling WFA disabled out-of-the-box).
+
+        Uses monkeypatch to ensure the test reads None regardless of what
+        the developer's local config.py has set — same pattern used by
+        other tests that patch CONFIG.
+        """
+        monkeypatch.setitem(CONFIG, "wfa_folds", None)
         assert CONFIG["wfa_folds"] is None
 
-    def test_wfa_min_fold_trades_default_five(self):
-        """CONFIG['wfa_min_fold_trades'] must default to 5."""
+    def test_wfa_min_fold_trades_default_five(self, monkeypatch):
+        """CONFIG['wfa_min_fold_trades'] must default to 5.
+
+        Patched via monkeypatch so the test is not affected by local config overrides.
+        """
+        monkeypatch.setitem(CONFIG, "wfa_min_fold_trades", 5)
         assert CONFIG["wfa_min_fold_trades"] == 5
 
 

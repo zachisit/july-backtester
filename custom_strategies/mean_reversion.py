@@ -42,6 +42,9 @@ are required to add, remove, or rename them.
 from helpers.registry import register_strategy
 from helpers.timeframe_utils import get_bars_for_period
 from helpers.indicators import (
+    bollinger_mean_reversion_atr_stop_logic,
+    volume_weighted_rsi_logic,
+    williams_r_logic,
     bollinger_band_logic,
     bollinger_breakout_logic,
     bollinger_band_squeeze_logic,
@@ -652,3 +655,86 @@ def overnight_hold_vix(df, **kwargs):
     ``vix_df`` is injected automatically by the engine (declared in dependencies).
     """
     return weekday_overnight_with_vix_filter_logic(df, vix_df=kwargs["vix_df"])
+
+
+@register_strategy(
+    name="Bollinger Mean Reversion w/ ATR Stop (20d/2.0/2xATR)",
+    dependencies=[],
+    params={
+        "length": get_bars_for_period("20d", _TF, _MUL),
+        "std_dev": 2.0,
+        "atr_period": get_bars_for_period("14d", _TF, _MUL),
+        "atr_multiplier": 2.0,
+    },
+)
+def bollinger_mean_reversion_atr_stop(df, **kwargs):
+    """Bollinger Band Mean Reversion with ATR stop loss.
+
+    Entry: price touches lower Bollinger Band (oversold).
+    Stop: 2x ATR below entry price (frozen at entry, no trailing).
+    Exit: price reaches middle band (SMA) — mean reversion target.
+
+    Combines existing bollinger_band and calculate_atr indicators into a
+    single mean-reversion strategy with downside protection.
+    """
+    return bollinger_mean_reversion_atr_stop_logic(
+        df,
+        length=kwargs["length"],
+        std_dev=kwargs["std_dev"],
+        atr_period=kwargs["atr_period"],
+        atr_multiplier=kwargs["atr_multiplier"],
+    )
+
+
+@register_strategy(
+    name="Williams %R Oversold Bounce (14d/-80/-50)",
+    dependencies=[],
+    params={
+        "length": get_bars_for_period("14d", _TF, _MUL),
+        "oversold": -80,
+        "exit_level": -50,
+    },
+)
+def williams_r_oversold_bounce(df, **kwargs):
+    """Williams %R Oversold Bounce strategy.
+
+    Entry: Williams %R crosses back up above -80 (leaving oversold territory).
+    Exit: Williams %R crosses up above -50 (mean reversion target reached).
+
+    Williams %R ranges from -100 (most oversold) to 0 (most overbought).
+    This is functionally similar to Stochastic but on an inverted scale.
+    """
+    return williams_r_logic(
+        df,
+        length=kwargs["length"],
+        oversold=kwargs["oversold"],
+        exit_level=kwargs["exit_level"],
+    )
+
+
+@register_strategy(
+    name="Volume-Weighted RSI (14/30)",
+    dependencies=[],
+    params={
+        "length": get_bars_for_period("14d", _TF, _MUL),
+        "oversold": 30,
+        "exit_level": 50,
+    },
+)
+def volume_weighted_rsi(df, **kwargs):
+    """Volume-Weighted RSI mean-reversion strategy.
+
+    RSI calculated on volume-weighted returns rather than raw close-to-close
+    returns. Produces a distinct signal from standard RSI — tends to fire
+    earlier on institutional accumulation days where heavy volume accompanies
+    price moves.
+
+    Entry: VWRSI crosses back up above 30 (oversold bounce).
+    Exit: VWRSI crosses up above 50 (return to mean).
+    """
+    return volume_weighted_rsi_logic(
+        df,
+        length=kwargs["length"],
+        oversold=kwargs["oversold"],
+        exit_level=kwargs["exit_level"],
+    )

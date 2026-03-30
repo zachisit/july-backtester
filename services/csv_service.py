@@ -224,4 +224,9 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
         )
         return None
 
+    # Normalize datetime index for daily data (set time to midnight)
+    # This ensures consistent datetime handling across daily and intraday timeframes
+    if config.get("timeframe", "D").upper() == "D":
+        df.index = df.index.normalize()
+
     return df

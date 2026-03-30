@@ -19,6 +19,7 @@ Design constraints
 from __future__ import annotations
 
 import os
+import re
 import sys
 import textwrap
 from datetime import datetime
@@ -281,6 +282,83 @@ f'}}\n'
 
 
 # ---------------------------------------------------------------------------
+# In-place patcher for existing config.py
+# ---------------------------------------------------------------------------
+
+def _patch_existing_config(
+    config_path: Path,
+    provider: str,
+    capital: float,
+    start: str,
+    mode: str,
+    symbols_or_portfolio: object,
+) -> tuple[str, list[str]]:
+    """
+    Patch only the wizard-collected keys in an existing config.py.
+
+    Returns (patched_text, list_of_human_readable_changes).
+    Keys not matched in the file are silently skipped so that exotic
+    formatting or commented-out blocks never cause a crash.
+    """
+    text = config_path.read_text(encoding="utf-8")
+    changes: list[str] = []
+
+    # --- data_provider ---
+    new_text, n = re.subn(
+        r'("data_provider"\s*:\s*)"[^"]*"',
+        rf'\1"{provider}"',
+        text,
+    )
+    if n:
+        text = new_text
+        changes.append(f'data_provider → "{provider}"')
+
+    # --- initial_capital ---
+    new_text, n = re.subn(
+        r'("initial_capital"\s*:\s*)[\d.]+',
+        rf'\g<1>{capital}',
+        text,
+    )
+    if n:
+        text = new_text
+        changes.append(f"initial_capital → {capital}")
+
+    # --- start_date ---
+    new_text, n = re.subn(
+        r'("start_date"\s*:\s*)"[^"]*"',
+        rf'\1"{start}"',
+        text,
+    )
+    if n:
+        text = new_text
+        changes.append(f'start_date → "{start}"')
+
+    # --- symbols_to_test / portfolios ---
+    if mode == "single":
+        symbols_repr = repr(symbols_or_portfolio)
+        new_text, n = re.subn(
+            r'("symbols_to_test"\s*:\s*)\[[^\]]*\]',
+            rf'\g<1>{symbols_repr}',
+            text,
+        )
+        if n:
+            text = new_text
+            changes.append(f"symbols_to_test → {symbols_repr}")
+    else:
+        portfolios_repr = repr(symbols_or_portfolio)
+        new_text, n = re.subn(
+            r'"portfolios"\s*:\s*\{[^}]*\}',
+            f'"portfolios": {portfolios_repr}',
+            text,
+        )
+        if n:
+            text = new_text
+            changes.append(f"portfolios → {portfolios_repr}")
+
+    return text, changes
+
+
+# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -385,27 +463,38 @@ def run_init_wizard() -> None:
     # ------------------------------------------------------------------ #
     _section("Step 4 of 4 — Review & Write")
 
-    config_path = project_root / "config_starter.py"
-    config_exists = (project_root / "config.py").exists()
+    config_path = project_root / "config.py"
+    config_exists = config_path.exists()
 
     print(f"\n  {bold('Will write:')}")
-    print(f"    {green(str(config_path))}")
+    print(f"    {green(str(config_path))}", end="")
+    if config_exists:
+        print(yellow("  (existing file — wizard values will be patched in-place)"))
+    else:
+        print()
     if polygon_api_key:
         print(f"    {green(str(project_root / '.env'))}  (POLYGON_API_KEY)")
-    if config_exists:
-        print()
-        print(yellow("  Note: config.py already exists and will NOT be overwritten."))
-        print(yellow("  Copy the sections you need from config_starter.py into your config.py."))
 
     print()
     if not _confirm("Proceed and write files?"):
         print(yellow("  Aborted. No files written."))
         return
 
-    # Build and write config_starter.py
-    config_text = _build_config(provider, capital, start_date, end_expr, mode, symbols_or_portfolio)
-    config_path.write_text(config_text, encoding="utf-8")
-    print(green(f"\n  Written: {config_path}"))
+    # Write or patch config.py
+    if config_exists:
+        patched_text, changes = _patch_existing_config(
+            config_path, provider, capital, start_date, mode, symbols_or_portfolio
+        )
+        config_path.write_text(patched_text, encoding="utf-8")
+        print(green(f"\n  Updated: {config_path}"))
+        for ch in changes:
+            print(f"    {cyan('→')} {ch}")
+        if not changes:
+            print(yellow("  (no keys matched — no changes made)"))
+    else:
+        config_text = _build_config(provider, capital, start_date, end_expr, mode, symbols_or_portfolio)
+        config_path.write_text(config_text, encoding="utf-8")
+        print(green(f"\n  Written: {config_path}"))
 
     # Write .env if polygon key supplied
     if polygon_api_key:
@@ -425,8 +514,8 @@ def run_init_wizard() -> None:
     print()
     print(bold("  Next steps:"))
     if config_exists:
-        print(f"  1. Open {cyan('config_starter.py')} and copy the settings you want into {cyan('config.py')}.")
+        print(f"  1. Review {cyan('config.py')} — all other settings are unchanged.")
     else:
-        print(f"  1. Rename {cyan('config_starter.py')} → {cyan('config.py')}.")
+        print(f"  1. Review {cyan('config.py')} and adjust any other settings you need.")
     print(f"  2. Run:  {cyan('python main.py')}")
     print()
