@@ -133,8 +133,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
             log_entry = {
                 'Symbol': symbol, 'Trade': f"Long {trade_counter}",
-                'EntryDate': pos['entry_date'].strftime('%Y-%m-%d'), 'EntryPrice': pos['entry_price'],
-                'ExitDate': exit_date.strftime('%Y-%m-%d'), 'ExitPrice': exit_price,
+                'EntryDate': pos['entry_date'].isoformat(), 'EntryPrice': pos['entry_price'],
+                'ExitDate': exit_date.isoformat(), 'ExitPrice': exit_price,
                 'Profit': net_pnl, 'ProfitPct': net_pnl / position_value if position_value > 0 else 0,
                 'Shares': pos['shares'],
                 'is_win': 1 if net_pnl > 0 else 0,
@@ -175,8 +175,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 trade_counter += 1
                 trade_log.append({
                     'Symbol': symbol, 'Trade': f"Short {trade_counter}",
-                    'EntryDate': spos['entry_date'].strftime('%Y-%m-%d'), 'EntryPrice': spos['entry_price'],
-                    'ExitDate': date.strftime('%Y-%m-%d'), 'ExitPrice': cover_slip,
+                    'EntryDate': spos['entry_date'].isoformat(), 'EntryPrice': spos['entry_price'],
+                    'ExitDate': date.isoformat(), 'ExitPrice': cover_slip,
                     'Profit': net_pnl, 'ProfitPct': net_pnl / spos['notional'] if spos['notional'] > 0 else 0,
                     'Shares': spos['shares'], 'is_win': 1 if net_pnl > 0 else 0,
                     'HoldDuration': (date - spos['entry_date']).days,
@@ -373,7 +373,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 _r_multiple = (net_pnl / (_initial_risk_per_share * pos['shares'])
                                if _initial_risk_per_share > 0 and pos['shares'] > 0 else None)
 
-                log_entry = {'Symbol': symbol, 'Trade': f"Long {trade_counter}", 'EntryDate': pos['entry_date'].strftime('%Y-%m-%d'), 'EntryPrice': pos['entry_price'], 'ExitDate': exit_date.strftime('%Y-%m-%d'), 'ExitPrice': exit_price, 'Profit': net_pnl, 'ProfitPct': net_pnl / (pos['shares'] * pos['entry_price']), 'Shares': pos['shares'], 'is_win': 1 if net_pnl > 0 else 0, 'HoldDuration': (exit_date - pos['entry_date']).days, 'MAE_pct': mae_pct, 'MFE_pct': mfe_pct, 'ExitReason': exit_reason, 'InitialRisk': _initial_risk_per_share, 'RMultiple': _r_multiple, **pos.get('features', {})}
+                log_entry = {'Symbol': symbol, 'Trade': f"Long {trade_counter}", 'EntryDate': pos['entry_date'].isoformat(), 'EntryPrice': pos['entry_price'], 'ExitDate': exit_date.isoformat(), 'ExitPrice': exit_price, 'Profit': net_pnl, 'ProfitPct': net_pnl / (pos['shares'] * pos['entry_price']), 'Shares': pos['shares'], 'is_win': 1 if net_pnl > 0 else 0, 'HoldDuration': (exit_date - pos['entry_date']).days, 'MAE_pct': mae_pct, 'MFE_pct': mfe_pct, 'ExitReason': exit_reason, 'InitialRisk': _initial_risk_per_share, 'RMultiple': _r_multiple, **pos.get('features', {})}
                 trade_log.append(log_entry)
     # --- END: MARK-TO-MARKET LOGIC ---
 

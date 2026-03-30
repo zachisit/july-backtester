@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import pandas as pd
+
 from helpers.wfa import evaluate_wfa as _evaluate_wfa
 
 _PASS_THRESHOLD = 0.60  # fraction of scorable folds that must individually pass
@@ -101,9 +103,19 @@ def evaluate_rolling_wfa(
     scored_count = 0
 
     for oos_start, oos_end in fold_dates:
-        is_trades  = [t for t in trade_log if t["ExitDate"] <  oos_start]
-        oos_trades = [t for t in trade_log
-                      if oos_start <= t["ExitDate"] < oos_end]
+        # Convert fold boundary strings to pd.Timestamp for datetime handling
+        oos_start_ts = pd.Timestamp(oos_start)
+        oos_end_ts = pd.Timestamp(oos_end)
+
+        # Convert ExitDate strings to pd.Timestamp for comparison
+        is_trades = []
+        oos_trades = []
+        for t in trade_log:
+            exit_ts = pd.Timestamp(t["ExitDate"])
+            if exit_ts < oos_start_ts:
+                is_trades.append(t)
+            elif oos_start_ts <= exit_ts < oos_end_ts:
+                oos_trades.append(t)
 
         if len(oos_trades) < min_fold_trades:
             continue  # insufficient data — skip this fold
