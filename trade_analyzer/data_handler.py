@@ -55,6 +55,24 @@ def clean_trades_data(trades_df: pd.DataFrame, initial_equity: float) -> Tuple[p
     #print("\n--- Attempting Data Cleaning ---")
     initial_load_count = len(trades_df)
 
+    # --- Column Remapping (engine v2 → legacy analyzer names) ---
+    # The backtester engine writes EntryDate/ExitDate/EntryPrice/ExitPrice/ProfitPct/etc.
+    # but the analyzer was built against an older column schema (Date/Ex. date/Price/etc.).
+    # This remapping bridges the two without touching every downstream reference.
+    _COLUMN_MAP = {
+        'EntryDate':    'Date',
+        'ExitDate':     'Ex. date',
+        'EntryPrice':   'Price',
+        'ExitPrice':    'Ex. Price',
+        'ProfitPct':    '% Profit',
+        'MAE_pct':      'MAE',
+        'MFE_pct':      'MFE',
+        'HoldDuration': '# bars',
+    }
+    for new_name, old_name in _COLUMN_MAP.items():
+        if new_name in trades_df.columns and old_name not in trades_df.columns:
+            trades_df.rename(columns={new_name: old_name}, inplace=True)
+
     # Convert dates
     if 'Date' in trades_df.columns:
         trades_df['Date'] = pd.to_datetime(trades_df['Date'], errors='coerce')

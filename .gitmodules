@@ -1,0 +1,3 @@
+[submodule "custom_strategies/private"]
+	path = custom_strategies/private
+	url = https://github.com/zachisit/july-backtester-private-strategies.git

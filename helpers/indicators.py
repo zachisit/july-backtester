@@ -296,12 +296,55 @@ def ema_regime_crossover_logic(df, spy_df, vix_df, fast_ema=20, slow_ema=50, reg
     return df
 
 def sma_crossover_logic(df, fast, slow):
+    """
+    Simple Moving Average crossover strategy.
+
+    Computes a fast SMA and a slow SMA on the Close price. Signal is 1 (long)
+    when the fast SMA is above the slow SMA, and -1 (flat) when below.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    fast : int
+        Lookback period for the fast SMA.
+    slow : int
+        Lookback period for the slow SMA.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1 or -1).
+    """
     df['SMA_fast'] = df['Close'].rolling(fast).mean()
     df['SMA_slow'] = df['Close'].rolling(slow).mean()
     df['Signal'] = np.where(df['SMA_fast'] > df['SMA_slow'], 1, -1)
     return df
 
 def rsi_logic(df, length, oversold, exit_level):
+    """
+    RSI mean-reversion strategy.
+
+    Buys when RSI crosses back up above the oversold level, exits when RSI
+    crosses up above the exit level (return to mean). Signal is forward-filled
+    to maintain position state between events.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    length : int
+        RSI lookback period.
+    oversold : float
+        RSI level below which the asset is considered oversold (buy trigger).
+    exit_level : float
+        RSI level above which the position is exited (e.g., 50 for midline).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     delta = df['Close'].diff()
     gain = delta.where(delta > 0, 0).ewm(alpha=1/length, adjust=False).mean()
     loss = (-delta.where(delta < 0, 0)).ewm(alpha=1/length, adjust=False).mean()
@@ -316,6 +359,29 @@ def rsi_logic(df, length, oversold, exit_level):
     return df
 
 def macd_crossover_logic(df, fast, slow, signal):
+    """
+    MACD crossover strategy.
+
+    Computes the MACD line (fast EMA minus slow EMA) and a signal line
+    (EMA of the MACD). Signal is 1 (long) when MACD is above the signal
+    line, and -1 (flat) when below.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    fast : int
+        Lookback period for the fast EMA.
+    slow : int
+        Lookback period for the slow EMA.
+    signal : int
+        Lookback period for the signal line EMA.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1 or -1).
+    """
     df['EMA_fast'] = df['Close'].ewm(span=fast, adjust=False).mean()
     df['EMA_slow'] = df['Close'].ewm(span=slow, adjust=False).mean()
     df['MACD'] = df['EMA_fast'] - df['EMA_slow']
@@ -332,7 +398,107 @@ def bollinger_band_logic(df, length=20, std_dev=2.0):
     df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
     return df
 
+def bollinger_mean_reversion_atr_stop_logic(df, length=20, std_dev=2.0, atr_period=14, atr_multiplier=2.0):
+    """
+    Bollinger Band Mean Reversion strategy with an ATR-based stop loss.
+
+    Combines the existing Bollinger Band and ATR indicators into a single
+    mean-reversion strategy. Entry occurs when price touches the lower band
+    (oversold); exit occurs when price reaches the middle band (mean reversion
+    target). A 2x ATR stop below entry protects against trend continuation.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'Open', 'High', 'Low', 'Close', 'Volume' columns.
+    length : int
+        Lookback period for the Bollinger Band SMA and standard deviation.
+    std_dev : float
+        Number of standard deviations for the bands.
+    atr_period : int
+        Lookback period for the ATR calculation.
+    atr_multiplier : float
+        Multiplier applied to ATR for the stop distance below entry price.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
+    # 1. Calculate indicators using existing helper functions
+    df = calculate_bollinger_bands(df, length, std_dev)
+    df = calculate_atr(df, period=atr_period)
+
+    # 2. Stateful loop — track entry price and ATR stop
+    signals = pd.Series(0, index=df.index)
+    in_position = False
+    stop_price = 0.0
+
+    for i in range(1, len(df)):
+        # Skip if indicators haven't warmed up
+        if pd.isna(df[f'SMA_{length}'].iloc[i]) or pd.isna(df['ATR'].iloc[i]):
+            continue
+
+        # --- CHECK EXIT FIRST ---
+        if in_position:
+            # Exit 1: Stop loss hit (Low breaches the ATR stop)
+            if df['Low'].iloc[i] < stop_price:
+                signals.iloc[i] = -1
+                in_position = False
+                stop_price = 0.0
+                continue
+
+            # Exit 2: Mean reversion target reached (Close >= middle band)
+            if df['Close'].iloc[i] >= df[f'SMA_{length}'].iloc[i]:
+                signals.iloc[i] = -1
+                in_position = False
+                stop_price = 0.0
+                continue
+
+            # Still in position
+            signals.iloc[i] = 1
+            continue
+
+        # --- CHECK ENTRY ---
+        # Entry: Close touches or crosses below the lower Bollinger Band
+        if df['Close'].iloc[i] < df['LowerBand'].iloc[i]:
+            in_position = True
+            entry_price = df['Close'].iloc[i]
+            stop_price = entry_price - (df['ATR'].iloc[i] * atr_multiplier)
+            signals.iloc[i] = 1
+
+    # Convert events to stateful signal
+    df['Signal'] = signals.replace(0, np.nan).ffill().fillna(0)
+    return df
+
+
+
 def stochastic_logic(df, length, k_smooth, oversold, exit_level):
+    """
+    Stochastic Oscillator mean-reversion strategy.
+
+    Buys when %K crosses back up above the oversold level, exits when %K
+    crosses up above the exit level. Signal is forward-filled to maintain
+    position state between events.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'High', 'Low', and 'Close' columns.
+    length : int
+        Lookback period for the highest high and lowest low.
+    k_smooth : int
+        Smoothing period for the %D line (SMA of %K).
+    oversold : float
+        %K level below which the asset is considered oversold (buy trigger).
+    exit_level : float
+        %K level above which the position is exited.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     df['L14'] = df['Low'].rolling(length).min()
     df['H14'] = df['High'].rolling(length).max()
     df['%K'] = 100 * ((df['Close'] - df['L14']) / (df['H14'] - df['L14']))
@@ -346,6 +512,27 @@ def stochastic_logic(df, length, k_smooth, oversold, exit_level):
     return df
 
 def bollinger_breakout_logic(df, length, std_dev):
+    """
+    Bollinger Band breakout (momentum) strategy.
+
+    Buys when the close breaks above the upper Bollinger Band, exits when
+    the close drops below the middle SMA. Signal is forward-filled to
+    maintain position state.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    length : int
+        Lookback period for the SMA and standard deviation calculation.
+    std_dev : float
+        Number of standard deviations for the upper band.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     df['SMA'] = df['Close'].rolling(length).mean()
     df['StdDev'] = df['Close'].rolling(length).std()
     df['UpperBand'] = df['SMA'] + (df['StdDev'] * std_dev)
@@ -356,6 +543,26 @@ def bollinger_breakout_logic(df, length, std_dev):
     return df
 
 def roc_logic(df, length, threshold=0):
+    """
+    Rate of Change (ROC) momentum strategy.
+
+    Computes the percentage change over a lookback period. Signal is 1 (long)
+    when ROC exceeds the threshold, and -1 (flat) when below.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    length : int
+        Number of bars for the ROC calculation.
+    threshold : float, optional
+        Minimum ROC value to trigger a long signal (default 0).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1 or -1).
+    """
     df['ROC'] = df['Close'].pct_change(periods=length) * 100
     df['Signal'] = np.where(df['ROC'] > threshold, 1, -1)
     return df
@@ -520,6 +727,31 @@ def obv_confirmation_period_logic(df, ma_length=20, confirmation_days=2):
     return df
 
 def macd_rsi_filter_logic(df, macd_fast, macd_slow, macd_signal, rsi_length):
+    """
+    MACD crossover strategy with RSI confirmation filter.
+
+    Buys when the MACD line crosses above the signal line AND RSI is above 50
+    (confirming momentum). Exits on MACD cross below the signal line regardless
+    of RSI. Signal is forward-filled to maintain position state.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a 'Close' column.
+    macd_fast : int
+        Lookback period for the fast MACD EMA.
+    macd_slow : int
+        Lookback period for the slow MACD EMA.
+    macd_signal : int
+        Lookback period for the MACD signal line EMA.
+    rsi_length : int
+        RSI lookback period for the confirmation filter.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     df['EMA_fast'] = df['Close'].ewm(span=macd_fast, adjust=False).mean()
     df['EMA_slow'] = df['Close'].ewm(span=macd_slow, adjust=False).mean()
     df['MACD'] = df['EMA_fast'] - df['EMA_slow']
@@ -537,6 +769,29 @@ def macd_rsi_filter_logic(df, macd_fast, macd_slow, macd_signal, rsi_length):
     return df
 
 def ma_bounce_logic(df, ma_length=20, filter_bars=2):
+    """
+    Moving Average bounce strategy.
+
+    Buys when price touches the MA and recovers (closes back above it),
+    provided the stock has not been in a confirmed downtrend (consecutive
+    closes below the MA). Exits when the downtrend is confirmed.
+    Signal is forward-filled to maintain position state.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'Low' and 'Close' columns.
+    ma_length : int, optional
+        Lookback period for the moving average (default 20).
+    filter_bars : int, optional
+        Number of consecutive closes below the MA required to confirm
+        a downtrend and trigger an exit (default 2).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     df['MA'] = df['Close'].rolling(ma_length).mean()
     is_below_ma = df['Close'] < df['MA']
     df['consecutive_below'] = is_below_ma.rolling(window=filter_bars).sum()
@@ -549,7 +804,25 @@ def ma_bounce_logic(df, ma_length=20, filter_bars=2):
     return df
 
 def weekday_overnight_logic(df):
-    """Generates a stateful signal to be long Mon-Thu nights."""
+    """
+    Weekday overnight hold strategy.
+
+    Generates a stateful signal to be long Monday through Thursday nights
+    and flat on Friday nights (avoiding weekend risk). Uses the day-of-week
+    index to determine signal.
+
+    Signal convention: 1 on Mon/Tue/Wed/Thu (hold overnight), -1 on Fri.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with a DatetimeIndex.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1 or -1).
+    """
     df['weekday'] = df.index.dayofweek
     buy_days = [0, 1, 2, 3] # Mon, Tue, Wed, Thu
     df['Signal'] = np.where(df['weekday'].isin(buy_days), 1, -1)
@@ -964,7 +1237,31 @@ def ema_crossover_unfiltered_logic(df, fast_ema, slow_ema):
     return df
 
 def ema_crossover_spy_only_logic(df, spy_df, fast_ema, slow_ema, regime_ma=200):
-    """EMA Crossover, filtered ONLY by a SPY trend regime."""
+    """
+    EMA Crossover filtered by a SPY trend regime.
+
+    Uses the unfiltered EMA crossover as the base signal, then suppresses
+    buy signals when SPY is below its long-term SMA (bear market filter).
+    Sell signals are never filtered — exits always fire.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame for the target symbol.
+    spy_df : pd.DataFrame
+        OHLCV DataFrame for SPY (injected via dependencies=["spy"]).
+    fast_ema : int
+        Lookback period for the fast EMA.
+    slow_ema : int
+        Lookback period for the slow EMA.
+    regime_ma : int, optional
+        SMA lookback for the SPY trend filter (default 200).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     # Get the base signal from the unfiltered version
     df = ema_crossover_unfiltered_logic(df, fast_ema, slow_ema)
     original_signal = df['Signal'].copy()
@@ -983,7 +1280,31 @@ def ema_crossover_spy_only_logic(df, spy_df, fast_ema, slow_ema, regime_ma=200):
     return df
 
 def ema_crossover_vix_only_logic(df, vix_df, fast_ema, slow_ema, vix_threshold=30):
-    """EMA Crossover, filtered ONLY by a VIX volatility regime."""
+    """
+    EMA Crossover filtered by a VIX volatility regime.
+
+    Uses the unfiltered EMA crossover as the base signal, then suppresses
+    buy signals when VIX is above the threshold (high-fear filter).
+    Sell signals are never filtered — exits always fire.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame for the target symbol.
+    vix_df : pd.DataFrame
+        OHLCV DataFrame for VIX (injected via dependencies=["vix"]).
+    fast_ema : int
+        Lookback period for the fast EMA.
+    slow_ema : int
+        Lookback period for the slow EMA.
+    vix_threshold : float, optional
+        VIX level above which buy signals are suppressed (default 30).
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
     df = ema_crossover_unfiltered_logic(df, fast_ema, slow_ema)
     original_signal = df['Signal'].copy()
     
@@ -995,5 +1316,164 @@ def ema_crossover_vix_only_logic(df, vix_df, fast_ema, slow_ema, vix_threshold=3
 
     # Apply the filter only to buy signals
     df['Signal'] = np.where((original_signal == 1) & is_market_calm, 1, original_signal)
+    df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
+    return df
+
+
+def calculate_williams_r(df, length=14):
+    """
+    Calculates Williams %R and adds a 'WilliamsR_{length}' column to the DataFrame.
+
+    Williams %R is a momentum oscillator that measures overbought/oversold levels.
+    It ranges from -100 (oversold) to 0 (overbought), which is the inverse of
+    the Stochastic Oscillator's scale.
+
+    Formula: %R = (Highest High - Close) / (Highest High - Lowest Low) × -100
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'High', 'Low', and 'Close' columns.
+    length : int
+        Lookback period for the highest high and lowest low.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'WilliamsR_{length}' column added.
+    """
+    col_name = f'WilliamsR_{length}'
+    if col_name not in df.columns:
+        highest_high = df['High'].rolling(window=length).max()
+        lowest_low = df['Low'].rolling(window=length).min()
+        df[col_name] = ((highest_high - df['Close']) / (highest_high - lowest_low)) * -100
+    return df
+
+
+def williams_r_logic(df, length=14, oversold=-80, exit_level=-50):
+    """
+    Williams %R Oversold Bounce strategy.
+
+    Buys when Williams %R crosses back up above the oversold level (e.g., -80),
+    indicating a potential reversal from oversold conditions. Exits when %R
+    crosses up above the exit level (e.g., -50), capturing the mean reversion.
+
+    Signal is forward-filled to maintain position state between events.
+
+    Note: Williams %R ranges from -100 (most oversold) to 0 (most overbought).
+    The oversold parameter should be a negative number (e.g., -80).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'High', 'Low', and 'Close' columns.
+    length : int
+        Lookback period for the Williams %R calculation.
+    oversold : float
+        %R level below which the asset is considered oversold (buy trigger).
+        Typically -80 (default). Must be negative.
+    exit_level : float
+        %R level above which the position is exited (return to mean).
+        Typically -50 (default). Must be negative and > oversold.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
+    df = calculate_williams_r(df, length)
+    col_name = f'WilliamsR_{length}'
+
+    # Buy when %R crosses back UP above the oversold line
+    buy_signal = (df[col_name].shift(1) < oversold) & (df[col_name] >= oversold)
+
+    # Exit when %R crosses back UP above the exit level (return to mean)
+    sell_signal = (df[col_name].shift(1) < exit_level) & (df[col_name] >= exit_level)
+
+    df['Signal'] = np.where(buy_signal, 1, np.where(sell_signal, -1, 0))
+    df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
+    return df
+
+
+def calculate_volume_weighted_rsi(df, length=14):
+    """
+    Calculates RSI on volume-weighted returns and adds a 'VWRSI_{length}' column.
+
+    Instead of using raw close-to-close returns (standard RSI), this variant
+    weights each bar's return by its relative volume. Bars with higher volume
+    contribute more to the gain/loss averages. This produces a distinct signal
+    from standard RSI — it tends to fire earlier on institutional accumulation
+    days where heavy volume accompanies price moves.
+
+    Formula:
+        volume_weight = Volume / Volume.rolling(length).mean()
+        weighted_return = close_to_close_return × volume_weight
+        Then standard RSI EWM calculation on the weighted returns.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'Close' and 'Volume' columns.
+    length : int
+        RSI lookback period.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'VWRSI_{length}' column added.
+    """
+    col_name = f'VWRSI_{length}'
+    if col_name not in df.columns:
+        # Calculate volume-weighted returns
+        raw_return = df['Close'].diff()
+        avg_volume = df['Volume'].rolling(window=length).mean()
+        # Avoid division by zero
+        volume_weight = df['Volume'] / avg_volume.replace(0, np.nan)
+        volume_weight = volume_weight.fillna(1.0)
+        weighted_return = raw_return * volume_weight
+
+        # Standard RSI calculation on weighted returns
+        gain = weighted_return.where(weighted_return > 0, 0).ewm(alpha=1/length, adjust=False).mean()
+        loss = (-weighted_return.where(weighted_return < 0, 0)).ewm(alpha=1/length, adjust=False).mean()
+        rs = gain / loss.replace(0, np.nan)
+        df[col_name] = 100 - (100 / (1 + rs))
+    return df
+
+
+def volume_weighted_rsi_logic(df, length=14, oversold=30, exit_level=50):
+    """
+    Volume-Weighted RSI mean-reversion strategy.
+
+    Buys when Volume-Weighted RSI crosses back up above the oversold level,
+    exits when VWRSI crosses up above the exit level. Identical signal logic
+    to the standard RSI strategy but uses volume-weighted returns as input,
+    which tends to fire earlier on institutional accumulation days.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        OHLCV DataFrame with 'Close' and 'Volume' columns.
+    length : int
+        RSI lookback period.
+    oversold : float
+        VWRSI level below which the asset is considered oversold (buy trigger).
+    exit_level : float
+        VWRSI level above which the position is exited.
+
+    Returns
+    -------
+    pd.DataFrame
+        Input DataFrame with 'Signal' column added (1, -1, or forward-filled).
+    """
+    df = calculate_volume_weighted_rsi(df, length)
+    col_name = f'VWRSI_{length}'
+
+    # Buy when VWRSI crosses back UP above the oversold line
+    buy_signal = (df[col_name].shift(1) < oversold) & (df[col_name] >= oversold)
+
+    # Exit when VWRSI crosses back UP above the exit level
+    sell_signal = (df[col_name].shift(1) < exit_level) & (df[col_name] >= exit_level)
+
+    df['Signal'] = np.where(buy_signal, 1, np.where(sell_signal, -1, 0))
     df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
     return df

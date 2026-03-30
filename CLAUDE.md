@@ -9,6 +9,7 @@ Python backtesting engine for US equities. Tests 20+ technical strategies across
 - `main.py` — portfolio mode (default), multiprocessing across all CPU cores
 - `main.py --mode single` — single-asset mode, all strategies vs `symbols_to_test`
 - `main.py --name "run-name"` — optional prefix for report folder and S3 path
+- `main.py --verbose` — print two additional tables beneath the default Core Performance table: Extended Metrics (RS(avg/min/last), MaxRcvry, AvgRcvry, Calmar, PF, WinRate, Trades, Expct(R), SQN) and Robustness (OOS P&L, WFA Verdict, RollWFA, Corr, MC, MC Score). Default output shows Core Performance only.
 
 ## Key Files
 ```
@@ -19,7 +20,7 @@ helpers/registry.py                # Strategy registry: register_strategy decora
 helpers/simulations.py             # Single-asset trade simulation engine
 helpers/portfolio_simulations.py   # Multi-asset portfolio simulation engine
 helpers/monte_carlo.py             # Monte Carlo robustness scoring
-helpers/summary.py                 # Report generation, S3 upload
+helpers/summary.py                 # Report generation, S3 upload; _T1_COLS/_T2_COLS/_T3_COLS/_VERBOSE_SHORT_NAMES control tiered table layout; _print_table() handles all bordered terminal output
 helpers/wfa.py                     # Walk-Forward Analysis (get_split_date, split_trades, evaluate_wfa)
 helpers/wfa_rolling.py             # Rolling multi-fold WFA (get_fold_dates, evaluate_rolling_wfa)
 helpers/ml_export.py               # ML trade feature export (export_trade_features)
@@ -67,6 +68,7 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "wfa_folds": None                # None = rolling WFA disabled; int >= 2 = number of folds
 "wfa_min_fold_trades": 5         # min OOS trades per fold to score it (rolling WFA only)
 "export_ml_features": False      # True = write ml_features.parquet after the run (requires pyarrow)
+"verbose_output": False          # True = print Extended Metrics + Robustness tables; --verbose overrides at runtime
 "noise_injection_pct": 0.0       # 0.0 = disabled (default, stress testing is opt-in). Set to e.g. 0.01 for ±1% stress test.
 "risk_free_rate": 0.05           # annual, used in Sharpe calculation (default 5% — US T-bill proxy)
 "sensitivity_sweep_enabled": False  # opt-in parameter fragility sweep
@@ -91,6 +93,8 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 **API key resolution order** (in `helpers/aws_utils.py`): environment variable → `.env` file. No AWS Secrets Manager.
 
 **Data fetcher signature:** `fetcher(symbol, start_date, end_date, config) -> pd.DataFrame | None`. Columns must be `Open, High, Low, Close, Volume` with a `Datetime` index.
+
+**Datetime index normalization (Phase 4 of #55):** All data providers return `pd.DatetimeIndex` regardless of timeframe. Daily data (`timeframe="D"`) is normalized to midnight timestamps (00:00:00 UTC) via `.normalize()` to ensure consistent datetime handling across timeframes. Intraday data (`timeframe="H"` or `"MIN"`) preserves hour/minute precision. Trade logs store `EntryDate` and `ExitDate` as ISO 8601 strings (`.isoformat()`) supporting both date-only (`"2024-01-15"`) and datetime (`"2024-01-15T10:30:00"`) formats. WFA functions convert these strings to `pd.Timestamp` for chronological comparisons, ensuring robust datetime handling for mixed daily/intraday backtests.
 
 ## Adding a Strategy (Plugin System)
 
@@ -160,7 +164,7 @@ output/
 - S3 uploads (if configured) use the same `<run_id>/` prefix as the key root.
 
 ## Do Not Touch
-- `helpers/indicators.py` strategy logic (all working correctly)
+- `helpers/indicators.py` strategy **logic** (all working correctly) — docstring additions and documentation improvements are permitted provided no signal logic, parameter handling, imports, or formatting is changed
 - `helpers/simulations.py` and `helpers/portfolio_simulations.py` simulation engines
 - `helpers/monte_carlo.py`
 - `tickers_to_scan/` JSON files

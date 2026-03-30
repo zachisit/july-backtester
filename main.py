@@ -246,7 +246,9 @@ def main():
     parser = argparse.ArgumentParser(description="Portfolio Backtester")
     parser.add_argument("--name", type=str, help="An optional name for the backtest run, used as a prefix for the report folder.")
     parser.add_argument("--dry-run", action="store_true", help="Validate config and print run summary without fetching data or running simulations.")
+    parser.add_argument("--verbose", action="store_true", help="Show all table columns in the summary (default: compact 7-column view).")
     args = parser.parse_args()
+    CONFIG["verbose_output"] = args.verbose
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_folder_name = f"{args.name}_{timestamp}" if args.name else timestamp
     start_time = time.monotonic()
@@ -386,7 +388,8 @@ def main():
     wfa_split_date = None
     if _wfa_ratio and 0 < float(_wfa_ratio) < 1:
         from helpers.wfa import get_split_date as _get_split_date
-        wfa_split_date = _get_split_date(_spy_actual_start, _spy_actual_end, float(_wfa_ratio))
+        # Pass spy_df and CONFIG for intraday bar-count splitting (Phase 2)
+        wfa_split_date = _get_split_date(_spy_actual_start, _spy_actual_end, float(_wfa_ratio), df=spy_df, config=CONFIG)
         logger.info(
             f"  WFA split date   : {wfa_split_date}  "
             f"(IS: {_spy_actual_start} -> {wfa_split_date} | OOS: {wfa_split_date} -> {_spy_actual_end})"
