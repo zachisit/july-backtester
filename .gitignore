@@ -42,3 +42,10 @@ tools/watchlists
 
 # Claude AI internal config
 .claude/
+
+# Private strategies (belt & suspenders - submodule handles this, but safety first)
+# This prevents accidental commits if someone copies files instead of using the submodule
+custom_strategies/private/*.py
+!custom_strategies/private/_TEMPLATE_strategy.py
+custom_strategies/private/**/*.py
+!custom_strategies/private/.gitkeep
