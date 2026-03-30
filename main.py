@@ -427,7 +427,8 @@ def main():
     wfa_split_date = None
     if _wfa_ratio and 0 < float(_wfa_ratio) < 1:
         from helpers.wfa import get_split_date as _get_split_date
-        wfa_split_date = _get_split_date(_spy_actual_start, _spy_actual_end, float(_wfa_ratio))
+        # Pass spy_df and CONFIG for intraday bar-count splitting (Phase 2)
+        wfa_split_date = _get_split_date(_spy_actual_start, _spy_actual_end, float(_wfa_ratio), df=spy_df, config=CONFIG)
         logger.info(
             f"  WFA split date   : {wfa_split_date}  "
             f"(IS: {_spy_actual_start} -> {wfa_split_date} | OOS: {wfa_split_date} -> {_spy_actual_end})"

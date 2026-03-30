@@ -30,6 +30,13 @@ def get_price_data(symbol, start_date, end_date, config):
         # Standardize column names
         df.columns = [col.capitalize() for col in df.columns]
         df.index.name = 'Datetime'
+
+        # Normalize datetime index for daily data (set time to midnight)
+        # This ensures consistent datetime handling across daily and intraday timeframes
+        if config.get("timeframe", "D").upper() == "D":
+            df.index = pd.to_datetime(df.index)
+            df.index = df.index.normalize()
+
         return df
     except Exception as e:
         print(f"  -> Norgate ERROR fetching data for '{symbol}': {e}")

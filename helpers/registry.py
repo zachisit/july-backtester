@@ -231,6 +231,10 @@ def get_active_strategies(directory: str = "custom_strategies") -> dict:
     decorators fire.  Subsequent calls are fast because modules already in
     ``sys.modules`` are skipped by :func:`load_strategies`.
 
+    **Private strategies submodule**: If ``custom_strategies/private/`` exists
+    (the private strategies git submodule), it will also be scanned automatically.
+    This allows interns to keep proprietary strategies in a separate private repo.
+
     The returned set is then filtered by ``CONFIG["strategies"]``:
 
     * ``"all"`` (or ``None``) — returns every registered strategy.
@@ -251,7 +255,13 @@ def get_active_strategies(directory: str = "custom_strategies") -> dict:
         Each value has the shape ``{"logic": callable, "dependencies": list,
         "params": dict}`` — identical to the old ``STRATEGIES`` dict format.
     """
+    # Load public strategies
     load_strategies(directory)
+
+    # Load private strategies if submodule exists
+    private_dir = os.path.join(directory, "private")
+    if os.path.isdir(private_dir):
+        load_strategies(private_dir)
 
     # Lazy import avoids a circular dependency at module load time
     # (config.py does not import from helpers/).

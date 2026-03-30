@@ -34,6 +34,14 @@ For Polygon data, add your API key to `.env` (copy `.env.example` to get started
 POLYGON_API_KEY=your_key_here
 ```
 
+**For interns with private strategies**: After cloning, initialize the private strategies submodule:
+
+```bash
+git submodule update --init --recursive
+```
+
+See [PRIVATE_STRATEGIES.md](PRIVATE_STRATEGIES.md) for the full guide.
+
 ---
 
 ## Quick Start
