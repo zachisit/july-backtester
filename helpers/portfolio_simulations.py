@@ -222,18 +222,40 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 entry_exec_date = date
 
             if pd.isna(raw_entry_price): continue
-            
+
             entry_price = raw_entry_price * (1 + CONFIG['slippage_pct'])
-            
-            # Determine max capital to allocate for this single trade
-            capital_to_allocate = total_equity * allocation_pct
-            
-            # You cannot allocate more for the principal than your available cash
-            capital_to_allocate = min(capital_to_allocate, cash)
-            
-            if entry_price > 0 and capital_to_allocate > 0:
-                # Calculate ideal shares based on the capital allocation
-                shares = capital_to_allocate / entry_price
+
+            if entry_price > 0:
+                # --- POSITION SIZING ---
+                from helpers.position_sizing import calculate_position_size
+
+                sizing_method = CONFIG.get('position_sizing_method', 'fixed')
+
+                # Prepare kwargs for method-specific parameters
+                sizing_kwargs = {}
+
+                # For risk_parity: calculate stop distance if stop is set
+                if sizing_method == "risk_parity" and stop_config.get("type") != "none":
+                    # We'll calculate stop distance once we have the stop level
+                    # For now, pass None and let it fall back to ATR-based
+                    pass
+
+                # For kelly: historical stats not available during simulation
+                # Kelly will fall back to fixed in this implementation
+
+                shares = calculate_position_size(
+                    method=sizing_method,
+                    equity=total_equity,
+                    price=entry_price,
+                    symbol_data=df,
+                    config=CONFIG,
+                    **sizing_kwargs
+                )
+
+                # Cash constraint
+                capital_needed = shares * entry_price
+                if capital_needed > cash:
+                    shares = cash / entry_price
 
                 # --- VOLUME-BASED LIQUIDITY FILTER ---
                 max_pct_adv = CONFIG.get('max_pct_adv') or 0
