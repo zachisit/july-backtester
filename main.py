@@ -498,6 +498,33 @@ def main():
             logger.warning(f"Could not fetch data for any symbols in '{portfolio_name}'. Skipping.")
             continue
 
+        # --- DATA QUALITY VALIDATION ---
+        if CONFIG.get("data_quality_checks", True):
+            from helpers.data_quality import quality_report
+            logger.info(f"  -> Running data quality checks on {len(symbols)} symbols...")
+            quality_df = quality_report(symbols, portfolio_data, CONFIG.get("timeframe", "D"))
+
+            # Display quality report
+            threshold = CONFIG.get("data_quality_threshold", 80)
+            low_quality = quality_df[quality_df["score"] < threshold]
+
+            if not low_quality.empty:
+                logger.warning(f"  -> {len(low_quality)} symbol(s) have quality score < {threshold}")
+                print("\n" + "=" * 80)
+                print(f"DATA QUALITY REPORT: {portfolio_name}".center(80))
+                print("=" * 80)
+                # Show only low-quality symbols in detail
+                print(low_quality[["symbol", "score", "issues"]].to_string(index=False))
+                print("=" * 80 + "\n")
+
+                if CONFIG.get("strict_data_quality", False):
+                    raise ValueError(
+                        f"Data quality check failed: {len(low_quality)} symbol(s) below threshold {threshold}. "
+                        f"Set strict_data_quality=False to continue with warnings."
+                    )
+            else:
+                logger.info(f"  -> All symbols passed quality checks (min score: {quality_df['score'].min():.1f})")
+
         # --- Generate tasks for THIS portfolio, WITHOUT the large `portfolio_data` ---
         tasks_for_this_portfolio = []
         for strat_name, strategy_config in get_active_strategies().items():

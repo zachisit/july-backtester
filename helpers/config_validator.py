@@ -88,6 +88,10 @@ KNOWN_KEYS: set[str] = {
     "export_ml_features",
     # SECTION 21: Verbose Summary Table
     "verbose_output",
+    # SECTION 22: Data Quality
+    "data_quality_checks",
+    "data_quality_threshold",
+    "strict_data_quality",
     # S3
     "s3_reports_bucket",
     "upload_to_s3",
