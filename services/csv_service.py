@@ -158,7 +158,20 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     -------
     pd.DataFrame with columns [Open, High, Low, Close, Volume] and a
     UTC DatetimeIndex named 'Datetime', or None on any error / no data.
+
+    Notes
+    -----
+    CSV provider does not support delisting dates or delisted company data.
+    If `include_delisted=True` in config, a warning is logged.
     """
+    # Warn if survivorship bias handling is enabled
+    if config.get("include_delisted", False):
+        logger.warning(
+            f"[WARNING] include_delisted=True but CSV provider does not provide "
+            f"delisting data for symbol '{symbol}'. Survivorship bias handling is "
+            f"disabled for this provider. Use Norgate or Polygon for production backtests."
+        )
+
     csv_dir = _resolve_dir(config)
     filepath = _find_csv(symbol, csv_dir)
 

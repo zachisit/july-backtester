@@ -59,6 +59,11 @@ def get_price_data(symbol, start_date, end_date, config):
     Polygon.io implementation for fetching price data.
     This version includes automatic pagination, correctly authenticates
     ALL requests, and dynamically handles different timeframes.
+
+    Supports delisted symbols when `include_delisted=True` in config.
+    Polygon's aggregates endpoint returns historical data for delisted
+    symbols when queried by symbol name. Delisting dates are fetched
+    separately via helpers/survivorship.py.
     """
     api_key = os.environ.get("POLYGON_API_KEY")
     if not api_key:

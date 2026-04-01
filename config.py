@@ -346,6 +346,19 @@ CONFIG = {
     # When True, all 23 columns are displayed.
     # Override at runtime with: python main.py --verbose
     "verbose_output": False,
+
+    # ============================================================
+    # SECTION 22: SURVIVORSHIP BIAS
+    # ============================================================
+    # Include delisted/failed companies in backtests to avoid survivorship bias.
+    # Only Norgate and Polygon support delisting data.
+    # Yahoo and CSV providers will log a warning if enabled.
+    "include_delisted": False,
+
+    # How to price force-closed positions when a stock is delisted:
+    # "last_close" — use the last known Close price (default, realistic)
+    # "zero" — assume total loss (conservative, stress-test scenario)
+    "delisting_price_assumption": "last_close",
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

@@ -28,17 +28,18 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------
 # --- WORKER INITIALIZER FOR MULTIPROCESSING ---
 # --------------------------------------------------------------------
-def init_worker(spy, vix, tnx, portfolio_data_for_worker):
+def init_worker(spy, vix, tnx, portfolio_data_for_worker, delisting_dates_for_worker):
     """
     Initializer for the multiprocessing pool.
-    Makes large dataframes AND the current portfolio's data globally 
+    Makes large dataframes AND the current portfolio's data globally
     available to each worker process.
     """
-    global spy_df_global, vix_df_global, tnx_df_global, portfolio_data_global
+    global spy_df_global, vix_df_global, tnx_df_global, portfolio_data_global, delisting_dates_global
     spy_df_global = spy
     vix_df_global = vix
     tnx_df_global = tnx
     portfolio_data_global = portfolio_data_for_worker
+    delisting_dates_global = delisting_dates_for_worker
 
 # --------------------------------------------------------------------
 
@@ -48,7 +49,7 @@ def run_single_simulation(args):
     This version now uses globally initialized dataframes AND portfolio_data.
     """
     # Access ALL globally initialized data
-    global spy_df_global, vix_df_global, tnx_df_global, portfolio_data_global
+    global spy_df_global, vix_df_global, tnx_df_global, portfolio_data_global, delisting_dates_global
 
     # 1. Unpack the arguments. `portfolio_data` has been REMOVED from the tuple.
     portfolio_name, name, logic_func, dependencies, stop_config, \
@@ -92,7 +93,7 @@ def run_single_simulation(args):
         # Call the simulation, passing the stop_config and using the global dataframes.
         result = run_portfolio_simulation(
             portfolio_data, final_signals, CONFIG["initial_capital"], CONFIG["allocation_per_trade"],
-            spy_df_global, vix_df_global, tnx_df_global, stop_config
+            spy_df_global, vix_df_global, tnx_df_global, stop_config, delisting_dates_global
         )
         
         if result is None: return None
@@ -498,6 +499,17 @@ def main():
             logger.warning(f"Could not fetch data for any symbols in '{portfolio_name}'. Skipping.")
             continue
 
+        # --- FETCH DELISTING DATES (if survivorship bias handling is enabled) ---
+        delisting_dates = {}
+        if CONFIG.get("include_delisted", False):
+            from helpers.survivorship import get_delisting_dates
+            logger.info(f"  -> Fetching delisting dates for {len(symbols)} symbols...")
+            delisting_dates = get_delisting_dates(symbols, CONFIG["data_provider"], CONFIG)
+            if delisting_dates:
+                logger.info(f"  -> Found {len(delisting_dates)} delisted symbols: {', '.join(list(delisting_dates.keys())[:10])}{'...' if len(delisting_dates) > 10 else ''}")
+            else:
+                logger.info(f"  -> No delisted symbols found (or provider doesn't support delisting data).")
+
         # --- Generate tasks for THIS portfolio, WITHOUT the large `portfolio_data` ---
         tasks_for_this_portfolio = []
         for strat_name, strategy_config in get_active_strategies().items():
@@ -529,8 +541,8 @@ def main():
         logger.info("=" * 15 + f" RUNNING SIMULATIONS FOR '{portfolio_name}' " + "=" * 15)
         logger.info(f"Found {len(tasks_for_this_portfolio)} tasks. Using up to {cpu_count()} CPU cores.")
         
-        # Pass `portfolio_data` during initialization, not with each task
-        init_args = (spy_df, vix_df, tnx_df, portfolio_data)
+        # Pass `portfolio_data` and `delisting_dates` during initialization, not with each task
+        init_args = (spy_df, vix_df, tnx_df, portfolio_data, delisting_dates)
 
         with Pool(processes=cpu_count(), initializer=init_worker, initargs=init_args) as p:
             import time as _time

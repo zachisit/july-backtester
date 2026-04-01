@@ -19,7 +19,7 @@ _T1_COLS = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'Sharpe',
 _T2_COLS = ['Strategy', 'vs. QQQ (B&H)', 'Calmar', 'Roll.Sharpe(avg)',
             'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Max Rcvry (d)',
             'Avg Rcvry (d)', 'Profit Factor', 'Win Rate', 'Trades',
-            'Expectancy (R)', 'SQN']
+            'Expectancy (R)', 'SQN', 'Delisted Pos', 'Delisting Loss (%)']
 
 _T3_COLS = ['Strategy', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
             'Avg. Corr', 'MC Verdict', 'MC Score']
@@ -27,19 +27,21 @@ _T3_COLS = ['Strategy', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
 # Short display names for verbose tables only (T2 and T3).
 # Core Performance (T1) headers are already short and stay unchanged.
 _VERBOSE_SHORT_NAMES = {
-    'vs. QQQ (B&H)':    'vs. QQQ',
-    'Roll.Sharpe(avg)':  'RS(avg)',
-    'Roll.Sharpe(min)':  'RS(min)',
-    'Roll.Sharpe(last)': 'RS(last)',
-    'Max Rcvry (d)':     'MaxRcvry',
-    'Avg Rcvry (d)':     'AvgRcvry',
-    'Profit Factor':     'PF',
-    'Win Rate':          'WinRate',
-    'Expectancy (R)':    'Expct(R)',
-    'OOS P&L (%)':       'OOS P&L',
-    'Rolling WFA':       'RollWFA',
-    'Avg. Corr':         'Corr',
-    'MC Verdict':        'MC',
+    'vs. QQQ (B&H)':       'vs. QQQ',
+    'Roll.Sharpe(avg)':    'RS(avg)',
+    'Roll.Sharpe(min)':    'RS(min)',
+    'Roll.Sharpe(last)':   'RS(last)',
+    'Max Rcvry (d)':       'MaxRcvry',
+    'Avg Rcvry (d)':       'AvgRcvry',
+    'Profit Factor':       'PF',
+    'Win Rate':            'WinRate',
+    'Expectancy (R)':      'Expct(R)',
+    'OOS P&L (%)':         'OOS P&L',
+    'Rolling WFA':         'RollWFA',
+    'Avg. Corr':           'Corr',
+    'MC Verdict':          'MC',
+    'Delisted Pos':        'Delist',
+    'Delisting Loss (%)':  'DelistL%',
 }
 
 
@@ -335,11 +337,11 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         display_df.reset_index(drop=True, inplace=True)
 
         # Formatting logic
-        for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"), ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"), ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"), ('rolling_sharpe_final', "{:.2f}"), ('avg_recovery_days', "{:.0f}")]:
+        for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"), ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"), ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"), ('rolling_sharpe_final', "{:.2f}"), ('avg_recovery_days', "{:.0f}"), ('delisting_loss_pct', "{:.2%}")]:
             if col in display_df.columns: display_df[col] = display_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
         if 'avg_trade_duration' in display_df.columns: display_df['avg_trade_duration'] = display_df['avg_trade_duration'].apply(lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x)
-        display_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'wfa_rolling_verdict': 'Rolling WFA', 'avg_corr': 'Avg. Corr', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN', 'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)', 'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)'}, inplace=True)
-        report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'Avg. Corr', 'MC Verdict', 'MC Score']
+        display_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'wfa_rolling_verdict': 'Rolling WFA', 'avg_corr': 'Avg. Corr', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN', 'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)', 'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)', 'positions_delisted': 'Delisted Pos', 'delisting_loss_pct': 'Delisting Loss (%)'}, inplace=True)
+        report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'Delisted Pos', 'Delisting Loss (%)', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'Avg. Corr', 'MC Verdict', 'MC Score']
         summary_df_display = display_df.reindex(columns=report_cols).fillna('N/A').reset_index(drop=True)
         _t1 = [c for c in _T1_COLS if c in summary_df_display.columns]
         _print_table(summary_df_display[_t1], f"--- Core Performance: {portfolio_name} ---")
