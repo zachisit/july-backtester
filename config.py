@@ -388,7 +388,21 @@ CONFIG = {
     "delisted_symbols_file": None,
 
     # ============================================================
-    # SECTION 24: POINT-IN-TIME UNIVERSE PATHS
+    # SECTION 24: DATA QUALITY VALIDATION
+    # ============================================================
+    # Pre-flight data quality checks before backtest runs.
+    # Detects: missing bars, price jumps, OHLC violations, negative prices, zero volume
+    "data_quality_checks": True,
+
+    # Minimum quality score (0-100) to proceed with backtest in strict mode
+    "data_quality_threshold": 80,
+
+    # When True, fail fast if any symbol has score < threshold
+    # When False (default), log warnings and continue
+    "strict_data_quality": False,
+
+    # ============================================================
+    # SECTION 25: POINT-IN-TIME UNIVERSE PATHS
     # ============================================================
     # Absolute paths to local clones of the PIT data repos.
     # Required when using "pit:nq100" or "pit:sp500" as a portfolio value.
