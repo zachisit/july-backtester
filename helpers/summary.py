@@ -78,7 +78,7 @@ def _get_t2_cols(benchmark_columns):
     return (['Strategy'] + extra_benchmarks +
             ['Calmar', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
              'Max Rcvry (d)', 'Avg Rcvry (d)', 'Profit Factor', 'Win Rate', 'Trades',
-             'Expectancy (R)', 'SQN'])
+             'Expectancy (R)', 'SQN', 'Delisted Pos', 'Delisting Loss (%)'])
 
 _T3_COLS = ['Strategy', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
             'Avg. Corr', 'MC Verdict', 'MC Score', 'Smooth Verdict']
@@ -87,19 +87,21 @@ _T3_COLS = ['Strategy', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
 # Core Performance (T1) headers are already short and stay unchanged.
 # Benchmark short names are dynamically added by _build_benchmark_columns().
 _VERBOSE_SHORT_NAMES = {
-    'Roll.Sharpe(avg)':  'RS(avg)',
-    'Roll.Sharpe(min)':  'RS(min)',
-    'Roll.Sharpe(last)': 'RS(last)',
-    'Max Rcvry (d)':     'MaxRcvry',
-    'Avg Rcvry (d)':     'AvgRcvry',
-    'Profit Factor':     'PF',
-    'Win Rate':          'WinRate',
-    'Expectancy (R)':    'Expct(R)',
-    'OOS P&L (%)':       'OOS P&L',
-    'Rolling WFA':       'RollWFA',
-    'Avg. Corr':         'Corr',
-    'MC Verdict':        'MC',
-    'Smooth Verdict':    'Smooth',
+    'Roll.Sharpe(avg)':   'RS(avg)',
+    'Roll.Sharpe(min)':   'RS(min)',
+    'Roll.Sharpe(last)':  'RS(last)',
+    'Max Rcvry (d)':      'MaxRcvry',
+    'Avg Rcvry (d)':      'AvgRcvry',
+    'Profit Factor':      'PF',
+    'Win Rate':           'WinRate',
+    'Expectancy (R)':     'Expct(R)',
+    'OOS P&L (%)':        'OOS P&L',
+    'Rolling WFA':        'RollWFA',
+    'Avg. Corr':          'Corr',
+    'MC Verdict':         'MC',
+    'Smooth Verdict':     'Smooth',
+    'Delisted Pos':       'Delist',
+    'Delisting Loss (%)': 'DelistL%',
 }
 
 
@@ -547,7 +549,8 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_
             ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"),
             ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"),
             ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"),
-            ('rolling_sharpe_final', "{:.2f}"), ('avg_recovery_days', "{:.0f}")
+            ('rolling_sharpe_final', "{:.2f}"), ('avg_recovery_days', "{:.0f}"),
+            ('delisting_loss_pct', "{:.2%}")
         ]
         # Add all benchmark columns with their format specs
         for result_key in benchmark_columns["result_keys"]:
@@ -574,6 +577,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_
             'rolling_sharpe_final': 'Roll.Sharpe(last)',
             'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)',
             'smooth_verdict': 'Smooth Verdict',
+            'positions_delisted': 'Delisted Pos', 'delisting_loss_pct': 'Delisting Loss (%)',
         }
         # Add benchmark column renames
         rename_map.update(benchmark_columns["display_names"])
@@ -585,7 +589,8 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_
                       ['Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe',
                        'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
                        'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades',
-                       'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
+                       'Expectancy (R)', 'SQN', 'Delisted Pos', 'Delisting Loss (%)',
+                       'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
                        'Avg. Corr', 'MC Verdict', 'MC Score', 'Smooth Verdict'])
 
         summary_df_display = display_df.reindex(columns=report_cols).fillna('N/A').reset_index(drop=True)
