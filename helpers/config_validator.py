@@ -99,7 +99,12 @@ KNOWN_KEYS: set[str] = {
     "data_quality_checks",
     "data_quality_threshold",
     "strict_data_quality",
-    # SECTION 25: Point-in-Time Universe Paths
+    # SECTION 25: Position Sizing
+    "position_sizing_method",
+    "kelly_fraction",
+    "target_risk_per_trade",
+    "max_portfolio_heat",
+    # SECTION 26: Point-in-Time Universe Paths
     "nq100_pit_path",
     "sp500_pit_path",
     # S3
