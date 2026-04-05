@@ -39,14 +39,15 @@ def get_data_service():
         from .csv_service import get_price_data as _fetcher
         return _fetcher
 
-    raise ValueError(
-        f"Unsupported data_provider '{provider}'. "
-        f"Valid options: 'polygon', 'norgate', 'yahoo', 'csv', 'parquet'."
-    )
     if provider == "parquet":
         logger.info("Using local Parquet data service.")
         from .parquet_service import get_price_data as _fetcher
         return _fetcher
+
+    raise ValueError(
+        f"Unsupported data_provider '{provider}'. "
+        f"Valid options: 'polygon', 'norgate', 'yahoo', 'csv', 'parquet'."
+    )
 
 def get_previous_close_service():
     """
