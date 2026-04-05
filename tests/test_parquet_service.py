@@ -347,6 +347,113 @@ class TestGetPriceDataRealFixture:
 
 
 # ---------------------------------------------------------------------------
+# TestParquetSimulation  (end-to-end — real parquet → signals → sim)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.skipif(
+    not os.path.isdir(_FIXTURE_DIR),
+    reason="Real parquet fixtures not present — run from the project root.",
+)
+class TestParquetSimulation:
+    """
+    End-to-end integration test: load real Norgate parquet fixture,
+    generate SMA-crossover signals, and run run_portfolio_simulation.
+
+    This proves the full pipeline:
+        parquet file → get_price_data → signal generation
+        → run_portfolio_simulation → result dict with trades
+    """
+
+    _provider_config = {"parquet_data_dir": _FIXTURE_DIR}
+
+    @pytest.fixture(scope="class")
+    def sim_result(self):
+        from unittest.mock import patch
+        from helpers.portfolio_simulations import run_portfolio_simulation
+        from helpers.indicators import sma_crossover_logic
+
+        _SIM_CONFIG = {
+            "slippage_pct": 0.0,
+            "commission_per_share": 0.0,
+            "execution_time": "open",
+            "max_pct_adv": 0,
+            "volume_impact_coeff": 0.0,
+            "risk_free_rate": 0.05,
+            "htb_rate_annual": 0.0,
+            "timeframe": "D",
+            "timeframe_multiplier": 1,
+        }
+
+        # Load real AAPL data from the fixture
+        aapl_df = get_price_data("AAPL", "2023-01-01", "2023-12-31", self._provider_config)
+        assert aapl_df is not None, "AAPL fixture failed to load"
+
+        # Strip tz so the simulation engine (which builds tz-naive all_dates) works
+        aapl_df.index = aapl_df.index.tz_localize(None)
+
+        # Generate SMA crossover signals — fast=5, slow=10 fires within 62 bars
+        sig_df = sma_crossover_logic(aapl_df.copy(), fast=5, slow=10)
+        signals = {"AAPL": sig_df["Signal"]}
+
+        # Build synthetic SPY/VIX aligned to AAPL dates (strategy doesn't depend on them,
+        # but run_portfolio_simulation expects the DataFrames to be present)
+        idx = aapl_df.index
+        spy_df = aapl_df.copy().rename(columns={"Close": "Close"})
+        vix_df = pd.DataFrame(
+            {"Open": 18.0, "High": 19.0, "Low": 17.0, "Close": 18.0, "Volume": 0},
+            index=idx,
+        )
+        vix_df.index.name = "Datetime"
+
+        portfolio_data = {"AAPL": aapl_df}
+
+        with patch.dict("config.CONFIG", _SIM_CONFIG):
+            result = run_portfolio_simulation(
+                portfolio_data=portfolio_data,
+                signals=signals,
+                initial_capital=100_000.0,
+                allocation_pct=0.10,
+                spy_df=spy_df,
+                vix_df=vix_df,
+                tnx_df=None,
+                stop_config={"type": "none"},
+            )
+        return result
+
+    def test_simulation_completes_without_error(self, sim_result):
+        """Simulation must return a result dict, not None."""
+        assert sim_result is not None, (
+            "Simulation returned None — no trades generated from real AAPL parquet data"
+        )
+
+    def test_result_has_core_keys(self, sim_result):
+        for key in ("pnl_percent", "Trades", "trade_log", "portfolio_timeline", "max_drawdown"):
+            assert key in sim_result, f"Missing key: {key}"
+
+    def test_trade_log_is_populated(self, sim_result):
+        assert isinstance(sim_result["trade_log"], list)
+        assert len(sim_result["trade_log"]) > 0, "No trades generated from real parquet data"
+
+    def test_all_trades_are_aapl(self, sim_result):
+        symbols = {t["Symbol"] for t in sim_result["trade_log"]}
+        assert symbols == {"AAPL"}
+
+    def test_pnl_is_finite(self, sim_result):
+        assert np.isfinite(sim_result["pnl_percent"])
+
+    def test_portfolio_timeline_covers_full_period(self, sim_result):
+        """Timeline length must match number of trading days in the fixture (62)."""
+        assert len(sim_result["portfolio_timeline"]) == 62
+
+    def test_trade_entries_have_required_fields(self, sim_result):
+        required = ("Symbol", "EntryDate", "ExitDate", "EntryPrice", "ExitPrice",
+                    "Profit", "Shares", "is_win", "ExitReason")
+        for trade in sim_result["trade_log"]:
+            for field in required:
+                assert field in trade, f"Trade missing field: {field}"
+
+
+# ---------------------------------------------------------------------------
 # TestServiceRegistration  (regression — dead-code bug fix)
 # ---------------------------------------------------------------------------
 
