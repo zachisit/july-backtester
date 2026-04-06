@@ -88,19 +88,21 @@ class TestBuildConfig:
         text = _cfg(start="2015-06-01")
         assert "2015-06-01" in text
 
-    def test_single_mode_sets_symbols_to_test(self):
-        """Single mode must emit a non-empty symbols_to_test list."""
+    def test_single_mode_puts_symbols_in_portfolios(self):
+        """Single mode must emit symbols inside portfolios under 'My Symbols' — no symbols_to_test."""
         text = _cfg(mode="single", symbols=["AAPL", "MSFT"])
-        assert '"symbols_to_test"' in text
+        assert '"portfolios"' in text
+        assert "My Symbols" in text
         assert "AAPL" in text
         assert "MSFT" in text
+        assert '"symbols_to_test"' not in text
 
     def test_portfolio_mode_sets_portfolios(self):
-        """Portfolio mode must emit the portfolio dict and empty symbols_to_test."""
+        """Portfolio mode must emit the portfolio dict — no symbols_to_test."""
         portfolio = {"Nasdaq 100": "nasdaq_100.json"}
         text = _build_config("yahoo", 100_000.0, "2010-01-01", _END_EXPR, "portfolio", portfolio)
         assert "nasdaq_100.json" in text
-        assert '"symbols_to_test": []' in text
+        assert '"symbols_to_test"' not in text
 
     def test_all_required_keys_present(self):
         """Every required CONFIG key must appear in the generated text."""
@@ -141,7 +143,7 @@ class TestPatchExistingConfig:
         '    "data_provider": "polygon",\n'
         '    "initial_capital": 100000.0,\n'
         '    "start_date": "2004-01-01",\n'
-        '    "symbols_to_test": [\'BITB\'],\n'
+        '    "portfolios": {"My Symbols": ["BITB"]},\n'
         '    "commission_per_share": 0.002,\n'
     )
 
@@ -170,12 +172,12 @@ class TestPatchExistingConfig:
         assert '"start_date": "2015-06-01"' in text
         assert any("start_date" in c for c in changes)
 
-    def test_patches_symbols_to_test_single_mode(self, tmp_path):
+    def test_patches_portfolios_single_mode(self, tmp_path):
         p = self._make(tmp_path)
         text, changes = _patch_existing_config(p, "polygon", 100_000.0, "2004-01-01", "single", ["AAPL", "MSFT"])
         assert "AAPL" in text
         assert "MSFT" in text
-        assert any("symbols_to_test" in c for c in changes)
+        assert any("portfolios" in c for c in changes)
 
     def test_patches_portfolios_portfolio_mode(self, tmp_path):
         content = (
@@ -219,10 +221,10 @@ class TestPatchExistingConfig:
         text, changes = _patch_existing_config(p, "yahoo", 100_000.0, "2010-01-01", "single", ["SPY"])
         assert not any("data_provider" in c for c in changes)
 
-    def test_missing_symbols_skipped_not_crash(self, tmp_path):
+    def test_missing_portfolios_skipped_not_crash(self, tmp_path):
         p = self._make(tmp_path, '    "data_provider": "polygon",\n')
         text, changes = _patch_existing_config(p, "yahoo", 100_000.0, "2010-01-01", "single", ["AAPL"])
-        assert not any("symbols_to_test" in c for c in changes)
+        assert not any("portfolios" in c for c in changes)
 
     def test_empty_changes_list_when_nothing_matches(self, tmp_path):
         p = self._make(tmp_path, '# nothing here\n')

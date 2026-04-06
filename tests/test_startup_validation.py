@@ -291,32 +291,24 @@ class TestS2AllocationValidation:
 # ---------------------------------------------------------------------------
 
 class TestS2PortfolioValidation:
-    """S2 guard: portfolios dict must be non-empty when symbols_to_test is also empty."""
+    """S2 guard: portfolios dict must be non-empty."""
 
     def test_empty_portfolios_exits_one(self, tmp_path):
-        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}, "symbols_to_test": []})
+        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}})
         assert result.returncode == 1
 
     def test_empty_portfolios_prints_error_header(self, tmp_path):
-        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}, "symbols_to_test": []})
+        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}})
         assert "[ERROR] Invalid configuration in config.py:" in result.stdout
 
     def test_empty_portfolios_error_mentions_portfolios(self, tmp_path):
-        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}, "symbols_to_test": []})
+        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}})
         assert "portfolios" in result.stdout.lower()
 
     def test_none_portfolios_exits_one(self, tmp_path):
         """None is also falsy and should trigger the same guard."""
-        result = _run_with_config_patch(tmp_path, patches={"portfolios": None, "symbols_to_test": []})
+        result = _run_with_config_patch(tmp_path, patches={"portfolios": None})
         assert result.returncode == 1
-
-    def test_empty_portfolios_with_symbols_to_test_passes(self, tmp_path):
-        """Single-asset mode: empty portfolios + populated symbols_to_test must NOT error."""
-        result = _run_with_config_patch(
-            tmp_path,
-            patches={"portfolios": {}, "symbols_to_test": ["SPY"]},
-        )
-        assert "portfolios" not in result.stdout.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -345,17 +337,17 @@ class TestS2ErrorReporting:
 
     def test_s2_error_uses_stdout_not_stderr(self, tmp_path):
         """S2 uses print() — errors must appear on stdout."""
-        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}, "symbols_to_test": []})
+        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}})
         assert "portfolios" in result.stdout.lower()
         assert "portfolios" not in result.stderr.lower()
 
     def test_s2_fires_before_run_summary(self, tmp_path):
         """S2 exits before the U1 RUN SUMMARY block is reached."""
-        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}, "symbols_to_test": []})
+        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}})
         combined = result.stdout + result.stderr
         assert "RUN SUMMARY" not in combined
 
     def test_s2_fires_before_dry_run_gate(self, tmp_path):
-        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}, "symbols_to_test": []})
+        result = _run_with_config_patch(tmp_path, patches={"portfolios": {}})
         combined = result.stdout + result.stderr
         assert "[DRY RUN]" not in combined

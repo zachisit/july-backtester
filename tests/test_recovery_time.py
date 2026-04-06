@@ -157,15 +157,13 @@ class TestRecoveryInSummary:
             "initial_capital": 100_000,
         }
 
-        spy_benchmark = {"pnl_percent": 0.15}
-        qqq_benchmark = {"pnl_percent": 0.17}
+        benchmark_returns = {"SPY": 0.15, "QQQ": 0.17}
 
         buf = io.StringIO()
         with redirect_stdout(buf):
             generate_single_asset_summary_report(
                 [mock_result],
-                spy_benchmark,
-                qqq_benchmark,
+                benchmark_returns,
                 "AAPL",
                 None,
                 "test_run",

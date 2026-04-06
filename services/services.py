@@ -41,7 +41,7 @@ def get_data_service():
         except ImportError:
             raise ImportError("Configuration Error: data_provider is 'csv', but csv_service.py could not be imported.")
     else:
-        raise ValueError(f"Unsupported data_provider in config: '{provider}'. Valid options: 'polygon', 'norgate', 'yahoo', 'csv'.")
+        raise ValueError(f"Unsupported data_provider in config: '{provider}'. Valid options: 'polygon', 'norgate', 'yahoo', 'csv', 'parquet'.")
 
     # --- Step 2: Define a new function that wraps the original fetcher with caching logic ---
     def cached_fetcher(symbol, start_date, end_date, config):
