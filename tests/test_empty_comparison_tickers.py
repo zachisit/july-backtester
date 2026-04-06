@@ -272,8 +272,7 @@ class TestEmptyComparisonTickersRun:
     _BASE_PATCHES = {
         "data_provider": "parquet",
         "comparison_tickers": [],
-        "symbols_to_test": ["AAPL"],
-        "portfolios": {},
+        "portfolios": {"My Symbols": ["AAPL"]},
         # AAPL fixture has 62 rows — must be below this or the symbol is filtered
         # before any worker runs, giving a false-green test
         "min_bars_required": 10,

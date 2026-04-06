@@ -253,8 +253,8 @@ def main():
     if not (0 < alloc <= 1.0):
         errors.append(f"  - allocation_per_trade ({alloc}) must be between 0 (exclusive) and 1.0 (inclusive)")
 
-    if not CONFIG.get("portfolios") and not CONFIG.get("symbols_to_test"):
-        errors.append("  - portfolios is empty. Add at least one portfolio entry to run.")
+    if not CONFIG.get("portfolios"):
+        errors.append("  - portfolios is empty. Add at least one entry to run, e.g. \"My Symbols\": [\"AAPL\"].")
 
     if errors:
         print("\n[ERROR] Invalid configuration in config.py:")
@@ -302,10 +302,7 @@ def main():
         ],
     )
 
-    # --- Single-asset mode: wrap symbols_to_test as a synthetic portfolio ---
     _portfolios = CONFIG.get("portfolios") or {}
-    if not _portfolios and CONFIG.get("symbols_to_test"):
-        _portfolios = {"Single Asset": CONFIG["symbols_to_test"]}
 
     # --- U1: RUN SUMMARY ---
     total_stop_configs = len(CONFIG.get("stop_loss_configs", []))
