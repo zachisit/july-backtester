@@ -20,7 +20,7 @@ helpers/registry.py                # Strategy registry: register_strategy decora
 helpers/simulations.py             # Single-asset trade simulation engine
 helpers/portfolio_simulations.py   # Multi-asset portfolio simulation engine
 helpers/monte_carlo.py             # Monte Carlo robustness scoring
-helpers/summary.py                 # Report generation, S3 upload; _T1_COLS/_T2_COLS/_T3_COLS/_VERBOSE_SHORT_NAMES control tiered table layout; _print_table() handles all bordered terminal output
+helpers/summary.py                 # Report generation, S3 upload; dynamic benchmark columns via _build_benchmark_columns(); _get_t1_cols()/_get_t2_cols()/_T3_COLS/_VERBOSE_SHORT_NAMES control tiered table layout; _print_table() handles all bordered terminal output
 helpers/wfa.py                     # Walk-Forward Analysis (get_split_date, split_trades, evaluate_wfa)
 helpers/wfa_rolling.py             # Rolling multi-fold WFA (get_fold_dates, evaluate_rolling_wfa)
 helpers/ml_export.py               # ML trade feature export (export_trade_features)
@@ -93,6 +93,8 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 **API key resolution order** (in `helpers/aws_utils.py`): environment variable → `.env` file. No AWS Secrets Manager.
 
 **Data fetcher signature:** `fetcher(symbol, start_date, end_date, config) -> pd.DataFrame | None`. Columns must be `Open, High, Low, Close, Volume` with a `Datetime` index.
+
+**Dynamic benchmark columns:** `helpers/summary.py` uses `_build_benchmark_columns(benchmark_returns)` to generate column names, display names, format specs, and short names dynamically from the `benchmark_returns` dict passed to summary functions. This allows summary reports to display arbitrary benchmark tickers (not just hardcoded SPY/QQQ). All 4 summary functions (`generate_per_portfolio_summary`, `generate_single_asset_summary_report`, `generate_final_summary`, `generate_portfolio_summary_report`) accept a `benchmark_returns` dict parameter (e.g., `{"SPY": 0.12, "QQQ": 0.15, "XLF": 0.08}`) and dynamically build result keys like `vs_spy_benchmark`, `vs_qqq_benchmark`, `vs_xlf_benchmark`. The first benchmark appears in Table 1 (Core Performance), remaining benchmarks appear in Table 2 (Extended Metrics). Filtering logic supports backward compatibility: the first two benchmarks respect `min_performance_vs_spy` and `min_performance_vs_qqq` config keys; additional benchmarks default to `-9999.0` threshold (show all).
 
 **Datetime index normalization (Phase 4 of #55):** All data providers return `pd.DatetimeIndex` regardless of timeframe. Daily data (`timeframe="D"`) is normalized to midnight timestamps (00:00:00 UTC) via `.normalize()` to ensure consistent datetime handling across timeframes. Intraday data (`timeframe="H"` or `"MIN"`) preserves hour/minute precision. Trade logs store `EntryDate` and `ExitDate` as ISO 8601 strings (`.isoformat()`) supporting both date-only (`"2024-01-15"`) and datetime (`"2024-01-15T10:30:00"`) formats. WFA functions convert these strings to `pd.Timestamp` for chronological comparisons, ensuring robust datetime handling for mixed daily/intraday backtests.
 
