@@ -23,6 +23,7 @@ KNOWN_KEYS: set[str] = {
     # SECTION 1: Data Provider
     "data_provider",
     "csv_data_dir",
+    "parquet_data_dir",
     # SECTION 2: Backtest Period & Capital
     "start_date",
     "end_date",
