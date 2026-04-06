@@ -180,6 +180,27 @@ class TestNormalizeTicker:
         """I:XYZ (unknown) → XYZ (CSV fallback)"""
         assert normalize_ticker("I:XYZ", "csv") == "XYZ"
 
+    # --- Parquet Provider (alias for CSV) ---
+
+    def test_parquet_index_returns_bare_symbol(self):
+        """I:VIX with parquet provider → bare 'VIX' (same as CSV)"""
+        assert normalize_ticker("I:VIX", "parquet") == "VIX"
+
+    def test_parquet_tnx_returns_bare_symbol(self):
+        """I:TNX with parquet provider → bare 'TNX' (same as CSV)"""
+        assert normalize_ticker("I:TNX", "parquet") == "TNX"
+
+    def test_parquet_equity_passes_through(self):
+        """SPY with parquet provider → 'SPY' unchanged"""
+        assert normalize_ticker("SPY", "parquet") == "SPY"
+
+    def test_parquet_does_not_warn(self, caplog):
+        """parquet provider must not log an 'Unknown data provider' warning"""
+        import logging
+        with caplog.at_level(logging.WARNING):
+            normalize_ticker("I:VIX", "parquet")
+        assert "Unknown data provider" not in caplog.text
+
     # --- Unknown Provider Warning ---
 
     def test_unknown_provider_returns_unchanged(self):
