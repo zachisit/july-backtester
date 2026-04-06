@@ -46,7 +46,6 @@ KNOWN_KEYS: set[str] = {
     "save_only_filtered_trades",
     "show_qqq_losers",
     # SECTION 7: Portfolio Settings
-    "symbols_to_test",
     "portfolios",
     "min_bars_required",
     # SECTION 8: Allocation & Execution
