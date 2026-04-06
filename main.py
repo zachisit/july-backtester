@@ -393,13 +393,14 @@ def main():
         # Derive actual data period from comparison ticker data if available,
         # otherwise fall back to config dates (valid when comparison_tickers = [])
         if comparison_dfs:
-            ref_df = comparison_dfs.get("SPY") or next(iter(comparison_dfs.values()))
-            _spy_actual_start = ref_df.index.min().strftime("%Y-%m-%d")
-            _spy_actual_end   = ref_df.index.max().strftime("%Y-%m-%d")
+            spy_df = comparison_dfs.get("SPY") or next(iter(comparison_dfs.values()))
+            _spy_actual_start = spy_df.index.min().strftime("%Y-%m-%d")
+            _spy_actual_end   = spy_df.index.max().strftime("%Y-%m-%d")
             logger.info("-" * 60)
             logger.info(f"  Actual Data Period : {_spy_actual_start} -> {_spy_actual_end}")
             logger.info("-" * 60)
         else:
+            spy_df = None
             _spy_actual_start = CONFIG["start_date"]
             _spy_actual_end   = CONFIG.get("end_date") or datetime.now().strftime("%Y-%m-%d")
             logger.info("-" * 60)
