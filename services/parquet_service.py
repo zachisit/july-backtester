@@ -153,7 +153,7 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
         logger.error(f"Failed to read parquet file '{filepath}': {e}")
         return None
 
-    logger.info(f"Loaded {len(df)} rows from {filepath}")
+    logger.debug(f"Loaded {len(df)} rows from {filepath}")
 
     # Normalise columns
     df = _normalise_columns(df)
@@ -184,7 +184,7 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     # Drop any rows with NaN in OHLC
     df = df.dropna(subset=["Open", "High", "Low", "Close"])
 
-    logger.info(
+    logger.debug(
         f"  {symbol}: {len(df)} bars, "
         f"{df.index[0].strftime('%Y-%m-%d')} → {df.index[-1].strftime('%Y-%m-%d')}"
     )
