@@ -178,7 +178,7 @@ def run_single_simulation(args):
             from helpers.regime import build_regime_heatmap as _build_heatmap
             result["regime_heatmap"] = _build_heatmap(
                 result.get("trade_log", []),
-                vix_df_global,
+                vix_df_local,
                 result.get("initial_capital", CONFIG["initial_capital"]),
             )
 
