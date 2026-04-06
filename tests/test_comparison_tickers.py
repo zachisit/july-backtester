@@ -4,7 +4,7 @@ Unit tests for helpers/comparison_tickers.py — comparison ticker config parser
 
 Tests cover:
 - Valid configs (single benchmark, multiple benchmarks, mixed roles)
-- Legacy fallback behavior
+- Missing/empty key raises ValueError (no silent fallback)
 - Duplicate symbol handling
 - Invalid role values
 - Missing required keys
@@ -192,31 +192,25 @@ class TestParseValidConfigs:
 # ---------------------------------------------------------------------------
 
 class TestParseFallbackAndEdgeCases:
-    """Test legacy fallback and edge case handling."""
+    """Test explicit error and edge case handling."""
 
-    def test_missing_key_uses_legacy(self):
-        """Missing comparison_tickers key triggers legacy fallback."""
-        config = {}  # No comparison_tickers key
-        result = parse_comparison_tickers(config)
+    def test_missing_key_raises(self):
+        """Missing comparison_tickers key raises ValueError with helpful message."""
+        config = {}
+        with pytest.raises(ValueError, match="comparison_tickers"):
+            parse_comparison_tickers(config)
 
-        # Should have legacy symbols (SPY, QQQ, VIX, TNX)
-        assert len(result["all_symbols"]) == 4
-        assert "SPY" in result["all_symbols"]
-        assert "QQQ" in result["all_symbols"]
-
-    def test_empty_list_uses_legacy(self):
-        """Empty comparison_tickers list triggers legacy fallback."""
+    def test_empty_list_raises(self):
+        """Empty comparison_tickers list raises ValueError."""
         config = {"comparison_tickers": []}
-        result = parse_comparison_tickers(config)
+        with pytest.raises(ValueError, match="comparison_tickers"):
+            parse_comparison_tickers(config)
 
-        assert len(result["all_symbols"]) == 4  # Legacy defaults
-
-    def test_none_value_uses_legacy(self):
-        """comparison_tickers=None triggers legacy fallback."""
+    def test_none_value_raises(self):
+        """comparison_tickers=None raises ValueError."""
         config = {"comparison_tickers": None}
-        result = parse_comparison_tickers(config)
-
-        assert len(result["all_symbols"]) == 4  # Legacy defaults
+        with pytest.raises(ValueError, match="comparison_tickers"):
+            parse_comparison_tickers(config)
 
     def test_duplicate_symbol_keeps_first(self):
         """Duplicate symbols are skipped (first occurrence kept)."""
