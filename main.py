@@ -382,7 +382,10 @@ def main():
         logger.info("-" * 60)
         logger.info(f"  Actual Data Period : {_spy_actual_start} -> {_spy_actual_end}  (via SPY)")
         logger.info("-" * 60)
-        logger.info(f"SPY B&H: {spy_buy_and_hold_return:.2%}, QQQ B&H: {qqq_buy_and_hold_return:.2%}")
+        if _benchmark == "QQQ":
+            logger.info(f"SPY B&H: {spy_buy_and_hold_return:.2%}, QQQ B&H: {qqq_buy_and_hold_return:.2%}")
+        else:
+            logger.info(f"SPY B&H: {spy_buy_and_hold_return:.2%}")
     except Exception as e:
         logger.error(f"FATAL: Could not fetch dependency data: {e}")
         return
