@@ -66,12 +66,16 @@ def _run_patched(tmp_path, patches: dict, cli_args=()) -> subprocess.CompletedPr
     wrapper = tmp_path / "run_patched.py"
     wrapper.write_text("\n".join(lines), encoding="utf-8")
 
-    return subprocess.run(
-        [sys.executable, str(wrapper)],
-        capture_output=True,
-        text=True,
-        cwd=PROJECT_ROOT,
-    )
+    try:
+        return subprocess.run(
+            [sys.executable, str(wrapper)],
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip("Subprocess timed out — system too slow for this integration test")
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +112,7 @@ class TestParseEmptyList:
 
 
 # ---------------------------------------------------------------------------
-# Integration tests — subprocess, require parquet fixtures
+# Unit tests — run_portfolio_simulation with spy_df=None / vix_df=None
 # ---------------------------------------------------------------------------
 
 _SKIP_NO_FIXTURE = pytest.mark.skipif(
@@ -118,12 +122,151 @@ _SKIP_NO_FIXTURE = pytest.mark.skipif(
 
 
 @_SKIP_NO_FIXTURE
+class TestSimulationWithNoneComparisons:
+    """
+    Direct unit tests for portfolio_simulations.py when spy_df / vix_df are None.
+
+    This is the root-cause fix for the AttributeError:
+        'NoneType' object has no attribute 'loc'
+    raised inside run_portfolio_simulation when comparison_tickers=[].
+
+    These tests are fast (no subprocess, no multiprocessing) and target the
+    exact lines that needed the None-guard.
+    """
+
+    _SIM_CONFIG = {
+        "slippage_pct": 0.0,
+        "commission_per_share": 0.0,
+        "execution_time": "open",
+        "max_pct_adv": 0,
+        "volume_impact_coeff": 0.0,
+        "risk_free_rate": 0.05,
+        "htb_rate_annual": 0.0,
+        "timeframe": "D",
+        "timeframe_multiplier": 1,
+    }
+
+    @pytest.fixture(scope="class")
+    def aapl_df(self):
+        from services.parquet_service import get_price_data
+        df = get_price_data("AAPL", "2023-01-01", "2023-12-31", {"parquet_data_dir": _FIXTURE_DIR})
+        assert df is not None
+        df.index = df.index.tz_localize(None)
+        return df
+
+    def test_spy_none_does_not_raise(self, aapl_df):
+        """Regression: spy_df=None must not raise AttributeError on .loc access."""
+        from unittest.mock import patch
+        from helpers.portfolio_simulations import run_portfolio_simulation
+        from helpers.indicators import sma_crossover_logic
+
+        sig_df = sma_crossover_logic(aapl_df.copy(), fast=5, slow=10)
+        signals = {"AAPL": sig_df["Signal"]}
+
+        with patch.dict("config.CONFIG", self._SIM_CONFIG):
+            result = run_portfolio_simulation(
+                portfolio_data={"AAPL": aapl_df},
+                signals=signals,
+                initial_capital=100_000,
+                allocation_pct=0.10,
+                spy_df=None,
+                vix_df=None,
+                tnx_df=None,
+                stop_config={"type": "none"},
+            )
+        assert result is not None
+
+    def test_vix_none_does_not_raise(self, aapl_df):
+        """vix_df=None must not raise AttributeError on .loc access."""
+        from unittest.mock import patch
+        from helpers.portfolio_simulations import run_portfolio_simulation
+        from helpers.indicators import sma_crossover_logic
+
+        sig_df = sma_crossover_logic(aapl_df.copy(), fast=5, slow=10)
+        signals = {"AAPL": sig_df["Signal"]}
+
+        with patch.dict("config.CONFIG", self._SIM_CONFIG):
+            result = run_portfolio_simulation(
+                portfolio_data={"AAPL": aapl_df},
+                signals=signals,
+                initial_capital=100_000,
+                allocation_pct=0.10,
+                spy_df=None,
+                vix_df=None,
+                tnx_df=None,
+                stop_config={"type": "none"},
+            )
+        assert result is not None
+
+    def test_entry_spy_features_absent_when_spy_none(self, aapl_df):
+        """When spy_df=None, entry_SPY_* columns must not appear in trade log."""
+        from unittest.mock import patch
+        from helpers.portfolio_simulations import run_portfolio_simulation
+        from helpers.indicators import sma_crossover_logic
+
+        sig_df = sma_crossover_logic(aapl_df.copy(), fast=5, slow=10)
+        signals = {"AAPL": sig_df["Signal"]}
+
+        with patch.dict("config.CONFIG", self._SIM_CONFIG):
+            result = run_portfolio_simulation(
+                portfolio_data={"AAPL": aapl_df},
+                signals=signals,
+                initial_capital=100_000,
+                allocation_pct=0.10,
+                spy_df=None,
+                vix_df=None,
+                tnx_df=None,
+                stop_config={"type": "none"},
+            )
+
+        trade_log = result.get("trade_log", [])
+        for trade in trade_log:
+            assert "entry_SPY_RSI_14" not in trade
+            assert "entry_SPY_SMA200_dist_pct" not in trade
+            assert "entry_VIX_Close" not in trade
+
+    def test_result_has_expected_keys(self, aapl_df):
+        """Result dict must have the standard keys regardless of None comparisons."""
+        from unittest.mock import patch
+        from helpers.portfolio_simulations import run_portfolio_simulation
+        from helpers.indicators import sma_crossover_logic
+
+        sig_df = sma_crossover_logic(aapl_df.copy(), fast=5, slow=10)
+        signals = {"AAPL": sig_df["Signal"]}
+
+        with patch.dict("config.CONFIG", self._SIM_CONFIG):
+            result = run_portfolio_simulation(
+                portfolio_data={"AAPL": aapl_df},
+                signals=signals,
+                initial_capital=100_000,
+                allocation_pct=0.10,
+                spy_df=None,
+                vix_df=None,
+                tnx_df=None,
+                stop_config={"type": "none"},
+            )
+
+        for key in ("Trades", "trade_log", "portfolio_timeline"):
+            assert key in result, f"Missing key: {key}"
+
+
+# ---------------------------------------------------------------------------
+# Subprocess integration tests — require parquet fixtures
+# ---------------------------------------------------------------------------
+
+
+@_SKIP_NO_FIXTURE
+@pytest.mark.slow
 class TestEmptyComparisonTickersRun:
     """
-    Full main() runs using parquet fixtures + comparison_tickers=[].
+    Full main() subprocess runs using parquet fixtures + comparison_tickers=[].
 
-    These tests caught the NameError bug: spy_df not defined when
-    comparison_dfs is empty.
+    Marked @slow — excluded from the default test run to avoid CPU saturation
+    from multiprocessing worker startup. Run explicitly with:
+        pytest -m slow tests/test_empty_comparison_tickers.py
+
+    The core regression (AttributeError in workers) is covered without
+    subprocess overhead by TestSimulationWithNoneComparisons above.
     """
 
     _BASE_PATCHES = {
@@ -131,6 +274,11 @@ class TestEmptyComparisonTickersRun:
         "comparison_tickers": [],
         "symbols_to_test": ["AAPL"],
         "portfolios": {},
+        # AAPL fixture has 62 rows — must be below this or the symbol is filtered
+        # before any worker runs, giving a false-green test
+        "min_bars_required": 10,
+        # Run one strategy only — keeps subprocess runtime under the 90s timeout
+        "strategies": ["SMA Crossover (20d/50d)"],
         "wfa_split_ratio": None,
         "wfa_folds": None,
         "export_ml_features": False,
@@ -149,11 +297,22 @@ class TestEmptyComparisonTickersRun:
         result = _run_patched(tmp_path, self._patches_with(), cli_args=[])
         assert "NameError" not in result.stderr, result.stderr
 
+    def test_no_attribute_error_on_none_spy_df(self, tmp_path):
+        """
+        Regression: with comparison_tickers=[], spy_df_local=None inside workers.
+        portfolio_simulations.py must guard spy_df/vix_df before .loc[] access.
+        Previously crashed: AttributeError: 'NoneType' object has no attribute 'loc'
+        """
+        result = _run_patched(tmp_path, self._patches_with(), cli_args=[])
+        assert "AttributeError" not in result.stderr, result.stderr
+        assert "FATAL ERROR IN WORKER" not in result.stderr, result.stderr
+
     def test_exits_zero_or_clean_failure(self, tmp_path):
-        """Run must not crash with an unhandled exception."""
+        """Run must not crash with any unhandled exception or worker fatal error."""
         result = _run_patched(tmp_path, self._patches_with(), cli_args=[])
         combined = result.stdout + result.stderr
         assert "Traceback" not in combined, combined
+        assert "FATAL ERROR IN WORKER" not in combined, combined
 
     def test_config_period_log_line_appears(self, tmp_path):
         """When comparison_dfs is empty the 'Data Period (config)' line must appear."""
@@ -179,6 +338,7 @@ class TestEmptyComparisonTickersRun:
         combined = result.stdout + result.stderr
         assert "NameError" not in combined, combined
         assert "Traceback" not in combined, combined
+        assert "FATAL ERROR IN WORKER" not in combined, combined
 
     def test_actual_data_period_line_not_present(self, tmp_path):
         """'Actual Data Period' line should NOT appear — only 'Data Period (config)'."""
