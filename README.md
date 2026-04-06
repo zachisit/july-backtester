@@ -81,7 +81,7 @@ graph TD
 
 ```python
 "data_provider": "yahoo",
-"symbols_to_test": ["SPY"],
+"portfolios": {"My Symbols": ["SPY"]},
 "start_date": "2010-01-01",
 "initial_capital": 100000.0,
 ```

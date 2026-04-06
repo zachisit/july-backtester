@@ -6,15 +6,14 @@
 Python backtesting engine for US equities. Tests 20+ technical strategies across single symbols or large portfolios (Nasdaq, S&P 500, etc.) with Monte Carlo robustness scoring.
 
 ## Entry Points
-- `main.py` — portfolio mode (default), multiprocessing across all CPU cores
-- `main.py --mode single` — single-asset mode, all strategies vs `symbols_to_test`
+- `main.py` — runs all entries in `portfolios`; a single-ticker basket like `"My Symbols": ["AAPL"]` replaces the old single-asset mode
 - `main.py --name "run-name"` — optional prefix for report folder and S3 path
 - `main.py --verbose` — print two additional tables beneath the default Core Performance table: Extended Metrics (RS(avg/min/last), MaxRcvry, AvgRcvry, Calmar, PF, WinRate, Trades, Expct(R), SQN) and Robustness (OOS P&L, WFA Verdict, RollWFA, Corr, MC, MC Score). Default output shows Core Performance only.
 
 ## Key Files
 ```
 config.py                          # All settings — edit this before running
-main.py                            # Single entry point (--mode portfolio|single --name)
+main.py                            # Single entry point (--name, --verbose, --dry-run, --init)
 helpers/indicators.py              # All strategy signal logic — do not touch
 helpers/registry.py                # Strategy registry: register_strategy decorator, load_strategies, get_active_strategies
 helpers/simulations.py             # Single-asset trade simulation engine
@@ -56,8 +55,8 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "initial_capital": 100000.0
 "timeframe": "D"                   # D, H, MIN, W, M
 "timeframe_multiplier": 1          # e.g. 5 for 5-min bars
-"symbols_to_test": ["AAPL"]        # single-asset mode
-"portfolios": {"Nasdaq 100": "nasdaq_100.json"}  # portfolio mode
+"portfolios": {"My Symbols": ["AAPL"]}             # single ticker (replaces old symbols_to_test)
+"portfolios": {"Nasdaq 100": "nasdaq_100.json"}  # pre-built JSON list
 "allocation_per_trade": 0.10       # 10% equity per position
 "stop_loss_configs": [{"type": "none"}]  # or {"type":"percentage","value":0.05}
 "slippage_pct": 0.0005
@@ -433,7 +432,7 @@ Interactive four-step wizard for first-time setup. Writes `config_starter.py` to
 **Four steps:**
 1. **Data provider** — choose `yahoo` / `csv` / `polygon` / `norgate`. If Polygon is selected, optionally enter the API key (appended to `.env`).
 2. **Capital & dates** — `initial_capital` (default 100 000), `start_date` (default 2010-01-01). End date is always a dynamic `datetime.now()` expression in the written file.
-3. **What to test** — `single` (comma-separated tickers → `symbols_to_test`) or `portfolio` (nasdaq100 JSON or custom named list → `portfolios`).
+3. **What to test** — `single` (comma-separated tickers → written as `"My Symbols": [...]` in `portfolios`) or `portfolio` (nasdaq100 JSON or custom named list → `portfolios`).
 4. **Confirm & write** — shows a file list, asks for explicit `y/n` confirmation before writing anything.
 
 **Design constraints:**
