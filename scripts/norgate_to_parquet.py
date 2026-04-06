@@ -24,6 +24,12 @@ Usage:
     # Resume a previously interrupted export (skips existing files):
     python scripts/norgate_to_parquet.py --watchlist "Russell 3000" --skip-existing
 
+    # Export hourly bars:
+    python scripts/norgate_to_parquet.py --watchlist "Nasdaq 100" --timeframe H
+
+    # Export 5-minute bars:
+    python scripts/norgate_to_parquet.py --tickers AAPL --timeframe MIN --multiplier 5
+
 Output:
     One Parquet file per symbol in the output directory:
         parquet_data/AAPL.parquet
@@ -148,6 +154,15 @@ def main():
         "--end-date", type=str, default=None,
         help="End date for data export (default: today)",
     )
+    parser.add_argument(
+        "--timeframe", type=str, choices=["D", "H", "MIN"], default="D",
+        help="Bar timeframe: D=daily (default), H=hourly, MIN=minute",
+    )
+    parser.add_argument(
+        "--multiplier", type=int, default=1,
+        help="Timeframe multiplier (e.g. 5 for 5-minute bars, default: 1)",
+    )
+
     args = parser.parse_args()
 
     # --- Validate norgatedata is available ---
@@ -170,8 +185,8 @@ def main():
         "data_provider": "norgate",
         "start_date": args.start_date,
         "end_date": end_date,
-        "timeframe": "D",
-        "timeframe_multiplier": 1,
+        "timeframe": args.timeframe,
+        "timeframe_multiplier": args.multiplier,
         "price_adjustment": norgatedata.StockPriceAdjustmentType.TOTALRETURN,
     }
 
