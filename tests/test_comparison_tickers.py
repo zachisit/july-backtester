@@ -200,14 +200,16 @@ class TestParseFallbackAndEdgeCases:
         with pytest.raises(ValueError, match="comparison_tickers"):
             parse_comparison_tickers(config)
 
-    def test_empty_list_raises(self):
-        """Empty comparison_tickers list raises ValueError."""
+    def test_empty_list_returns_empty_structure(self):
+        """Empty list is valid — returns empty benchmarks/dependencies/all_symbols."""
         config = {"comparison_tickers": []}
-        with pytest.raises(ValueError, match="comparison_tickers"):
-            parse_comparison_tickers(config)
+        result = parse_comparison_tickers(config)
+        assert result["benchmarks"] == []
+        assert result["dependencies"] == {}
+        assert result["all_symbols"] == []
 
     def test_none_value_raises(self):
-        """comparison_tickers=None raises ValueError."""
+        """comparison_tickers=None (key present but None) raises ValueError."""
         config = {"comparison_tickers": None}
         with pytest.raises(ValueError, match="comparison_tickers"):
             parse_comparison_tickers(config)

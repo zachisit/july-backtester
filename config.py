@@ -77,9 +77,9 @@ CONFIG = {
     #   "benchmark"  — shown as a B&H return column in the summary table
     #   "dependency" — injected into strategies that declare dependencies=["spy"] etc.
     #   "both"       — serves both roles
-    # Remove any entry whose data you don't have (e.g. when using parquet provider
-    # without SPY/VIX parquet files). At minimum keep one symbol with role "benchmark"
-    # or "both" so the engine can determine the actual data period.
+    # Set to [] to run with no comparison tickers (e.g. pure parquet runs where you
+    # have no SPY/VIX files). The engine falls back to config start_date/end_date for
+    # the period. Strategies declaring dependencies=["spy"] etc. will be skipped.
     "comparison_tickers": [
         {"symbol": "SPY",   "role": "both",       "label": "SPY"},
         {"symbol": "I:VIX", "role": "dependency", "label": "VIX"},

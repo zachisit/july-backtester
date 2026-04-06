@@ -108,7 +108,7 @@ def parse_comparison_tickers(config: dict) -> dict[str, Any]:
     """
     comparison_tickers = config.get("comparison_tickers")
 
-    if not comparison_tickers:
+    if comparison_tickers is None:
         raise ValueError(
             "CONFIG['comparison_tickers'] is not set. "
             "Add it to config.py — for example:\n\n"
@@ -119,8 +119,13 @@ def parse_comparison_tickers(config: dict) -> dict[str, Any]:
             "    ]\n\n"
             "Set role='benchmark' to compare B&H returns, "
             "'dependency' to make the ticker available to strategies, "
-            "or 'both' for both."
+            "or 'both' for both. "
+            "Use [] to run with no comparison tickers."
         )
+
+    # Empty list is explicitly valid — user wants no comparison tickers
+    if not comparison_tickers:
+        return {"benchmarks": [], "dependencies": {}, "all_symbols": [], "comparison_tickers": []}
 
     # Parse and validate each ticker entry
     benchmarks = []

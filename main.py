@@ -390,22 +390,21 @@ def main():
             else:
                 logger.warning(f"Failed to fetch data for comparison ticker '{symbol}' (normalized: '{normalized}')")
 
-        # Extract SPY for actual period computation (fallback to first available comparison ticker)
-        spy_df = comparison_dfs.get("SPY")
-        if spy_df is None and comparison_dfs:
-            # Fallback: use the first available ticker for period info
-            first_symbol = list(comparison_dfs.keys())[0]
-            spy_df = comparison_dfs[first_symbol]
-            logger.warning(f"SPY not available — using '{first_symbol}' for Actual Data Period")
-
-        if spy_df is None:
-            raise ValueError("No comparison tickers available — cannot determine actual data period")
-
-        _spy_actual_start = spy_df.index.min().strftime("%Y-%m-%d")
-        _spy_actual_end   = spy_df.index.max().strftime("%Y-%m-%d")
-        logger.info("-" * 60)
-        logger.info(f"  Actual Data Period : {_spy_actual_start} -> {_spy_actual_end}")
-        logger.info("-" * 60)
+        # Derive actual data period from comparison ticker data if available,
+        # otherwise fall back to config dates (valid when comparison_tickers = [])
+        if comparison_dfs:
+            ref_df = comparison_dfs.get("SPY") or next(iter(comparison_dfs.values()))
+            _spy_actual_start = ref_df.index.min().strftime("%Y-%m-%d")
+            _spy_actual_end   = ref_df.index.max().strftime("%Y-%m-%d")
+            logger.info("-" * 60)
+            logger.info(f"  Actual Data Period : {_spy_actual_start} -> {_spy_actual_end}")
+            logger.info("-" * 60)
+        else:
+            _spy_actual_start = CONFIG["start_date"]
+            _spy_actual_end   = CONFIG.get("end_date") or datetime.now().strftime("%Y-%m-%d")
+            logger.info("-" * 60)
+            logger.info(f"  Data Period (config): {_spy_actual_start} -> {_spy_actual_end}  (no comparison tickers)")
+            logger.info("-" * 60)
 
         # Calculate benchmark returns
         for bm in comparison_config["benchmarks"]:
