@@ -245,6 +245,9 @@ def normalize_ticker(symbol: str, provider: str) -> str:
     '^XYZ'  # Unknown index — fallback
     """
     provider = provider.lower()
+    # Parquet files use bare symbol names (VIX.parquet, TNX.parquet) — same as CSV.
+    if provider == "parquet":
+        provider = "csv"
     canonical_name, original_format = _extract_canonical_name(symbol)
 
     # Not an index — equity ticker, pass through unchanged

@@ -12,7 +12,7 @@ Tests trading strategies against full historical US equity data, runs 1,000-path
 
 **Intraday support**: Backtest on hourly (1H, 4H), 5-minute, 15-minute, or 30-minute bars with automatic metrics annualization (Sharpe, Sortino, HTB fees).
 
-Supports Polygon, Norgate, Yahoo Finance, and local CSV. Free to run against Yahoo Finance with no API key.
+Supports Polygon, Norgate, Yahoo Finance, local CSV, and local Parquet. Free to run against Yahoo Finance with no API key.
 
 Full reference: [docs/README_full.md](docs/README_full.md)
 

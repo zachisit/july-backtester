@@ -17,6 +17,7 @@ def get_data_service():
         "norgate" — Norgate Data local API
         "yahoo"   — Yahoo Finance via yfinance
         "csv"     — Local CSV files (see config["csv_data_dir"])
+        "parquet" — Local Parquet files (see config["parquet_data_dir"])
     """
     provider = CONFIG.get("data_provider", "polygon").lower()
 
@@ -39,9 +40,14 @@ def get_data_service():
         from .csv_service import get_price_data as _fetcher
         return _fetcher
 
+    if provider == "parquet":
+        logger.info("Using local Parquet data service.")
+        from .parquet_service import get_price_data as _fetcher
+        return _fetcher
+
     raise ValueError(
         f"Unsupported data_provider '{provider}'. "
-        f"Valid options: 'polygon', 'norgate', 'yahoo', 'csv'."
+        f"Valid options: 'polygon', 'norgate', 'yahoo', 'csv', 'parquet'."
     )
 
 def get_previous_close_service():

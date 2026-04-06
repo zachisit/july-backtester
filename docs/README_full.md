@@ -144,7 +144,7 @@ All settings live in one file: [config.py](../config.py). Open it in any text ed
 
 - [ ] Add `POLYGON_API_KEY` to your `.env` file (copy `.env.example` to get started)
 - [ ] Set `upload_to_s3` and `s3_reports_bucket` if you want S3 uploads (optional)
-- [ ] Choose `data_provider`: `"polygon"`, `"norgate"`, `"yahoo"`, or `"csv"`
+- [ ] Choose `data_provider`: `"polygon"`, `"norgate"`, `"yahoo"`, `"csv"`, or `"parquet"`
 - [ ] Set `start_date` and `initial_capital`
 - [ ] Add at least one entry to `portfolios` in `config.py` (single ticker, list, or JSON file)
 
