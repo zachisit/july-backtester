@@ -369,8 +369,12 @@ def main():
     try:
         spy_df = data_fetcher('SPY', CONFIG["start_date"], CONFIG["end_date"], CONFIG)
         spy_buy_and_hold_return = (spy_df['Close'].iloc[-1] - spy_df['Close'].iloc[0]) / spy_df['Close'].iloc[0]
-        qqq_df = data_fetcher('QQQ', CONFIG["start_date"], CONFIG["end_date"], CONFIG)
-        qqq_buy_and_hold_return = (qqq_df['Close'].iloc[-1] - qqq_df['Close'].iloc[0]) / qqq_df['Close'].iloc[0]
+        _benchmark = CONFIG.get("benchmark_symbol", "SPY").upper()
+        if _benchmark == "QQQ":
+            qqq_df = data_fetcher('QQQ', CONFIG["start_date"], CONFIG["end_date"], CONFIG)
+            qqq_buy_and_hold_return = (qqq_df['Close'].iloc[-1] - qqq_df['Close'].iloc[0]) / qqq_df['Close'].iloc[0]
+        else:
+            qqq_buy_and_hold_return = 0.0
         vix_df = data_fetcher("I:VIX", CONFIG["start_date"], CONFIG["end_date"], CONFIG) # Simplified
         tnx_df = data_fetcher("I:TNX", CONFIG["start_date"], CONFIG["end_date"], CONFIG) # Simplified
         _spy_actual_start = spy_df.index.min().strftime("%Y-%m-%d")
