@@ -345,3 +345,86 @@ class TestFilteringWithMultipleBenchmarks:
         # Both should appear despite terrible XLF performance
         assert "Strat1" in output
         assert "Strat2" in output
+
+
+# ---------------------------------------------------------------------------
+# Test Class 5: Call-signature regression
+# ---------------------------------------------------------------------------
+
+class TestGeneratePerPortfolioSummarySignature:
+    """
+    Regression guard for the TypeError: generate_per_portfolio_summary()
+    got multiple values for argument 'corr_matrix'.
+
+    Root cause (caught in manual QA):
+        main.py was calling with the old 5-positional-arg signature:
+            generate_per_portfolio_summary(results, name, spy_return, qqq_return, run_id, corr_matrix=x)
+        PR #60 changed the function to accept a single benchmark_returns dict:
+            generate_per_portfolio_summary(results, name, benchmark_returns, run_id, corr_matrix=None)
+        The call site was never updated, causing qqq_return to land in run_id's
+        slot and run_id to fill corr_matrix positionally, then corr_matrix=x
+        raised TypeError for duplicate keyword argument.
+
+    These tests call generate_per_portfolio_summary with the correct new
+    signature and verify it does not raise. They would fail if someone
+    reverts to the old positional pattern.
+    """
+
+    def _call_summary(self, benchmark_returns, corr_matrix=None, monkeypatch=None):
+        import config as _config_module
+        if monkeypatch:
+            monkeypatch.setitem(_config_module.CONFIG, "verbose_output", False)
+
+        result = _make_result(vs_benchmarks={k: 0.05 for k in benchmark_returns})
+        buf = io.StringIO()
+        with (
+            redirect_stdout(buf),
+            patch("helpers.summary.os.makedirs"),
+            patch.object(pd.DataFrame, "to_csv"),
+        ):
+            # Correct 4-positional-arg call: (results, name, benchmark_returns_dict, run_id)
+            generate_per_portfolio_summary(
+                [result], "TestPort", benchmark_returns, "test_run_001",
+                corr_matrix=corr_matrix,
+            )
+        return buf.getvalue()
+
+    def test_correct_signature_does_not_raise(self, monkeypatch):
+        """Calling with benchmark_returns dict (not two floats) must not raise TypeError."""
+        import config as _config_module
+        monkeypatch.setitem(_config_module.CONFIG, "verbose_output", False)
+        # Should not raise
+        self._call_summary({"SPY": 0.12}, monkeypatch=monkeypatch)
+
+    def test_old_positional_pattern_raises_type_error(self, monkeypatch):
+        """
+        Guard: passing spy_return + qqq_return as two separate positional args
+        must raise TypeError so the caller cannot silently regress.
+        """
+        import config as _config_module
+        monkeypatch.setitem(_config_module.CONFIG, "verbose_output", False)
+
+        result = _make_result(vs_benchmarks={"SPY": 0.05})
+        with pytest.raises(TypeError):
+            with (
+                patch("helpers.summary.os.makedirs"),
+                patch.object(pd.DataFrame, "to_csv"),
+            ):
+                # Old broken call: 5 positional args + keyword corr_matrix
+                generate_per_portfolio_summary(
+                    [result], "TestPort", 0.12, 0.08, "test_run_001",
+                    corr_matrix=None,
+                )
+
+    def test_with_corr_matrix_kwarg_does_not_raise(self, monkeypatch):
+        """corr_matrix keyword arg is passed correctly with new signature."""
+        import config as _config_module
+        monkeypatch.setitem(_config_module.CONFIG, "verbose_output", False)
+        dummy_corr = pd.DataFrame({"A": [1.0]}, index=["A"])
+        self._call_summary({"SPY": 0.12}, corr_matrix=dummy_corr, monkeypatch=monkeypatch)
+
+    def test_empty_benchmark_returns_dict_does_not_raise(self, monkeypatch):
+        """Empty benchmark dict (comparison_tickers=[]) must not raise."""
+        import config as _config_module
+        monkeypatch.setitem(_config_module.CONFIG, "verbose_output", False)
+        self._call_summary({}, monkeypatch=monkeypatch)

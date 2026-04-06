@@ -628,10 +628,7 @@ def main():
         except Exception as _corr_err:
             logger.warning(f"  Correlation analysis skipped for '{p_name}': {_corr_err}")
 
-        # Extract SPY and QQQ returns for backward compatibility with summary.py (Phase 4 will update this)
-        spy_return = benchmark_returns.get("SPY", 0.0)
-        qqq_return = benchmark_returns.get("QQQ", 0.0)
-        generate_per_portfolio_summary(p_results, p_name, spy_return, qqq_return, run_folder_name, corr_matrix=corr_matrix)
+        generate_per_portfolio_summary(p_results, p_name, benchmark_returns, run_folder_name, corr_matrix=corr_matrix)
 
         from helpers.regime import print_regime_heatmap as _print_heatmap
         for _r in p_results:
