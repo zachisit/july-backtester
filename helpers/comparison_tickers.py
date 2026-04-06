@@ -108,13 +108,19 @@ def parse_comparison_tickers(config: dict) -> dict[str, Any]:
     """
     comparison_tickers = config.get("comparison_tickers")
 
-    # Fallback to legacy if not set or empty
     if not comparison_tickers:
-        logger.debug(
-            "comparison_tickers not set in config — using legacy defaults "
-            "(SPY, QQQ, VIX, TNX)"
+        raise ValueError(
+            "CONFIG['comparison_tickers'] is not set. "
+            "Add it to config.py — for example:\n\n"
+            '    "comparison_tickers": [\n'
+            '        {"symbol": "SPY",   "role": "both"},\n'
+            '        {"symbol": "I:VIX", "role": "dependency"},\n'
+            '        {"symbol": "I:TNX", "role": "dependency"},\n'
+            "    ]\n\n"
+            "Set role='benchmark' to compare B&H returns, "
+            "'dependency' to make the ticker available to strategies, "
+            "or 'both' for both."
         )
-        comparison_tickers = get_legacy_comparison_tickers()
 
     # Parse and validate each ticker entry
     benchmarks = []

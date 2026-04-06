@@ -71,11 +71,20 @@ CONFIG = {
     # Use a simple string for this setting. The service modules interpret it.
     "price_adjustment": "total_return", # Options: "total_return" or "none"
 
-    # --- Benchmark Symbol ---
-    # Pipe in a benchmark to compare the backtest to.
-    # Based on 'buy and hold' comparison only.
-    # Limited to one symbol.
-    "benchmark_symbol": "SPY",
+    # --- Comparison Tickers ---
+    # Controls which external symbols are fetched alongside your portfolio data.
+    # Roles:
+    #   "benchmark"  — shown as a B&H return column in the summary table
+    #   "dependency" — injected into strategies that declare dependencies=["spy"] etc.
+    #   "both"       — serves both roles
+    # Remove any entry whose data you don't have (e.g. when using parquet provider
+    # without SPY/VIX parquet files). At minimum keep one symbol with role "benchmark"
+    # or "both" so the engine can determine the actual data period.
+    "comparison_tickers": [
+        {"symbol": "SPY",   "role": "both",       "label": "SPY"},
+        {"symbol": "I:VIX", "role": "dependency", "label": "VIX"},
+        {"symbol": "I:TNX", "role": "dependency", "label": "TNX"},
+    ],
 
     # ============================================================
     # SECTION 5: FILE OUTPUT
