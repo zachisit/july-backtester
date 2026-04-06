@@ -46,7 +46,7 @@ class TestPrintReportHint:
 
     def test_command_contains_correct_path(self):
         run_id = "2026-04-05_21-01-37"
-        expected_path = os.path.join("output", "runs", run_id)
+        expected_path = f"output/runs/{run_id}"
         lines = self._captured_calls(run_id)
         assert any(expected_path in l for l in lines)
 

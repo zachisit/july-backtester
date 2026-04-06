@@ -618,7 +618,7 @@ def main():
 
 def _print_report_hint(run_folder_name: str) -> None:
     """Log a copy-paste ready report command at the end of a run."""
-    run_path = os.path.join("output", "runs", run_folder_name)
+    run_path = f"output/runs/{run_folder_name}"
     cmd = f"python report.py --all {run_path}"
     bar = "━" * len(cmd)
     logger.info(bar)
