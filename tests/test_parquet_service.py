@@ -33,6 +33,7 @@ from services.parquet_service import (
     _find_parquet,
     _normalise_columns,
     _resolve_dir,
+    _sanitize_filename,
     _to_utc_index,
     get_price_data,
 )
@@ -512,3 +513,36 @@ class TestServiceRegistration:
         with mock.patch.object(svc_mod, "CONFIG", {"data_provider": "unsupported_xyz"}):
             with pytest.raises(ValueError, match="unsupported_xyz"):
                 svc_mod.get_data_service()
+
+
+# ---------------------------------------------------------------------------
+# TestSanitizedFilenames
+# ---------------------------------------------------------------------------
+
+class TestSanitizedFilenames:
+    """Tests for filename sanitization of index symbols (e.g. I:VIX → I_VIX)."""
+
+    def test_sanitize_colon(self):
+        assert _sanitize_filename("I:VIX") == "I_VIX"
+
+    def test_sanitize_plain_ticker_unchanged(self):
+        assert _sanitize_filename("AAPL") == "AAPL"
+
+    def test_sanitize_dollar_colon(self):
+        assert _sanitize_filename("$I:TNX") == "$I_TNX"
+
+    def test_find_parquet_sanitized_symbol(self, tmp_path):
+        """_find_parquet('I:VIX', ...) must find I_VIX.parquet."""
+        (tmp_path / "I_VIX.parquet").write_bytes(b"fake")
+        result = _find_parquet("I:VIX", str(tmp_path))
+        assert result is not None
+        assert result.endswith("I_VIX.parquet")
+
+    def test_get_price_data_sanitized_symbol(self, tmp_path):
+        """get_price_data('I:VIX', ...) must load data from I_VIX.parquet."""
+        df = _make_ohlcv_df(10)
+        df.to_parquet(tmp_path / "I_VIX.parquet")
+        config = _config_for(tmp_path)
+        result = get_price_data("I:VIX", "2023-01-01", "2023-12-31", config)
+        assert isinstance(result, pd.DataFrame)
+        assert not result.empty

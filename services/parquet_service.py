@@ -30,6 +30,16 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CANONICAL_COLS = ["Open", "High", "Low", "Close", "Volume"]
 
+# Characters illegal in Windows filenames (and generally problematic on any OS)
+_ILLEGAL_FILENAME_CHARS = r'\/:*?"<>|'
+
+
+def _sanitize_filename(symbol: str) -> str:
+    """Replace characters that are illegal in Windows filenames with underscores."""
+    for ch in _ILLEGAL_FILENAME_CHARS:
+        symbol = symbol.replace(ch, "_")
+    return symbol
+
 
 def _resolve_dir(config: dict) -> str:
     """Return the absolute path to the parquet data directory."""
@@ -48,14 +58,17 @@ def _find_parquet(symbol: str, parquet_dir: str) -> str | None:
         logger.warning(f"Parquet data directory does not exist: {parquet_dir}")
         return None
 
+    # Sanitize the symbol so I:VIX looks for I_VIX.parquet
+    safe = _sanitize_filename(symbol)
+
     # Try exact match first, then case-insensitive
-    for candidate in [f"{symbol}.parquet", f"{symbol.upper()}.parquet", f"{symbol.lower()}.parquet"]:
+    for candidate in [f"{safe}.parquet", f"{safe.upper()}.parquet", f"{safe.lower()}.parquet"]:
         path = os.path.join(parquet_dir, candidate)
         if os.path.isfile(path):
             return path
 
     # Brute-force case-insensitive scan
-    target = f"{symbol.upper()}.parquet"
+    target = f"{safe.upper()}.parquet"
     for fname in os.listdir(parquet_dir):
         if fname.upper() == target:
             return os.path.join(parquet_dir, fname)

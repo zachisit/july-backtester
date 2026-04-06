@@ -32,6 +32,10 @@ Output:
 
     Each file has columns: Open, High, Low, Close, Volume
     with a DatetimeIndex.
+
+    Symbols containing illegal filename characters (e.g. I:VIX) are
+    sanitized: colons and other special characters become underscores
+    (I:VIX → I_VIX.parquet).
 """
 
 import argparse
@@ -56,6 +60,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Characters illegal in Windows filenames (and generally problematic on any OS)
+_ILLEGAL_FILENAME_CHARS = r'\/:*?"<>|'
+
+
+def _sanitize_filename(symbol: str) -> str:
+    """Replace characters that are illegal in Windows filenames with underscores."""
+    for ch in _ILLEGAL_FILENAME_CHARS:
+        symbol = symbol.replace(ch, "_")
+    return symbol
+
 
 def get_watchlist_symbols(watchlist_name: str) -> list[str]:
     """Fetch all symbols from a Norgate watchlist."""
@@ -75,7 +89,7 @@ def export_symbol(symbol: str, output_dir: Path, config: dict, skip_existing: bo
     """
     from services.norgate_service import get_price_data
 
-    output_path = output_dir / f"{symbol}.parquet"
+    output_path = output_dir / f"{_sanitize_filename(symbol)}.parquet"
 
     if skip_existing and output_path.exists():
         return True
@@ -134,7 +148,6 @@ def main():
         "--end-date", type=str, default=None,
         help="End date for data export (default: today)",
     )
-
     args = parser.parse_args()
 
     # --- Validate norgatedata is available ---
@@ -187,7 +200,7 @@ def main():
     start_time = time.time()
 
     for i, symbol in enumerate(symbols, 1):
-        if args.skip_existing and (output_dir / f"{symbol}.parquet").exists():
+        if args.skip_existing and (output_dir / f"{_sanitize_filename(symbol)}.parquet").exists():
             skip_count += 1
             continue
 
