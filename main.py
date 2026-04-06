@@ -25,6 +25,20 @@ from helpers.noise import inject_price_noise
 
 logger = logging.getLogger(__name__)
 
+
+def _pick_reference_df(comparison_dfs: dict) -> pd.DataFrame:
+    """Return the reference DataFrame used to derive the actual data period.
+
+    Prefers SPY when present.  Falls back to the first available ticker.
+    Uses an explicit ``is None`` check to avoid the ``bool(DataFrame)``
+    ambiguity error that arises from the ``or`` operator on DataFrames.
+    """
+    spy = comparison_dfs.get("SPY")
+    if spy is not None:
+        return spy
+    return next(iter(comparison_dfs.values()))
+
+
 # --------------------------------------------------------------------
 # --- WORKER INITIALIZER FOR MULTIPROCESSING ---
 # --------------------------------------------------------------------
@@ -393,7 +407,7 @@ def main():
         # Derive actual data period from comparison ticker data if available,
         # otherwise fall back to config dates (valid when comparison_tickers = [])
         if comparison_dfs:
-            spy_df = comparison_dfs.get("SPY") or next(iter(comparison_dfs.values()))
+            spy_df = _pick_reference_df(comparison_dfs)
             _spy_actual_start = spy_df.index.min().strftime("%Y-%m-%d")
             _spy_actual_end   = spy_df.index.max().strftime("%Y-%m-%d")
             logger.info("-" * 60)
