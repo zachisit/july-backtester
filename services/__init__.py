@@ -17,6 +17,7 @@ def get_data_service():
         "norgate" — Norgate Data local API
         "yahoo"   — Yahoo Finance via yfinance
         "csv"     — Local CSV files (see config["csv_data_dir"])
+        "parquet" — Local Parquet files (see config["parquet_data_dir"])
     """
     provider = CONFIG.get("data_provider", "polygon").lower()
 
