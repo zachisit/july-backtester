@@ -105,13 +105,19 @@ def evaluate_rolling_wfa(
     for oos_start, oos_end in fold_dates:
         # Convert fold boundary strings to pd.Timestamp for datetime handling
         oos_start_ts = pd.Timestamp(oos_start)
+        if oos_start_ts.tzinfo is not None:
+            oos_start_ts = oos_start_ts.tz_localize(None)
         oos_end_ts = pd.Timestamp(oos_end)
+        if oos_end_ts.tzinfo is not None:
+            oos_end_ts = oos_end_ts.tz_localize(None)
 
         # Convert ExitDate strings to pd.Timestamp for comparison
         is_trades = []
         oos_trades = []
         for t in trade_log:
             exit_ts = pd.Timestamp(t["ExitDate"])
+            if exit_ts.tzinfo is not None:
+                exit_ts = exit_ts.tz_localize(None)
             if exit_ts < oos_start_ts:
                 is_trades.append(t)
             elif oos_start_ts <= exit_ts < oos_end_ts:
