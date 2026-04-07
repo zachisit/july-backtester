@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from helpers.caching import get_cached_data, set_cached_data
+from helpers.ticker_normalizer import normalize_ticker
 
 load_dotenv()
 
@@ -60,6 +61,9 @@ def get_price_data(symbol, start_date, end_date, config):
     This version includes automatic pagination, correctly authenticates
     ALL requests, and dynamically handles different timeframes.
     """
+    # Normalize ticker for Polygon format (e.g., "^VIX" → "I:VIX", "SPY" → "SPY")
+    polygon_symbol = normalize_ticker(symbol, "polygon")
+
     api_key = os.environ.get("POLYGON_API_KEY")
     if not api_key:
         raise ValueError("POLYGON_API_KEY is not set. Add it to your .env file or environment.")
@@ -71,20 +75,20 @@ def get_price_data(symbol, start_date, end_date, config):
     }
     timespan = timespan_map.get(timeframe_code)
     multiplier = config.get("timeframe_multiplier", 1)
-    
+
     if not timespan:
         raise ValueError(f"Invalid timeframe '{timeframe_code}' in config. Must be one of {list(timespan_map.keys())}")
     # --- END: New Dynamic Timeframe Logic ---
 
-    cached_df = get_cached_data(symbol, start_date, end_date, timespan, multiplier)
+    cached_df = get_cached_data(polygon_symbol, start_date, end_date, timespan, multiplier)
     if cached_df is not None:
         return cached_df
-    
-    is_index = symbol.upper().startswith("I:")
+
+    is_index = polygon_symbol.upper().startswith("I:")
     is_adjusted = "false" if is_index else ("true" if config.get("price_adjustment") == "total_return" else "false")
-    
+
     # The URL is now built dynamically using the timespan and multiplier.
-    next_url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{start_date}/{end_date}"
+    next_url = f"https://api.polygon.io/v2/aggs/ticker/{polygon_symbol}/range/{multiplier}/{timespan}/{start_date}/{end_date}"
     
     params = {
         "apiKey": api_key,
@@ -142,7 +146,7 @@ def get_price_data(symbol, start_date, end_date, config):
         df.index = df.index.normalize()
 
     if not df.empty:
-        set_cached_data(df, symbol, start_date, end_date, timespan, multiplier)
+        set_cached_data(df, polygon_symbol, start_date, end_date, timespan, multiplier)
 
     return df[available_cols]
 

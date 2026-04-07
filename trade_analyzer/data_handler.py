@@ -73,13 +73,16 @@ def clean_trades_data(trades_df: pd.DataFrame, initial_equity: float) -> Tuple[p
         if new_name in trades_df.columns and old_name not in trades_df.columns:
             trades_df.rename(columns={new_name: old_name}, inplace=True)
 
-    # Convert dates
+    # Convert dates — strip tz so equity curves align with tz-naive yfinance data.
+    # Parquet-sourced runs produce UTC-aware timestamps; utc=True normalises all
+    # input formats (tz-naive, UTC, any offset) to UTC, then tz_convert(None) strips
+    # the timezone to give a consistent tz-naive DatetimeIndex across all providers.
     if 'Date' in trades_df.columns:
-        trades_df['Date'] = pd.to_datetime(trades_df['Date'], errors='coerce')
+        trades_df['Date'] = pd.to_datetime(trades_df['Date'], errors='coerce', utc=True).dt.tz_convert(None)
     else:
         raise ValueError("Required column 'Date' not found.")
     if 'Ex. date' in trades_df.columns:
-        trades_df['Ex. date'] = pd.to_datetime(trades_df['Ex. date'], errors='coerce')
+        trades_df['Ex. date'] = pd.to_datetime(trades_df['Ex. date'], errors='coerce', utc=True).dt.tz_convert(None)
     else:
          raise ValueError("Required column 'Ex. date' not found.")
     

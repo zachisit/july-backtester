@@ -37,6 +37,7 @@ Thumbs.db
 # Project outputs
 data_cache/
 output/
+# parquet_data/ is now a git submodule (july-backtester-norgate-data)
 
 tools/watchlists
 autoresearch_runs/
