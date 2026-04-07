@@ -172,8 +172,8 @@ def main():
         help="One or more ticker symbols to export",
     )
     parser.add_argument(
-        "--output-dir", type=str, default="parquet_data",
-        help="Directory for output Parquet files (default: parquet_data/)",
+        "--output-dir", type=str, default="parquet_data/data",
+        help="Directory for output Parquet files (default: parquet_data/data/)",
     )
     parser.add_argument(
         "--skip-existing", action="store_true",
