@@ -25,19 +25,33 @@ from helpers.noise import inject_price_noise
 
 logger = logging.getLogger(__name__)
 
+
+def _pick_reference_df(comparison_dfs: dict) -> pd.DataFrame:
+    """Return the reference DataFrame used to derive the actual data period.
+
+    Prefers SPY when present.  Falls back to the first available ticker.
+    Uses an explicit ``is None`` check to avoid the ``bool(DataFrame)``
+    ambiguity error that arises from the ``or`` operator on DataFrames.
+    """
+    spy = comparison_dfs.get("SPY")
+    if spy is not None:
+        return spy
+    return next(iter(comparison_dfs.values()))
+
+
 # --------------------------------------------------------------------
 # --- WORKER INITIALIZER FOR MULTIPROCESSING ---
 # --------------------------------------------------------------------
-def init_worker(spy, vix, tnx, portfolio_data_for_worker, delisting_dates_for_worker):
+def init_worker(comparison_dfs_dict, benchmark_returns_dict, dependency_map_dict, portfolio_data_for_worker, delisting_dates_for_worker):
     """
     Initializer for the multiprocessing pool.
-    Makes large dataframes AND the current portfolio's data globally
-    available to each worker process.
+    Makes comparison ticker DataFrames, benchmark returns, dependency symbol map,
+    the current portfolio's data, and delisting dates globally available to each worker process.
     """
-    global spy_df_global, vix_df_global, tnx_df_global, portfolio_data_global, delisting_dates_global
-    spy_df_global = spy
-    vix_df_global = vix
-    tnx_df_global = tnx
+    global comparison_dfs_global, benchmark_returns_global, dependency_map_global, portfolio_data_global, delisting_dates_global
+    comparison_dfs_global = comparison_dfs_dict
+    benchmark_returns_global = benchmark_returns_dict
+    dependency_map_global = dependency_map_dict
     portfolio_data_global = portfolio_data_for_worker
     delisting_dates_global = delisting_dates_for_worker
 
@@ -49,15 +63,19 @@ def run_single_simulation(args):
     This version now uses globally initialized dataframes AND portfolio_data.
     """
     # Access ALL globally initialized data
-    global spy_df_global, vix_df_global, tnx_df_global, portfolio_data_global, delisting_dates_global
+    global comparison_dfs_global, benchmark_returns_global, dependency_map_global, portfolio_data_global, delisting_dates_global
 
     # 1. Unpack the arguments. `portfolio_data` has been REMOVED from the tuple.
     portfolio_name, name, logic_func, dependencies, stop_config, \
-    spy_buy_and_hold_return, qqq_buy_and_hold_return, strategy_params, wfa_split_date, \
-    spy_actual_start, spy_actual_end = args
-    
+    strategy_params, wfa_split_date, spy_actual_start, spy_actual_end = args
+
     # Assign the global data to a local variable for clarity
     portfolio_data = portfolio_data_global
+
+    # Extract individual DataFrames for run_portfolio_simulation (legacy signature)
+    spy_df_local = comparison_dfs_global.get(dependency_map_global.get("spy"))
+    vix_df_local = comparison_dfs_global.get(dependency_map_global.get("vix"))
+    tnx_df_local = comparison_dfs_global.get(dependency_map_global.get("tnx"))
 
     try:
         strat_name = name
@@ -69,17 +87,20 @@ def run_single_simulation(args):
         base_signals_with_dfs = {}
         for symbol, df in portfolio_data.items():
             kwargs = {}
-            if 'spy' in dependencies and spy_df_global is not None:
-                kwargs['spy_df'] = spy_df_global.reindex(df.index, method='ffill')
-            if 'vix' in dependencies and vix_df_global is not None:
-                kwargs['vix_df'] = vix_df_global.reindex(df.index, method='ffill')
+
+            # Dynamic dependency injection
+            for dep_key in dependencies:
+                dep_symbol = dependency_map_global.get(dep_key)
+                if dep_symbol and dep_symbol in comparison_dfs_global:
+                    dep_df = comparison_dfs_global[dep_symbol]
+                    kwargs[f'{dep_key}_df'] = dep_df.reindex(df.index, method='ffill')
 
             if strategy_params:
                 kwargs.update(strategy_params)
 
             if len(dependencies) > 0 and any(dep + '_df' not in kwargs for dep in dependencies):
                 tqdm.write(f"\n-> WARNING for '{symbol}': Skipping strategy '{name}' due to missing dependency data.")
-                base_signals_with_dfs[symbol] = df.copy().assign(Signal=0) 
+                base_signals_with_dfs[symbol] = df.copy().assign(Signal=0)
                 continue
 
             # - If there are dependencies, kwargs contains spy_df etc.
@@ -89,11 +110,11 @@ def run_single_simulation(args):
 
         # The simulator now handles stop-loss logic internally.
         final_signals = {symbol: df['Signal'] for symbol, df in base_signals_with_dfs.items()}
-        
+
         # Call the simulation, passing the stop_config and using the global dataframes.
         result = run_portfolio_simulation(
             portfolio_data, final_signals, CONFIG["initial_capital"], CONFIG["allocation_per_trade"],
-            spy_df_global, vix_df_global, tnx_df_global, stop_config, delisting_dates_global
+            spy_df_local, vix_df_local, tnx_df_local, stop_config, delisting_dates_global
         )
         
         if result is None: return None
@@ -115,8 +136,9 @@ def run_single_simulation(args):
             else:
                 result.update({"mc_verdict": "N/A (no trades)", "mc_score": -999, "max_drawdown": 0, "calmar_ratio": 0, "sharpe_ratio": 0, "profit_factor": 0, "win_rate": 0, "avg_trade_duration": 0})
 
-            result['vs_spy_benchmark'] = result.get('pnl_percent', 0.0) - spy_buy_and_hold_return
-            result['vs_qqq_benchmark'] = result.get('pnl_percent', 0.0) - qqq_buy_and_hold_return
+            # Dynamic benchmark comparisons
+            for benchmark_label, benchmark_return in benchmark_returns_global.items():
+                result[f'vs_{benchmark_label.lower().replace(" ", "_")}_benchmark'] = result.get('pnl_percent', 0.0) - benchmark_return
 
             # --- WFA ---
             if wfa_split_date and result.get('trade_log'):
@@ -171,7 +193,7 @@ def run_single_simulation(args):
             from helpers.regime import build_regime_heatmap as _build_heatmap
             result["regime_heatmap"] = _build_heatmap(
                 result.get("trade_log", []),
-                vix_df_global,
+                vix_df_local,
                 result.get("initial_capital", CONFIG["initial_capital"]),
             )
 
@@ -232,8 +254,8 @@ def main():
     if not (0 < alloc <= 1.0):
         errors.append(f"  - allocation_per_trade ({alloc}) must be between 0 (exclusive) and 1.0 (inclusive)")
 
-    if not CONFIG.get("portfolios") and not CONFIG.get("symbols_to_test"):
-        errors.append("  - portfolios is empty. Add at least one portfolio entry to run.")
+    if not CONFIG.get("portfolios"):
+        errors.append("  - portfolios is empty. Add at least one entry to run, e.g. \"My Symbols\": [\"AAPL\"].")
 
     if errors:
         print("\n[ERROR] Invalid configuration in config.py:")
@@ -281,10 +303,7 @@ def main():
         ],
     )
 
-    # --- Single-asset mode: wrap symbols_to_test as a synthetic portfolio ---
     _portfolios = CONFIG.get("portfolios") or {}
-    if not _portfolios and CONFIG.get("symbols_to_test"):
-        _portfolios = {"Single Asset": CONFIG["symbols_to_test"]}
 
     # --- U1: RUN SUMMARY ---
     total_stop_configs = len(CONFIG.get("stop_loss_configs", []))
@@ -365,21 +384,52 @@ def main():
     data_fetcher = get_data_service()
     logger.info("PORTFOLIO STRATEGY ANALYZER")
 
-    # --- FETCHING DEPENDENCY & BENCHMARK DATA (No changes) ---
-    # (Your existing code to fetch spy_df, vix_df, etc., and calculate benchmarks is correct)
+    # --- FETCHING DEPENDENCY & BENCHMARK DATA ---
+    from helpers.comparison_tickers import parse_comparison_tickers
+    from helpers.ticker_normalizer import normalize_ticker
+
     try:
-        spy_df = data_fetcher('SPY', CONFIG["start_date"], CONFIG["end_date"], CONFIG)
-        spy_buy_and_hold_return = (spy_df['Close'].iloc[-1] - spy_df['Close'].iloc[0]) / spy_df['Close'].iloc[0]
-        qqq_df = data_fetcher('QQQ', CONFIG["start_date"], CONFIG["end_date"], CONFIG)
-        qqq_buy_and_hold_return = (qqq_df['Close'].iloc[-1] - qqq_df['Close'].iloc[0]) / qqq_df['Close'].iloc[0]
-        vix_df = data_fetcher("I:VIX", CONFIG["start_date"], CONFIG["end_date"], CONFIG) # Simplified
-        tnx_df = data_fetcher("I:TNX", CONFIG["start_date"], CONFIG["end_date"], CONFIG) # Simplified
-        _spy_actual_start = spy_df.index.min().strftime("%Y-%m-%d")
-        _spy_actual_end   = spy_df.index.max().strftime("%Y-%m-%d")
-        logger.info("-" * 60)
-        logger.info(f"  Actual Data Period : {_spy_actual_start} -> {_spy_actual_end}  (via SPY)")
-        logger.info("-" * 60)
-        logger.info(f"SPY B&H: {spy_buy_and_hold_return:.2%}, QQQ B&H: {qqq_buy_and_hold_return:.2%}")
+        comparison_config = parse_comparison_tickers(CONFIG)
+        comparison_dfs = {}
+        benchmark_returns = {}
+
+        # Fetch all comparison tickers (benchmarks + dependencies)
+        for symbol in comparison_config["all_symbols"]:
+            normalized = normalize_ticker(symbol, CONFIG["data_provider"])
+            df = data_fetcher(normalized, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
+            if df is not None and not df.empty:
+                comparison_dfs[symbol] = df
+            else:
+                logger.warning(f"Failed to fetch data for comparison ticker '{symbol}' (normalized: '{normalized}')")
+
+        # Derive actual data period from comparison ticker data if available,
+        # otherwise fall back to config dates (valid when comparison_tickers = [])
+        if comparison_dfs:
+            spy_df = _pick_reference_df(comparison_dfs)
+            _spy_actual_start = spy_df.index.min().strftime("%Y-%m-%d")
+            _spy_actual_end   = spy_df.index.max().strftime("%Y-%m-%d")
+            logger.info("-" * 60)
+            logger.info(f"  Actual Data Period : {_spy_actual_start} -> {_spy_actual_end}")
+            logger.info("-" * 60)
+        else:
+            spy_df = None
+            _spy_actual_start = CONFIG["start_date"]
+            _spy_actual_end   = CONFIG.get("end_date") or datetime.now().strftime("%Y-%m-%d")
+            logger.info("-" * 60)
+            logger.info(f"  Data Period (config): {_spy_actual_start} -> {_spy_actual_end}  (no comparison tickers)")
+            logger.info("-" * 60)
+
+        # Calculate benchmark returns
+        for bm in comparison_config["benchmarks"]:
+            symbol = bm["symbol"]
+            label = bm["label"]
+            if symbol in comparison_dfs:
+                df = comparison_dfs[symbol]
+                bnh_return = (df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0]
+                benchmark_returns[label] = bnh_return
+                logger.info(f"{label} B&H: {bnh_return:.2%}")
+            else:
+                logger.warning(f"Benchmark '{label}' (symbol: {symbol}) not available — skipping")
     except Exception as e:
         logger.error(f"FATAL: Could not fetch dependency data: {e}")
         return
@@ -526,7 +576,7 @@ def main():
                     task_args = (
                         portfolio_name, display_name, strategy_config["logic"],
                         strategy_config.get("dependencies", []),
-                        stop_config, spy_buy_and_hold_return, qqq_buy_and_hold_return,
+                        stop_config,
                         variant_params,
                         wfa_split_date,
                         _spy_actual_start, _spy_actual_end,
@@ -541,8 +591,8 @@ def main():
         logger.info("=" * 15 + f" RUNNING SIMULATIONS FOR '{portfolio_name}' " + "=" * 15)
         logger.info(f"Found {len(tasks_for_this_portfolio)} tasks. Using up to {cpu_count()} CPU cores.")
         
-        # Pass `portfolio_data` and `delisting_dates` during initialization, not with each task
-        init_args = (spy_df, vix_df, tnx_df, portfolio_data, delisting_dates)
+        # Pass comparison data, portfolio data, and delisting dates during initialization, not with each task
+        init_args = (comparison_dfs, benchmark_returns, comparison_config["dependencies"], portfolio_data, delisting_dates)
 
         with Pool(processes=cpu_count(), initializer=init_worker, initargs=init_args) as p:
             import time as _time
@@ -601,7 +651,7 @@ def main():
         except Exception as _corr_err:
             logger.warning(f"  Correlation analysis skipped for '{p_name}': {_corr_err}")
 
-        generate_per_portfolio_summary(p_results, p_name, spy_buy_and_hold_return, qqq_buy_and_hold_return, run_folder_name, corr_matrix=corr_matrix)
+        generate_per_portfolio_summary(p_results, p_name, benchmark_returns, run_folder_name, corr_matrix=corr_matrix)
 
         from helpers.regime import print_regime_heatmap as _print_heatmap
         for _r in p_results:
@@ -609,7 +659,7 @@ def main():
                 _print_heatmap(_r["regime_heatmap"], _r.get("Strategy", "Unknown"))
 
     duration_seconds = time.monotonic() - start_time
-    generate_portfolio_summary_report(all_portfolio_results, duration_seconds, run_folder_name)
+    generate_portfolio_summary_report(all_portfolio_results, benchmark_returns, duration_seconds, run_folder_name)
     generate_sensitivity_report(all_portfolio_results, run_folder_name)
 
     if CONFIG.get("export_ml_features", False):
@@ -621,6 +671,17 @@ def main():
 
     mins, secs = divmod(duration_seconds, 60)
     logger.info(f"All portfolio simulations complete in {int(mins)}m {secs:.2f}s.")
+    _print_report_hint(run_folder_name)
+
+
+def _print_report_hint(run_folder_name: str) -> None:
+    """Log a copy-paste ready report command at the end of a run."""
+    run_path = f"output/runs/{run_folder_name}"
+    cmd = f"python report.py --all {run_path}"
+    bar = "━" * len(cmd)
+    logger.info(bar)
+    logger.info(f"  Run report:  {cmd}")
+    logger.info(bar)
 
 if __name__ == "__main__":
     main()

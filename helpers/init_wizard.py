@@ -131,14 +131,11 @@ def _build_config(
     # Use explicit double-quote formatting so ast.parse() can validate
     # the output and tests can assert on '"key": "value"' patterns.
     if mode == "single":
-        symbols_line = f'    "symbols_to_test": {symbols_or_portfolio!r},'
-        portfolios_block = (
-            '"portfolios": {\n'
-            '        # Single-asset mode — symbols driven by symbols_to_test above.\n'
-            '    },'
-        )
+        # Single mode: put the ticker list directly in portfolios under "My Symbols"
+        portfolio_dict = {"My Symbols": symbols_or_portfolio}
+        portfolios_repr = repr(portfolio_dict)
+        portfolios_block = f'"portfolios": {portfolios_repr},'
     else:
-        symbols_line = '    "symbols_to_test": [],'
         portfolios_repr = repr(symbols_or_portfolio)
         portfolios_block = f'"portfolios": {portfolios_repr},'
 
@@ -161,7 +158,7 @@ f'CONFIG = {{\n'
 f'    # ============================================================\n'
 f'    # SECTION 1: DATA PROVIDER\n'
 f'    # ============================================================\n'
-f'    # Options: "polygon", "norgate", "yahoo", "csv"\n'
+f'    # Options: "polygon", "norgate", "yahoo", "csv", "parquet"\n'
 f'    "data_provider": "{provider}",\n'
 f'{polygon_note}'
 f'\n'
@@ -206,7 +203,6 @@ f'\n'
 f'    # ============================================================\n'
 f'    # SECTION 7: PORTFOLIO SETTINGS\n'
 f'    # ============================================================\n'
-f'    {symbols_line}\n'
 f'    "min_bars_required": 250,\n'
 f'    {portfolios_block}\n'
 f'\n'
@@ -333,27 +329,20 @@ def _patch_existing_config(
         text = new_text
         changes.append(f'start_date → "{start}"')
 
-    # --- symbols_to_test / portfolios ---
+    # --- portfolios ---
     if mode == "single":
-        symbols_repr = repr(symbols_or_portfolio)
-        new_text, n = re.subn(
-            r'("symbols_to_test"\s*:\s*)\[[^\]]*\]',
-            rf'\g<1>{symbols_repr}',
-            text,
-        )
-        if n:
-            text = new_text
-            changes.append(f"symbols_to_test → {symbols_repr}")
+        portfolio_dict = {"My Symbols": symbols_or_portfolio}
+        portfolios_repr = repr(portfolio_dict)
     else:
         portfolios_repr = repr(symbols_or_portfolio)
-        new_text, n = re.subn(
-            r'"portfolios"\s*:\s*\{[^}]*\}',
-            f'"portfolios": {portfolios_repr}',
-            text,
-        )
-        if n:
-            text = new_text
-            changes.append(f"portfolios → {portfolios_repr}")
+    new_text, n = re.subn(
+        r'"portfolios"\s*:\s*\{[^}]*\}',
+        f'"portfolios": {portfolios_repr}',
+        text,
+    )
+    if n:
+        text = new_text
+        changes.append(f"portfolios → {portfolios_repr}")
 
     return text, changes
 

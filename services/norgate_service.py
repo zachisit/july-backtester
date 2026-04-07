@@ -3,12 +3,17 @@
 import norgatedata
 import pandas as pd
 
+from helpers.ticker_normalizer import normalize_ticker
+
 def get_price_data(symbol, start_date, end_date, config):
     """
     Norgate implementation for fetching price data.
 
     Supports `include_delisted` config key to include delisted/failed companies.
     """
+    # Normalize ticker for Norgate format (e.g., "^VIX" → "I:VIX", "SPY" → "SPY")
+    norgate_symbol = normalize_ticker(symbol, "norgate")
+
     try:
         # It now reads the special object that was conditionally set in config.py
         adjustment_setting = config["price_adjustment"]
@@ -17,7 +22,7 @@ def get_price_data(symbol, start_date, end_date, config):
         padding_setting = norgatedata.PaddingType.ALLMARKETDAYS if config.get("include_delisted", False) else norgatedata.PaddingType.NONE
 
         df = norgatedata.price_timeseries(
-            symbol,
+            norgate_symbol,
             interval=config["timeframe"],
             start_date=start_date,
             end_date=end_date,
