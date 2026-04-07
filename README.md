@@ -105,6 +105,63 @@ Validate before a long run: `python main.py --dry-run`
 
 See [examples/](examples/) for ready-to-use config files and annotated strategy examples.
 
+---
+
+## Norgate Data
+
+If you have a Norgate license, you can either query Norgate live on every run **or** export the full database to local Parquet files once and share access with teammates who don't have a license.
+
+| Setting | What it does | Requires |
+|---|---|---|
+| `data_provider: "norgate"` | Calls Norgate API live on every run | Norgate license + NDU running |
+| `data_provider: "parquet"` | Reads pre-exported local Parquet files | Submodule only — no license needed |
+
+### Pipeline
+
+```mermaid
+%%{init: {'theme': 'neutral'}}%%
+graph LR
+    A[Norgate API\nNDU running] -->|norgate_to_parquet.py| B[(parquet_data/data/\n~36 000 .parquet files)]
+    B -->|data_provider: parquet| C[Backtester]
+    A -->|data_provider: norgate| C
+```
+
+### Exporting Norgate data to Parquet
+
+Run the three export commands once (full dump, ~36 000 symbols, ~2.5 GB):
+
+```bash
+python scripts/norgate_to_parquet.py --database "US Equities"          --output-dir parquet_data/data --start-date 1990-01-01
+python scripts/norgate_to_parquet.py --database "US Equities Delisted" --output-dir parquet_data/data --start-date 1990-01-01 --skip-existing
+python scripts/norgate_to_parquet.py --database "US Indices"           --output-dir parquet_data/data --start-date 1990-01-01 --skip-existing
+```
+
+Validate that every Norgate symbol has a local file:
+
+```bash
+python scripts/validate_norgate_export.py
+```
+
+See [scripts/NORGATE_EXPORT.md](scripts/NORGATE_EXPORT.md) for the full export and validation guide.
+
+### Accessing the exported data (interns / no-license teammates)
+
+The exported dataset lives in the `parquet_data/` git submodule (private repo: `july-backtester-norgate-data`). Clone it alongside the main repo:
+
+```bash
+git clone --recurse-submodules https://github.com/zachisit/july-backtester.git
+```
+
+Or, if you already cloned without `--recurse-submodules`:
+
+```bash
+git submodule update --init parquet_data
+```
+
+Then set `data_provider: "parquet"` in `config.py`. No Norgate license or NDU process required.
+
+---
+
 ### The Backtesting Lifecycle
 
 ```mermaid
