@@ -119,6 +119,8 @@ def split_trades(
     """
     # Convert split_date string to pd.Timestamp for proper comparison
     split_ts = pd.Timestamp(split_date)
+    if split_ts.tzinfo is not None:
+        split_ts = split_ts.tz_localize(None)
 
     is_trades = []
     oos_trades = []
@@ -126,6 +128,8 @@ def split_trades(
     for t in trade_log:
         # Convert ExitDate string to pd.Timestamp
         exit_ts = pd.Timestamp(t["ExitDate"])
+        if exit_ts.tzinfo is not None:
+            exit_ts = exit_ts.tz_localize(None)
 
         if exit_ts < split_ts:
             is_trades.append(t)

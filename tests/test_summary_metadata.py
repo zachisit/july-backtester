@@ -97,8 +97,9 @@ def _run_and_load_csv(tmp_path, config_override=None):
         orig_cwd = os.getcwd()
         try:
             os.chdir(str(tmp_path))
+            benchmark_returns = {"SPY": 0.12, "QQQ": 0.15}
             summary_mod.generate_portfolio_summary_report(
-                [_minimal_result()], duration_seconds=5.0, run_id=run_id
+                [_minimal_result()], benchmark_returns, duration_seconds=5.0, run_id=run_id
             )
         finally:
             os.chdir(orig_cwd)
@@ -154,8 +155,9 @@ class TestMetadataColumnsPresent:
             orig_cwd = os.getcwd()
             try:
                 os.chdir(str(tmp_path))
+                benchmark_returns = {"SPY": 0.12, "QQQ": 0.15}
                 summary_mod.generate_portfolio_summary_report(
-                    [_minimal_result()], duration_seconds=1.0, run_id=run_id
+                    [_minimal_result()], benchmark_returns, duration_seconds=1.0, run_id=run_id
                 )
             finally:
                 os.chdir(orig_cwd)
@@ -241,8 +243,10 @@ class TestExistingColumnsPreserved:
             orig_cwd = os.getcwd()
             try:
                 os.chdir(str(tmp_path))
+                benchmark_returns = {"SPY": 0.12, "QQQ": 0.15}
                 summary_mod.generate_portfolio_summary_report(
                     [_minimal_result("P1", "Strat_A"), _minimal_result("P2", "Strat_B")],
+                    benchmark_returns,
                     duration_seconds=2.0,
                     run_id=run_id,
                 )
@@ -264,8 +268,10 @@ class TestExistingColumnsPreserved:
             orig_cwd = os.getcwd()
             try:
                 os.chdir(str(tmp_path))
+                benchmark_returns = {"SPY": 0.12, "QQQ": 0.15}
                 summary_mod.generate_portfolio_summary_report(
                     [_minimal_result("P1", "S1"), _minimal_result("P2", "S2")],
+                    benchmark_returns,
                     duration_seconds=1.0,
                     run_id=run_id,
                 )

@@ -1,3 +1,6 @@
 [submodule "custom_strategies/private"]
 	path = custom_strategies/private
 	url = https://github.com/zachisit/july-backtester-private-strategies.git
+[submodule "parquet_data"]
+	path = parquet_data
+	url = https://github.com/zachisit/july-backtester-norgate-data.git

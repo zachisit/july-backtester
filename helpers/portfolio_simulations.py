@@ -300,9 +300,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         features['entry_ATR_14_pct'] = df.loc[entry_exec_date, 'ATR_14_pct']
                         features['entry_SMA200_dist_pct'] = df.loc[entry_exec_date, 'SMA200_dist_pct']
                         features['entry_Volume_Spike'] = df.loc[entry_exec_date, 'Volume_Spike']
-                        features['entry_SPY_RSI_14'] = spy_df.loc[entry_exec_date, 'RSI_14']
-                        features['entry_SPY_SMA200_dist_pct'] = spy_df.loc[entry_exec_date, 'SMA200_dist_pct']
-                        features['entry_VIX_Close'] = vix_df.loc[entry_exec_date, 'Close']
+                        if spy_df is not None:
+                            features['entry_SPY_RSI_14'] = spy_df.loc[entry_exec_date, 'RSI_14']
+                            features['entry_SPY_SMA200_dist_pct'] = spy_df.loc[entry_exec_date, 'SMA200_dist_pct']
+                        if vix_df is not None:
+                            features['entry_VIX_Close'] = vix_df.loc[entry_exec_date, 'Close']
                         if tnx_df is not None:
                             features['entry_TNX_Close'] = tnx_df.loc[entry_exec_date, 'Close']
                     except KeyError:

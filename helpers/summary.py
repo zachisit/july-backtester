@@ -9,25 +9,84 @@ from helpers.aws_utils import upload_file_to_s3
 from helpers.correlation import compute_avg_correlations, DEFAULT_THRESHOLD
 
 # ---------------------------------------------------------------------------
+# Benchmark Column Builder
+# ---------------------------------------------------------------------------
+def _build_benchmark_columns(benchmark_returns):
+    """Build dynamic benchmark column mappings from benchmark_returns dict.
+
+    Parameters
+    ----------
+    benchmark_returns : dict
+        Dictionary of benchmark labels to their returns, e.g., {"SPY": 0.123, "QQQ": 0.456}
+
+    Returns
+    -------
+    dict
+        {
+            "result_keys": ["vs_spy_benchmark", "vs_qqq_benchmark", ...],
+            "display_names": {"vs_spy_benchmark": "vs. SPY (B&H)", ...},
+            "format_spec": {"vs_spy_benchmark": "{:+.2%}", ...},
+            "short_names": {"vs. SPY (B&H)": "vs. SPY", ...},
+        }
+    """
+    result_keys = []
+    display_names = {}
+    format_spec = {}
+    short_names = {}
+
+    for label in benchmark_returns.keys():
+        # Result key: vs_spy_benchmark, vs_qqq_benchmark, vs_financials_benchmark
+        key = f'vs_{label.lower().replace(" ", "_")}_benchmark'
+        # Display name: vs. SPY (B&H), vs. QQQ (B&H), vs. Financials (B&H)
+        display = f'vs. {label} (B&H)'
+        # Short name for verbose tables: vs. SPY, vs. QQQ, vs. Financials
+        short = f'vs. {label}'
+
+        result_keys.append(key)
+        display_names[key] = display
+        format_spec[key] = "{:+.2%}"
+        short_names[display] = short
+
+    return {
+        "result_keys": result_keys,
+        "display_names": display_names,
+        "format_spec": format_spec,
+        "short_names": short_names,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Table column definitions for tiered terminal output.
 # Table 1 is always shown; Tables 2 and 3 only appear with --verbose.
 # Strategy is the join key and appears in every table.
+#
+# NOTE: Benchmark columns (vs. SPY, vs. QQQ, etc.) are dynamically injected
+# by each summary function based on the benchmark_returns dict passed to it.
 # ---------------------------------------------------------------------------
-_T1_COLS = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'Sharpe',
-            'Max DD', 'MC Score', 'WFA Verdict']
+def _get_t1_cols(benchmark_columns):
+    """Get Table 1 columns with first benchmark dynamically injected."""
+    if benchmark_columns["result_keys"]:
+        first_benchmark = benchmark_columns["display_names"][benchmark_columns["result_keys"][0]]
+        return ['Strategy', 'P&L (%)', first_benchmark, 'Sharpe', 'Max DD', 'MC Score', 'WFA Verdict']
+    else:
+        return ['Strategy', 'P&L (%)', 'Sharpe', 'Max DD', 'MC Score', 'WFA Verdict']
 
-_T2_COLS = ['Strategy', 'vs. QQQ (B&H)', 'Calmar', 'Roll.Sharpe(avg)',
-            'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Max Rcvry (d)',
-            'Avg Rcvry (d)', 'Profit Factor', 'Win Rate', 'Trades',
-            'Expectancy (R)', 'SQN']
+def _get_t2_cols(benchmark_columns):
+    """Get Table 2 columns with remaining benchmarks dynamically injected."""
+    # Include all benchmarks except the first (which is in T1)
+    extra_benchmarks = [benchmark_columns["display_names"][k] for k in benchmark_columns["result_keys"][1:]]
+    return (['Strategy'] + extra_benchmarks +
+            ['Calmar', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
+             'Max Rcvry (d)', 'Avg Rcvry (d)', 'Profit Factor', 'Win Rate', 'Trades',
+             'Expectancy (R)', 'SQN'])
 
 _T3_COLS = ['Strategy', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
             'Avg. Corr', 'MC Verdict', 'MC Score']
 
 # Short display names for verbose tables only (T2 and T3).
 # Core Performance (T1) headers are already short and stay unchanged.
+# Benchmark short names are dynamically added by _build_benchmark_columns().
 _VERBOSE_SHORT_NAMES = {
-    'vs. QQQ (B&H)':    'vs. QQQ',
     'Roll.Sharpe(avg)':  'RS(avg)',
     'Roll.Sharpe(min)':  'RS(min)',
     'Roll.Sharpe(last)': 'RS(last)',
@@ -86,21 +145,24 @@ def save_trades_to_csv(result, local_folder, run_id):
     except Exception as e:
         print(f"  -> WARNING: Could not save trade log for {strategy_name_safe}. Error: {e}")
         
-def generate_single_asset_summary_report(symbol_results, spy_benchmark_result, qqq_benchmark_result, symbol, symbol_trades_folder, run_id):
+def generate_single_asset_summary_report(symbol_results, benchmark_returns, symbol, symbol_trades_folder, run_id):
     """
     Prints the per-symbol summary and saves all profitable trade logs.
+
+    Parameters
+    ----------
+    benchmark_returns : dict
+        Dictionary of benchmark labels to their returns, e.g., {"SPY": 0.123, "QQQ": 0.456}
     """
+    # Build dynamic benchmark column mappings
+    benchmark_columns = _build_benchmark_columns(benchmark_returns)
+
     print("\n\n" + "=" * 80)
     print(f"Strategy Performance Summary for: {symbol}".center(80))
     print(f"Timeframe: {CONFIG['timeframe']} | Period: {CONFIG['start_date']} to {CONFIG['end_date']}".center(80))
     print("=" * 80)
-    
-    if spy_benchmark_result:
-        spy_return = spy_benchmark_result.get('pnl_percent', 0.0)
-        print(f"Benchmark (SPY) Buy & Hold Return: {spy_return:.2%}".center(80))
-    if qqq_benchmark_result:
-        qqq_return = qqq_benchmark_result.get('pnl_percent', 0.0)
-        print(f"Benchmark (QQQ) Buy & Hold Return: {qqq_return:.2%}".center(80))
+    for label, ret in benchmark_returns.items():
+        print(f"Benchmark ({label}) Buy & Hold Return: {ret:.2%}".center(80))
     print("=" * 80)
     
     if not symbol_results:
@@ -110,43 +172,102 @@ def generate_single_asset_summary_report(symbol_results, spy_benchmark_result, q
     summary_df = pd.DataFrame(symbol_results)
     max_dd_filter = CONFIG.get("max_acceptable_drawdown", 1.0)
     mc_score_min = CONFIG.get("mc_score_min_to_show_in_summary", -999)
-    min_pnl = CONFIG.get("min_pandl_to_show_in_summary", -999.0) # Corrected: Read as percentage
+    min_pnl = CONFIG.get("min_pandl_to_show_in_summary", -999.0)
     min_calmar = CONFIG.get("min_calmar_to_show_in_summary", -999.0)
-    min_vs_spy = CONFIG.get("min_performance_vs_spy", -9999.0)
-    min_vs_qqq = CONFIG.get("min_performance_vs_qqq", -9999.0)
 
-    filtered_df = summary_df[
+    # Build filter mask
+    filter_mask = (
         (summary_df['max_drawdown'] <= max_dd_filter) &
         (summary_df['mc_score'] >= mc_score_min) &
-        (summary_df['pnl_percent'] * 100 >= min_pnl) & # Corrected: Compare as percentage
-        (summary_df['calmar_ratio'] >= min_calmar) &
-        (summary_df['vs_spy_benchmark'] * 100 >= min_vs_spy) &
-        (summary_df['vs_qqq_benchmark'] * 100 >= min_vs_qqq)
-    ].copy()
+        (summary_df['pnl_percent'] * 100 >= min_pnl) &
+        (summary_df['calmar_ratio'] >= min_calmar)
+    )
+
+    # Dynamic benchmark filtering (legacy keys apply to first 2 benchmarks)
+    benchmark_filter_msgs = []
+    for idx, result_key in enumerate(benchmark_columns["result_keys"]):
+        if idx == 0:
+            min_perf = CONFIG.get("min_performance_vs_spy", -9999.0)
+            label = list(benchmark_returns.keys())[0]
+        elif idx == 1:
+            min_perf = CONFIG.get("min_performance_vs_qqq", -9999.0)
+            label = list(benchmark_returns.keys())[1]
+        else:
+            min_perf = -9999.0
+            label = list(benchmark_returns.keys())[idx]
+
+        if result_key in summary_df.columns:
+            filter_mask &= (summary_df[result_key] * 100 >= min_perf)
+            benchmark_filter_msgs.append(f"vs {label} >= {min_perf:.2f}%")
+
+    filtered_df = summary_df[filter_mask].copy()
 
     if filtered_df.empty:
         print(f"\nNo strategies for {symbol} met the required criteria.")
-        print(f"(Filters: Max DD < {max_dd_filter:.0%}, Min MC Score >= {mc_score_min}, Min P&L >= {min_pnl:.2f}%, Min Calmar >= {min_calmar:.2f}, "
-              f"vs SPY >= {min_vs_spy:.2f}%, vs QQQ >= {min_vs_qqq:.2f}%)")
+        filter_msg = (f"(Filters: Max DD < {max_dd_filter:.0%}, Min MC Score >= {mc_score_min}, "
+                      f"Min P&L >= {min_pnl:.2f}%, Min Calmar >= {min_calmar:.2f}")
+        if benchmark_filter_msgs:
+            filter_msg += ", " + ", ".join(benchmark_filter_msgs)
+        filter_msg += ")"
+        print(filter_msg)
     else:
-        # (Formatting logic is fine)
-        for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"), ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"), ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"), ('rolling_sharpe_final', "{:.2f}"), ('avg_recovery_days', "{:.0f}")]:
+        # Formatting logic (dynamic benchmark columns)
+        format_map = [
+            ('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"),
+            ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"),
+            ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"),
+            ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"),
+            ('rolling_sharpe_final', "{:.2f}"), ('avg_recovery_days', "{:.0f}")
+        ]
+        for result_key in benchmark_columns["result_keys"]:
+            format_map.append((result_key, benchmark_columns["format_spec"][result_key]))
+
+        for col, f_str in format_map:
             if col in filtered_df.columns:
                 filtered_df[col] = filtered_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
+
         if 'avg_trade_duration' in filtered_df.columns:
-            filtered_df['avg_trade_duration'] = filtered_df['avg_trade_duration'].apply(lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x)
-        filtered_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'wfa_rolling_verdict': 'Rolling WFA', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN', 'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)', 'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)'}, inplace=True)
-        report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'MC Verdict', 'MC Score']
+            filtered_df['avg_trade_duration'] = filtered_df['avg_trade_duration'].apply(
+                lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x
+            )
+
+        # Dynamic column renaming
+        rename_map = {
+            'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar',
+            'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate',
+            'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score',
+            'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict',
+            'wfa_rolling_verdict': 'Rolling WFA', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN',
+            'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)',
+            'rolling_sharpe_final': 'Roll.Sharpe(last)',
+            'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)',
+        }
+        rename_map.update(benchmark_columns["display_names"])
+        filtered_df.rename(columns=rename_map, inplace=True)
+
+        # Dynamic report columns
+        benchmark_display_names = [benchmark_columns["display_names"][k] for k in benchmark_columns["result_keys"]]
+        report_cols = (['Strategy', 'P&L (%)'] + benchmark_display_names +
+                      ['Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe',
+                       'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
+                       'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades',
+                       'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
+                       'MC Verdict', 'MC Score'])
+
         summary_df_display = filtered_df.reindex(columns=report_cols).fillna('N/A').sort_values(by='MC Score', ascending=False).reset_index(drop=True)
-        _t1 = [c for c in _T1_COLS if c in summary_df_display.columns]
+
+        # Dynamic table columns
+        _t1 = [c for c in _get_t1_cols(benchmark_columns) if c in summary_df_display.columns]
         _print_table(summary_df_display[_t1], f"--- Core Performance: {symbol} ---")
+
         if CONFIG.get("verbose_output", False):
-            _t2 = [c for c in _T2_COLS if c in summary_df_display.columns]
+            verbose_short_names = {**_VERBOSE_SHORT_NAMES, **benchmark_columns["short_names"]}
+            _t2 = [c for c in _get_t2_cols(benchmark_columns) if c in summary_df_display.columns]
             if len(_t2) > 1:
-                _print_table(summary_df_display[_t2].rename(columns=_VERBOSE_SHORT_NAMES), "--- Extended Metrics ---")
+                _print_table(summary_df_display[_t2].rename(columns=verbose_short_names), "--- Extended Metrics ---")
             _t3 = [c for c in _T3_COLS if c in summary_df_display.columns]
             if len(_t3) > 1:
-                _print_table(summary_df_display[_t3].rename(columns=_VERBOSE_SHORT_NAMES), "--- Robustness ---")
+                _print_table(summary_df_display[_t3].rename(columns=verbose_short_names), "--- Robustness ---")
         else:
             print("\n  Run with --verbose for extended metrics and robustness scores.")
     
@@ -169,10 +290,18 @@ def generate_single_asset_summary_report(symbol_results, spy_benchmark_result, q
     else:
         print(f"\nSkipping individual trade log saving for {symbol} as per config.")
 
-def generate_final_summary(all_results):
+def generate_final_summary(all_results, benchmark_returns):
     """
     Generates the final summary for the single-asset mode.
+
+    Parameters
+    ----------
+    benchmark_returns : dict
+        Dictionary of benchmark labels to their returns, e.g., {"SPY": 0.123, "QQQ": 0.456}
     """
+    # Build dynamic benchmark column mappings
+    benchmark_columns = _build_benchmark_columns(benchmark_returns)
+
     print("\n\n" + "=" * 80)
     print("Overall Top 5 Single-Asset Strategies".center(80))
     print("=" * 80)
@@ -184,67 +313,110 @@ def generate_final_summary(all_results):
     mc_score_min = CONFIG.get("mc_score_min_to_show_in_summary", -999)
     min_pnl = CONFIG.get("min_pandl_to_show_in_summary", -999.0)
     min_calmar = CONFIG.get("min_calmar_to_show_in_summary", -999.0)
-    min_vs_spy = CONFIG.get("min_performance_vs_spy", -9999.0)
-    min_vs_qqq = CONFIG.get("min_performance_vs_qqq", -9999.0)
     max_dd_filter = CONFIG.get("max_acceptable_drawdown", -9999.0)
     min_trades = CONFIG.get("min_trades_for_mc", 15)
 
-    filtered_df = summary_df[
+    # Build filter mask
+    filter_mask = (
         (summary_df['Trades'] >= min_trades) &
         (summary_df['max_drawdown'] <= max_dd_filter) &
         (summary_df['mc_score'] >= mc_score_min) &
         (summary_df['pnl_percent'] * 100 >= min_pnl) &
-        (summary_df['calmar_ratio'] >= min_calmar) &
-        (summary_df['vs_spy_benchmark'] * 100 >= min_vs_spy) &
-        (summary_df['vs_qqq_benchmark'] * 100 >= min_vs_qqq)
-    ].copy()
-    
+        (summary_df['calmar_ratio'] >= min_calmar)
+    )
+
+    # Dynamic benchmark filtering
+    benchmark_filter_msgs = []
+    for idx, result_key in enumerate(benchmark_columns["result_keys"]):
+        if idx == 0:
+            min_perf = CONFIG.get("min_performance_vs_spy", -9999.0)
+            label = list(benchmark_returns.keys())[0]
+        elif idx == 1:
+            min_perf = CONFIG.get("min_performance_vs_qqq", -9999.0)
+            label = list(benchmark_returns.keys())[1]
+        else:
+            min_perf = -9999.0
+            label = list(benchmark_returns.keys())[idx]
+
+        if result_key in summary_df.columns:
+            filter_mask &= (summary_df[result_key] * 100 >= min_perf)
+            benchmark_filter_msgs.append(f"vs {label} >= {min_perf:.2f}%")
+
+    filtered_df = summary_df[filter_mask].copy()
+
     if filtered_df.empty:
         print("\nNo strategies met the final criteria.")
-        print(f"(Filters: Min Trades >= {min_trades}, Max DD < {max_dd_filter:.0%}, Min MC Score >= {mc_score_min}, "
-              f"Min P&L >= {min_pnl:.2f}%, Min Calmar >= {min_calmar:.2f}, "
-              f"vs SPY >= {min_vs_spy:.2f}%, vs QQQ >= {min_vs_qqq:.2f}%)")
+        filter_msg = (f"(Filters: Min Trades >= {min_trades}, Max DD < {max_dd_filter:.0%}, "
+                      f"Min MC Score >= {mc_score_min}, Min P&L >= {min_pnl:.2f}%, "
+                      f"Min Calmar >= {min_calmar:.2f}")
+        if benchmark_filter_msgs:
+            filter_msg += ", " + ", ".join(benchmark_filter_msgs)
+        filter_msg += ")"
+        print(filter_msg)
         return
         
     final_df = filtered_df.sort_values(by='mc_score', ascending=False).head(5).reset_index(drop=True)
-    
-    for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"),
-                       ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"),
-                       ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"),
-                       ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"),
-                       ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"), ('rolling_sharpe_final', "{:.2f}"),
-                       ('avg_recovery_days', "{:.0f}")]:
+
+    # Formatting logic (dynamic benchmark columns)
+    format_map = [
+        ('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"),
+        ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"),
+        ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"),
+        ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"),
+        ('rolling_sharpe_final', "{:.2f}"), ('avg_recovery_days', "{:.0f}")
+    ]
+    for result_key in benchmark_columns["result_keys"]:
+        format_map.append((result_key, benchmark_columns["format_spec"][result_key]))
+
+    for col, f_str in format_map:
         if col in final_df.columns:
             final_df[col] = final_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
+
     if 'avg_trade_duration' in final_df.columns:
         final_df['avg_trade_duration'] = final_df['avg_trade_duration'].apply(
-            lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x)
+            lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x
+        )
 
-    final_df.rename(columns={
+    # Dynamic column renaming
+    rename_map = {
         'Asset': 'Symbol', 'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar',
         'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate',
         'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score',
-        'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)',
         'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'wfa_rolling_verdict': 'Rolling WFA',
         'expectancy': 'Expectancy (R)', 'sqn': 'SQN',
-        'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)',
+        'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)',
+        'rolling_sharpe_final': 'Roll.Sharpe(last)',
         'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)',
-    }, inplace=True)
+    }
+    rename_map.update(benchmark_columns["display_names"])
+    final_df.rename(columns=rename_map, inplace=True)
 
-    report_cols = ['Symbol', 'Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'MC Verdict', 'MC Score']
+    # Dynamic report columns
+    benchmark_display_names = [benchmark_columns["display_names"][k] for k in benchmark_columns["result_keys"]]
+    report_cols = (['Symbol', 'Strategy', 'P&L (%)'] + benchmark_display_names +
+                  ['Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe',
+                   'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
+                   'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades',
+                   'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
+                   'MC Verdict', 'MC Score'])
+
     final_df_display = final_df.reindex(columns=report_cols).fillna('N/A')
-    
+
     print("\nBased on all filters, the most promising single-asset combinations are:")
     _pfx = ['Symbol'] if 'Symbol' in final_df_display.columns else []
-    _t1 = list(dict.fromkeys(_pfx + [c for c in _T1_COLS if c in final_df_display.columns]))
+    _t1_cols = _get_t1_cols(benchmark_columns)
+    _t1 = list(dict.fromkeys(_pfx + [c for c in _t1_cols if c in final_df_display.columns]))
     _print_table(final_df_display[_t1], "--- Core Performance ---")
+
     if CONFIG.get("verbose_output", False):
-        _t2 = list(dict.fromkeys(_pfx + [c for c in _T2_COLS if c in final_df_display.columns]))
+        verbose_short_names = {**_VERBOSE_SHORT_NAMES, **benchmark_columns["short_names"]}
+        _t2_cols = _get_t2_cols(benchmark_columns)
+        _t2 = list(dict.fromkeys(_pfx + [c for c in _t2_cols if c in final_df_display.columns]))
         if len(_t2) > len(_pfx) + 1:
-            _print_table(final_df_display[_t2].rename(columns=_VERBOSE_SHORT_NAMES), "--- Extended Metrics ---")
+            _print_table(final_df_display[_t2].rename(columns=verbose_short_names), "--- Extended Metrics ---")
         _t3 = list(dict.fromkeys(_pfx + [c for c in _T3_COLS if c in final_df_display.columns]))
         if len(_t3) > len(_pfx) + 1:
-            _print_table(final_df_display[_t3].rename(columns=_VERBOSE_SHORT_NAMES), "--- Robustness ---")
+            _print_table(final_df_display[_t3].rename(columns=verbose_short_names), "--- Robustness ---")
     else:
         print("\n  Run with --verbose for extended metrics and robustness scores.")
     
@@ -259,16 +431,23 @@ def generate_final_summary(all_results):
 
     print("\n" + "=" * 80)
 
-def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return, qqq_return, run_id, corr_matrix=None):
+def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_returns, run_id, corr_matrix=None):
     """
     Prints the per-portfolio strategy summary and saves all trade logs.
+
+    Parameters
+    ----------
+    benchmark_returns : dict
+        Dictionary of benchmark labels to their returns, e.g., {"SPY": 0.123, "QQQ": 0.456}
     """
+    # Build dynamic benchmark column mappings
+    benchmark_columns = _build_benchmark_columns(benchmark_returns)
 
     print("\n\n" + "=" * 80)
     print(f"Strategy Performance Summary for Portfolio: {portfolio_name}".center(80))
     print("=" * 80)
-    print(f"Benchmark (SPY) Buy & Hold Return: {spy_return:.2%}".center(80))
-    print(f"Benchmark (QQQ) Buy & Hold Return: {qqq_return:.2%}".center(80))
+    for label, ret in benchmark_returns.items():
+        print(f"Benchmark ({label}) Buy & Hold Return: {ret:.2%}".center(80))
     print("=" * 80)
 
     if not portfolio_results:
@@ -279,23 +458,43 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
     summary_df = pd.DataFrame(portfolio_results).copy()
 
     # --- Step 2: Create a separate, FILTERED DataFrame for DISPLAY purposes only ---
-    min_vs_spy = CONFIG.get("min_performance_vs_spy", -9999.0)
-    min_vs_qqq = CONFIG.get("min_performance_vs_qqq", -9999.0)
+    # Legacy config keys (min_performance_vs_spy, min_performance_vs_qqq) are still supported for backward compatibility
+    # They apply to the first two benchmarks if present
     max_dd_filter = CONFIG.get("max_acceptable_drawdown", 1.0)
     mc_score_min = CONFIG.get("mc_score_min_to_show_in_summary", -999)
     min_pnl = CONFIG.get("min_pandl_to_show_in_summary", -999.0)
     min_calmar = CONFIG.get("min_calmar_to_show_in_summary", -999.0)
-    
-    # Always include the check for trades > 0
-    display_df = summary_df[
+
+    # Build filter conditions
+    filter_mask = (
         (summary_df['Trades'] > 0) &
         (summary_df['max_drawdown'] <= max_dd_filter) &
         (summary_df['mc_score'] >= mc_score_min) &
         (summary_df['pnl_percent'] * 100 >= min_pnl) &
-        (summary_df['calmar_ratio'] >= min_calmar) &
-        (summary_df['vs_spy_benchmark'] * 100 >= min_vs_spy) &
-        (summary_df['vs_qqq_benchmark'] * 100 >= min_vs_qqq)
-    ].copy()
+        (summary_df['calmar_ratio'] >= min_calmar)
+    )
+
+    # Dynamic benchmark filtering (legacy keys apply to first 2 benchmarks)
+    benchmark_filter_msgs = []
+    for idx, result_key in enumerate(benchmark_columns["result_keys"]):
+        if idx == 0:
+            # First benchmark: check min_performance_vs_spy for backward compatibility
+            min_perf = CONFIG.get("min_performance_vs_spy", -9999.0)
+            label = list(benchmark_returns.keys())[0]
+        elif idx == 1:
+            # Second benchmark: check min_performance_vs_qqq for backward compatibility
+            min_perf = CONFIG.get("min_performance_vs_qqq", -9999.0)
+            label = list(benchmark_returns.keys())[1]
+        else:
+            # Additional benchmarks: no legacy config key, default to -9999.0
+            min_perf = -9999.0
+            label = list(benchmark_returns.keys())[idx]
+
+        if result_key in summary_df.columns:
+            filter_mask &= (summary_df[result_key] * 100 >= min_perf)
+            benchmark_filter_msgs.append(f"vs {label} >= {min_perf:.2f}%")
+
+    display_df = summary_df[filter_mask].copy()
 
     # Capture the set of strategy names that passed the display filter for use in Step 4b.
     passed_display_filter = set(display_df['Strategy'].tolist())
@@ -303,8 +502,13 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
     # --- Step 3: Use the filtered display_df to show the summary table ---
     if display_df.empty:
         print(f"\nNo strategies for {portfolio_name} met the required display criteria.")
-        print(f"(Filters: Min Trades > 0, Max DD < {max_dd_filter:.0%}, Min MC Score >= {mc_score_min}, Min P&L >= {min_pnl:.2f}%, Min Calmar >= {min_calmar:.2f}, "
-              f"vs SPY >= {min_vs_spy:.2f}%, vs QQQ >= {min_vs_qqq:.2f}%)")
+        filter_msg = (f"(Filters: Min Trades > 0, Max DD < {max_dd_filter:.0%}, "
+                      f"Min MC Score >= {mc_score_min}, Min P&L >= {min_pnl:.2f}%, "
+                      f"Min Calmar >= {min_calmar:.2f}")
+        if benchmark_filter_msgs:
+            filter_msg += ", " + ", ".join(benchmark_filter_msgs)
+        filter_msg += ")"
+        print(filter_msg)
     else:
         # --- Avg. Corr column (from pre-computed correlation matrix) ---
         if corr_matrix is not None and not corr_matrix.empty:
@@ -334,22 +538,67 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, spy_return
         display_df.sort_values(by='mc_score', ascending=False, inplace=True)
         display_df.reset_index(drop=True, inplace=True)
 
-        # Formatting logic
-        for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"), ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"), ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"), ('rolling_sharpe_final', "{:.2f}"), ('avg_recovery_days', "{:.0f}")]:
-            if col in display_df.columns: display_df[col] = display_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
-        if 'avg_trade_duration' in display_df.columns: display_df['avg_trade_duration'] = display_df['avg_trade_duration'].apply(lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x)
-        display_df.rename(columns={'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate', 'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score', 'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)', 'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'wfa_rolling_verdict': 'Rolling WFA', 'avg_corr': 'Avg. Corr', 'expectancy': 'Expectancy (R)', 'sqn': 'SQN', 'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)', 'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)'}, inplace=True)
-        report_cols = ['Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'Avg. Corr', 'MC Verdict', 'MC Score']
+        # Formatting logic (dynamic benchmark columns)
+        format_map = [
+            ('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"),
+            ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"),
+            ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"),
+            ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"),
+            ('rolling_sharpe_final', "{:.2f}"), ('avg_recovery_days', "{:.0f}")
+        ]
+        # Add all benchmark columns with their format specs
+        for result_key in benchmark_columns["result_keys"]:
+            format_map.append((result_key, benchmark_columns["format_spec"][result_key]))
+
+        for col, f_str in format_map:
+            if col in display_df.columns:
+                display_df[col] = display_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
+
+        if 'avg_trade_duration' in display_df.columns:
+            display_df['avg_trade_duration'] = display_df['avg_trade_duration'].apply(
+                lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else x
+            )
+
+        # Dynamic column renaming
+        rename_map = {
+            'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar',
+            'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor', 'win_rate': 'Win Rate',
+            'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score',
+            'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict',
+            'wfa_rolling_verdict': 'Rolling WFA', 'avg_corr': 'Avg. Corr',
+            'expectancy': 'Expectancy (R)', 'sqn': 'SQN',
+            'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)',
+            'rolling_sharpe_final': 'Roll.Sharpe(last)',
+            'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)',
+        }
+        # Add benchmark column renames
+        rename_map.update(benchmark_columns["display_names"])
+        display_df.rename(columns=rename_map, inplace=True)
+
+        # Dynamic report columns
+        benchmark_display_names = [benchmark_columns["display_names"][k] for k in benchmark_columns["result_keys"]]
+        report_cols = (['Strategy', 'P&L (%)'] + benchmark_display_names +
+                      ['Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe',
+                       'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
+                       'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades',
+                       'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
+                       'Avg. Corr', 'MC Verdict', 'MC Score'])
+
         summary_df_display = display_df.reindex(columns=report_cols).fillna('N/A').reset_index(drop=True)
-        _t1 = [c for c in _T1_COLS if c in summary_df_display.columns]
+
+        # Dynamic table columns
+        _t1 = [c for c in _get_t1_cols(benchmark_columns) if c in summary_df_display.columns]
         _print_table(summary_df_display[_t1], f"--- Core Performance: {portfolio_name} ---")
+
         if CONFIG.get("verbose_output", False):
-            _t2 = [c for c in _T2_COLS if c in summary_df_display.columns]
+            # Merge benchmark short names into verbose short names
+            verbose_short_names = {**_VERBOSE_SHORT_NAMES, **benchmark_columns["short_names"]}
+            _t2 = [c for c in _get_t2_cols(benchmark_columns) if c in summary_df_display.columns]
             if len(_t2) > 1:
-                _print_table(summary_df_display[_t2].rename(columns=_VERBOSE_SHORT_NAMES), "--- Extended Metrics ---")
+                _print_table(summary_df_display[_t2].rename(columns=verbose_short_names), "--- Extended Metrics ---")
             _t3 = [c for c in _T3_COLS if c in summary_df_display.columns]
             if len(_t3) > 1:
-                _print_table(summary_df_display[_t3].rename(columns=_VERBOSE_SHORT_NAMES), "--- Robustness ---")
+                _print_table(summary_df_display[_t3].rename(columns=verbose_short_names), "--- Robustness ---")
         else:
             print("\n  Run with --verbose for extended metrics and robustness scores.")
 
@@ -438,16 +687,22 @@ def format_duration(seconds):
     mins, secs = divmod(seconds, 60)
     return f"{int(mins)} minutes, {secs:.2f} seconds"
 
-def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id=None):
+def generate_portfolio_summary_report(all_results, benchmark_returns, duration_seconds=None, run_id=None):
     """
     Generates the final, overall portfolio summary report.
+
+    Parameters
+    ----------
+    benchmark_returns : dict
+        Dictionary of benchmark labels to their returns, e.g., {"SPY": 0.123, "QQQ": 0.456}
     """
+    # Build dynamic benchmark column mappings
+    benchmark_columns = _build_benchmark_columns(benchmark_returns)
+
     print("\n\n" + "=" * 80)
     print("Overall Top Portfolio Strategies".center(80))
     print("=" * 80)
 
-    min_vs_spy = CONFIG.get("min_performance_vs_spy", -9999.0)
-    min_vs_qqq = CONFIG.get("min_performance_vs_qqq", -9999.0)
     mc_score_min = CONFIG.get("mc_score_min_to_show_in_summary", -999)
     min_pnl = CONFIG.get("min_pandl_to_show_in_summary", -999.0)
     min_calmar = CONFIG.get("min_calmar_to_show_in_summary", -999.0)
@@ -456,22 +711,35 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
     if duration_seconds is not None:
         print(f"Total Backtest Runtime: {format_duration(duration_seconds)}".center(80))
         print("=" * 80)
-        
+
     if not all_results:
         print("\nNo portfolio results to summarize.")
         return
 
     summary_df = pd.DataFrame(all_results)
-    
-    filtered_df = summary_df[
+
+    # Build filter mask
+    filter_mask = (
         (summary_df['Trades'] > 0) &
         (summary_df['mc_score'] >= mc_score_min) &
         (summary_df['pnl_percent'] * 100 >= min_pnl) &
         (summary_df['calmar_ratio'] >= min_calmar) &
-        (summary_df['vs_spy_benchmark'] * 100 >= min_vs_spy) &
-        (summary_df['vs_qqq_benchmark'] * 100 >= min_vs_qqq) &
         (summary_df['max_drawdown'] <= max_dd_filter)
-    ].copy()
+    )
+
+    # Dynamic benchmark filtering
+    for idx, result_key in enumerate(benchmark_columns["result_keys"]):
+        if idx == 0:
+            min_perf = CONFIG.get("min_performance_vs_spy", -9999.0)
+        elif idx == 1:
+            min_perf = CONFIG.get("min_performance_vs_qqq", -9999.0)
+        else:
+            min_perf = -9999.0
+
+        if result_key in summary_df.columns:
+            filter_mask &= (summary_df[result_key] * 100 >= min_perf)
+
+    filtered_df = summary_df[filter_mask].copy()
 
     if filtered_df.empty:
         print("\nNo strategies met the final filtering criteria.")
@@ -481,45 +749,66 @@ def generate_portfolio_summary_report(all_results, duration_seconds=None, run_id
     filtered_df.sort_values(by='mc_score', ascending=False, inplace=True)
     filtered_df.reset_index(drop=True, inplace=True)
 
-    # --- Formatting and Renaming Section ---
-    for col, f_str in [('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"), ('calmar_ratio', "{:.2f}"),
-                       ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"), ('vs_spy_benchmark', "{:+.2%}"), ('vs_qqq_benchmark', "{:+.2%}"),
-                       ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"),
-                       ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"), ('rolling_sharpe_final', "{:.2f}"),
-                       ('avg_recovery_days', "{:.0f}")]:
+    # Formatting logic (dynamic benchmark columns)
+    format_map = [
+        ('pnl_percent', "{:.2%}"), ('max_drawdown', "{:.2%}"), ('win_rate', "{:.2%}"),
+        ('calmar_ratio', "{:.2f}"), ('sharpe_ratio', "{:.2f}"), ('profit_factor', "{:.2f}"),
+        ('oos_pnl_pct', "{:+.2%}"), ('expectancy', "{:.3f}"), ('sqn', "{:.2f}"),
+        ('rolling_sharpe_mean', "{:.2f}"), ('rolling_sharpe_min', "{:.2f}"),
+        ('rolling_sharpe_final', "{:.2f}"), ('avg_recovery_days', "{:.0f}")
+    ]
+    for result_key in benchmark_columns["result_keys"]:
+        format_map.append((result_key, benchmark_columns["format_spec"][result_key]))
+
+    for col, f_str in format_map:
         if col in filtered_df.columns:
             filtered_df[col] = filtered_df[col].apply(lambda x: f_str.format(x) if isinstance(x, (int, float)) else x)
 
     if 'avg_trade_duration' in filtered_df.columns:
         filtered_df['avg_trade_duration'] = filtered_df['avg_trade_duration'].apply(
-            lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else 'N/A')
+            lambda x: int(np.ceil(x)) if pd.notna(x) and isinstance(x, (int, float)) else 'N/A'
+        )
 
-    filtered_df.rename(columns={
+    # Dynamic column renaming
+    rename_map = {
         'pnl_percent': 'P&L (%)', 'max_drawdown': 'Max DD', 'calmar_ratio': 'Calmar',
         'win_rate': 'Win Rate', 'sharpe_ratio': 'Sharpe', 'profit_factor': 'Profit Factor',
         'avg_trade_duration': 'Avg. Hold (d)', 'mc_verdict': 'MC Verdict', 'mc_score': 'MC Score',
-        'vs_spy_benchmark': 'vs. SPY (B&H)', 'vs_qqq_benchmark': 'vs. QQQ (B&H)',
         'oos_pnl_pct': 'OOS P&L (%)', 'wfa_verdict': 'WFA Verdict', 'wfa_rolling_verdict': 'Rolling WFA',
         'expectancy': 'Expectancy (R)', 'sqn': 'SQN',
-        'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)', 'rolling_sharpe_final': 'Roll.Sharpe(last)',
+        'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)',
+        'rolling_sharpe_final': 'Roll.Sharpe(last)',
         'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)',
-    }, inplace=True)
+    }
+    rename_map.update(benchmark_columns["display_names"])
+    filtered_df.rename(columns=rename_map, inplace=True)
 
-    report_cols = ['Portfolio', 'Strategy', 'P&L (%)', 'vs. SPY (B&H)', 'vs. QQQ (B&H)', 'Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe', 'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)', 'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades', 'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA', 'MC Verdict', 'MC Score']
+    # Dynamic report columns
+    benchmark_display_names = [benchmark_columns["display_names"][k] for k in benchmark_columns["result_keys"]]
+    report_cols = (['Portfolio', 'Strategy', 'P&L (%)'] + benchmark_display_names +
+                  ['Max DD', 'Max Rcvry (d)', 'Avg Rcvry (d)', 'Calmar', 'Sharpe',
+                   'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
+                   'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades',
+                   'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
+                   'MC Verdict', 'MC Score'])
+
     summary_df_display = filtered_df.reindex(columns=report_cols).fillna('N/A')
-
     summary_df_sorted = summary_df_display
-    
+
     _pfx = ['Portfolio'] if 'Portfolio' in summary_df_sorted.columns else []
-    _t1 = list(dict.fromkeys(_pfx + [c for c in _T1_COLS if c in summary_df_sorted.columns]))
+    _t1_cols = _get_t1_cols(benchmark_columns)
+    _t1 = list(dict.fromkeys(_pfx + [c for c in _t1_cols if c in summary_df_sorted.columns]))
     _print_table(summary_df_sorted[_t1], "--- Core Performance: All Portfolios ---")
+
     if CONFIG.get("verbose_output", False):
-        _t2 = list(dict.fromkeys(_pfx + [c for c in _T2_COLS if c in summary_df_sorted.columns]))
+        verbose_short_names = {**_VERBOSE_SHORT_NAMES, **benchmark_columns["short_names"]}
+        _t2_cols = _get_t2_cols(benchmark_columns)
+        _t2 = list(dict.fromkeys(_pfx + [c for c in _t2_cols if c in summary_df_sorted.columns]))
         if len(_t2) > len(_pfx) + 1:
-            _print_table(summary_df_sorted[_t2].rename(columns=_VERBOSE_SHORT_NAMES), "--- Extended Metrics ---")
+            _print_table(summary_df_sorted[_t2].rename(columns=verbose_short_names), "--- Extended Metrics ---")
         _t3 = list(dict.fromkeys(_pfx + [c for c in _T3_COLS if c in summary_df_sorted.columns]))
         if len(_t3) > len(_pfx) + 1:
-            _print_table(summary_df_sorted[_t3].rename(columns=_VERBOSE_SHORT_NAMES), "--- Robustness ---")
+            _print_table(summary_df_sorted[_t3].rename(columns=verbose_short_names), "--- Robustness ---")
     else:
         print("\n  Run with --verbose for extended metrics and robustness scores.")
 
