@@ -8,7 +8,7 @@ against the local parquet_data/ directory and reports any missing files.
 
 Usage:
     python scripts/validate_norgate_export.py
-    python scripts/validate_norgate_export.py --output-dir parquet_data
+    python scripts/validate_norgate_export.py --output-dir parquet_data/data
 """
 
 import argparse
@@ -80,7 +80,7 @@ def validate(output_dir: Path) -> None:
 
 def main():
     parser = argparse.ArgumentParser(description="Validate Norgate export against local Parquet files.")
-    parser.add_argument("--output-dir", default="parquet_data", help="Parquet output directory (default: parquet_data/)")
+    parser.add_argument("--output-dir", default="parquet_data/data", help="Parquet output directory (default: parquet_data/data/)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
