@@ -44,6 +44,23 @@ python -c "import norgatedata; print(norgatedata.databases())"
 python -c "import norgatedata; print(norgatedata.watchlists())"
 ```
 
+## Validating the export
+
+After running all three steps, verify that every Norgate symbol has a local Parquet file:
+
+```bash
+python scripts/validate_norgate_export.py
+```
+
+Reports per-database counts (Norgate vs local) and lists any missing symbols.
+If anything is missing, fetch just those symbols:
+
+```bash
+python scripts/norgate_to_parquet.py --tickers AIMN DCBG --output-dir parquet_data --start-date 1990-01-01
+```
+
+Then re-run the validator to confirm `STATUS: ALL PRESENT`.
+
 ## Notes
 
 - Output: one `.parquet` file per symbol in `parquet_data/` (e.g. `AAPL.parquet`, `I_VIX.parquet`)
