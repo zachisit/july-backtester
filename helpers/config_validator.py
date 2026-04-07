@@ -23,6 +23,7 @@ KNOWN_KEYS: set[str] = {
     # SECTION 1: Data Provider
     "data_provider",
     "csv_data_dir",
+    "parquet_data_dir",
     # SECTION 2: Backtest Period & Capital
     "start_date",
     "end_date",
@@ -33,6 +34,7 @@ KNOWN_KEYS: set[str] = {
     # SECTION 4: Price Adjustment & Benchmarks
     "price_adjustment",
     "benchmark_symbol",
+    "comparison_tickers",
     # SECTION 5: File Output
     "save_individual_trades",
     # SECTION 6: Filtering
@@ -45,7 +47,6 @@ KNOWN_KEYS: set[str] = {
     "save_only_filtered_trades",
     "show_qqq_losers",
     # SECTION 7: Portfolio Settings
-    "symbols_to_test",
     "portfolios",
     "min_bars_required",
     # SECTION 8: Allocation & Execution
@@ -161,6 +162,97 @@ def validate_intraday_config(config: dict) -> list[str]:
             "Metrics (Sharpe, Sortino, HTB fees) are automatically adjusted for bars-per-year. "
             "WFA splits are calculated by bar count for accurate IS/OOS ratios. "
             "Ensure your data provider supports intraday data."
+        )
+
+    return warnings
+
+
+def validate_comparison_tickers(config: dict) -> list[str]:
+    """
+    Validate comparison_tickers configuration.
+
+    Checks for:
+    - Invalid role values (must be "benchmark", "dependency", or "both")
+    - VIX used as a benchmark (no sensible B&H return for volatility)
+    - No benchmarks defined (nothing to compare against)
+    - Missing required keys (symbol, role)
+
+    Parameters
+    ----------
+    config : dict
+        The CONFIG dictionary from config.py.
+
+    Returns
+    -------
+    list[str]
+        List of warning/info message strings. Empty if no issues found.
+    """
+    warnings = []
+    comparison_tickers = config.get("comparison_tickers")
+
+    # If not set, will fall back to legacy — no warnings needed
+    if not comparison_tickers:
+        return warnings
+
+    if not isinstance(comparison_tickers, list):
+        warnings.append(
+            "WARNING: comparison_tickers must be a list of dicts. "
+            f"Got {type(comparison_tickers).__name__}. Will fall back to legacy defaults."
+        )
+        return warnings
+
+    valid_roles = {"benchmark", "dependency", "both"}
+    has_any_benchmark = False
+    volatility_symbols = {"VIX", "I:VIX", "^VIX", "VXN", "I:VXN", "^VXN"}
+
+    for i, entry in enumerate(comparison_tickers):
+        if not isinstance(entry, dict):
+            warnings.append(
+                f"WARNING: comparison_tickers[{i}] is not a dict — will be skipped"
+            )
+            continue
+
+        symbol = entry.get("symbol")
+        role = entry.get("role")
+
+        # Check required keys
+        if not symbol:
+            warnings.append(
+                f"WARNING: comparison_tickers[{i}] missing required 'symbol' key — will be skipped"
+            )
+            continue
+
+        if not role:
+            warnings.append(
+                f"WARNING: comparison_tickers[{i}] (symbol='{symbol}') missing required 'role' key — will be skipped"
+            )
+            continue
+
+        # Validate role
+        if role not in valid_roles:
+            warnings.append(
+                f"WARNING: comparison_tickers[{i}] (symbol='{symbol}') has invalid role '{role}'. "
+                f"Must be one of {valid_roles} — will be skipped"
+            )
+            continue
+
+        # Track if any entry has a benchmark role
+        if role in ("benchmark", "both"):
+            has_any_benchmark = True
+
+        # Warn if volatility index is used as a benchmark
+        if role in ("benchmark", "both") and symbol.upper() in volatility_symbols:
+            warnings.append(
+                f"WARNING: comparison_tickers[{i}] uses volatility symbol '{symbol}' as a benchmark. "
+                "Volatility indices (VIX, VXN) typically do not have sensible buy & hold returns. "
+                "Consider using role='dependency' instead."
+            )
+
+    # Warn if no benchmarks are defined
+    if not has_any_benchmark:
+        warnings.append(
+            "INFO: No benchmarks defined in comparison_tickers (all entries are role='dependency'). "
+            "No 'vs. X (B&H)' columns will appear in summary tables."
         )
 
     return warnings

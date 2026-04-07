@@ -15,8 +15,8 @@ CONFIG = {
     # ============================================================
     # SECTION 1: DATA PROVIDER
     # ============================================================
-    # Options: "polygon", "norgate", "yahoo", "csv"
-    "data_provider": "yahoo",
+    # Options: "polygon", "norgate", "yahoo", "csv", "parquet"
+    "data_provider": "parquet",
 
     # --- CSV Data Directory (only used when data_provider = "csv") ---
     # Path to the folder containing per-symbol CSV files.
@@ -24,6 +24,13 @@ CONFIG = {
     # Each file must be named {SYMBOL}.csv (case-insensitive).
     # Required columns: Date, Open, High, Low, Close, Volume
     "csv_data_dir": "csv_data",
+
+    # --- Parquet Data Directory (only used when data_provider = "parquet") ---
+    # Path to the folder containing per-symbol Parquet files.
+    # Relative paths are resolved from the project root.
+    # Each file must be named {SYMBOL}.parquet (case-insensitive).
+    # Required columns: Open, High, Low, Close, Volume with a DatetimeIndex.
+    "parquet_data_dir": "parquet_data",
 
     # ============================================================
     # SECTION 2: BACKTEST PERIOD & CAPITAL
@@ -71,11 +78,20 @@ CONFIG = {
     # Use a simple string for this setting. The service modules interpret it.
     "price_adjustment": "total_return", # Options: "total_return" or "none"
 
-    # --- Benchmark Symbol ---
-    # Pipe in a benchmark to compare the backtest to.
-    # Based on 'buy and hold' comparison only.
-    # Limited to one symbol.
-    "benchmark_symbol": "SPY",
+    # --- Comparison Tickers ---
+    # Controls which external symbols are fetched alongside your portfolio data.
+    # Roles:
+    #   "benchmark"  — shown as a B&H return column in the summary table
+    #   "dependency" — injected into strategies that declare dependencies=["spy"] etc.
+    #   "both"       — serves both roles
+    # Set to [] to run with no comparison tickers (e.g. pure parquet runs where you
+    # have no SPY/VIX files). The engine falls back to config start_date/end_date for
+    # the period. Strategies declaring dependencies=["spy"] etc. will be skipped.
+    "comparison_tickers": [
+      #  {"symbol": "SPY",   "role": "both",       "label": "SPY"},
+      #  {"symbol": "I:VIX", "role": "both", "label": "VIX"},
+      #  {"symbol": "I:TNX", "role": "both", "label": "TNX"},
+    ],
 
     # ============================================================
     # SECTION 5: FILE OUTPUT
@@ -132,35 +148,21 @@ CONFIG = {
     # ============================================================
     # SECTION 7: PORTFOLIO SETTINGS
     # ============================================================
-    # --- Single Asset Mode Settings ---
-    # Trick the system into thinking you're testing an entire 
-    #   portfolio by wrapping individual entries in brackets.
-    #   e.g., ['BITB','BBAI', ...] or a single entry ['BBAI']
-    "symbols_to_test": ['BITB'],
-    
-    # --- Portfolio Mode Settings ---
-    # Inside the 'portfolios' object list the various baskets
-    #   to iterate over. Comment out per each run when not in
-    #   use so you can easily come back later if needed and
-    #   not have to remember what basket is what. 
-    # 
-    # Declare an unlimited number of baskets for backtesting in a
-    #   single run.
+    # Add one or more named baskets to run. Each basket is independent
+    #   and will appear as its own section in the output report.
     #
-    # Either declare a list of one or more tickers, e.g. 
-    #   "BITB ETF": ["BITB"],
-    #   or multiple tickers e.g.,
-    #   "Semiconductors": ["NVDA", "AVGO", "QCOM", "AMD", ...],
-    #   without having to save a separate JSON file of tickers
+    # Single ticker:
+    #   "AAPL": ["AAPL"],
     #
-    # If a JSON file exists of tickers, call the file directly e.g.,
-    #   "Nasdaq": "nasdaq.json",
+    # Multiple tickers:
+    #   "Semiconductors": ["NVDA", "AVGO", "QCOM", "AMD"],
     #
-    # For Norgate Data users:
-    #   Norgate allows you to call the basket of tickers they package
-    #   up nicely for you directly. Very handy. The rubric of that looks
-    #   like the following:
+    # JSON file (relative to project root):
+    #   "Nasdaq 100": "nasdaq_100.json",
+    #
+    # Norgate watchlist:
     #   "Nasdaq Biotechnology": "norgate:Nasdaq Biotechnology",
+    #
     # --- Minimum Bars Required ---
     # Symbols with fewer bars than this are skipped entirely.
     # 250 ≈ one year of daily data. Increase if your strategies need
@@ -168,7 +170,8 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "Nasdaq 100": "nasdaq_100.json",
+        "My Symbols": ["AAPL"],
+        #"Nasdaq 100": "nasdaq_100.json",
         #"Nasdaq Biotech": "nasdaq_biotech_tickers.json",
         #"Russell 1000": "russell_1000.json",
     },

@@ -394,10 +394,15 @@ def plot_benchmark_comparison(
         if benchmark_df is None or benchmark_df.empty or 'Benchmark_Price' not in benchmark_df.columns:
              return create_placeholder_figure(title, f"Plot Skipped: Benchmark data for {benchmark_ticker} is missing or invalid.")
 
-        # Ensure indices are datetime
+        # Ensure indices are datetime and tz-naive (parquet data is UTC-aware;
+        # yfinance benchmark data is tz-naive — strip tz before intersection).
         try:
             equity_index = pd.to_datetime(daily_equity.index)
+            if equity_index.tz is not None:
+                equity_index = equity_index.tz_localize(None)
             benchmark_index = pd.to_datetime(benchmark_df.index)
+            if benchmark_index.tz is not None:
+                benchmark_index = benchmark_index.tz_localize(None)
             # Use copies to avoid SettingWithCopyWarning if slicing later
             daily_equity = daily_equity.copy()
             daily_equity.index = equity_index

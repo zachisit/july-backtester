@@ -27,12 +27,15 @@
 
 The backtester takes a strategy that you create (e.g., "buy when the 20-day SMA crosses above the 50-day SMA"), simulates it against historical price data for one or many stocks, and produces a performance report. You can run a single strategy or sweep many strategies simultaneously to find what works.
 
-**Two modes:**
+Everything runs through `portfolios` in `config.py` — from a single ticker to a full index. Add one or more named baskets and run `python main.py`. Examples:
 
-- **Single-Asset Mode** — Tests all strategies against one or a small list of specific tickers (e.g., just AAPL or BITB). Good for deep-diving a specific stock. Set `symbols_to_test` in `config.py` and run `python main.py`.
-- **Portfolio Mode** — Tests strategies against an entire index or portfolio (e.g., every stock in the Nasdaq 100). Runs in parallel across all your CPU cores. This is the primary research tool. Set `portfolios` in `config.py` and run `python main.py`.
-
-Both modes are accessed through the single entry point `main.py`. Portfolio mode is the default.
+```python
+"portfolios": {
+    "My Symbols": ["AAPL"],                          # single ticker
+    "My Watchlist": ["AAPL", "TSLA", "NVDA"],        # several tickers
+    "Nasdaq 100": "nasdaq_100.json",                 # pre-built JSON list
+}
+```
 
 **What you get out:**
 
@@ -141,10 +144,9 @@ All settings live in one file: [config.py](../config.py). Open it in any text ed
 
 - [ ] Add `POLYGON_API_KEY` to your `.env` file (copy `.env.example` to get started)
 - [ ] Set `upload_to_s3` and `s3_reports_bucket` if you want S3 uploads (optional)
-- [ ] Choose `data_provider`: `"polygon"`, `"norgate"`, `"yahoo"`, or `"csv"`
+- [ ] Choose `data_provider`: `"polygon"`, `"norgate"`, `"yahoo"`, `"csv"`, or `"parquet"`
 - [ ] Set `start_date` and `initial_capital`
-- [ ] For portfolio mode: uncomment the portfolios you want in the `portfolios` dict
-- [ ] For single-asset mode: set `symbols_to_test`
+- [ ] Add at least one entry to `portfolios` in `config.py` (single ticker, list, or JSON file)
 
 ### Data Provider Settings
 
@@ -260,14 +262,7 @@ Setting `start_date` to a date earlier than the provider's available data is fin
 
 ### What to Test
 
-**Single-Asset Mode:**
-
-```python
-"symbols_to_test": ['AAPL'],                      # One ticker
-"symbols_to_test": ['AAPL', 'TSLA', 'NVDA'],      # Several tickers
-```
-
-**Portfolio Mode** — edit the `portfolios` dictionary in `config.py`. Comment out entries you do not want to run:
+Everything goes in the `portfolios` dictionary in `config.py`. Comment out entries you do not want to run:
 
 ```python
 "portfolios": {
@@ -378,15 +373,15 @@ python main.py --dry-run
 python main.py --dry-run --name "my-next-run"
 ```
 
-### Single-Asset Mode
+### Testing a Single Ticker
 
-Tests strategies against the symbols listed in `symbols_to_test` in `config.py`. Update that list first, then run the same entry point:
+Add it directly to `portfolios` and run `python main.py`:
 
-```bash
-python main.py
+```python
+"portfolios": {
+    "My Symbols": ["AAPL"],
+}
 ```
-
-> To use single-asset mode, set `symbols_to_test` in `config.py` and make sure the `portfolios` dict only contains the symbols you want (or wrap them as a portfolio entry like `"My Tickers": ["AAPL", "TSLA"]`).
 
 ### First Run Tips
 
@@ -994,8 +989,7 @@ their `@register_strategy` decorator.
 | `timeframe_multiplier` | `1` | For sub-daily bars only — e.g., `5` with `"MIN"` gives 5-minute bars, `4` with `"H"` gives 4-hour bars |
 | `price_adjustment` | `"total_return"` | `"total_return"` (dividend-adjusted) or `"none"` |
 | `benchmark_symbol` | `"SPY"` | Primary benchmark ticker |
-| `symbols_to_test` | `['BITB']` | Tickers for single-asset mode |
-| `portfolios` | (see config) | Portfolios dict for portfolio mode |
+| `portfolios` | `{"My Symbols": ["AAPL"]}` | Named baskets of tickers to test — single ticker, list, or JSON filename |
 | `allocation_per_trade` | `0.10` | Fraction of equity per new position (0.10 = 10%) |
 | `execution_time` | `"open"` | Fill at next-day open price |
 | `stop_loss_configs` | `[{"type": "none"}]` | List of stop-loss configurations to test |

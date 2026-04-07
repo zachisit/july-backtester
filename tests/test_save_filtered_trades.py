@@ -89,11 +89,11 @@ class TestSaveOnlyFilteredTrades:
                 patch("helpers.summary.os.makedirs"),
                 patch.object(pd.DataFrame, "to_csv"),
             ):
+                benchmark_returns = {"SPY": 0.10, "QQQ": 0.12}
                 generate_per_portfolio_summary(
                     portfolio_results=portfolio_results,
                     portfolio_name="Test Portfolio",
-                    spy_return=0.10,
-                    qqq_return=0.12,
+                    benchmark_returns=benchmark_returns,
                     run_id="test-run-001",
                 )
                 return mock_save
