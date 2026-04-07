@@ -41,8 +41,8 @@ class TestNormalizeTicker:
         assert normalize_ticker("^VIX", "polygon") == "I:VIX"
 
     def test_yahoo_vix_to_norgate(self):
-        """^VIX (Yahoo) → I:VIX (Norgate)"""
-        assert normalize_ticker("^VIX", "norgate") == "I:VIX"
+        """^VIX (Yahoo) → $VIX (Norgate native dollar-prefix format)"""
+        assert normalize_ticker("^VIX", "norgate") == "$VIX"
 
     def test_yahoo_vix_to_csv(self):
         """^VIX (Yahoo) → VIX (CSV)"""
@@ -160,11 +160,29 @@ class TestNormalizeTicker:
         assert normalize_ticker("$I:VIX", "yahoo") == "^VIX"
 
     def test_dollar_vix_to_yahoo(self):
-        """$VIX (with $ prefix) → $VIX (not recognized as index, passes through)"""
-        # $VIX without "I:" is not a known index format
-        result = normalize_ticker("$VIX", "yahoo")
-        # After stripping $, "VIX" is recognized → ^VIX
-        assert result == "^VIX"
+        """$VIX (Norgate native format) → ^VIX (Yahoo)"""
+        # $VIX is Norgate's native dollar-prefix format; strips to canonical VIX → ^VIX
+        assert normalize_ticker("$VIX", "yahoo") == "^VIX"
+
+    def test_norgate_vix_to_polygon(self):
+        """$VIX (Norgate) → I:VIX (Polygon)"""
+        assert normalize_ticker("$VIX", "polygon") == "I:VIX"
+
+    def test_norgate_vix_to_csv(self):
+        """$VIX (Norgate) → VIX (CSV/bare)"""
+        assert normalize_ticker("$VIX", "csv") == "VIX"
+
+    def test_norgate_vix_passthrough(self):
+        """$VIX (Norgate) → $VIX (Norgate) — pass-through"""
+        assert normalize_ticker("$VIX", "norgate") == "$VIX"
+
+    def test_norgate_spx_to_yahoo(self):
+        """$SPX (Norgate) → ^GSPC (Yahoo) — special Yahoo ticker"""
+        assert normalize_ticker("$SPX", "yahoo") == "^GSPC"
+
+    def test_polygon_vix_to_norgate(self):
+        """I:VIX (Polygon) → $VIX (Norgate native format)"""
+        assert normalize_ticker("I:VIX", "norgate") == "$VIX"
 
     # --- Unknown Indices (Fallback Behavior) ---
 
@@ -229,6 +247,10 @@ class TestIsIndexTicker:
         """$I:VIX → True"""
         assert is_index_ticker("$I:VIX") is True
 
+    def test_norgate_dollar_format_is_index(self):
+        """$VIX (Norgate native) → True"""
+        assert is_index_ticker("$VIX") is True
+
     def test_bare_canonical_name_is_index(self):
         """VIX (bare, in canonical map) → True"""
         assert is_index_ticker("VIX") is True
@@ -276,6 +298,10 @@ class TestExtractCanonicalName:
     def test_bare_canonical_name(self):
         """VIX (bare, in map) → ('VIX', 'csv')"""
         assert _extract_canonical_name("VIX") == ("VIX", "csv")
+
+    def test_norgate_dollar_format(self):
+        """$VIX (Norgate native) → ('VIX', 'norgate')"""
+        assert _extract_canonical_name("$VIX") == ("VIX", "norgate")
 
     def test_equity_ticker(self):
         """AAPL → (None, 'AAPL')"""
