@@ -1,5 +1,25 @@
 # Release History
 
+## [1.3.0] — 2026-04-07
+
+**Norgate → Parquet pipeline + private data submodule**
+
+### Added
+- **`--database` flag** in `norgate_to_parquet.py` — export every symbol in an entire Norgate database (`US Equities`, `US Equities Delisted`, `US Indices`) without needing a watchlist. Enables a complete 1:1 local dump of all 36,418 Norgate symbols in three commands.
+- **`validate_norgate_export.py`** — cross-checks all three Norgate databases against local `parquet_data/` and reports missing symbols per-database. Run after export to confirm `STATUS: ALL PRESENT`.
+- **`scripts/NORGATE_EXPORT.md`** — step-by-step guide for the full 3-step Norgate dump, data refresh workflow, validation, and targeted re-exports.
+- **`parquet_data/` git submodule** — mounts `zachisit/july-backtester-norgate-data` (private, Git LFS) at `parquet_data/`. Interns clone the full 2.6 GB dataset with `git clone --recurse-submodules`. Follows the same pattern as the existing `custom_strategies/private` submodule.
+
+### Fixed
+- **Index symbol export failures** — `CANONICAL_INDEX_MAP` in `ticker_normalizer.py` had all Norgate entries set to Polygon's `I:` prefix instead of Norgate's native `$` prefix (`$VIX`, `$SPX`, `$DJI`, etc.). This caused 7 index symbols to fail during `US Indices` database export. All 1,615 indices now export cleanly.
+- **`$VIX` filename preservation** — `_sanitize_filename()` correctly preserves the `$` prefix (not a Windows-illegal character), so Norgate index files land as `$VIX.parquet` rather than `I_VIX.parquet`.
+
+### Notes
+- `CON.parquet` and `PRN.parquet` excluded from the data submodule — Windows reserved device names cannot be tracked by git. Fix tracked in issue #108.
+- Git LFS required to clone the data submodule (`git lfs install` before first clone).
+
+---
+
 ## [1.2.0] — 2026-04-06
 
 **Parquet data provider + config simplification**
