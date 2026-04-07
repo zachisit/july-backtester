@@ -2,13 +2,14 @@
 """
 Provider-agnostic ticker normalization service.
 
-Converts between provider-specific index symbol formats (e.g., I:VIX, ^VIX, $I:VIX)
+Converts between provider-specific index symbol formats (e.g., I:VIX, ^VIX, $VIX)
 to enable consistent ticker handling across data providers.
 
 **Index Symbol Formats by Provider:**
 - **Yahoo Finance**: Uses `^` prefix (e.g., `^VIX`, `^GSPC`)
-- **Polygon / Norgate**: Uses `I:` or `$I:` prefix (e.g., `I:VIX`, `$I:VIX`)
-- **CSV**: Uses bare symbol (e.g., `VIX`, `SPX`)
+- **Polygon**: Uses `I:` or `$I:` prefix (e.g., `I:VIX`, `$I:VIX`)
+- **Norgate**: Uses `$` prefix (e.g., `$VIX`, `$SPX`) — native Norgate Data format
+- **CSV / Parquet**: Uses bare symbol (e.g., `VIX`, `SPX`)
 
 **Equity tickers** (AAPL, MSFT, SPY, etc.) pass through unchanged across all providers.
 
@@ -47,39 +48,41 @@ CANONICAL_INDEX_MAP: dict[str, dict[str, str]] = {
     "VIX": {
         "yahoo":   "^VIX",     # CBOE Volatility Index
         "polygon": "I:VIX",
-        "norgate": "I:VIX",
+        "norgate": "$VIX",     # Norgate native: $ prefix
         "csv":     "VIX",
     },
     "VXN": {
         "yahoo":   "^VXN",     # Nasdaq Volatility Index
         "polygon": "I:VXN",
-        "norgate": "I:VXN",
+        "norgate": "$VXN",
         "csv":     "VXN",
     },
 
     # Interest Rate Indices (Treasury Yields)
+    # Note: TNX, TYX, FVX, IRX are Yahoo/Polygon concepts — not available in Norgate.
+    # Norgate entries are best-guess $ format; calls will return no data.
     "TNX": {
         "yahoo":   "^TNX",     # 10-Year Treasury Yield
         "polygon": "I:TNX",
-        "norgate": "I:TNX",
+        "norgate": "$TNX",
         "csv":     "TNX",
     },
     "TYX": {
         "yahoo":   "^TYX",     # 30-Year Treasury Yield
         "polygon": "I:TYX",
-        "norgate": "I:TYX",
+        "norgate": "$TYX",
         "csv":     "TYX",
     },
     "FVX": {
         "yahoo":   "^FVX",     # 5-Year Treasury Yield
         "polygon": "I:FVX",
-        "norgate": "I:FVX",
+        "norgate": "$FVX",
         "csv":     "FVX",
     },
     "IRX": {
         "yahoo":   "^IRX",     # 13-Week Treasury Bill
         "polygon": "I:IRX",
-        "norgate": "I:IRX",
+        "norgate": "$IRX",
         "csv":     "IRX",
     },
 
@@ -87,31 +90,31 @@ CANONICAL_INDEX_MAP: dict[str, dict[str, str]] = {
     "SPX": {
         "yahoo":   "^GSPC",    # S&P 500 (Yahoo uses GSPC ticker)
         "polygon": "I:SPX",
-        "norgate": "I:SPX",
+        "norgate": "$SPX",
         "csv":     "SPX",
     },
     "NDX": {
         "yahoo":   "^NDX",     # Nasdaq 100
         "polygon": "I:NDX",
-        "norgate": "I:NDX",
+        "norgate": "$NDX",
         "csv":     "NDX",
     },
     "DJI": {
         "yahoo":   "^DJI",     # Dow Jones Industrial Average
         "polygon": "I:DJI",
-        "norgate": "I:DJI",
+        "norgate": "$DJI",
         "csv":     "DJI",
     },
     "RUT": {
         "yahoo":   "^RUT",     # Russell 2000
         "polygon": "I:RUT",
-        "norgate": "I:RUT",
+        "norgate": "$RUT",
         "csv":     "RUT",
     },
     "NYA": {
         "yahoo":   "^NYA",     # NYSE Composite
         "polygon": "I:NYA",
-        "norgate": "I:NYA",
+        "norgate": "$NYA",
         "csv":     "NYA",
     },
 
@@ -119,7 +122,7 @@ CANONICAL_INDEX_MAP: dict[str, dict[str, str]] = {
     "DXY": {
         "yahoo":   "DX-Y.NYB", # US Dollar Index (ICE) - special Yahoo format
         "polygon": "I:DXY",
-        "norgate": "I:DXY",
+        "norgate": "$DXY",
         "csv":     "DXY",
     },
 }
@@ -173,9 +176,21 @@ def _extract_canonical_name(symbol: str) -> tuple[str | None, str]:
     s = symbol.strip()
     reverse_map = _get_reverse_map()
 
-    # Strip leading "$" (Polygon extended format: "$I:VIX")
+    # Strip leading "$" — two cases:
+    # - Polygon extended format: "$I:VIX" → strip to "I:VIX" (still Polygon)
+    # - Norgate native format:   "$VIX"   → canonical "VIX", format "norgate"
     if s.startswith("$"):
-        s = s[1:]
+        s_stripped = s[1:]
+        if s_stripped.upper().startswith("I:"):
+            # "$I:VIX" — Polygon extended, strip and continue
+            s = s_stripped
+        else:
+            # "$VIX" — Norgate native dollar-prefix format
+            canonical = s_stripped.upper()
+            if canonical in CANONICAL_INDEX_MAP:
+                return canonical, "norgate"
+            # Unknown $-prefixed symbol — treat as norgate index
+            return canonical, "norgate"
 
     # Check reverse map first for exact matches (handles special formats like ^GSPC, DX-Y.NYB)
     if s.upper() in reverse_map:
@@ -267,8 +282,10 @@ def normalize_ticker(symbol: str, provider: str) -> str:
     # Unknown index — apply fallback prefix pattern
     if provider == "yahoo":
         fallback = f"^{canonical_name}"
-    elif provider in ("polygon", "norgate"):
+    elif provider == "polygon":
         fallback = f"I:{canonical_name}"
+    elif provider == "norgate":
+        fallback = f"${canonical_name}"
     elif provider == "csv":
         fallback = canonical_name
     else:
