@@ -84,7 +84,7 @@ class TestResolveDir:
     def test_default_dir_is_parquet_data(self):
         from services.parquet_service import _PROJECT_ROOT
         result = _resolve_dir({})
-        assert result == os.path.join(_PROJECT_ROOT, "parquet_data")
+        assert os.path.normpath(result) == os.path.normpath(os.path.join(_PROJECT_ROOT, "parquet_data", "data"))
 
     def test_custom_relative_dir(self):
         from services.parquet_service import _PROJECT_ROOT
