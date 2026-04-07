@@ -4,8 +4,8 @@ norgate_to_parquet.py — Export Norgate bar data to Parquet files
 ================================================================
 
 Uses the project's existing Norgate wrapper (services/norgate_service.py)
-to iterate over all stocks in a Norgate watchlist and export daily OHLCV
-bars to individual Parquet files.
+to iterate over all stocks in a Norgate watchlist, database, or explicit
+ticker list and export daily OHLCV bars to individual Parquet files.
 
 Requirements:
     - Norgate Data Updater installed and running (Windows/macOS)
@@ -29,6 +29,13 @@ Usage:
 
     # Export 5-minute bars:
     python scripts/norgate_to_parquet.py --tickers AAPL --timeframe MIN --multiplier 5
+
+    # Export an entire Norgate database (complete universe, no watchlist needed):
+    python scripts/norgate_to_parquet.py --database "US Equities" --output-dir parquet_data
+    python scripts/norgate_to_parquet.py --database "US Equities Delisted" --output-dir parquet_data --skip-existing
+
+    # List available databases (run in Python):
+    #   import norgatedata; print(norgatedata.databases())
 
 Output:
     One Parquet file per symbol in the output directory:
@@ -86,6 +93,22 @@ def get_watchlist_symbols(watchlist_name: str) -> list[str]:
     return symbols
 
 
+def get_database_symbols(database_name: str) -> list[str]:
+    """Fetch all symbols from a Norgate database (e.g. 'US Equities', 'US Equities Delisted')."""
+    import norgatedata
+    available = norgatedata.databases()
+    if database_name not in available:
+        logger.error(
+            f"Database '{database_name}' not found. "
+            f"Available databases: {available}"
+        )
+        return []
+    symbols = norgatedata.database_symbols(database_name)
+    if not symbols:
+        logger.warning(f"Database '{database_name}' returned 0 symbols.")
+    return symbols
+
+
 def export_symbol(symbol: str, output_dir: Path, config: dict, skip_existing: bool = False) -> bool:
     """
     Export a single symbol's daily bars to a Parquet file using the
@@ -133,6 +156,16 @@ def main():
     group.add_argument(
         "--watchlist", type=str,
         help='Norgate watchlist name (e.g., "Russell 3000", "Nasdaq 100")',
+    )
+    group.add_argument(
+        "--database", type=str,
+        help=(
+            'Norgate database name — exports every symbol in that database. '
+            'Use this for a complete universe dump. '
+            'Examples: "US Equities", "US Equities Delisted", "US Indices". '
+            'Run: python -c "import norgatedata; print(norgatedata.databases())" '
+            'to list all available databases.'
+        ),
     )
     group.add_argument(
         "--tickers", nargs="+", type=str,
@@ -194,6 +227,9 @@ def main():
     if args.watchlist:
         logger.info(f"Fetching symbols from watchlist: '{args.watchlist}'")
         symbols = get_watchlist_symbols(args.watchlist)
+    elif args.database:
+        logger.info(f"Fetching symbols from database: '{args.database}'")
+        symbols = get_database_symbols(args.database)
     else:
         symbols = args.tickers
 
