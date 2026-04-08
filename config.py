@@ -349,6 +349,29 @@ CONFIG = {
     # When True, all 23 columns are displayed.
     # Override at runtime with: python main.py --verbose
     "verbose_output": False,
+
+    # ============================================================
+    # SECTION 22: POSITION SIZING
+    # ============================================================
+    # Position sizing method: "fixed", "kelly", "vol_parity", "risk_parity"
+    "position_sizing_method": "fixed",
+
+    # Fixed method: % of equity per trade (used by "fixed" method)
+    # Already defined in SECTION 8, but listed here for reference
+    # "allocation_per_trade": 0.10,
+
+    # Kelly Criterion: fraction of full Kelly to use (conservative)
+    # Full Kelly can be very aggressive, so we use 25% by default
+    "kelly_fraction": 0.25,
+
+    # Volatility/Risk Parity: target risk per trade (2% of equity)
+    # This is the $ amount you're willing to lose if the trade hits your stop
+    "target_risk_per_trade": 0.02,
+
+    # Portfolio heat limit: max total $ risk across all open positions
+    # 0.10 = 10% of equity can be at risk simultaneously
+    # 1.0 = no limit (allow full portfolio risk)
+    "max_portfolio_heat": 0.10,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
