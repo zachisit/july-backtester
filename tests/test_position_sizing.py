@@ -286,11 +286,11 @@ class TestPortfolioHeat:
         result = check_portfolio_heat(positions, 1000, 100000, 0.02)  # 1% heat, 2% max
         assert result is True
 
-    def test_zero_equity_returns_false(self):
-        """Zero equity returns False (safety guard)."""
+    def test_zero_equity_returns_true(self):
+        """Zero equity: heat defaults to 0.0 (division guarded), so trade is allowed."""
         positions = {}
         result = check_portfolio_heat(positions, 100, 0, 0.10)
-        assert result is True  # Actually, with 0 equity, heat = 0.0 / 0 = 0, which is <= max_heat
+        assert result is True
 
     def test_max_heat_100pct_allows_all(self):
         """max_heat=1.0 (100%) allows all trades."""
@@ -309,3 +309,85 @@ class TestPortfolioHeat:
         # Only MSFT contributes to heat
         result = check_portfolio_heat(positions, 1000, 100000, 0.02)  # (500+1000)/100000 = 1.5%
         assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for bugs fixed after initial implementation
+# ---------------------------------------------------------------------------
+
+class TestLookAheadBiasSlice:
+    """vol_parity and risk_parity must not see future ATR values."""
+
+    def test_vol_parity_uses_last_row_of_slice_not_full_history(self):
+        """Slicing symbol_data to current date prevents using a future ATR."""
+        config = {"target_risk_per_trade": 0.02}
+        dates = pd.date_range("2020-01-01", periods=5, freq="D")
+        # Early ATR is 1.0; last (future) ATR is 100.0
+        df = pd.DataFrame({"ATR_14": [1.0, 1.0, 1.0, 1.0, 100.0]}, index=dates)
+
+        # Slice to the 4th bar (simulating current date = dates[3])
+        current_slice = df.loc[: dates[3]]
+        shares_correct = _volatility_parity(100000, 50.0, current_slice, config)
+
+        # Using full history (the bug) would read ATR=100 from the last bar
+        shares_biased = _volatility_parity(100000, 50.0, df, config)
+
+        # Correct sizing uses ATR=1.0 → much larger position than biased ATR=100.0
+        assert shares_correct > shares_biased
+
+
+class TestKellyRollingStats:
+    """Kelly must produce non-fixed sizing once trade history is available."""
+
+    def test_kelly_with_stats_differs_from_fixed(self):
+        """Kelly with win_rate/avg_win/avg_loss produces a different size than fixed."""
+        config = {"allocation_per_trade": 0.10, "kelly_fraction": 0.25}
+        dates = pd.date_range("2020-01-01", periods=5, freq="D")
+        df = pd.DataFrame({"ATR_14": [2.0] * 5}, index=dates)
+
+        shares_fixed = calculate_position_size("fixed", 100000, 50.0, df, config)
+        # win_rate=0.65, R:R=2:1 → full Kelly = 0.475 → fractional = 0.11875 ≠ 0.10 fixed
+        shares_kelly = calculate_position_size(
+            "kelly", 100000, 50.0, df, config,
+            win_rate=0.65, avg_win=0.08, avg_loss=0.04,
+        )
+        assert shares_kelly != shares_fixed
+        assert shares_kelly == pytest.approx(237.5)
+
+    def test_kelly_falls_back_when_fewer_than_10_trades(self):
+        """Kelly falls back to fixed when insufficient trade history is passed."""
+        config = {"allocation_per_trade": 0.10, "kelly_fraction": 0.25}
+        dates = pd.date_range("2020-01-01", periods=5, freq="D")
+        df = pd.DataFrame({"ATR_14": [2.0] * 5}, index=dates)
+
+        # No kwargs → missing win_rate/avg_win/avg_loss → fallback to fixed
+        shares = calculate_position_size("kelly", 100000, 50.0, df, config)
+        assert shares == pytest.approx(200.0)
+
+
+class TestRiskParityStopDistance:
+    """risk_parity must use the configured stop distance, not always ATR fallback."""
+
+    def test_percentage_stop_uses_config_value(self):
+        """stop_distance_pct derived from percentage stop matches direct call."""
+        config = {"target_risk_per_trade": 0.02}
+        df = pd.DataFrame({"ATR_14": [2.0]}, index=[pd.Timestamp("2020-01-01")])
+
+        # Direct call with explicit stop distance = 5%
+        shares_direct = _risk_parity(100000, 50.0, df, config, stop_distance_pct=0.05)
+        # shares = (100000 * 0.02) / (50.0 * 0.05) = 800
+        assert shares_direct == pytest.approx(800.0)
+
+    def test_atr_fallback_used_when_no_stop_distance(self):
+        """When stop_distance_pct is absent, 3x ATR fallback is used."""
+        config = {"target_risk_per_trade": 0.02}
+        df = pd.DataFrame({"ATR_14": [2.0]}, index=[pd.Timestamp("2020-01-01")])
+
+        shares_fallback = _risk_parity(100000, 50.0, df, config)
+        # stop_distance = (2.0 * 3.0) / 50.0 = 0.12
+        # shares = (100000 * 0.02) / (50.0 * 0.12) ≈ 333.33
+        assert shares_fallback == pytest.approx(333.33, rel=0.01)
+
+        # Explicit stop of 5% must produce a different (larger) result than 12% fallback
+        shares_explicit = _risk_parity(100000, 50.0, df, config, stop_distance_pct=0.05)
+        assert shares_explicit > shares_fallback
