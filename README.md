@@ -53,7 +53,7 @@ graph TD
     B --> C[pip install -r requirements.txt]
     C --> D{Choose Data Provider}
     D -->|Polygon.io| E[Add POLYGON_API_KEY to .env file]
-    D -->|Yahoo / Norgate / CSV| F[No API Key Needed]
+    D -->|Yahoo / Norgate / CSV / Parquet| F[No API Key Needed]
     E --> G[Run Setup Wizard: python main.py --init]
     F --> G
     G --> H[config.py written - Ready to Backtest]
@@ -69,7 +69,7 @@ python main.py --init
 graph TD
     A[Run Setup Wizard: python main.py --init] --> B{Select Data Provider}
     B -->|Polygon.io| C[Enter API Key]
-    B -->|Yahoo / Norgate / CSV| D[No API Key Needed]
+    B -->|Yahoo / Norgate / CSV / Parquet| D[No API Key Needed]
     C --> E[Configure Account]
     D --> E
     E -->|Set Capital, Dates, & Slippage| F[Select Initial Portfolio]
