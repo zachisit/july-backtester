@@ -40,6 +40,7 @@ output/
 # parquet_data/ is now a git submodule (july-backtester-norgate-data)
 
 tools/watchlists
+autoresearch_runs/
 
 # Claude AI internal config
 .claude/
