@@ -1035,9 +1035,8 @@ def _draw_underwater_inline(ax, trades_df: pd.DataFrame, equity_dd_percent: pd.S
                 transform=ax.transAxes)
         return
 
-    use_dates = 'Ex. date' in trades_df.columns and pd.api.types.is_datetime64_any_dtype(trades_df['Ex. date'])
-    x = trades_df['Ex. date'] if use_dates else trades_df.index
     underwater = -equity_dd_percent
+    x = equity_dd_percent.index
 
     ax.fill_between(x, underwater, 0, color=T['dd_fill'], alpha=0.8)
     ax.plot(x, underwater, color=T['negative'], linewidth=0.7)

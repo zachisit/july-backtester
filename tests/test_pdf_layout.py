@@ -29,7 +29,7 @@ def _make_trades(n: int = 30) -> pd.DataFrame:
     eq = 50_000.0
     for i in range(n):
         entry = start + timedelta(days=i * 3)
-        exit_ = entry + timedelta(days=rng.integers(2, 15))
+        exit_ = entry + timedelta(days=int(rng.integers(2, 15)))
         profit = float(rng.uniform(-500, 1500))
         eq += profit
         pct = profit / 50_000 * 100
