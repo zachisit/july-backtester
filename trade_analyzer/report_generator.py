@@ -1,18 +1,21 @@
 # report_generator.py
 import math
-import os 
-import re 
+import os
+import re
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
+import matplotlib.gridspec as mgridspec
 from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 import numpy as np
 import traceback
+from datetime import datetime
 from pandas.core.dtypes.dtypes import PeriodDtype
 
 from . import default_config as config
 from . import calculations
 from . import utils
+from . import plotting as _plotting
 
 def create_text_figure(lines_to_draw, page_title=""):
     """Creates a matplotlib figure containing the provided lines of text."""
@@ -790,16 +793,11 @@ def generate_mc_percentile_table(mc_results: dict, drawdown_as_negative: bool) -
         table_string = f"Error generating MC percentile table: {e}\n{traceback.format_exc()}"
     return title, table_string
 
-# --- generate_pdf_report ---
+# --- generate_pdf_report (legacy — used only as fallback, kept for compat) ---
 def generate_pdf_report(report_sections, output_path, report_title_suffix=""):
     """
-    Generates the PDF report from a list of sections, handling pagination for text.
-
-    Args:
-        report_sections (list): List of dictionaries defining report content.
-                                Each dict: {'type': 'text'|'plot', 'title': str, 'data': str|Figure}
-        output_path (str): Path to save the output PDF file.
-        report_title_suffix (str, optional): Suffix to add to the main report title. Defaults to "".
+    Legacy PDF report generator — produces the old monospace-text layout.
+    Called when the new report_data dict is not available.
     """
     print(f"\n--- Generating PDF Report: {output_path} ---")
     pdf_pages = None
