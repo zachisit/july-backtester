@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 6 Rounds × Multi-Agent Parallel Research
+**Research Loop:** 7 Rounds × Multi-Agent Parallel Research
 **Last Updated:** 2026-04-10
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-10 (36 years)
@@ -33,6 +33,12 @@ Round 5 (5 new strategies, 1990-2026 extended history)
 Round 6 (fix attempts + 44-sym validation, 1990-2026)
   → Most fixes failed; Donchian (60d/20d)+MA Alignment validated on 44 symbols
   → RS(min) -3.98 on 44 symbols — second-smoothest equity curve overall
+
+Round 7 (5 first-principles strategies, 1990-2026)
+  → DISCOVERY: RSI>50 is redundant on N-bar new-high breakouts (r=+1.00 proven)
+  → DISCOVERY: ROC (20d)+MA Full Stack Gate — SQN 6.95 (highest ever), RS(min)=-3.83
+  → CMF (10d) failed — shorter window makes CMF noisier, not better
+  → EMA (8/21)+CMF Hold Gate: MaxRcvry 5008 days — dual-condition exit creates whipsaw
 ```
 
 ---
@@ -47,6 +53,8 @@ Round 6 (fix attempts + 44-sym validation, 1990-2026)
 | 4 | CMF Momentum (20d)+SMA200 | 51,173% | +0.63 | -15.03 | +43,803% | Pass | 3/3 | 0.18 |
 | 5 | Donchian (60d/20d)+MA Alignment | 42,263% | +0.64 | -3.98 | +35,177% | Pass | 3/3 | 0.28* |
 | 6 | MA Confluence (10/20/50) Full Stack | 29,771% | +0.54 | -4.36 | +22,911% | Pass | 3/3 | 0.17 |
+| 7 | ROC (20d) + MA Full Stack Gate | 14,518% | +0.50 | -3.83 | +12,472% | Pass | 3/3 | 0.35 |
+| 8 | SMA Crossover (20/50) + OBV Confirmation | 10,841% | +0.46 | -4.25 | +8,832% | Pass | 3/3 | 0.23 |
 
 *Donchian variants have r=0.39-0.95 with each other; do not hold multiple Donchian variants simultaneously.
 
@@ -132,6 +140,24 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 - On NVDA/META with ATR ≈ 5-8% of price, 2.0-2.5x = 10-20% stop → too tight for daily bar strategies
 - If using ATR stops, test 3.0x minimum; consider weekly bars instead
 
+### 8. RSI Gates Are Redundant on Price-Breakout Strategies (R7)
+- Donchian (40/20) + RSI>50 gate == Donchian (40/20) exactly (r=+1.00 on 44 symbols)
+- When price reaches a 40-bar new high, RSI>50 is almost always already true by definition
+- A N-bar new high IS a strong momentum signal; the oscillator just echoes it
+- **Lesson: don't add RSI confirmation to breakout entry events — it's a redundant parameter**
+
+### 9. CMF Window Length Is Not the Problem (R7)
+- CMF (10d) had negative Sharpe (-0.13) vs CMF (20d) at Sharpe +0.01 on 6 symbols
+- Shorter window = more crossings of the buy/sell threshold = more whipsaws, not fewer
+- The problem with CMF is that it hovers near zero frequently (distribution detection is inherently noisy)
+- **Lesson: don't fix CMF by shortening the period; the signal family itself is lower-quality than MA-based signals**
+
+### 10. High Trade Count + Moderate Expectancy = Highest SQN (R7)
+- ROC (20d) + MA Full Stack: 5,158 trades, SQN 6.95 — highest statistical confidence of all strategies
+- SMA (20/50) + OBV: 5,625 trades, SQN 6.59 — second highest
+- These strategies have lower P&L than champions but the law of large numbers makes them the most statistically reliable
+- **Lesson: SQN is the best single measure of statistical confidence; high-trade-count strategies dominate**
+
 ---
 
 ## Recommended Live Implementation
@@ -172,6 +198,7 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 | `breakout_round3.py` | R3+ | Donchian+SMA200, BB+ROC Gate, Donchian (60/20) |
 | `research_strategies_v4.py` | R5 | CMF+SMA200, MACD+RSI+SMA200, ATR Trailing, **MA Bounce (50d)+SMA200**, Keltner+MA Stack |
 | `round6_strategies.py` | R6 | CMF+RSI Gate, MA Bounce+RSI (failed), **Donchian (60d/20d)+MA Alignment**, OBV+MAC, MAC+ATR |
+| `round7_strategies.py` | R7 | CMF (10d) (failed), Donchian+RSI (redundant), EMA+CMF Hold (MaxRcvry 5008), **ROC (20d)+MA Full Stack**, **SMA (20/50)+OBV Confirm** |
 
 Bold = validated champion strategies.
 
@@ -190,17 +217,26 @@ Bold = validated champion strategies.
 | 6-symbol RS(min) is noisy; 44-symbol RS(min) is reliable | R6 scale validation | R6 |
 | RSI gating eliminates the timing advantage of bounce strategies | R6 failed fix | R6 |
 | Donchian (60d)+MA Alignment: RS(min) -3.98 on 44 symbols, better than expected | R6 44-sym run | R6 |
+| RSI>50 gate on N-bar new-high breakout is redundant (r=+1.00 proven on 44 symbols) | R7 44-sym validation | R7 |
+| CMF shorter period makes it worse, not better — oscillator family is inherently noisy | R7 failed experiment | R7 |
+| ROC+MA Full Stack: SQN 6.95 (highest ever) — high trade count drives statistical confidence | R7 new discovery | R7 |
 
 ---
 
 ## Open Research Questions for Future Rounds
 
-1. **Can MA Confluence MC Score be rescued?** ATR trailing stop at 2.0x failed. Try 3.0x or use a percent-based trailing stop (e.g., 15% below 20-bar high) instead.
+1. **Can MA Confluence MC Score be rescued?** ATR trailing stop at 2.0x failed. Try 3.0x or 3.5x multiplier — Round 8 priority.
 
-2. **CMF shorter period** — 10d CMF instead of 20d. Faster signal, less MaxDD accumulation in distribution phases. Round 7 candidate.
+2. ~~**CMF shorter period**~~ — TESTED in R7. CMF (10d) had negative Sharpe. CMF is not a strong signal family regardless of window.
 
 3. **MA Bounce on weekly bars** — the 50-SMA bounce on weekly charts is a strong institutional pattern. Weekly timeframe would give cleaner signals and higher win rates.
 
 4. **Multi-strategy portfolio simulation** — run MA Confluence Fast Exit + Donchian (40/20) + MA Bounce simultaneously as a combined portfolio to measure actual combined drawdown and Sharpe.
 
 5. **Sector rotation** — do the same strategies work equally well on energy, financials, healthcare? If yes, diversify away from tech concentration.
+
+6. **EMA (8/21) + OBV Hold Gate** — Replace CMF with OBV as the sustained hold condition. OBV doesn't hover near zero like CMF does. Round 8 candidate.
+
+7. **Donchian (40/20) + Volume Spike Confirmation** — Gate breakouts on volume > 1.5× 20-bar average (not RSI — proven redundant). Tests a real new hypothesis: breakouts on below-average volume fail more often.
+
+8. **MA Bounce (50d) + OBV Confirmation** — Gate bounce entries on OBV being above its MA. Should improve win rate without destroying the 50-SMA timing signal.

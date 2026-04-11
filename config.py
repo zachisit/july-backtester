@@ -16,7 +16,7 @@ CONFIG = {
     # SECTION 1: DATA PROVIDER
     # ============================================================
     # Options: "polygon", "norgate", "yahoo", "csv", "parquet"
-    "data_provider": "parquet",
+    "data_provider": "norgate",
 
     # --- CSV Data Directory (only used when data_provider = "csv") ---
     # Path to the folder containing per-symbol CSV files.
@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2004-01-01",
+    "start_date": "1990-01-01",
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -170,10 +170,9 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "My Symbols": ["AAPL"],
-        #"Nasdaq 100": "nasdaq_100.json",
-        #"Nasdaq Biotech": "nasdaq_biotech_tickers.json",
-        #"Russell 1000": "russell_1000.json",
+        # Round 7: validate top performers on 44 symbols
+        "NDX Tech (44)": "nasdaq_100_tech.json",
+        #"Tech Giants (6)": "tech_giants.json",
     },
 
     # ============================================================
@@ -245,7 +244,7 @@ CONFIG = {
     # Rolling multi-fold WFA (opt-in — keep None for normal runs).
     # wfa_folds: None or 0 → disabled; int >= 2 → number of equal-width OOS folds.
     # wfa_min_fold_trades: minimum OOS trades required to score a fold.
-    "wfa_folds": None,
+    "wfa_folds": 3,
     "wfa_min_fold_trades": 5,
 
     # ============================================================
@@ -286,7 +285,15 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["SMA Crossover (20d/50d)"],
+    "strategies": [
+        # Round 7: validate top 3 new strategies on 44 symbols
+        "Donchian (40/20) + RSI Momentum Gate",
+        "ROC (20d) + MA Full Stack Gate",
+        "SMA Crossover (20/50) + OBV Confirmation",
+        # Benchmarks (existing champions)
+        "MA Confluence (10/20/50) Fast Exit",
+        "Donchian Breakout (40/20)",
+    ],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
