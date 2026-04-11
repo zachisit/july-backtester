@@ -1938,14 +1938,44 @@ Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relati
 
 4. **Universe-specific correlation confirmed:** BB ↔ RSI Weekly is 0.4711 on Sectors+DJI 46 vs 0.7049 on NDX Tech 44. Same pair, different universe, completely different correlation due to sector rotation. Always test correlations on the actual production universe.
 
-**Research loop STATUS: ACTIVE — Q49 (Rel Mom as 6th strategy in Conservative) pending.**
+**Research loop STATUS: ACTIVE — Q49 DONE. Conservative 6th strategy track closed. Q50 (Williams %R on Sectors+DJI 46) pending — optional low priority.**
+
+**Rel Mom on Sectors+DJI 46 additional finding (Round 46):** Max r=0.2373 — lowest maximum correlation of any strategy in any combined portfolio run in research history. But Sharpe 0.80 disqualifies it. Lesson: Low correlation without sufficient alpha does not improve a portfolio. The two conditions are both necessary.
 
 _[Next agent: append your session below this line]_
 
 ---
 
-### QUEUE ITEM 49 — Relative Momentum as 6th Strategy in Conservative Portfolio (Sectors+DJI 46) [PRIORITY: MEDIUM]
+### QUEUE ITEM 50 — Williams %R as 6th Strategy in Conservative Portfolio (Sectors+DJI 46) [PRIORITY: LOW]
 **Status: PENDING**
+
+**Why this matters:** BB Breakout is confirmed as the best 6th strategy for the conservative portfolio (OOS +170.96%, all 6 MC Score 5), but its Sharpe (1.43) and OOS P&L are the weakest in the portfolio. Williams %R (14-period, oversold threshold) was confirmed robust in isolation in earlier rounds (R34-36 area) with different entry mechanics from all 5 existing conservative strategies. Williams %R enters on extreme oversold readings (mean reversion), unlike the trend-following signals of the 5 confirmed strategies. This different market timing may produce lower correlations with Price Momentum and RSI Weekly than BB Breakout achieves. If Williams %R has Sharpe > 1.43 AND OOS P&L > +170.96% on Sectors+DJI 46, it's a better 6th strategy than BB Breakout.
+
+**Config:**
+```python
+"timeframe": "W"
+"portfolios": {"Sectors+DJI 46": "sectors_dji_combined.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200",
+               "RSI Weekly Trend (55-cross) + SMA200",
+               "Williams %R Oversold (14/−70) + SMA200"]   # or whichever Williams %R name is registered
+"allocation_per_trade": 0.028
+"min_bars_required": 100
+```
+
+**Run:** `rtk python main.py --name "sectors-dji-6strat-williams" --verbose`
+**Note:** Check `rtk python main.py --dry-run` to confirm the exact Williams %R strategy name before running.
+
+**Success criteria:** All 6 WFA Pass + RollWFA 3/3. Williams %R Sharpe > 1.43 (better than BB Breakout). OOS P&L > +170.96%. All pairs < 0.70. If Williams %R beats BB Breakout on Sharpe + OOS → upgrade conservative v2 to Williams %R.
+
+**Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250, portfolios=NDX Tech 44.
+
+---
+
+### QUEUE ITEM 49 — Relative Momentum as 6th Strategy in Conservative Portfolio (Sectors+DJI 46) [PRIORITY: MEDIUM]
+**Status: DONE — 2026-04-11 (Round 46)**
+**Run ID:** sectors-dji-6strat-relmom_2026-04-11_13-03-38
+**Key result:** REJECTED. Sharpe 0.80 (far below minimum). OOS P&L only +51.38%. RS(avg) = -0.07. RS(min) = -1615.81. Relative Momentum's edge is universe-specific — sector ETF relative strength is mean-reverting, not momentum-continuing. BB Breakout (from R45) confirmed as the superior 6th strategy option (Sharpe 1.43, OOS +170.96%). Conservative portfolio 6th strategy track closed — BB Breakout is the best available.
 
 **Why this matters:** BB Breakout PASSES on Sectors+DJI 46 (max r=0.4711 with RSI Weekly, all 6 MC Score 5). But BB Breakout OOS P&L is only +170.96% — the weakest OOS of all 6. Relative Momentum (13w vs SPY) has never been tested in the conservative portfolio combined context. On Sectors+DJI 46, Rel Mom compares each stock to SPY relative performance — a fundamentally different signal from Price Momentum's raw ROC. If Rel Mom has low correlation with all 5 existing strategies (especially Price Momentum, r=0.6925 with RSI Weekly) AND has stronger OOS P&L, it could be a better 6th strategy than BB Breakout.
 

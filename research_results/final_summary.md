@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 45 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
+**Research Loop:** 46 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-11 (36 years)
@@ -263,6 +263,15 @@ Round 45 (BB Breakout as 6th Strategy in Conservative Portfolio — Q48, 2026-04
   → CONDITIONAL PASS: BB Breakout can be added as 6th strategy; conservative portfolio v2 defined
   → BUT: BB OOS P&L only +170.96% (weakest of 6), BB Sharpe 1.43 (weakest of 6)
   → Q49 added: test Relative Momentum as 6th strategy (may have better OOS P&L than BB Breakout)
+
+Round 46 (Relative Momentum as 6th Strategy in Conservative Portfolio — Q49, 2026-04-11)
+  → REJECTED: Sharpe 0.80 (far below minimum), OOS P&L only +51.38%, RS(avg) = -0.07
+  → RS(min) = -1615.81 — catastrophic rolling Sharpe window (near-zero equity curve period)
+  → Universe mismatch: sector ETF relative momentum (SPY-relative) is mean-reverting, not momentum-continuing
+  → Exceptional correlation properties (max r=0.2373 — lowest ever in any combined run), but alpha absent
+  → BB Breakout (R45) confirmed as the superior 6th strategy option for Conservative portfolio
+  → Conservative portfolio 6th strategy track CLOSED: 3 candidate strategies tested, BB Breakout wins
+  → Q50 added (low priority): Williams %R as alternative 6th strategy candidate
 ```
 
 ---
@@ -492,6 +501,13 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 - At 969 trades total (vs 831 in isolation), the strategy generates MORE trades at 2.8% allocation vs 10% in isolation — lower per-trade capital requirement allows more simultaneous positions before hitting cash ceiling
 - **Lesson: Long-duration, infrequent strategies (hold months, not days) have fundamentally different MC Score behavior. They are structurally resistant to the synchronized-crash tail risk that plagues high-frequency trend-following strategies on correlated universes.**
 
+### 27. Low Correlation Alone Is Insufficient — Alpha Must Meet Minimum Threshold (R46)
+- Relative Momentum on Sectors+DJI 46 achieved the lowest maximum correlation of any strategy in any combined portfolio run (max r=0.2373) — extraordinary diversification
+- BUT: Sharpe 0.80, OOS P&L +51.38%, RS(avg) = -0.07 — the strategy fails to generate sufficient alpha on this universe
+- Low correlation + poor alpha = net negative portfolio contribution (dilutes the high-alpha existing strategies)
+- **Lesson: Both conditions must be met for a 6th strategy to improve a portfolio: (1) correlation < threshold AND (2) individual Sharpe meets minimum standard. Low correlation without sufficient alpha does not improve a portfolio.**
+- **Universe insight:** Relative Momentum works on NDX Tech 44 (single-stock momentum within a sector) but fails on Sectors+DJI 46 (sector ETF relative momentum is mean-reverting by nature — strong sectors rotate out, weak sectors rotate in)
+
 ### 25. BB Breakout ↔ RSI Weekly Correlation is Universe-Specific: 0.4711 on Sectors+DJI 46 vs 0.7049 on NDX Tech 44 (R43/R45)
 - The same BB Breakout / RSI Weekly strategy pair shows dramatically different correlations depending on the universe
 - NDX Tech 44: r=0.7049 — both fire on the same concentrated tech stock momentum breakouts simultaneously
@@ -686,4 +702,5 @@ All 33 research questions have been answered across Rounds 1-31. Research is com
 34. ~~**Optimized 5-Strategy NDX Tech 44 (replace Price Momentum with Relative Momentum)**~~ — R42 Q45. All 5 WFA Pass. No pair > r=0.65. Relative Momentum MaxDD 31.82% (-13pp vs Price Momentum). RSI Weekly OOS +28,214% (record). CONFIRMED SUPERIOR to original R16 portfolio. **CLOSED.**
 35. ~~**BB Breakout as 6th Strategy in Combined NDX Tech 44**~~ — R43 Q46. All 6 WFA Pass + RollWFA 3/3. BB Breakout MC Score 5 (second strategy to achieve this alongside Rel Mom). MaxDD 34.27% (second best). CRITICAL: BB ↔ RSI Weekly r=0.7049 — above 0.70 threshold. BB cannot be added as 6th strategy. Q47 tests BB as Donchian replacement. **CLOSED.**
 36. ~~**BB Breakout Replacing Donchian (5-Strategy Test)**~~ — R44 Q47. REJECTED. Without Donchian, BB ↔ RSI Weekly escalates to r=0.7874 and BB ↔ Rel Mom to r=0.7203 — both above 0.70. Donchian is a structural portfolio buffer (r=0.22 with RSI Weekly) that cannot be replaced. R42 5-strategy NDX Tech 44 portfolio CONFIRMED FINAL. **CLOSED.**
-37. ~~**BB Breakout as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R45 Q48. CONDITIONAL PASS. All 6 MC Score 5 (unprecedented). BB ↔ RSI Weekly r=0.4711 (sector rotation decorrelates). BB MaxDD 13.29% (lowest ever). BUT: BB OOS P&L only +170.96% (weakest of 6). Conservative portfolio v2 (6-strategy MaxDD-focused) defined. Q49 tests Relative Momentum as alternative 6th strategy. **CLOSED.**
+37. ~~**BB Breakout as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R45 Q48. CONDITIONAL PASS. All 6 MC Score 5 (unprecedented). BB ↔ RSI Weekly r=0.4711 (sector rotation decorrelates). BB MaxDD 13.29% (lowest ever). BUT: BB OOS P&L only +170.96% (weakest of 6). Conservative portfolio v2 (6-strategy MaxDD-focused) defined. **CLOSED.**
+38. ~~**Relative Momentum as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R46 Q49. REJECTED. Sharpe 0.80, OOS +51.38%, RS(avg)=-0.07. Universe mismatch: sector ETF relative momentum is mean-reverting (not momentum-continuing like single stocks). Max r=0.2373 (lowest ever in any combined run) but alpha insufficient. BB Breakout confirmed as best 6th strategy. Conservative portfolio 6th strategy track CLOSED. **CLOSED.**
