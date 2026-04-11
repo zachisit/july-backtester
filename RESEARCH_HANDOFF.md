@@ -55,12 +55,13 @@ Do NOT batch multiple rounds into one commit. One round = one commit.
 1. Read this entire file first — it is the source of truth, not the conversation history.
 2. Check the SESSION LOG at the bottom to see what the last agent ran and found.
 3. Pop the first uncompleted item from THE RESEARCH QUEUE.
-4. Run it using the EXECUTION PROTOCOL below.
-5. Record results using the ROUND RECORDING FORMAT below.
-6. Update this file: mark queue item done, add new discoveries or anti-patterns, append to SESSION LOG.
-7. **Commit and push immediately** — main repo + private submodule (see COMMIT PROTOCOL below). Do this after EVERY round before moving to the next.
-8. If time permits, pop the next queue item and repeat from step 3.
-9. Stop when you hit SUCCESS/STOP CRITERIA or when your context window is getting full.
+4. **Before writing any new strategy code**, read the ANTI-OVERFITTING GUARD in the EXECUTION PROTOCOL section.
+5. Run it using the EXECUTION PROTOCOL below.
+6. Record results using the ROUND RECORDING FORMAT below.
+7. Update this file: mark queue item done, add new discoveries or anti-patterns, append to SESSION LOG.
+8. **Commit and push immediately** — main repo + private submodule (see COMMIT PROTOCOL below). Do this after EVERY round before moving to the next.
+9. If time permits, pop the next queue item and repeat from step 3.
+10. Stop when you hit SUCCESS/STOP CRITERIA or when your context window is getting full.
 
 **The goal is autonomous iteration — do not wait for human approval between rounds. Run, record, commit, push, advance.**
 
@@ -879,6 +880,71 @@ rtk git push origin research/autonomous-strategy-loop
 ```
 
 **One round = one commit. Do NOT batch multiple rounds. If the power goes out, the last push is safe.**
+
+---
+
+---
+
+### ANTI-OVERFITTING GUARD — MANDATORY RULES (read before writing any new strategy)
+
+**These rules exist because Claude agents overfit without them. Each rule was written from an observed failure.**
+
+#### RULE 1 — Mandatory 6-symbol validation before 44-symbol
+Every new strategy MUST pass the 6-symbol gate first:
+- Set `"portfolios": {"Tech Giants (6)": "tech_giants.json"}`, `"strategies": ["New Strategy Name"]`
+- If Sharpe < 0.30 OR WFA Fail on 6 symbols → **STOP. Do not run on 44 symbols. Log it as FAILED.**
+- Only if Sharpe ≥ 0.30 AND WFA Pass on 6 symbols → proceed to 44-symbol run.
+- **NEVER run a new, unvalidated strategy on 44 symbols as the first test.**
+- **NEVER combine unvalidated strategies with champions in the same run** — results are uninterpretable.
+
+#### RULE 2 — Thresholds must be derived from first principles, not tuned
+When you write a new strategy with a threshold (e.g., RSI > 55, BB 2-std, Williams %R > -20, K > 80):
+- **Document WHY that specific value** in the strategy file docstring before running anything.
+- Acceptable reasons: "same as RSI Weekly champion which proved effective" (explicit transfer), "the indicator's natural overbought/oversold boundary" (mathematical), "shown in academic literature for this indicator family" (evidence-based).
+- **NOT acceptable**: "I chose 80 because it looked good in preliminary tests", "optimized by testing 60/70/80 and picking the best".
+- If you cannot write a one-sentence first-principles justification for a threshold, **do not use it**.
+
+#### RULE 3 — Do not clone champion thresholds without justification
+If a new strategy uses the SAME thresholds as an existing champion (e.g., VWRSI 55/45 = RSI Weekly 55/45, or exit level = entry level of another strategy), you MUST explicitly state:
+- "These thresholds transfer from [champion] because [reason the same value applies to this different indicator]."
+- If you cannot justify the transfer, choose values from first principles instead — even if that means different values.
+
+#### RULE 4 — `allocation_per_trade` must be a round number
+Valid values: `0.10`, `0.05`, `0.033`, `0.025`, `0.028` is **NOT valid** — it signals parameter optimization.
+- Use `0.10` for single-strategy tests (10 symbols max concurrent)
+- Use `0.05` for 2-strategy combined tests
+- Use `0.033` for 3-strategy combined tests (standard multi-strategy allocation)
+- Use `0.028` ONLY if explicitly computing `1/N` for a specific N (document: "3.3% for N=3")
+- **Never pick an allocation that happens to produce optimal Sharpe in the current run.**
+
+#### RULE 5 — `"strategies"` config key rules
+- For testing a NEW strategy alone: `"strategies": ["New Strategy Name"]`
+- For champion-only runs (universe validation): `"strategies": ["Champion1", "Champion2", ...]` (all 5 known champions)
+- For combined validation (new strategy with champions): only after the new strategy has ALREADY passed 6-symbol AND 44-symbol tests in isolation.
+- **NEVER put unvalidated strategies alongside champions in a single run** — their correlation inflates apparent performance.
+
+#### RULE 6 — Sensitivity sweep is not optional for new champions
+Before declaring any strategy a champion, run with `"sensitivity_sweep_enabled": True` for at least one run.
+- If < 30% of parameter variants are profitable: the strategy is **FRAGILE** and must not be declared a champion.
+- Document the fragility verdict in the round recording.
+
+#### RULE 7 — Reset config after every run
+After every run, restore these keys to their defaults before committing:
+```python
+"timeframe": "D"                     # not "W" or "M"
+"allocation_per_trade": 0.10         # not 0.028 or any optimized value
+"strategies": "all"                  # not a specific list (unless the run was universe validation)
+"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}   # reset to primary universe
+"min_bars_required": 250             # not 100 (only lower for international ETF runs)
+```
+**Never commit config.py in a state that reflects the last run's parameters.**
+
+#### RED FLAGS — stop and log if you see these
+- `allocation_per_trade` is not a round number (e.g., 0.028, 0.037): you are optimizing, not researching.
+- A new strategy's thresholds match an existing champion exactly, with no documented justification.
+- You are running a new strategy on 44 symbols before it has passed 6-symbol validation.
+- The `"strategies"` list mixes champions and unvalidated strategies in the same run.
+- You chose a threshold value because it "looked better" in a preliminary scan — this IS p-hacking.
 
 ---
 
