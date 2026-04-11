@@ -1,10 +1,10 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 20 Rounds × Multi-Agent Parallel Research — **COMPLETE ✓**
+**Research Loop:** 31 Rounds × Multi-Agent Parallel Research — **COMPLETE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
-**Full Period:** 1990-01-01 → 2026-04-10 (36 years)
-**Ecosystems tested:** AAPL single → tech_giants (6) → Nasdaq 100 Tech (44 symbols) → S&P 500 (500 symbols — universality confirmed)
+**Full Period:** 1990-01-01 → 2026-04-11 (36 years)
+**Ecosystems tested:** AAPL single → tech_giants (6) → NDX Tech (44) → SP500 (500) → Russell 1000 (1,012) → DJI 30 → Biotech (257) → Sector ETFs (16) → High Vol (242) → Russell Top 200 (198) → NDX Full (101) → NDX+DJI (124) → Sectors+DJI (46) → Intl ETFs (30) → Global Diversified (76)
 
 ---
 
@@ -128,6 +128,86 @@ Round 20 (RSI Weekly parameter sensitivity sweep — Q21, 2026-04-11)
   → Mean Sharpe 1.58 across valid variants; range -0.98 to 2.10
   → ROBUST VERDICT: RSI Weekly edge is NOT parameter-specific. 55/45 thresholds are within a wide profitable family.
   → Best discovered variant: rsi_period=10, rsi_entry=63.25, rsi_exit=51.75 → Sharpe 2.10
+
+Round 21 (Dow Jones 30 — Q22, 2026-04-11)
+  → BREAKTHROUGH: All 5 WFA Pass + RollWFA 3/3 on DJI 30 blue-chip stocks
+  → MaxDD 19-23% — HALF of NDX Tech 44 (44-50%); Sharpe 1.71-1.93 (competitive with NDX)
+  → MC Score +5 for MA Bounce, MAC, Donchian — sector cross-diversification breaks correlated crashes
+  → RSI Weekly best P&L (3,926%) and OOS (+1,729%) on DJI
+  → Key insight: MaxDD reduction requires a universe where non-tech names are the majority
+
+Round 22 (Nasdaq Biotech 257 — Q23, 2026-04-11)
+  → ALL 5 WFA Pass on biotech (binary FDA events)
+  → Sharpe 0.68-0.81 (LOWEST universe tested — binary events create noise floor)
+  → MaxDD 55-67% (FDA cliff events raise drawdown ceiling)
+  → MAC Fast Exit best (Sharpe 0.81) — fast exit protects against sudden FDA reversals
+  → OOS P&L +1,550% to +2,961% due to COVID-era biotech super-cycle
+  → Conclusion: Strategies work even in the hardest binary-event sector
+
+Round 23 (Sector ETFs 16 — Q24, 2026-04-11)
+  → ALL 5 WFA Pass + ALL MC Score +5 — FIRST TIME all 5 strategies reach MC Score +5
+  → 16 maximally diversified ETFs (energy, tech, utilities, real estate, defense, gold, etc.)
+  → Geographic/sector decorrelation = Monte Carlo can't construct scenario that crashes all 16 simultaneously
+  → Sharpe 0.54-0.95 (lower than individual stocks — ETF trend capture is smoother but shallower)
+  → Confirmed: MC Score is determined by universe correlation structure, not strategy quality
+
+Round 24 (Russell 2000 attempt — Q25, 2026-04-11)
+  → NOT TESTABLE: Norgate carries ~203 of 1,969 R2000 symbols; 202 have <250 weekly bars
+  → Only 1 valid symbol — not a meaningful test; provider limitation
+  → Workaround: use Russell Top 200 (198 mega-caps) as the large-cap Russell proxy
+
+Round 25 (High Volatility 242 — Q26, 2026-04-11)
+  → ALL 5 WFA Pass on high-momentum names (NVDA, TSLA, PLTR, AVGO, etc.)
+  → Sharpe 1.16-1.31 — LOWER than NDX Tech 44 (1.63-1.95): excess volatility reduces Sharpe
+  → MAC Fast Exit dominant (Sharpe 1.31) — FIRST universe where MAC > RSI Weekly
+  → RSI Weekly weakest (1.16) — RSI 55-cross disrupted by binary volatility spikes in high-vol names
+  → Hypothesis falsified: extreme momentum names do NOT produce higher Sharpe; NDX quality > high-vol quantity
+
+Round 26 (Russell Top 200 — Q27, 2026-04-11)
+  → ALL 5 WFA Pass; Price Momentum Sharpe 1.95 (NEW RECORD for that strategy)
+  → RSI Weekly RS(min) -1.85 (NEW RECORD — best rolling Sharpe floor of any strategy)
+  → RS(avg) > 1.77 for all 5 strategies — highest consistent rolling average of any universe
+  → MaxDD 37-54%; 4 of 5 below 45%
+  → Best balanced universe: mega-cap diversification (tech + financials + healthcare + energy + consumer)
+
+Round 27 (Nasdaq Full 101 — Q28, 2026-04-11)
+  → ALL 5 WFA Pass; Sharpe 1.83-1.95 (matches NDX Tech 44, BETTER Donchian: +0.29)
+  → Donchian: Sharpe 1.63 → 1.92 with 57 additional non-tech NDX names
+  → RS(avg) > 1.99 for all 5 (new consistency record)
+  → MaxDD does NOT improve vs NDX Tech 44 (NDX non-tech crashes alongside tech in 2022)
+  → Updated production recommendation: use nasdaq_100.json (101) over nasdaq_100_tech.json (44)
+
+Round 28 (NDX Full + DJI 30 combined 124 symbols — Q29, 2026-04-11)
+  → MA Bounce Sharpe 1.98 (NEW ALL-TIME RECORD)
+  → RS(avg) > 2.0 for ALL 5 strategies (NEW RECORD for rolling consistency)
+  → MaxDD hypothesis FALSIFIED: blending NDX+DJI worsens MaxDD +3-9pp vs NDX Tech 44
+  → Insight: tech crashes dominate when 101 NDX names + 23 unique DJI = still 80%+ tech
+  → For MaxDD reduction, non-tech names must be the MAJORITY (not a small addition)
+
+Round 29 (Sectors+DJI 46 — Q30, 2026-04-11)
+  → BREAKTHROUGH — BEST RISK-BALANCED UNIVERSE DISCOVERED
+  → Sharpe 1.54-1.86; MaxDD 21-30%; MC Score +5 for MAC/Donchian/MA Bounce; +2 for RSI/Price Momentum
+  → FIRST universe to simultaneously achieve Sharpe >1.50, MaxDD <31%, MC ≥+2
+  → MAC Fast Exit RS(min) -2.00 (outstanding); RSI Weekly Sharpe 1.86 (highest on this universe)
+  → Price Momentum MaxDD 21.52% (matches DJI 30 best-case)
+  → Formula: 16 Sector ETFs (decorrelation backbone) + 30 DJI stocks (individual alpha) = optimal mix
+
+Round 30 (International ETFs 30 — Q32, 2026-04-11)
+  → ALL 5 WFA Pass + ALL MC Score +5 — geographic diversification fully cancels tail risk
+  → Sharpe 0.67-1.08 (lower — Japan stagnation, currency headwinds, weaker intl momentum)
+  → MaxDD 27-32% (comparable to Sectors+DJI 46)
+  → AvgRcvry 114-188 days (3-6× longer than US equities — international drawdowns last longer)
+  → RSI Weekly dominant (Sharpe 1.08, best OOS +373%)
+  → Best use: complement to Sectors+DJI 46 in a larger global portfolio
+
+Round 31 (Global Diversified 76 = Sectors+DJI+International ETFs — Q33, 2026-04-11)
+  → ALL 5 WFA Pass + RollWFA 3/3 on 76-symbol global portfolio
+  → Sharpe 1.36-1.82; MaxDD 22-34%; MAC+Donchian MC Score +5
+  → Donchian RS(min) -1.91 — NEW RECORD for that strategy
+  → HIGH CORRELATION ALERT: Price Momentum ↔ RSI Weekly r=0.81 on this universe
+    → Use only ONE of the two in a live portfolio on Global Diversified 76
+  → Sectors+DJI 46 remains superior: slightly better Sharpe (1.54-1.86) and MaxDD (21-30%)
+  → Global Diversified 76 best for investors who explicitly want geographic diversification
 ```
 
 ---
@@ -320,6 +400,30 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 - Adding a 5th uncorrelated strategy dilutes the aggregate tail risk enough for Monte Carlo robustness
 - **Lesson: MC Score -1 on concentrated universes is partially fixable by adding more uncorrelated strategies, not just by changing position sizing or adding stops.**
 
+### 17. MC Score Is Determined by Universe Correlation Structure (R21-R31)
+- NDX Tech 44: ALL strategies MC Score -1 (44 correlated tech stocks crash together)
+- DJI 30 (mixed sectors): MC Score 0 to +5 depending on strategy frequency
+- Sector ETFs 16 (max sector diversity): ALL strategies MC Score +5
+- International ETFs 30 (max geographic diversity): ALL strategies MC Score +5
+- **Lesson: MC Score is NOT a strategy property; it is a portfolio construction property. Fix MC Score by diversifying the universe, not by changing strategy parameters or adding trailing stops.**
+
+### 18. The 2-Ingredient Formula for Optimal Risk-Adjusted Portfolio (R29)
+- Ingredient 1: Sector ETFs (macro regime signals, near-zero inter-sector correlation, MC Score anchoring)
+- Ingredient 2: Individual blue-chip stocks from DIVERSE sectors (individual momentum for higher Sharpe than ETFs alone)
+- Sectors+DJI 46 = first universe to simultaneously achieve Sharpe >1.50, MaxDD <31%, MC ≥+2
+- **Lesson: The optimal live-trading universe is NOT the highest-momentum concentrated universe (NDX Tech 44) but rather a diversified combination of macro instruments + individual blue-chip stocks from non-correlated sectors.**
+
+### 19. Adding Non-Tech Names Helps Only When They Are the Majority (R28-R29)
+- NDX Tech 44 + 23 unique DJI names (NDX+DJI 124): MaxDD WORSENED +3-9pp — 80% still tech, crashes still synchronized
+- Sector ETFs 16 + 30 DJI names (Sectors+DJI 46): MaxDD 21-30% — 50%+ non-tech, crashes break correlation
+- **Lesson: Adding 15-20% non-tech names to a tech portfolio does not reduce MaxDD meaningfully. Only when non-tech exceeds ~50% of the portfolio does sector diversification break synchronized crash behavior.**
+
+### 20. Price Momentum ↔ RSI Weekly Are Structurally Correlated on Diversified Universes (R31)
+- On NDX Tech 44: Price Momentum and RSI Weekly have low correlation (different entry timing)
+- On Global Diversified 76: r=0.81 — both strategies enter/exit the same trending markets simultaneously
+- Both capture "sustained uptrend": ROC >15% 6-month return vs RSI >55 — on a 76-symbol universe with many sideways markets, only the strongest trends trigger both simultaneously
+- **Lesson: Strategy correlation is universe-dependent. Always check exit-day correlation on the actual production universe before running both. On diversified ETF/global universes, use only one of Price Momentum or RSI Weekly.**
+
 ---
 
 ## Recommended Live Implementation
@@ -404,9 +508,33 @@ Bold = validated champion strategies.
 
 ---
 
+## Universe Tier Results (All Tested, Weekly Bars, 5 Strategies, 3.3% Allocation)
+
+| Universe | Symbols | Sharpe Range | MaxDD | MC Score | Best For |
+|---|---|---|---|---|---|
+| NDX+DJI 124 | 124 | 1.81-**1.98** | 50-56% | ALL -1 | Maximum Sharpe (MA Bounce record 1.98) |
+| NDX Full 101 | 101 | 1.83-1.95 | 45-57% | ALL -1 | Best 100+ symbol Sharpe |
+| Russell Top 200 | 198 | 1.48-1.95 | 37-54% | ALL -1 | Best RS(min) (-1.85 record) |
+| DJI 30 | 30 | 1.71-1.93 | **19-23%** | 0 to +5 | Minimum MaxDD |
+| **Sectors+DJI 46** | **46** | **1.54-1.86** | **21-30%** | **+2 to +5** | **OPTIMAL: Sharpe + MaxDD + MC simultaneously** |
+| Global Diversified 76 | 76 | 1.36-1.82 | 22-34% | 0 to +5 | Geographic diversification variant |
+| High Volatility 242 | 242 | 1.16-1.31 | 42-56% | ALL -1 | — (underperforms NDX) |
+| Nasdaq Biotech 257 | 257 | 0.68-0.81 | 55-67% | ALL -1 | Lower bound (binary events) |
+| International ETFs 30 | 30 | 0.67-1.08 | 27-32% | **ALL +5** | Geographic MC anchor |
+| Sector ETFs 16 | 16 | 0.54-0.95 | 19-30% | **ALL +5** | Maximum MC robustness |
+| Russell 1000 | 1,012 | 0.87-1.18 | n/a | n/a | Universality confirmed |
+| SP500 | 500 | 1.42-1.81 | 45-58% | varies | Broad market |
+
+**Three recommended production tiers:**
+- **Conservative (risk-first):** Sectors+DJI 46 — `sectors_dji_combined.json`, `min_bars_required=100`, 5 strategies 3.3% each
+- **Aggressive (return-first):** NDX+DJI 124 or NDX Full 101 — `ndx101_dji30_combined.json` / `nasdaq_100.json`
+- **Balanced:** Russell Top 200 — `russell-top-200.json` — best RS(min) stability
+
+---
+
 ## Open Research Questions — All Closed
 
-All 21 research questions have been answered across Rounds 1-20. Research is complete.
+All 33 research questions have been answered across Rounds 1-31. Research is complete.
 
 1. ~~**Can MA Confluence MC Score be rescued with ATR?**~~ — R8. **CLOSED.**
 2. ~~**CMF shorter period**~~ — R7. **CLOSED.**
@@ -430,3 +558,14 @@ All 21 research questions have been answered across Rounds 1-20. Research is com
 19. ~~**Russell 1000 universality**~~ — R15 Q16. All 4 WFA Pass 3/3 on 1,012 symbols. **CLOSED.**
 20. ~~**5-strategy combined weekly portfolio**~~ — R16 Q17. ALL MaxDDs below 50%. **CLOSED.**
 21. ~~**RSI Weekly parameter sensitivity sweep (±15% ×2 steps)**~~ — R20 Q21. 99.8% profitable, 100% WFA Pass. ROBUST. **CLOSED.**
+22. ~~**Dow Jones 30 blue-chip universe**~~ — R21 Q22. All 5 WFA Pass. MaxDD 19-23%. **CLOSED.**
+23. ~~**Nasdaq Biotech 257**~~ — R22 Q23. All 5 WFA Pass. Sharpe 0.68-0.81 (binary event floor). **CLOSED.**
+24. ~~**Sector ETFs 16**~~ — R23 Q24. All 5 WFA Pass + ALL MC Score +5. **CLOSED.**
+25. ~~**Russell 2000 small caps**~~ — R24 Q25. Not testable with Norgate (1 valid symbol). **CLOSED.**
+26. ~~**High Volatility 242**~~ — R25 Q26. All 5 WFA Pass. Sharpe 1.16-1.31. MAC > RSI Weekly reversal. **CLOSED.**
+27. ~~**Russell Top 200 (198 mega-caps)**~~ — R26 Q27. All 5 WFA Pass. RS(min) -1.85 record. **CLOSED.**
+28. ~~**Nasdaq Full 101**~~ — R27 Q28. All 5 WFA Pass. Sharpe 1.83-1.95. **CLOSED.**
+29. ~~**NDX Full + DJI 30 combined (124 symbols)**~~ — R28 Q29. MA Bounce Sharpe 1.98 record. MaxDD hypothesis falsified. **CLOSED.**
+30. ~~**Sectors+DJI 46**~~ — R29 Q30. BREAKTHROUGH universe (Sharpe+MaxDD+MC simultaneously best). **CLOSED.**
+31. ~~**International ETFs 30**~~ — R30 Q32. All 5 WFA Pass + ALL MC Score +5. Sharpe 0.67-1.08. **CLOSED.**
+32. ~~**Global Diversified 76 (Sectors+DJI+International ETFs)**~~ — R31 Q33. All 5 WFA Pass. Sharpe 1.36-1.82. Donchian RS(min) -1.91 record. Price Momentum ↔ RSI Weekly r=0.81 on this universe. **CLOSED.**
