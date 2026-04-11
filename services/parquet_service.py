@@ -16,7 +16,8 @@ Configuration key:
     config["parquet_data_dir"]  — path to the directory containing the Parquet files.
                                   Relative paths are resolved from the project root
                                   (the directory that contains config.py).
-                                  Defaults to "parquet_data".
+                                  Defaults to "parquet_data/data" (the data/ subdirectory
+                                  inside the parquet_data git submodule).
 """
 
 import logging
@@ -43,7 +44,7 @@ def _sanitize_filename(symbol: str) -> str:
 
 def _resolve_dir(config: dict) -> str:
     """Return the absolute path to the parquet data directory."""
-    raw = config.get("parquet_data_dir", "parquet_data")
+    raw = config.get("parquet_data_dir", "parquet_data/data")
     if os.path.isabs(raw):
         return raw
     return os.path.join(_PROJECT_ROOT, raw)

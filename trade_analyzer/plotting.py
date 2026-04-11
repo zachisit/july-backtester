@@ -1,9 +1,11 @@
 # plotting.py
+import contextlib
 import traceback
 from typing import Optional
 
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
+import matplotlib.gridspec as gridspec
 import numpy as np
 import pandas as pd
 import seaborn as sns
@@ -11,43 +13,155 @@ import seaborn as sns
 from . import default_config as config
 
 
+# ---------------------------------------------------------------------------
+# Theme helpers
+# ---------------------------------------------------------------------------
+
+@contextlib.contextmanager
+def themed():
+    """Context manager: apply the report theme to rcParams, then restore."""
+    T = config.THEME
+    old = {
+        'font.family':          plt.rcParams.get('font.family'),
+        'font.size':            plt.rcParams.get('font.size'),
+        'axes.facecolor':       plt.rcParams.get('axes.facecolor'),
+        'axes.edgecolor':       plt.rcParams.get('axes.edgecolor'),
+        'axes.labelcolor':      plt.rcParams.get('axes.labelcolor'),
+        'axes.grid':            plt.rcParams.get('axes.grid'),
+        'grid.color':           plt.rcParams.get('grid.color'),
+        'grid.linestyle':       plt.rcParams.get('grid.linestyle'),
+        'grid.alpha':           plt.rcParams.get('grid.alpha'),
+        'xtick.color':          plt.rcParams.get('xtick.color'),
+        'ytick.color':          plt.rcParams.get('ytick.color'),
+        'text.color':           plt.rcParams.get('text.color'),
+        'legend.framealpha':    plt.rcParams.get('legend.framealpha'),
+        'legend.fontsize':      plt.rcParams.get('legend.fontsize'),
+        'figure.facecolor':     plt.rcParams.get('figure.facecolor'),
+    }
+    plt.rcParams.update({
+        'font.family':          config.FONT_FAMILY,
+        'font.size':            config.FONT_SIZE_BASE,
+        'axes.facecolor':       T['bg'],
+        'axes.edgecolor':       T['neutral'],
+        'axes.labelcolor':      T['text'],
+        'axes.grid':            True,
+        'grid.color':           T['grid'],
+        'grid.linestyle':       '--',
+        'grid.alpha':           0.7,
+        'xtick.color':          T['text_muted'],
+        'ytick.color':          T['text_muted'],
+        'text.color':           T['text'],
+        'legend.framealpha':    0.85,
+        'legend.fontsize':      config.FONT_SIZE_BASE - 1,
+        'figure.facecolor':     T['bg'],
+    })
+    try:
+        yield
+    finally:
+        plt.rcParams.update(old)
+
+
+def _apply_theme():
+    """Apply report theme to current rcParams (no restore)."""
+    T = config.THEME
+    plt.rcParams.update({
+        'font.family':          config.FONT_FAMILY,
+        'font.size':            config.FONT_SIZE_BASE,
+        'axes.facecolor':       T['bg'],
+        'axes.edgecolor':       T['neutral'],
+        'axes.labelcolor':      T['text'],
+        'axes.grid':            True,
+        'grid.color':           T['grid'],
+        'grid.linestyle':       '--',
+        'grid.alpha':           0.7,
+        'xtick.color':          T['text_muted'],
+        'ytick.color':          T['text_muted'],
+        'text.color':           T['text'],
+        'legend.framealpha':    0.85,
+        'legend.fontsize':      config.FONT_SIZE_BASE - 1,
+        'figure.facecolor':     T['bg'],
+    })
+
+
+def _fmt_dollar(ax, axis='y'):
+    fmt = mtick.FuncFormatter(lambda x, _: f'${x:,.0f}')
+    if axis == 'y':
+        ax.yaxis.set_major_formatter(fmt)
+    else:
+        ax.xaxis.set_major_formatter(fmt)
+
+
+def _style_ax(ax, title='', xlabel='', ylabel='', title_size=None):
+    T = config.THEME
+    if title:
+        ax.set_title(title, fontsize=title_size or config.FONT_SIZE_H2,
+                     color=T['primary'], fontweight='bold', pad=6)
+    if xlabel:
+        ax.set_xlabel(xlabel, labelpad=4)
+    if ylabel:
+        ax.set_ylabel(ylabel, labelpad=4)
+    ax.tick_params(axis='both', labelsize=config.FONT_SIZE_BASE - 1)
+    for spine in ax.spines.values():
+        spine.set_edgecolor(T['neutral'])
+        spine.set_linewidth(0.6)
+
+
 def create_placeholder_figure(title_text: str, message_text: str) -> plt.Figure:
     """Creates a simple placeholder figure with text."""
-    fig = plt.figure(figsize=config.A4_LANDSCAPE)
+    fig = plt.figure(figsize=config.FIG_FULL)
     plt.axis('off')
-    plt.text(0.5, 0.6, title_text, ha='center', va='center', fontsize=14, weight='bold', wrap=True)
-    plt.text(0.5, 0.4, message_text, ha='center', va='center', fontsize=10, color='red', wrap=True)
-    # No tight_layout here, let save_pdf handle final adjustments if needed
+    plt.text(0.5, 0.6, title_text, ha='center', va='center',
+             fontsize=12, weight='bold', color=config.THEME['primary'], wrap=True)
+    plt.text(0.5, 0.4, message_text, ha='center', va='center',
+             fontsize=9, color=config.THEME['negative'], wrap=True)
     return fig
 
 
-def plot_monthly_performance(monthly_perf_df: pd.DataFrame) -> Optional[plt.Figure]:
-    """Generates the monthly performance bar chart."""
-    title = "Monthly Net Profit"
-    if monthly_perf_df.empty or not all(c in monthly_perf_df for c in ['Entry YrMo', 'Monthly_Profit']):
-         print(f"Skipping '{title}' plot (missing data).")
-         return create_placeholder_figure(title, "Plot Skipped: Monthly performance data missing or invalid.")
+# ---------------------------------------------------------------------------
+# Plot functions
+# ---------------------------------------------------------------------------
 
-    fig = None # Initialize
+def plot_monthly_performance(monthly_perf_df: pd.DataFrame) -> Optional[plt.Figure]:
+    """Monthly P&L as a year × month heatmap (replaces bar chart)."""
+    title = "Monthly Returns Heatmap"
+    if monthly_perf_df.empty or 'Entry YrMo' not in monthly_perf_df or 'Monthly_Profit' not in monthly_perf_df:
+        return create_placeholder_figure(title, "Plot Skipped: Monthly performance data missing.")
+
+    fig = None
     try:
-        fig = plt.figure(figsize=config.A4_LANDSCAPE)
-        plt.bar(monthly_perf_df['Entry YrMo'], monthly_perf_df['Monthly_Profit'],
-                color=np.where(monthly_perf_df['Monthly_Profit'] >= 0, 'g', 'r'))
-        plt.title(title)
-        plt.xlabel('Month')
-        plt.ylabel('Profit ($)')
-        plt.xticks(rotation=90)
-        if len(monthly_perf_df['Entry YrMo']) > config.MAX_XTICKS_BEFORE_RESIZE:
-            plt.xticks(fontsize=6) # Reduce font size for many ticks
-        plt.grid(axis='y', linestyle='--')
-        plt.gca().yaxis.set_major_formatter(mtick.FormatStrFormatter('$%.0f'))
-        fig.tight_layout(pad=1.1) # Apply layout before returning
+        df = monthly_perf_df.copy()
+        # Parse period / string into year + month numbers
+        df['_yrmo'] = df['Entry YrMo'].astype(str)
+        df['_year'] = df['_yrmo'].str[:4].astype(int, errors='ignore')
+        df['_month'] = df['_yrmo'].str[5:7].astype(int, errors='ignore')
+        # Build pivot
+        pivot = df.pivot_table(index='_year', columns='_month', values='Monthly_Profit', aggfunc='sum')
+        month_labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+                        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        pivot.columns = [month_labels[m - 1] for m in pivot.columns]
+
+        T = config.THEME
+        fig, ax = plt.subplots(figsize=config.FIG_FULL)
+        abs_max = pivot.abs().max().max()
+        if abs_max == 0 or pd.isna(abs_max):
+            abs_max = 1.0
+        sns.heatmap(
+            pivot, ax=ax, cmap='RdYlGn', center=0,
+            vmin=-abs_max, vmax=abs_max,
+            linewidths=0.4, linecolor=T['grid'],
+            annot=True, fmt='.0f', annot_kws={'size': 7},
+            cbar_kws={'label': 'Net Profit ($)', 'shrink': 0.6},
+        )
+        _style_ax(ax, title=title, xlabel='Month', ylabel='Year')
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=0)
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
+        fig.tight_layout(pad=1.2)
     except Exception as e:
         print(f"ERROR generating '{title}' plot: {e}")
         traceback.print_exc()
-        if fig: plt.close(fig) # Close partial figure on error
+        if fig:
+            plt.close(fig)
         fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
-
     return fig
 
 
@@ -56,80 +170,68 @@ def plot_equity_and_drawdown(
     equity_dd_percent: pd.Series,
     wfa_split_date: Optional[str] = None,
 ) -> Optional[plt.Figure]:
-    """Generates the Equity Curve and Drawdown plot.
-
-    Parameters
-    ----------
-    trades_df        : cleaned trades DataFrame (must have 'Ex. date' and 'Equity').
-    equity_dd_percent: equity drawdown series aligned to ``trades_df.index``.
-    wfa_split_date   : ISO date string (e.g. ``'2018-01-01'``) marking the IS/OOS
-                       boundary.  When supplied, a vertical dashed line is drawn on
-                       both subplots at the first trade whose exit date falls on or
-                       after this date.  Pass ``None`` to omit the line.
-    """
+    """Equity curve (with calendar dates) + drawdown panel."""
     title = "Equity Curve and Drawdown"
-    fig = None # Initialize
+    fig = None
+    T = config.THEME
     try:
-        # Adjust figsize height slightly as original did (A4_LANDSCAPE[1]*0.9)
-        fig, axes = plt.subplots(2, 1, figsize=(config.A4_LANDSCAPE[0], config.A4_LANDSCAPE[1]*0.9),
-                                 sharex=True, gridspec_kw={'height_ratios': [2, 1]})
-        fig.suptitle(title, fontsize=14) # Add overall title
+        # Determine x-axis: prefer calendar dates from 'Ex. date', else trade index
+        use_dates = 'Ex. date' in trades_df.columns and pd.api.types.is_datetime64_any_dtype(trades_df['Ex. date'])
+        x = trades_df['Ex. date'] if use_dates else trades_df.index
 
-        # Plot equity on axes[0]
+        fig, axes = plt.subplots(
+            2, 1, figsize=config.FIG_FULL, sharex=True,
+            gridspec_kw={'height_ratios': [3, 1]},
+        )
+        fig.suptitle(title, fontsize=config.FONT_SIZE_TITLE,
+                     color=T['primary'], fontweight='bold', y=0.98)
+
+        # — Equity subplot —
         if 'Equity' in trades_df and pd.api.types.is_numeric_dtype(trades_df['Equity']):
-             axes[0].plot(trades_df.index, trades_df['Equity'], label='Equity Curve', color='blue', linewidth=1.5)
-             axes[0].set_ylabel('Equity ($)')
-             axes[0].grid(True, linestyle='--')
-             axes[0].legend(loc='upper left')
-             axes[0].yaxis.set_major_formatter(mtick.FormatStrFormatter('$%.0f'))
+            axes[0].plot(x, trades_df['Equity'], color=T['primary'], linewidth=1.6, label='Equity')
+            axes[0].fill_between(x, trades_df['Equity'].min() * 0.99, trades_df['Equity'],
+                                 color=T['primary'], alpha=0.06)
+            _fmt_dollar(axes[0])
         else:
-             axes[0].text(0.5, 0.5, 'Equity data not available', ha='center', va='center', transform=axes[0].transAxes)
-        axes[0].set_title('Equity Curve Over Trades') # Subplot title
+            axes[0].text(0.5, 0.5, 'Equity data not available',
+                         ha='center', va='center', transform=axes[0].transAxes)
+        _style_ax(axes[0], ylabel='Portfolio Value ($)')
 
-        # Plot drawdown on axes[1]
-        if isinstance(equity_dd_percent, pd.Series) and not equity_dd_percent.empty and pd.api.types.is_numeric_dtype(equity_dd_percent):
-            axes[1].plot(trades_df.index, equity_dd_percent, label='Equity Drawdown %', color='red', linewidth=1.5)
-            axes[1].fill_between(trades_df.index, equity_dd_percent, 0, color='red', alpha=0.3)
-            axes[1].set_ylabel('Drawdown (%)')
-            axes[1].grid(True, linestyle='--')
-            axes[1].legend(loc='upper left')
-            axes[1].yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
-            axes[1].set_ylim(bottom=min(0, equity_dd_percent.min() - 5)) # Ensure y-axis starts at or below 0
+        # — Drawdown subplot —
+        if isinstance(equity_dd_percent, pd.Series) and not equity_dd_percent.empty \
+                and pd.api.types.is_numeric_dtype(equity_dd_percent):
+            neg_dd = -equity_dd_percent
+            axes[1].fill_between(x, neg_dd, 0, color=T['dd_fill'], alpha=0.8)
+            axes[1].plot(x, neg_dd, color=T['negative'], linewidth=0.8)
+            axes[1].yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=0))
+            bottom = min(-equity_dd_percent.max() * 1.05, -1)
+            axes[1].set_ylim(bottom=bottom, top=0.5)
         else:
-             axes[1].text(0.5, 0.5, 'Drawdown data not available', ha='center', va='center', transform=axes[1].transAxes)
-        axes[1].set_xlabel('Trade Number')
+            axes[1].text(0.5, 0.5, 'Drawdown data not available',
+                         ha='center', va='center', transform=axes[1].transAxes)
+        _style_ax(axes[1], ylabel='Drawdown (%)',
+                  xlabel='Date' if use_dates else 'Trade Number')
 
-        # --- WFA split line ---
-        if wfa_split_date and 'Ex. date' in trades_df.columns:
+        # — WFA split line —
+        if wfa_split_date and use_dates:
             try:
                 split_dt = pd.to_datetime(wfa_split_date)
-                # Find the integer index of the first OOS trade
-                oos_mask = trades_df['Ex. date'] >= split_dt
-                if oos_mask.any():
-                    split_idx = trades_df.index[oos_mask][0]
-                    for ax in axes:
-                        ax.axvline(
-                            x=split_idx,
-                            color='orange',
-                            linestyle='--',
-                            linewidth=1.5,
-                            label=f'WFA Split ({wfa_split_date})',
-                            zorder=5,
-                        )
-                    # Re-draw legends to include the WFA line
-                    axes[0].legend(loc='upper left', fontsize=8)
-                    axes[1].legend(loc='upper left', fontsize=8)
-            except Exception as vline_err:
-                print(f"WFA plot Warning: could not draw split line: {vline_err}")
+                for ax in axes:
+                    ax.axvline(split_dt, color=T['accent'], linestyle='--',
+                               linewidth=1.5, label=f'WFA Split ({wfa_split_date})', zorder=5)
+                axes[0].legend(loc='upper left', fontsize=8)
+            except Exception:
+                pass
 
-        fig.tight_layout(pad=1.1, rect=[0, 0, 1, 0.96]) # Adjust rect to prevent suptitle overlap
-
+        if use_dates:
+            fig.autofmt_xdate(rotation=25, ha='right')
+        fig.tight_layout(pad=1.1, rect=[0, 0, 1, 0.96])
     except Exception as e:
         print(f"ERROR generating '{title}' plot: {e}")
         traceback.print_exc()
-        if fig: plt.close(fig) # Close partial figure on error
+        if fig:
+            plt.close(fig)
         fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
-
     return fig
 
 
@@ -137,558 +239,420 @@ def plot_underwater(
     trades_df: pd.DataFrame,
     equity_dd_percent: pd.Series,
 ) -> Optional[plt.Figure]:
-    """Generates a short, wide underwater (drawdown) banner chart.
-
-    Parameters
-    ----------
-    trades_df        : cleaned trades DataFrame (must have a numeric index).
-    equity_dd_percent: positive drawdown percentage series (0–100 scale, aligned
-                       to ``trades_df.index``).  Values are negated internally so
-                       the curve descends below the zero line.
-    """
+    """Underwater (drawdown) banner — short, wide."""
     title = "Underwater Plot (Drawdown & Duration)"
     fig = None
+    T = config.THEME
     try:
-        if not isinstance(equity_dd_percent, pd.Series) or equity_dd_percent.empty or not pd.api.types.is_numeric_dtype(equity_dd_percent):
+        if not isinstance(equity_dd_percent, pd.Series) or equity_dd_percent.empty \
+                or not pd.api.types.is_numeric_dtype(equity_dd_percent):
             return create_placeholder_figure(title, "Plot Skipped: Drawdown data missing or invalid.")
 
-        x = trades_df.index
-        underwater = -equity_dd_percent  # Negate: descends below the zero baseline
+        use_dates = 'Ex. date' in trades_df.columns and pd.api.types.is_datetime64_any_dtype(trades_df['Ex. date'])
+        x = trades_df['Ex. date'] if use_dates else trades_df.index
+        underwater = -equity_dd_percent
 
-        fig, ax_uw = plt.subplots(figsize=(10, 3), dpi=150)
-        ax_uw.plot(x, underwater, color='red', linewidth=1.0)
-        ax_uw.fill_between(x, underwater, 0, color='red', alpha=0.3)
-        ax_uw.axhline(0, color='black', linestyle='--', linewidth=0.8)
-        ax_uw.set_title(title)
-        ax_uw.set_xlabel('Trade Number')
-        ax_uw.set_ylabel('Drawdown (%)')
-        ax_uw.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
-        ax_uw.grid(True, linestyle='--', alpha=0.5)
-        fig.tight_layout()
-
+        fig, ax = plt.subplots(figsize=config.FIG_HALF_H)
+        ax.fill_between(x, underwater, 0, color=T['dd_fill'], alpha=0.85)
+        ax.plot(x, underwater, color=T['negative'], linewidth=0.8)
+        ax.axhline(0, color=T['neutral'], linestyle='-', linewidth=0.8)
+        ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=0))
+        bottom = min(underwater.min() * 1.05, -1)
+        ax.set_ylim(bottom=bottom, top=0.5)
+        _style_ax(ax, title=title, xlabel='Date' if use_dates else 'Trade Number',
+                  ylabel='Drawdown (%)')
+        if use_dates:
+            fig.autofmt_xdate(rotation=25, ha='right')
+        fig.tight_layout(pad=1.1)
     except Exception as e:
         print(f"ERROR generating '{title}' plot: {e}")
         traceback.print_exc()
         if fig:
             plt.close(fig)
         fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
-
     return fig
 
 
 def plot_duration_histogram(trades_df: pd.DataFrame) -> Optional[plt.Figure]:
-    """Generates the histogram for trade duration (# bars)."""
-    title = 'Distribution of Trade Duration (# bars)'
-    #print(f"Generating '{title}' plot...")
-
+    """Histogram for trade duration (# bars)."""
+    title = 'Trade Duration Distribution'
     fig = None
+    T = config.THEME
     try:
         if '# bars' not in trades_df.columns or not pd.api.types.is_numeric_dtype(trades_df['# bars']):
-             reason = "'# bars' column missing or invalid"
-             print(f"Skipping '{title}' plot ({reason}).")
-             return create_placeholder_figure(title, f"Plot Skipped\n({reason})")
-
+            return create_placeholder_figure(title, "Plot Skipped: '# bars' missing or invalid.")
         bars_series = trades_df['# bars'].dropna()
         if bars_series.empty:
-            reason = "'# bars' column has no valid data"
-            print(f"Skipping '{title}' plot ({reason}).")
-            return create_placeholder_figure(title, f"Plot Skipped\n({reason})")
+            return create_placeholder_figure(title, "Plot Skipped: '# bars' has no valid data.")
 
-        fig = plt.figure(figsize=config.A4_LANDSCAPE)
-        sns.histplot(bars_series, bins=30, kde=False)
-        plt.title(title)
-        plt.xlabel('Number of Bars Held')
-        plt.ylabel('Number of Trades')
-        plt.grid(axis='y', linestyle='--')
-        # Optional mean/median lines
-        # plt.axvline(bars_series.mean(), color='r', linestyle='dashed', linewidth=1, label=f'Mean: {bars_series.mean():.1f}')
-        # plt.axvline(bars_series.median(), color='g', linestyle='dashed', linewidth=1, label=f'Median: {bars_series.median():.0f}')
-        # plt.legend()
-        fig.tight_layout(pad=1.1)
-
+        fig, ax = plt.subplots(figsize=config.FIG_FULL)
+        ax.hist(bars_series, bins=30, color=T['primary'], alpha=0.75, edgecolor=T['bg'])
+        ax.axvline(bars_series.mean(), color=T['accent'], linestyle='--', linewidth=1.5,
+                   label=f'Mean: {bars_series.mean():.1f}')
+        ax.axvline(bars_series.median(), color=T['positive'], linestyle='--', linewidth=1.5,
+                   label=f'Median: {bars_series.median():.0f}')
+        ax.legend()
+        _style_ax(ax, title=title, xlabel='Bars Held', ylabel='Number of Trades')
+        fig.tight_layout(pad=1.2)
     except Exception as e:
         print(f"ERROR generating '{title}' plot: {e}")
         traceback.print_exc()
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
-
     return fig
 
 
 def plot_duration_scatter(trades_df: pd.DataFrame) -> Optional[plt.Figure]:
-    """Generates the scatter plot for Profit % vs. Trade Duration."""
+    """Scatter: Profit % vs. Trade Duration."""
     title = 'Profit % vs. Trade Duration'
-    #print(f"Generating '{title}' plot...")
-
     fig = None
+    T = config.THEME
     try:
         required_cols = ['# bars', '% Profit', 'Win']
-        missing_cols = []
-        if '# bars' not in trades_df.columns or not pd.api.types.is_numeric_dtype(trades_df['# bars']): missing_cols.append("# bars (numeric)")
-        if '% Profit' not in trades_df.columns or not pd.api.types.is_numeric_dtype(trades_df['% Profit']): missing_cols.append("% Profit (numeric)")
-        if 'Win' not in trades_df.columns or not pd.api.types.is_bool_dtype(trades_df['Win']):
-            if 'Win' in trades_df.columns: # Check if convertible
-                 try: _ = trades_df['Win'].astype(bool)
-                 except: missing_cols.append("Win (not boolean/convertible)")
-            else: missing_cols.append("Win (boolean)")
-
-        if missing_cols:
-             reason = f"Missing/invalid columns: {', '.join(missing_cols)}"
-             print(f"Skipping '{title}' plot ({reason}).")
-             return create_placeholder_figure(title, f"Plot Skipped\n({reason})")
-
+        missing = [c for c in required_cols if c not in trades_df.columns]
+        if missing:
+            return create_placeholder_figure(title, f"Plot Skipped: Missing {missing}.")
         scatter_data = trades_df.dropna(subset=required_cols).copy()
         if scatter_data.empty:
-            reason = "No overlapping data after dropna for required columns"
-            print(f"Skipping '{title}' plot ({reason}).")
-            return create_placeholder_figure(title, f"Plot Skipped\n({reason})")
-
-        # Ensure 'Win' is boolean for hue mapping
+            return create_placeholder_figure(title, "Plot Skipped: No overlapping data.")
         scatter_data['Win'] = scatter_data['Win'].astype(bool)
 
-        fig = plt.figure(figsize=config.A4_LANDSCAPE)
-        sns.scatterplot(data=scatter_data, x='# bars', y='% Profit', hue='Win', alpha=0.6)
-        plt.title(title)
-        plt.xlabel('Number of Bars Held')
-        plt.ylabel('% Profit per Trade')
-        plt.gca().yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
-        plt.grid(linestyle='--')
-        plt.axhline(0, color='grey', linestyle='--')
-        fig.tight_layout(pad=1.1)
-
+        fig, ax = plt.subplots(figsize=config.FIG_FULL)
+        wins = scatter_data[scatter_data['Win']]
+        losses = scatter_data[~scatter_data['Win']]
+        ax.scatter(losses['# bars'], losses['% Profit'], color=T['negative'],
+                   alpha=0.4, s=18, label='Loss', edgecolors='none')
+        ax.scatter(wins['# bars'], wins['% Profit'], color=T['positive'],
+                   alpha=0.4, s=18, label='Win', edgecolors='none')
+        ax.axhline(0, color=T['neutral'], linestyle='--', linewidth=0.8)
+        ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
+        ax.legend()
+        _style_ax(ax, title=title, xlabel='Bars Held', ylabel='% Profit per Trade')
+        fig.tight_layout(pad=1.2)
     except Exception as e:
         print(f"ERROR generating '{title}' plot: {e}")
         traceback.print_exc()
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
-
     return fig
 
 
 def plot_mae_mfe(trades_df: pd.DataFrame) -> Optional[plt.Figure]:
-    """Generates the scatter plots for Profit % vs. MAE and Profit % vs. MFE."""
-    title = "MAE/MFE Analysis"
-    #print(f"Generating '{title}' plots...")
-
+    """MAE / MFE scatter plots."""
+    title = "MAE / MFE Analysis"
     fig = None
+    T = config.THEME
     try:
         required_cols = ['MAE', 'MFE', '% Profit', 'Win']
-        missing_cols = []
-        if 'MAE' not in trades_df.columns or not pd.api.types.is_numeric_dtype(trades_df['MAE']): missing_cols.append("MAE (numeric)")
-        if 'MFE' not in trades_df.columns or not pd.api.types.is_numeric_dtype(trades_df['MFE']): missing_cols.append("MFE (numeric)")
-        if '% Profit' not in trades_df.columns or not pd.api.types.is_numeric_dtype(trades_df['% Profit']): missing_cols.append("% Profit (numeric)")
-        if 'Win' not in trades_df.columns:
-             missing_cols.append("Win (boolean)")
-        elif not pd.api.types.is_bool_dtype(trades_df['Win']):
-             try: _ = trades_df['Win'].astype(bool)
-             except: missing_cols.append("Win (not boolean/convertible)")
+        missing = [c for c in required_cols if c not in trades_df.columns]
+        if missing:
+            return create_placeholder_figure(title, f"Plot Skipped: Missing {missing}.")
+        df = trades_df.dropna(subset=required_cols).copy()
+        if df.empty:
+            return create_placeholder_figure(title, "Plot Skipped: No overlapping data.")
+        df['Win'] = df['Win'].astype(bool)
+        wins, losses = df[df['Win']], df[~df['Win']]
 
-        if missing_cols:
-             reason = f"Missing/invalid columns: {', '.join(missing_cols)}"
-             print(f"Skipping '{title}' plot ({reason}).")
-             return create_placeholder_figure(title, f"Plot Skipped\n({reason})")
+        fig, axes = plt.subplots(1, 2, figsize=config.FIG_FULL, sharey=True)
+        fig.suptitle(title, fontsize=config.FONT_SIZE_TITLE,
+                     color=T['primary'], fontweight='bold', y=0.99)
 
-        mae_mfe_df = trades_df.dropna(subset=required_cols).copy()
-        if mae_mfe_df.empty:
-            reason = "No overlapping data after dropna for required columns"
-            print(f"Skipping '{title}' plot ({reason}).")
-            return create_placeholder_figure(title, f"Plot Skipped\n({reason})")
+        for ax, xcol, xlabel in [(axes[0], 'MAE', 'MAE (%)'), (axes[1], 'MFE', 'MFE (%)')]:
+            ax.scatter(losses[xcol], losses['% Profit'], color=T['negative'],
+                       alpha=0.4, s=16, label='Loss', edgecolors='none')
+            ax.scatter(wins[xcol], wins['% Profit'], color=T['positive'],
+                       alpha=0.4, s=16, label='Win', edgecolors='none')
+            ax.axhline(0, color=T['neutral'], linestyle='--', linewidth=0.8)
+            ax.xaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
+            ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
+            ax.legend(fontsize=8)
+            _style_ax(ax, xlabel=xlabel, ylabel='% Profit per Trade')
 
-        mae_mfe_df['Win'] = mae_mfe_df['Win'].astype(bool)
-
-        fig, axes = plt.subplots(1, 2, figsize=(config.A4_LANDSCAPE[0], config.A4_LANDSCAPE[1]*0.8))
-        fig.suptitle(title, fontsize=14, y=0.99)
-
-        # Plot 1: Profit % vs MAE
-        sns.scatterplot(data=mae_mfe_df, x='MAE', y='% Profit', hue='Win', alpha=0.6, ax=axes[0])
-        axes[0].set_title('Profit % vs. MAE (Max Adverse Excursion)')
-        axes[0].set_xlabel('MAE (%)')
-        axes[0].set_ylabel('% Profit per Trade')
-        axes[0].grid(linestyle='--')
-        axes[0].axhline(0, color='grey', linestyle='--')
-        axes[0].xaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
-        axes[0].yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
-
-        # Plot 2: Profit % vs MFE
-        sns.scatterplot(data=mae_mfe_df, x='MFE', y='% Profit', hue='Win', alpha=0.6, ax=axes[1])
-        axes[1].set_title('Profit % vs. MFE (Max Favorable Excursion)')
-        axes[1].set_xlabel('MFE (%)')
-        axes[1].set_ylabel('% Profit per Trade')
-        axes[1].grid(linestyle='--')
-        axes[1].axhline(0, color='grey', linestyle='--')
-        axes[1].xaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
-        axes[1].yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=1))
-
-        fig.tight_layout(pad=1.1, rect=[0, 0, 1, 0.95]) # Adjust rect for suptitle
-
+        fig.tight_layout(pad=1.1, rect=[0, 0, 1, 0.95])
     except Exception as e:
         print(f"ERROR generating '{title}' plot: {e}")
         traceback.print_exc()
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
-
     return fig
 
 
 def plot_profit_distribution(trades_df: pd.DataFrame) -> Optional[plt.Figure]:
-    """Generates the histogram for the distribution of % Profit per trade."""
-    title = 'Distribution of % Profit per Trade'
-    #print(f"Generating '{title}' plot...")
-
+    """Histogram + KDE for % Profit per trade."""
+    title = 'Return Distribution (% Profit per Trade)'
     fig = None
+    T = config.THEME
     try:
         if '% Profit' not in trades_df.columns or not pd.api.types.is_numeric_dtype(trades_df['% Profit']):
-            reason = "'% Profit' column missing or invalid."
-            print(f"Skipping '{title}' plot ({reason}).")
-            return create_placeholder_figure(title, f"Plot Skipped\n({reason})")
+            return create_placeholder_figure(title, "Plot Skipped: '% Profit' missing or invalid.")
+        series = trades_df['% Profit'].dropna()
+        if series.empty:
+            return create_placeholder_figure(title, "Plot Skipped: No valid data.")
 
-        profit_pct_series = trades_df['% Profit'].dropna()
-        if profit_pct_series.empty:
-            reason = "'% Profit' column has no valid data"
-            print(f"Skipping '{title}' plot ({reason}).")
-            return create_placeholder_figure(title, f"Plot Skipped\n({reason})")
-
-        fig = plt.figure(figsize=config.A4_LANDSCAPE)
-        sns.histplot(profit_pct_series, bins=50, kde=True)
-        plt.title(title)
-        plt.xlabel('% Profit')
-        plt.ylabel('Number of Trades')
-        plt.gca().xaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0))
-        plt.axvline(0, color='grey', linestyle='--')
-        plt.grid(axis='y', linestyle='--')
-        fig.tight_layout(pad=1.1)
-
+        fig, ax = plt.subplots(figsize=config.FIG_FULL)
+        sns.histplot(series, bins=50, kde=True, ax=ax,
+                     color=T['primary'], alpha=0.65, edgecolor=T['bg'],
+                     line_kws={'linewidth': 1.5, 'color': T['accent']})
+        ax.axvline(0, color=T['neutral'], linestyle='--', linewidth=1.0, label='Breakeven')
+        ax.axvline(series.mean(), color=T['accent'], linestyle='--', linewidth=1.5,
+                   label=f'Mean: {series.mean():.2f}%')
+        ax.xaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0))
+        ax.legend()
+        _style_ax(ax, title=title, xlabel='% Profit', ylabel='Number of Trades')
+        fig.tight_layout(pad=1.2)
     except Exception as e:
         print(f"ERROR generating '{title}' plot: {e}")
         traceback.print_exc()
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
-
     return fig
 
 
 def plot_benchmark_comparison(
     daily_equity: pd.Series,
     benchmark_df: Optional[pd.DataFrame],
-    benchmark_ticker: str
+    benchmark_ticker: str,
 ) -> Optional[plt.Figure]:
-    """
-    Generates the Strategy Equity vs Benchmark Buy & Hold plot.
-    Includes robust checks and placeholder generation on failure.
-
-    Args:
-        daily_equity (pd.Series): Series of strategy's daily equity values.
-        benchmark_df (Optional[pd.DataFrame]): DataFrame with benchmark prices ('Benchmark_Price').
-        benchmark_ticker (str): Ticker symbol of the benchmark.
-
-    Returns:
-        Optional[plt.Figure]: The generated plot figure or a placeholder.
-    """
+    """Strategy equity vs benchmark (normalized) — calendar date x-axis."""
     title = f"Strategy Equity vs {benchmark_ticker} Buy & Hold"
-    #print(f"Generating '{title}' plot...")
-    fig = None # Initialize
-
+    fig = None
+    T = config.THEME
     try:
         if daily_equity.empty:
-             return create_placeholder_figure(title, "Plot Skipped: Strategy daily equity data is empty.")
+            return create_placeholder_figure(title, "Plot Skipped: Strategy daily equity empty.")
         if benchmark_df is None or benchmark_df.empty or 'Benchmark_Price' not in benchmark_df.columns:
-             return create_placeholder_figure(title, f"Plot Skipped: Benchmark data for {benchmark_ticker} is missing or invalid.")
+            return create_placeholder_figure(title, f"Plot Skipped: Benchmark data missing.")
 
-        # Ensure indices are datetime and tz-naive (parquet data is UTC-aware;
-        # yfinance benchmark data is tz-naive — strip tz before intersection).
-        try:
-            equity_index = pd.to_datetime(daily_equity.index)
-            if equity_index.tz is not None:
-                equity_index = equity_index.tz_localize(None)
-            benchmark_index = pd.to_datetime(benchmark_df.index)
-            if benchmark_index.tz is not None:
-                benchmark_index = benchmark_index.tz_localize(None)
-            # Use copies to avoid SettingWithCopyWarning if slicing later
-            daily_equity = daily_equity.copy()
-            daily_equity.index = equity_index
-            benchmark_df = benchmark_df.copy()
-            benchmark_df.index = benchmark_index
-        except Exception as e:
-             return create_placeholder_figure(title, f"Plot Skipped: Error converting indices to datetime: {e}")
+        # Normalise timezone
+        equity_idx = pd.to_datetime(daily_equity.index)
+        if equity_idx.tz is not None:
+            equity_idx = equity_idx.tz_localize(None)
+        bench_idx = pd.to_datetime(benchmark_df.index)
+        if bench_idx.tz is not None:
+            bench_idx = bench_idx.tz_localize(None)
+        eq = daily_equity.copy(); eq.index = equity_idx
+        bdf = benchmark_df.copy(); bdf.index = bench_idx
 
-        # --- Alignment ---
-        common_index = daily_equity.index.intersection(benchmark_df.index)
-        if common_index.empty or len(common_index) < 2:
-            return create_placeholder_figure(title, "Plot Skipped: No overlapping dates found between strategy equity and benchmark data.")
+        common = eq.index.intersection(bdf.index)
+        if len(common) < 2:
+            return create_placeholder_figure(title, "Plot Skipped: No overlapping dates.")
 
-        # --- Data Preparation ---
-        equity_for_plot = daily_equity.loc[common_index].dropna()
-        benchmark_price_for_plot = benchmark_df.loc[common_index, 'Benchmark_Price'].dropna()
+        eq_final = eq.loc[common].dropna()
+        bp_final = bdf.loc[common, 'Benchmark_Price'].dropna()
+        common2 = eq_final.index.intersection(bp_final.index)
+        if len(common2) < 2:
+            return create_placeholder_figure(title, "Plot Skipped: No data after dropna.")
 
-        # Re-align after dropna
-        final_common_index = equity_for_plot.index.intersection(benchmark_price_for_plot.index)
-        if final_common_index.empty or len(final_common_index) < 2:
-             return create_placeholder_figure(title, "Plot Skipped: No overlapping data remaining after cleaning NaNs.")
+        eq_final = eq_final.loc[common2]
+        bp_final = bp_final.loc[common2]
+        bp_norm = (bp_final / bp_final.iloc[0]) * eq_final.iloc[0]
 
-        equity_final = equity_for_plot.loc[final_common_index]
-        benchmark_price_final = benchmark_price_for_plot.loc[final_common_index]
-
-        # --- Normalization ---
-        first_equity_value = equity_final.iloc[0]
-        first_benchmark_price = benchmark_price_final.iloc[0]
-
-        if pd.isna(first_equity_value) or pd.isna(first_benchmark_price) or first_benchmark_price < 1e-9: # Check for zero or near-zero price
-            reason = []
-            if pd.isna(first_equity_value): reason.append("initial strategy equity is NaN")
-            if pd.isna(first_benchmark_price): reason.append("initial benchmark price is NaN")
-            if first_benchmark_price < 1e-9: reason.append("initial benchmark price is zero or near-zero")
-            return create_placeholder_figure(title, f"Plot Skipped: Cannot normalize data ({', '.join(reason)}).")
-
-        normalized_benchmark = (benchmark_price_final / first_benchmark_price) * first_equity_value
-
-        # --- Generate Plot ---
-        fig, ax = plt.subplots(figsize=config.A4_LANDSCAPE)
-        ax.plot(equity_final.index, equity_final, label='Strategy Equity', color='blue', linewidth=1.5)
-        ax.plot(normalized_benchmark.index, normalized_benchmark, label=f'{benchmark_ticker} Buy & Hold (Normalized)', color='darkgrey', linestyle='--')
-
-        ax.set_title(title)
-        ax.set_ylabel('Portfolio Value ($)')
-        ax.set_xlabel('Date')
-        ax.yaxis.set_major_formatter(mtick.FormatStrFormatter('$%.0f'))
+        fig, ax = plt.subplots(figsize=config.FIG_FULL)
+        ax.plot(eq_final.index, eq_final, color=T['primary'], linewidth=1.6, label='Strategy')
+        ax.plot(bp_norm.index, bp_norm, color=T['accent'], linewidth=1.4,
+                linestyle='--', label=f'{benchmark_ticker} B&H (normalised)')
+        ax.fill_between(eq_final.index, bp_norm, eq_final,
+                        where=(eq_final >= bp_norm), color=T['positive'], alpha=0.08)
+        ax.fill_between(eq_final.index, bp_norm, eq_final,
+                        where=(eq_final < bp_norm), color=T['negative'], alpha=0.08)
+        _fmt_dollar(ax)
         ax.legend()
-        ax.grid(True, linestyle=':')
-        plt.xticks(rotation=30, ha='right')
+        _style_ax(ax, title=title, xlabel='Date', ylabel='Portfolio Value ($)')
+        fig.autofmt_xdate(rotation=25, ha='right')
         fig.tight_layout(pad=1.1)
-
     except Exception as e:
         print(f"ERROR generating '{title}' plot: {e}")
         traceback.print_exc()
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
-
     return fig
 
 
 def plot_rolling_metrics(
     trades_df: pd.DataFrame,
     window: int,
-    risk_free_rate: float
+    risk_free_rate: float,
 ) -> Optional[plt.Figure]:
-    """
-    Generates the plots for rolling Profit Factor and rolling Sharpe Ratio.
-
-    Args:
-        trades_df (pd.DataFrame): DataFrame with 'Rolling_PF' and 'Rolling_Sharpe' columns.
-        window (int): The rolling window size used.
-        risk_free_rate (float): The risk-free rate used for Sharpe display.
-
-    Returns:
-        Optional[plt.Figure]: The generated plot figure or a placeholder.
-    """
+    """Rolling Profit Factor + rolling Sharpe (calendar date x-axis)."""
     title = f'Rolling {window}-Trade Metrics'
-    #print(f"Generating '{title}' plot...")
-
     fig = None
+    T = config.THEME
     try:
         required_cols = ['Rolling_PF', 'Rolling_Sharpe']
-        missing_cols = [col for col in required_cols if col not in trades_df.columns]
-        if missing_cols:
-             reason = f"Missing calculated columns: {', '.join(missing_cols)}"
-             print(f"Skipping '{title}' plot ({reason}).")
-             return create_placeholder_figure(title, f"Plot Skipped\n({reason})")
-
-        # Check if there's *any* non-NaN data to plot
+        missing = [c for c in required_cols if c not in trades_df.columns]
+        if missing:
+            return create_placeholder_figure(title, f"Plot Skipped: Missing {missing}.")
         pf_valid = trades_df['Rolling_PF'].notna().any()
-        sharpe_valid = trades_df['Rolling_Sharpe'].notna().any()
-        if not pf_valid and not sharpe_valid:
-             reason = "No valid data points found in 'Rolling_PF' or 'Rolling_Sharpe' columns"
-             print(f"Skipping '{title}' plot ({reason}).")
-             return create_placeholder_figure(title, f"Plot Skipped\n({reason})")
+        sh_valid = trades_df['Rolling_Sharpe'].notna().any()
+        if not pf_valid and not sh_valid:
+            return create_placeholder_figure(title, "Plot Skipped: No valid rolling data.")
 
-        # --- Generate Plot (with two subplots) ---
-        fig, axes = plt.subplots(2, 1, figsize=(config.A4_LANDSCAPE[0], config.A4_LANDSCAPE[1]*0.9),
-                                 sharex=True, gridspec_kw={'height_ratios': [1, 1]})
-        fig.suptitle(title, fontsize=14) # Add overall title
+        use_dates = 'Ex. date' in trades_df.columns and pd.api.types.is_datetime64_any_dtype(trades_df['Ex. date'])
+        x = trades_df['Ex. date'] if use_dates else trades_df.index
 
-        # Plot 1: Rolling Profit Factor
+        fig, axes = plt.subplots(2, 1, figsize=config.FIG_FULL, sharex=True,
+                                 gridspec_kw={'height_ratios': [1, 1]})
+        fig.suptitle(title, fontsize=config.FONT_SIZE_TITLE,
+                     color=T['primary'], fontweight='bold', y=0.98)
+
+        # — PF subplot —
         if pf_valid:
-            axes[0].plot(trades_df.index, trades_df['Rolling_PF'], label=f'{window}-Trade Rolling PF', color='blue', linewidth=1.5)
-            axes[0].axhline(1.0, color='red', linestyle='--', linewidth=1, label='PF = 1.0 (Breakeven)')
-            axes[0].set_ylim(bottom=0) # PF typically >= 0
+            axes[0].plot(x, trades_df['Rolling_PF'], color=T['primary'], linewidth=1.4,
+                         label=f'{window}-trade Rolling PF')
+            axes[0].axhline(1.0, color=T['negative'], linestyle='--', linewidth=1.0, label='PF = 1.0')
+            axes[0].set_ylim(bottom=0)
+            axes[0].legend(loc='upper left')
         else:
-            axes[0].text(0.5, 0.5, 'Rolling PF data not available or all NaN',
-                         horizontalalignment='center', verticalalignment='center', transform=axes[0].transAxes)
-        axes[0].set_title(f'Rolling {window}-Trade Profit Factor')
-        axes[0].set_ylabel('Profit Factor')
-        axes[0].grid(True, linestyle='--')
-        axes[0].legend(loc='upper left')
+            axes[0].text(0.5, 0.5, 'No PF data', ha='center', va='center',
+                         transform=axes[0].transAxes)
+        _style_ax(axes[0], ylabel='Profit Factor')
 
-        # Plot 2: Rolling Sharpe Ratio
-        if sharpe_valid:
-            axes[1].plot(trades_df.index, trades_df['Rolling_Sharpe'], label=f'{window}-Trade Rolling Sharpe', color='green', linewidth=1.5)
-            axes[1].axhline(0.0, color='red', linestyle='--', linewidth=1, label='Sharpe = 0.0')
+        # — Sharpe subplot —
+        if sh_valid:
+            axes[1].plot(x, trades_df['Rolling_Sharpe'], color=T['positive'], linewidth=1.4,
+                         label=f'{window}-trade Rolling Sharpe')
+            axes[1].axhline(0.0, color=T['negative'], linestyle='--', linewidth=1.0)
+            # shade positive region
+            axes[1].fill_between(x, trades_df['Rolling_Sharpe'], 0,
+                                 where=(trades_df['Rolling_Sharpe'] >= 0),
+                                 color=T['positive'], alpha=0.1)
+            axes[1].fill_between(x, trades_df['Rolling_Sharpe'], 0,
+                                 where=(trades_df['Rolling_Sharpe'] < 0),
+                                 color=T['negative'], alpha=0.1)
+            axes[1].legend(loc='upper left')
         else:
-            axes[1].text(0.5, 0.5, 'Rolling Sharpe data not available or all NaN',
-                         horizontalalignment='center', verticalalignment='center', transform=axes[1].transAxes)
-        axes[1].set_title(f'Rolling {window}-Trade Sharpe Ratio (Annualized, Rf={risk_free_rate*100:.1f}%)')
-        axes[1].set_ylabel('Sharpe Ratio')
-        axes[1].set_xlabel('Trade Number')
-        axes[1].grid(True, linestyle='--')
-        axes[1].legend(loc='upper left')
+            axes[1].text(0.5, 0.5, 'No Sharpe data', ha='center', va='center',
+                         transform=axes[1].transAxes)
+        _style_ax(axes[1], ylabel=f'Sharpe (Rf={risk_free_rate*100:.1f}%)',
+                  xlabel='Date' if use_dates else 'Trade Number')
 
-        fig.tight_layout(pad=1.1, rect=[0, 0.03, 1, 0.95]) # Adjust rect for suptitle & x-label
-
-        return fig
-
+        if use_dates:
+            fig.autofmt_xdate(rotation=25, ha='right')
+        fig.tight_layout(pad=1.1, rect=[0, 0.02, 1, 0.95])
     except Exception as e:
         print(f"ERROR generating '{title}' plot: {e}")
         traceback.print_exc()
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
+    return fig
 
-def plot_mc_min_max_equity(simulated_equity_paths: pd.DataFrame) -> Optional[plt.Figure]:
-    """Plots min, max, average, and percentile equity paths from simulations."""
-    title = "Monte Carlo: Simulated Equity Paths"
-    #print(f"Generating '{title}' plot...")
+
+def plot_mc_fan(
+    equity_paths_df: pd.DataFrame,
+    initial_equity: float,
+) -> Optional[plt.Figure]:
+    """MC equity-path fan chart: percentile bands + median + initial equity."""
+    title = "Monte Carlo — Simulated Equity Paths"
     fig = None
+    T = config.THEME
     try:
-        if simulated_equity_paths.empty or simulated_equity_paths.shape[1] < 1:
-            return create_placeholder_figure(title, "Plot Skipped: No simulation paths provided.")
+        if not isinstance(equity_paths_df, pd.DataFrame) or equity_paths_df.empty:
+            return create_placeholder_figure(title, "Plot Skipped: No MC equity paths.")
 
-        avg_path = simulated_equity_paths.mean(axis=1)
-        median_path = simulated_equity_paths.median(axis=1)
-        # Calculate percentiles (adjust as needed)
-        pct_5 = simulated_equity_paths.quantile(0.05, axis=1)
-        pct_95 = simulated_equity_paths.quantile(0.95, axis=1)
-        min_path = simulated_equity_paths.min(axis=1)
-        max_path = simulated_equity_paths.max(axis=1)
+        n_sims = equity_paths_df.shape[1]
+        x = equity_paths_df.index
 
-        fig, ax = plt.subplots(figsize=config.A4_LANDSCAPE)
-        ax.plot(avg_path.index, avg_path, label='Average Equity', color='blue', linewidth=2)
-        ax.plot(median_path.index, median_path, label='Median Equity', color='orange', linestyle='--', linewidth=1.5)
-        # Fill between percentiles
-        ax.fill_between(pct_5.index, pct_5, pct_95, color='skyblue', alpha=0.3, label='5th-95th Percentile')
-        # Optionally plot min/max
-        # ax.plot(min_path.index, min_path, label='Min Equity', color='red', linestyle=':', linewidth=1)
-        # ax.plot(max_path.index, max_path, label='Max Equity', color='green', linestyle=':', linewidth=1)
+        p5  = equity_paths_df.quantile(0.05,  axis=1)
+        p25 = equity_paths_df.quantile(0.25,  axis=1)
+        p50 = equity_paths_df.quantile(0.50,  axis=1)
+        p75 = equity_paths_df.quantile(0.75,  axis=1)
+        p95 = equity_paths_df.quantile(0.95,  axis=1)
 
-        ax.set_title(title + f" ({simulated_equity_paths.shape[1]} Simulations)")
-        ax.set_xlabel("Trade Number in Simulation")
-        ax.set_ylabel("Simulated Equity ($)")
-        ax.yaxis.set_major_formatter(mtick.FormatStrFormatter('$%.0f'))
-        ax.grid(True, linestyle=':')
+        fig, ax = plt.subplots(figsize=config.FIG_FULL)
+        # outer fan: 5–95
+        ax.fill_between(x, p5, p95, color=T['mc_fill'], alpha=0.45, label='5–95th pct')
+        # inner fan: 25–75
+        ax.fill_between(x, p25, p75, color=T['primary'], alpha=0.20, label='25–75th pct')
+        # median
+        ax.plot(x, p50, color=T['primary'], linewidth=2.0, label='Median')
+        # initial equity reference
+        ax.axhline(initial_equity, color=T['neutral'], linestyle=':', linewidth=1.0,
+                   label=f'Initial (${initial_equity:,.0f})')
+
+        _fmt_dollar(ax)
         ax.legend(loc='upper left')
-        fig.tight_layout(pad=1.1)
-
+        _style_ax(ax, title=f"{title} ({n_sims:,} sims)",
+                  xlabel='Trade #', ylabel='Simulated Equity ($)')
+        fig.tight_layout(pad=1.2)
     except Exception as e:
         print(f"ERROR generating '{title}' plot: {e}")
         traceback.print_exc()
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         fig = create_placeholder_figure(title, f"Error generating plot:\n{e}")
     return fig
 
-def plot_mc_distribution(data: pd.Series, plot_title: str, xlabel: str, use_kde: bool = True) -> Optional[plt.Figure]:
-    """Helper function to plot distributions (Histogram/KDE)."""
-    #print(f"Generating '{plot_title}' plot...")
-    fig = None
-    try:
-        if data.empty or data.isna().all():
-             return create_placeholder_figure(plot_title, f"Plot Skipped: No valid data for {xlabel}.")
 
-        fig, ax = plt.subplots(figsize=config.A4_LANDSCAPE)
-        sns.histplot(data.dropna(), kde=use_kde, ax=ax, bins=50) # Use dropna()
-        ax.set_title(plot_title + f" (Distribution from {data.count()} Simulations)") # Use count() for non-NaN
-        ax.set_xlabel(xlabel)
-        ax.set_ylabel("Frequency (Number of Simulations)")
-
-        # Formatting based on xlabel content
-        if '$' in xlabel:
-            ax.xaxis.set_major_formatter(mtick.FormatStrFormatter('$%.0f'))
-        elif '%' in xlabel:
-            ax.xaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0)) # Assuming percent input
-
-        ax.grid(True, axis='y', linestyle=':')
-        fig.tight_layout(pad=1.1)
-
-    except Exception as e:
-        print(f"ERROR generating '{plot_title}' plot: {e}")
-        traceback.print_exc()
-        if fig: plt.close(fig)
-        fig = create_placeholder_figure(plot_title, f"Error generating plot:\n{e}")
-    return fig
-
+# Keep legacy name used by analyzer.py
 def plot_mc_min_max_equity(equity_paths_df: pd.DataFrame, initial_equity: float) -> Optional[plt.Figure]:
-    """
-    Plots the minimum and maximum equity paths across all MC simulations.
+    return plot_mc_fan(equity_paths_df, initial_equity)
 
-    Args:
-        equity_paths_df (pd.DataFrame): DataFrame where each column is a simulation path
-                                        and rows represent trade steps.
-        initial_equity (float): The starting equity for reference.
 
-    Returns:
-        Optional[plt.Figure]: The generated matplotlib Figure, or None on error.
-    """
-    plot_title = "MC Min/Max Equity"
-    fig = None # Initialize
-
-    if not isinstance(equity_paths_df, pd.DataFrame) or equity_paths_df.empty:
-        print(f"Skipping '{plot_title}' plot (equity paths DataFrame missing or empty).")
-        return create_placeholder_figure(plot_title, "Plot Skipped: Equity paths data missing or empty.")
-
+def _plot_mc_dist(data: pd.Series, plot_title: str, xlabel: str,
+                  dollar: bool = False, pct: bool = False) -> Optional[plt.Figure]:
+    """Generic MC distribution histogram + KDE."""
+    fig = None
+    T = config.THEME
     try:
-        #print(f"Generating '{plot_title}' plot...")
-        # Calculate min and max equity across all simulations for each step (row)
-        min_equity_step = equity_paths_df.min(axis=1)
-        max_equity_step = equity_paths_df.max(axis=1)
-        median_equity_step = equity_paths_df.median(axis=1) # Optional: Plot median too
+        if data is None or data.empty or data.isna().all():
+            return create_placeholder_figure(plot_title, f"Plot Skipped: No valid data for {xlabel}.")
 
-        fig, ax = plt.subplots(figsize=config.A4_LANDSCAPE)
-
-        trade_steps = equity_paths_df.index # Should be 0 to num_trades_per_sim
-
-        # Plot Max and Min lines
-        ax.plot(trade_steps, max_equity_step, label='Max Equity', color='lightgreen', linewidth=1)
-        ax.plot(trade_steps, min_equity_step, label='Min Equity', color='lightcoral', linewidth=1)
-
-        # Optional: Plot Median line
-        ax.plot(trade_steps, median_equity_step, label='Median Equity', color='blue', linestyle='--', linewidth=1.5)
-
-        # Fill between Max and Min
-        ax.fill_between(trade_steps, min_equity_step, max_equity_step, color='grey', alpha=0.3, label='Equity Range')
-
-        # Add initial equity line
-        ax.axhline(initial_equity, color='black', linestyle=':', linewidth=1, label=f'Initial Equity (${initial_equity:,.0f})')
-
-        # Formatting
-        ax.set_title(plot_title, fontsize=14)
-        ax.set_xlabel("Trade #")
-        ax.set_ylabel("Equity ($)")
-        ax.yaxis.set_major_formatter(mtick.FormatStrFormatter('$%.0f'))
-        ax.legend(loc='upper left')
-        ax.grid(True, linestyle='--', alpha=0.6)
-
-        fig.tight_layout(pad=1.1)
-        #print(f"Successfully generated '{plot_title}' plot.")
-
+        clean = data.dropna()
+        fig, ax = plt.subplots(figsize=config.FIG_FULL)
+        sns.histplot(clean, bins=50, kde=True, ax=ax,
+                     color=T['primary'], alpha=0.65, edgecolor=T['bg'],
+                     line_kws={'linewidth': 1.5, 'color': T['accent']})
+        # percentile markers
+        for pval, color in [(0.05, T['negative']), (0.50, T['accent']), (0.95, T['positive'])]:
+            v = clean.quantile(pval)
+            ax.axvline(v, color=color, linestyle='--', linewidth=1.2,
+                       label=f'P{int(pval*100)}: {"$" if dollar else ""}{v:,.0f}{"%" if pct else ""}')
+        if dollar:
+            ax.xaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: f'${x:,.0f}'))
+        elif pct:
+            ax.xaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0))
+        ax.legend(fontsize=8)
+        _style_ax(ax, title=f"{plot_title} ({clean.count():,} sims)",
+                  xlabel=xlabel, ylabel='Frequency')
+        fig.tight_layout(pad=1.2)
     except Exception as e:
         print(f"ERROR generating '{plot_title}' plot: {e}")
         traceback.print_exc()
-        if fig: plt.close(fig)
+        if fig:
+            plt.close(fig)
         fig = create_placeholder_figure(plot_title, f"Error generating plot:\n{e}")
-
     return fig
 
-# Specific plot functions using the helper
+
 def plot_mc_final_equity(final_equities: pd.Series) -> Optional[plt.Figure]:
-    return plot_mc_distribution(final_equities, "Monte Carlo: Distribution of Final Equity", "Final Equity ($)")
+    return _plot_mc_dist(final_equities, "MC — Final Equity Distribution", "Final Equity ($)", dollar=True)
+
 
 def plot_mc_cagr(cagr_values: pd.Series) -> Optional[plt.Figure]:
-    # Format CAGR as percentage before plotting if needed
-    return plot_mc_distribution(cagr_values * 100, "Monte Carlo: Distribution of CAGR", "Compound Annual Growth Rate (%)")
+    return _plot_mc_dist(cagr_values * 100, "MC — CAGR Distribution", "CAGR (%)", pct=True)
+
 
 def plot_mc_drawdown_pct(dd_pct_values: pd.Series) -> Optional[plt.Figure]:
-    # Ensure DD % is positive for histogram (it should be from calculations.py)
-    return plot_mc_distribution(dd_pct_values, "Monte Carlo: Distribution of Max Drawdown %", "Maximum Drawdown (%)")
+    return _plot_mc_dist(dd_pct_values, "MC — Max Drawdown % Distribution", "Max Drawdown (%)", pct=True)
+
 
 def plot_mc_drawdown_amount(dd_amount_values: pd.Series) -> Optional[plt.Figure]:
-    return plot_mc_distribution(dd_amount_values, "Monte Carlo: Distribution of Max Drawdown $", "Maximum Drawdown ($)")
+    return _plot_mc_dist(dd_amount_values, "MC — Max Drawdown $ Distribution", "Max Drawdown ($)", dollar=True)
+
 
 def plot_mc_lowest_equity(lowest_equity_values: pd.Series) -> Optional[plt.Figure]:
-    return plot_mc_distribution(lowest_equity_values, "Monte Carlo: Distribution of Lowest Equity", "Lowest Equity Reached ($)")
-    return fig
+    return _plot_mc_dist(lowest_equity_values, "MC — Lowest Equity Distribution", "Lowest Equity ($)", dollar=True)
+
+
+def plot_mc_distribution(data: pd.Series, plot_title: str, xlabel: str,
+                         use_kde: bool = True) -> Optional[plt.Figure]:
+    """Legacy shim used in older callers."""
+    dollar = '$' in xlabel
+    pct = '%' in xlabel and not dollar
+    return _plot_mc_dist(data, plot_title, xlabel, dollar=dollar, pct=pct)
