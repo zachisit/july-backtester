@@ -1872,7 +1872,82 @@ _[Next agent: append your session below this line]_
 
 Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relative Momentum belongs in the Aggressive portfolio (NDX Tech 44). The two portfolios use different 5th strategies because their universes have different correlation structures.
 
-**Research loop STATUS: COMPLETE — Rounds 41-42 fully close the "Aggressive" portfolio question. No further experiments warranted.**
+**Research loop STATUS: ACTIVE — Q46 DONE. Q47 (BB Breakout replacing Donchian) pending.**
+
+---
+
+### Session 15 (continued) — Round 43: BB Breakout in 6-Strategy Combined Portfolio
+
+**Additional findings (Round 43 — Q46):**
+
+16. **BB Breakout MC Score 5 in combined context** — second strategy ever to achieve MC Score 5 alongside Relative Momentum. Both achieve this via long hold duration (BB holds until Bollinger mean reversion, Rel Mom until relative strength decay), making them structurally resistant to Monte Carlo crash scenarios.
+
+17. **BB Breakout MaxDD 34.27%** — second best in portfolio after Rel Mom (29.46%), dramatically lower than RSI Weekly (46.14%) or MAC (45.16%). The Bollinger Band exit mechanics provide natural drawdown control.
+
+18. **CRITICAL: BB Breakout ↔ RSI Weekly r=0.7049** — exceeds the 0.70 research protocol threshold. Both fire on similar uptrend momentum triggers on NDX tech stocks (RSI crosses 55 threshold; BB price closes above 2-std upper band). On concentrated NVDA/AMZN/META tech, these signals are nearly synonymous. BB Breakout CANNOT coexist with RSI Weekly in a combined portfolio without replacing RSI Weekly.
+
+19. **BB Breakout vs Donchian comparison:**
+    - BB Sharpe: 1.64 vs Donchian 1.56 (+0.08)
+    - BB MaxDD: 34.27% vs Donchian 47.72% (-13.45pp)
+    - BB MC Score: 5 vs Donchian 2 (+3)
+    - BUT: BB ↔ RSI Weekly r=0.7049 vs Donchian ↔ RSI Weekly r=0.22 (Donchian is a FAR better diversifier from RSI Weekly)
+    - Replacing Donchian with BB Breakout would eliminate one of the portfolio's best diversifiers
+
+20. **Q47 hypothesis:** Testing BB Breakout as Donchian replacement (5-strategy: MA Bounce + MAC + RSI Weekly + Rel Mom + BB Breakout at 3.3%) — if BB ↔ RSI Weekly stays at r=0.7049 in this context, the replacement is REJECTED and R42 remains optimal. If the correlation drops below 0.70 without Donchian in the mix, BB Breakout may be viable.
+
+**Research loop STATUS: ACTIVE — Q47 (BB Breakout replacing Donchian) pending.**
+
+---
+
+### QUEUE ITEM 47 — BB Breakout Replacing Donchian (5-Strategy: MA Bounce + MAC + RSI Weekly + Rel Mom + BB Breakout) [PRIORITY: MEDIUM]
+**Status: PENDING**
+
+**Why this matters:** Round 43 found BB Breakout ↔ RSI Weekly r=0.7049 (above 0.70 threshold in 6-strategy context), ruling out BB Breakout as a 6th strategy. However, BB Breakout is superior to Donchian on almost every metric (Sharpe +0.08, MaxDD -13.45pp, MC Score +3). The only reason to keep Donchian is its exceptional RSI Weekly decorrelation (r=0.22). This run tests whether the BB Breakout vs Donchian tradeoff is worth it in a 5-strategy configuration at 3.3% allocation.
+
+**Config:**
+```python
+"timeframe": "W"
+"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "RSI Weekly Trend (55-cross) + SMA200",
+               "Relative Momentum (13w vs SPY) Weekly + SMA200",
+               "BB Weekly Breakout (20w/2std) + SMA200"]
+"allocation_per_trade": 0.033   # 5 strategies: 1/N for N=5
+"min_bars_required": 100
+```
+
+**Run:** `rtk python main.py --name "ndx44-5strat-bb-vs-donchian" --verbose`
+
+**Success criteria:** All 5 WFA Pass + RollWFA 3/3. BB ↔ RSI Weekly correlation < 0.70. MaxDD all < 50%. If BB ↔ RSI Weekly remains ≥ 0.70, REJECT replacement — R42 remains optimal. If BB ↔ RSI Weekly drops below 0.70 (without Donchian in the mix), compare overall portfolio metrics vs R42 to determine which is superior.
+
+**Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250.
+
+---
+
+### QUEUE ITEM 46 — BB Breakout in Combined Portfolio: Test Against Optimized 5-Strategy NDX Tech 44 [PRIORITY: MEDIUM]
+**Status: DONE — 2026-04-11 (Round 43)**
+**Run ID:** ndx44-6strat-bb-breakout_2026-04-11_12-47-53
+**Key result:** All 6 WFA Pass + RollWFA 3/3. BB Breakout MC Score 5 (second strategy to achieve this in combined context, alongside Rel Mom). CRITICAL: BB Breakout ↔ RSI Weekly r=0.7049 — ABOVE the 0.70 research threshold. BB Breakout CANNOT be added as a 6th strategy. Q47 tests BB Breakout as a Donchian REPLACEMENT (5-strategy) since BB is superior on Sharpe/MaxDD/MC but introduces RSI Weekly correlation problem.
+
+**Why this matters:** BB Weekly Breakout (20w/2std) + SMA200 is confirmed ROBUST (Sharpe 2.08, 100% of 75 sweep variants profitable, RS(min) -3.50) but has NEVER been tested in a combined portfolio context. It is the joint #1 champion by Sharpe (tied with Relative Momentum at 2.08). RS(min) -3.50 is worse than the other weekly champions (-2.06 to -2.54), but in a combined portfolio context this may improve via diversification. Key question: what is BB Breakout's exit-day correlation with the 5 strategies in the optimized R42 portfolio? If it's low vs RSI Weekly and Relative Momentum (the two momentum-threshold strategies), it could replace Donchian (lowest Sharpe, 1.63) as a better 5th strategy.
+
+**Config:**
+```python
+"timeframe": "W"
+"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "Donchian Breakout (40/20)", "RSI Weekly Trend (55-cross) + SMA200",
+               "Relative Momentum (13w vs SPY) Weekly + SMA200",
+               "BB Weekly Breakout (20w/2std) + SMA200"]
+"allocation_per_trade": 0.028   # 6 strategies: 1/N for N=6
+"min_bars_required": 100
+```
+
+**Run:** `rtk python main.py --name "ndx44-6strat-bb-breakout" --verbose`
+
+**Success criteria:** BB Breakout WFA Pass + RollWFA 3/3 in combined context. BB ↔ Donchian correlation < 0.70 (they are both breakout strategies — may be highly correlated). BB ↔ RSI Weekly < 0.70. If BB Breakout has lower correlation than Donchian with RSI Weekly, consider replacing Donchian with BB Breakout in the production portfolio.
+
+**Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250.
 
 ---
 
