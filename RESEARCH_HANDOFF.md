@@ -692,7 +692,8 @@ RS(min) -2.06 is the single best rolling Sharpe stress score of all 15+ strategi
 ---
 
 ### QUEUE ITEM 20 — Noise Injection Stress Test on 5-Strategy Combined [PRIORITY: MEDIUM]
-**Status: TODO**
+**Status: DONE — 2026-04-11 — ROBUST: Sharpe changes -1% to +1.2% under ±1% noise (essentially zero)**
+**Run ID:** weekly-5strat-noise-1pct_2026-04-11_06-16-26
 
 **Why this matters:** `noise_injection_pct: 0.01` injects ±1% uniform random noise into all OHLC bars before running strategies. If a strategy's Sharpe drops dramatically (e.g., 1.9 → 0.5) under 1% noise, its edge depends on exact price levels that may not hold in live trading with real bid/ask spreads. A robust strategy should show < 20% Sharpe degradation under ±1% noise.
 
