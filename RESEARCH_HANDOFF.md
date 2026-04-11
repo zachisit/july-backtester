@@ -1596,7 +1596,11 @@ Williams R: IMPAIRED — min_val=2 clips negative thresholds. Only base ran. Pen
 ---
 
 ### QUEUE ITEM 40 — Williams R as RSI Weekly Replacement in 5-Strategy Portfolio [PRIORITY: HIGH]
-**Status: PENDING**
+**Status: DONE — 2026-04-11 (Round 38)**
+Run ID: 5strat-williams-r-replace_2026-04-11_11-46-18
+**Result: RSI WEEKLY REMAINS PREFERRED. Williams R valid but highly correlated with Price Momentum (r=0.80) in combined portfolio.**
+
+Key metrics: Williams R Sharpe 1.92, MaxDD 46.49% (-2.87pp vs RSI), MC Score +1 (vs RSI -1). But correlation with Price Momentum (r=0.80) and MA Bounce (r=0.75) reduces portfolio diversification. RSI Weekly's lower correlation with Price Momentum provides better combined portfolio diversification despite lower isolated Sharpe.
 
 **Why this matters:** Williams R (Sharpe 1.94, RS(min) -2.12) outperforms RSI Weekly (Sharpe 1.85, RS(min) -2.15) on isolation. Both are momentum oscillators, but Williams R uses a different signal mechanism (%R near 14-week high vs RSI 55-cross). Test if the 5-strategy combined portfolio improves when Williams R replaces RSI Weekly.
 
@@ -1749,3 +1753,24 @@ Three validated universe tiers:
 **Status: RESEARCH FULLY COMPLETE ✓** All 33 queue items done (32 completed, Q31 superseded). No further research warranted. 12 sessions across 31+ rounds confirm the 5-strategy weekly portfolio is robust, universal, and ready for forward testing.
 
 _[Next agent: append your session below this line]_
+
+---
+
+### Session 14 — 2026-04-11 (Rounds 38+ — New Champion Portfolio Tests)
+**Agent:** Claude Sonnet 4.6 (continuation of Session 13)
+**Ran:**
+- Round 38: Q40 — Williams R as RSI Weekly replacement in 5-strategy portfolio (Run ID: 5strat-williams-r-replace_2026-04-11_11-46-18)
+
+**Key findings:**
+
+1. **Williams R HIGHLY CORRELATED with Price Momentum in combined portfolio (r=0.80)** — both strategies capture "price near recent highs" (Williams %R > -20 = top 20% of 14w range; Price Momentum = up 15%+ over 26w). They enter and exit simultaneously. Correlation also high with MA Bounce (r=0.75). Portfolio diversification is reduced vs RSI Weekly.
+
+2. **All 5 WFA Pass + RollWFA 3/3 with Williams R** — portfolio structure valid. Williams R MaxDD 46.49% (vs RSI 49.36%, -2.87pp), MC Score +1 (vs RSI -1), Sharpe 1.92 (vs RSI 1.91). Surface metrics are slightly better.
+
+3. **RSI Weekly remains preferred for the 5th portfolio slot** — lower correlation with Price Momentum provides better portfolio diversification. RSI Weekly OOS P&L in combined (+27,315%) was much higher than Williams R (+14,556%).
+
+4. **Williams R's role clarified**: Best as a replacement FOR Price Momentum (they are signal substitutes), not as an addition to a portfolio that already contains Price Momentum.
+
+**Next recommended actions (pending):**
+1. Q42: Relative Momentum Sensitivity Sweep (99 trades — CRITICAL)
+2. Q41: 6-Strategy Portfolio on Sectors+DJI 46 with Relative Momentum
