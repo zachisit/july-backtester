@@ -71,6 +71,9 @@ All use: wfa_split_ratio=0.80, wfa_folds=3. TF = timeframe (D=daily, W=weekly).
 
 **UNIVERSALITY CONFIRMED (2026-04-10):** All 3 primary daily champions also pass WFA+RollWFA 3/3 on `sp-500.json` (500 stocks). Strategies are not tech-regime-specific.
 **DOW JONES 30 BREAKTHROUGH (2026-04-11):** All 5 strategies WFA Pass + RollWFA 3/3 on DJI 30. MaxDD only 19-23% (vs 44-50% on NDX). MC Score +5 for 3 of 5 strategies. Sharpe 1.71-1.93. Sector diversification halves drawdowns while maintaining Sharpe.
+**SECTOR ETFs BREAKTHROUGH (2026-04-11):** All 5 strategies WFA Pass + MC Score +5 (ALL). 16 maximally diversified ETFs → zero correlated crashes → best possible MC robustness. RSI Weekly Sharpe 0.95, best OOS +166%.
+**BIOTECH CONFIRMED (2026-04-11):** All 5 WFA Pass on Nasdaq Biotech 257. Sharpe 0.68-0.81 (lower due to binary FDA events). MaxDD 55-67%. Strategies work even in the hardest sector.
+**ECOSYSTEM UNIVERSALITY (2026-04-11):** Framework confirmed on 6 distinct universes: NDX 44 → SP500 503 → Russell 1000 1,012 → Dow Jones 30 → Biotech 257 → Sector ETFs 16. All WFA Pass. Key finding: MC Score improves with sector diversification (NDX: -1, DJI: +5, Sectors: +5).
 **SP500 COMBINED (2026-04-11):** MA Bounce reaches MC Score +1 at 3% allocation on 500-stock universe — diversification partially fixes MC Score.
 **WEEKLY TIMEFRAME STRUCTURAL (2026-04-11):** ALL 4 strategies tested on weekly bars show Sharpe improvement of 165-215% and RS(min) improvement of 1.75-6.9×. Weekly timeframe is a proven structural improvement.
 **PRICE MOMENTUM IS TECH-SPECIFIC (2026-04-11):** 6m ROC > 15% FAILS on SP500 daily (RS(min) -17.09). On weekly bars, Price Momentum works on Russell 1000 (Sharpe 1.18, WFA Pass 3/3). The SP500 failure was a timeframe issue, not a signal issue.
@@ -761,7 +764,8 @@ RS(min) -2.06 is the single best rolling Sharpe stress score of all 15+ strategi
 ---
 
 ### QUEUE ITEM 23 — Nasdaq Biotech (257): Binary-Event Sector [PRIORITY: HIGH]
-**Status: TODO**
+**Status: DONE — 2026-04-11 — ALL 5 WFA Pass, Sharpe 0.68-0.81, MaxDD 55-67% (binary events raise floor)**
+**Run ID:** biotech-weekly-5strat_2026-04-11_06-58-39
 
 **Why this matters:** Biotech is structurally different from all tested universes — returns are driven by FDA approval events, clinical trial results, and partnership announcements. These are near-random binary events. Momentum strategies might fail entirely (if stock moves are random binary jumps) or might succeed (if post-approval momentum is real and sustained). This tests whether weekly momentum strategies are universal or tech/industrial-specific.
 
@@ -780,7 +784,8 @@ RS(min) -2.06 is the single best rolling Sharpe stress score of all 15+ strategi
 ---
 
 ### QUEUE ITEM 24 — Sector ETFs (16): Cross-Sector Rotation [PRIORITY: MEDIUM]
-**Status: TODO**
+**Status: DONE — 2026-04-11 — ALL 5 WFA Pass + MC Score +5! Best MC result of any universe tested.**
+**Run ID:** sectors-weekly-5strat_2026-04-11_07-01-32
 
 **Why this matters:** Sector rotation is a classic institutional strategy. The 16 sector ETFs (XLK, XLF, XLE, XLY, XLP, XLI, XLB, XLU, IYR, IBB, ITA, IHI, GDX, XOP, XRT, ITB) represent different corners of the market that rotate in/out of favor. With only 16 symbols and weekly bars, trade counts will be very low — but the test reveals whether the momentum framework detects sector leadership cycles. Note: sector ETFs were created 1998-2006 so historical data is shorter.
 
@@ -800,7 +805,7 @@ RS(min) -2.06 is the single best rolling Sharpe stress score of all 15+ strategi
 ---
 
 ### QUEUE ITEM 25 — Russell 2000 (Small Caps, ~1,969 symbols): Size Effect Test [PRIORITY: CRITICAL]
-**Status: TODO**
+**Status: RUNNING — 2026-04-11 — Run ID: russell2000-weekly-5strat (pending completion)**
 
 **Why this matters:** The size effect (Fama-French) documents that small caps historically outperform large caps on a risk-adjusted basis. Academic research shows momentum is stronger in small caps (less efficient pricing, slower institutional reaction). However, small caps also have: higher transaction costs, lower liquidity, more failed companies (survivorship bias concern), and more volatile earnings. This tests whether the 5 weekly strategies capture small-cap momentum OR whether the strategies only work on large, liquid, trending stocks.
 

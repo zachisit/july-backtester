@@ -65,7 +65,7 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    "timeframe": "D",  # Daily
+    "timeframe": "W",  # Weekly — Q25: Russell 2000 small-cap test
     #"timeframe": "H",  # Hourly
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
     #"timeframe_multiplier": 5,       # e.g., 1, 5, 15, 30 for minutes
@@ -172,7 +172,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "NDX Tech (44)": "nasdaq_100_tech.json",
+        "Russell 2000": "russell-2000.json",
     },
 
     # ============================================================
@@ -181,7 +181,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.10,  # 10% per position — isolation test
+    "allocation_per_trade": 0.033,  # 3.3% per position — 5-strategy combined
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -285,7 +285,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": "all",
+    "strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200", "RSI Weekly Trend (55-cross) + SMA200"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
@@ -347,7 +347,7 @@ CONFIG = {
     # Max DD, MC Score, WFA Verdict.
     # When True, all 23 columns are displayed.
     # Override at runtime with: python main.py --verbose
-    "verbose_output": False,
+    "verbose_output": True,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
