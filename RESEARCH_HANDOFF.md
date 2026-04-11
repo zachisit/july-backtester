@@ -2387,6 +2387,7 @@ New Polygon API key: see .env file.
 | R5 | MACD Histogram Crossover (4H) | REJECTED (PF 1.16, Calmar 0.26) | 0.26 | +17.89% | 2602 |
 | R6 | Williams %R Dip-Recovery (4H) | REJECTED (WFA Overfitted, OOS -5.60%) | 0.03 | -5.60% | 1238 |
 | R7 | Relative Strength Momentum (4H) | CHAMPION | 0.82 | +49.11% | 2332 |
+| R8 | RS Momentum Sensitivity Sweep | ROBUST (625/625 profitable, WFA, MC5) | — | — | — |
 
 **4H Structural Findings:**
 1. MEAN-REVERSION FAILS AT 4H: RSI Dip (R1), Williams %R (R6) both WFA Overfitted.
@@ -2396,27 +2397,24 @@ New Polygon API key: see .env file.
 3. NEGATIVE SHARPE IS SYSTEMATIC: Not a quality issue. Use Calmar/OOS/WFA instead.
 4. VOLUME FILTERS GENERATE EXCESSIVE TRADES: 3000+ trades = noise entries.
 
-**4H Production Portfolio v1 — CONFIRMED (4 strategies)**
+**4H Production Portfolio v1 — CONFIRMED (4 strategies, all rules satisfied)**
 Config: Liquid 4H (20), allocation_per_trade=0.10, stop_loss=none
 
-| Rank | Strategy | File | Calmar | OOS | WFA | MC | MaxDD |
-|---|---|---|---|---|---|---|---|
-| 1 | Relative Strength Momentum (4H) | strategies_4h.py | 0.82 | +49.11% | Pass | 5 | 15.94% |
-| 2 | EMA Velocity Breakout (4H) | strategies_4h.py | 0.66 | +48.68% | Pass | 5 | 19.68% |
-| 3 | Keltner Channel Breakout (4H) | strategies_4h.py | 0.65 | +33.01% | Pass | 5 | 16.09% |
-| 4 | Donchian Turtle (4H) | strategies_4h.py | 0.58 | +25.93% | Pass | 5 | 16.31% |
+| Rank | Strategy | File | Calmar | OOS | WFA | MC | MaxDD | Sweep |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Relative Strength Momentum (4H) | strategies_4h.py | 0.82 | +49.11% | Pass (3/3) | 5 | 15.94% | ROBUST (625/625) |
+| 2 | EMA Velocity Breakout (4H) | strategies_4h.py | 0.66 | +48.68% | Pass (3/3) | 5 | 19.68% | ROBUST (R3) |
+| 3 | Keltner Channel Breakout (4H) | strategies_4h.py | 0.65 | +33.01% | Pass (3/3) | 5 | 16.09% | ROBUST (R3) |
+| 4 | Donchian Turtle (4H) | strategies_4h.py | 0.58 | +25.93% | Pass (3/3) | 5 | 16.31% | ROBUST (R3) |
 
 Max pairwise correlation: 0.22 (Keltner ↔ Donchian). All others ≤ 0.06.
 
 **All rejected candidates:** ADX Entry, RSI Dip, Volume Surge, Donchian Channel
 Momentum (bug), MACD Histogram, Williams %R Dip-Recovery.
 
-**Next recommended 4H action:**
-- Option A: Sensitivity sweep on Relative Strength Momentum (new champion, R7)
-  to confirm non-overfitting of the rs_threshold=0.01 and rs_period parameters.
-- Option B: Search for a 5th strategy to complement the current 4-strategy portfolio.
-  Suggested candidates: Hull MA Cross, ATR Expansion Entry, EMA Triple Alignment.
-- Option C: Declare 4H portfolio COMPLETE (4 strong strategies is production-ready).
+**4H Research Status: COMPLETE** — Stop Criteria C satisfied (4+ champions, all 7 rules).
+R8 sensitivity sweep confirmed RS Momentum ROBUST (625/625 variants profitable/WFA/MC5).
+All 4 strategies fully confirmed. No further 4H research required.
 
 ---
 
@@ -2436,3 +2434,24 @@ Round files: research_results/4h_round_1.md through 4h_round_7.md
 
 **Next recommended action:** Sensitivity sweep on Relative Strength Momentum or
 search for 5th strategy. Current 4-strategy portfolio is production-ready as-is.
+
+---
+
+### Session 20 — 2026-04-11 (4H Research Round 8 — RS Momentum Sweep)
+**Agent:** Claude Sonnet 4.6
+**Ran:** Sensitivity sweep on Relative Strength Momentum (4H) — Rule 6 compliance
+**Run ID:** 4h-r8-rs-momentum-sweep_2026-04-11_16-17-47
+**Period:** 2018-01-01 → 2026-04-11, WFA split ~2024-08-07, 3 rolling folds
+
+**Key findings:**
+- 625/625 (100%) variants profitable, WFA Pass, Rolling WFA Pass (3/3), MC Score 5
+- P&L range: +65.53% to +266.58% (ALL positive)
+- Calmar range: 0.310 to 1.240 (ALL ≥ 0.31)
+- OOS P&L range: +14.84% to +83.41% (ALL positive)
+- Base rank: 304/625 = median (NOT cherry-picked at maximum)
+- VERDICT: ROBUST — strongest sweep result in all research (625/625 vs Williams R 81/81)
+- Critical fix: sensitivity_sweep_min_val=0.001 required for rs_threshold=0.010
+
+**4H Research COMPLETE:**
+Stop Criteria C satisfied — 4 confirmed champions, all 7 anti-overfitting rules satisfied.
+Round file: research_results/4h_round_8.md

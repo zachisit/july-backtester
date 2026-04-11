@@ -302,7 +302,7 @@ CONFIG = {
     "sensitivity_sweep_enabled": False,
     "sensitivity_sweep_pct": 0.20,        # ±20% per step
     "sensitivity_sweep_steps": 2,         # 2 steps each side → 5 values per param
-    "sensitivity_sweep_min_val": 2,       # floor (prevents e.g. SMA period = 0)
+    "sensitivity_sweep_min_val": 2,       # floor for generated values (prevents SMA period = 0)
 
     # ============================================================
     # SECTION 16: ROLLING METRICS
