@@ -109,13 +109,13 @@ All use: wfa_split_ratio=0.80, wfa_folds=3. TF = timeframe (D=daily, W=weekly).
 **GLOBAL DIVERSIFIED 76 CONFIRMED (2026-04-11):** Sectors+DJI+International ETFs (76 symbols) — all 5 WFA Pass. Sharpe 1.36-1.82, MaxDD 22-34%. MAC+Donchian MC Score +5. Donchian RS(min) -1.91 (new record). HIGH CORRELATION: Price Momentum ↔ RSI Weekly r=0.81 — use only one in live portfolio. Sectors+DJI 46 remains superior conservative universe.
 **BB BREAKOUT NEW CO-CHAMPION (2026-04-11):** BB Weekly Breakout (20w/2std) + SMA200 confirmed Sharpe 2.08 (tied record), RS(min) -3.50, 798 trades. Sensitivity sweep ROBUST: 100% of 75 variants profitable. Registered name: `BB Weekly Breakout (20w/2std) + SMA200`, file `round34_strategies.py`.
 **WILLIAMS R CONFIRMED CHAMPION (2026-04-11):** Williams R Weekly Trend (above-20) + SMA200: Sharpe 1.94, RS(min) -2.12, 799 trades. Sweep (Q43) ROBUST: 625/625 variants profitable (100%), 625/625 WFA Pass (100%), Sharpe range 1.59-2.21. File `round34_strategies.py`.
-**RELATIVE MOMENTUM NEW PROVISIONAL CHAMPION (2026-04-11):** Relative Momentum (13w vs SPY) Weekly + SMA200 achieves P&L 166,502% (new all-time high), Sharpe 2.08 (tied record), but only 99 trades. PROVISIONAL until sensitivity sweep (Q42) completes.
+**RELATIVE MOMENTUM CONFIRMED CHAMPION (2026-04-11, corrected Round 39):** Relative Momentum (13w vs SPY) Weekly + SMA200: P&L 166,502% (all-time high), Sharpe 2.08 (record), **831 trades** (NOT 99 — earlier "99 trades" was a CSV column misread; actual avg hold = 99 days, trades = 831). Sweep (Q42) ROBUST: 125/125 variants profitable (100%), 124/125 WFA Pass (99.2%), Sharpe range -0.36 to 2.08. Base params at 99th percentile. File `round36_strategies.py`.
 **MEAN REVERSION ANTI-PATTERN CONFIRMED (2026-04-11):** RSI MeanRev Weekly = 0 trades (conditions mutually exclusive). BB MeanRev Weekly = 22 trades, Sharpe -1.45. Weekly timeframe benefits ONLY trend-following strategies. Mean reversion is dead at weekly resolution.
 **BB SQUEEZE FAILED (2026-04-11):** BB Squeeze Breakout failed 6-symbol gate (WFA Likely Overfitted, Sharpe 0.45). Permanently disqualified.
 
 | Rank | Strategy | Registered Name (exact) | File | TF | P&L | Sharpe | RS(min) | OOS P&L | WFA | RollWFA | Status |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 🥇 NEW | Relative Momentum (13w vs SPY) | `Relative Momentum (13w vs SPY) Weekly + SMA200` | `round36_strategies.py` | **W** | **166,502%** | **+2.08** | -2.36 | +153,533% | Pass | 3/3 | PROVISIONAL |
+| 🥇 | Relative Momentum (13w vs SPY) | `Relative Momentum (13w vs SPY) Weekly + SMA200` | `round36_strategies.py` | **W** | **166,502%** | **+2.08** | -2.36 | +153,533% | Pass | 3/3 | **CONFIRMED** ✓ |
 | 🥇 NEW | BB Breakout Weekly | `BB Weekly Breakout (20w/2std) + SMA200` | `round34_strategies.py` | **W** | 152,197% | **+2.08** | -3.50 | +131,460% | Pass | 3/3 | **CONFIRMED** ✓ |
 | 3 NEW | Williams R Weekly | `Williams R Weekly Trend (above-20) + SMA200` | `round34_strategies.py` | **W** | 156,992% | **+1.94** | **-2.12** | +133,655% | Pass | 3/3 | **CONFIRMED** ✓ |
 | 4† | Price Momentum Weekly | `Price Momentum (6m ROC, 15pct) + SMA200` | `round9_strategies.py` | **W** | 156,879% | +1.87 | -2.30 | +138,152% | Pass | 3/3 | Confirmed |
@@ -1650,7 +1650,9 @@ Key metrics: Williams R Sharpe 1.92, MaxDD 46.49% (-2.87pp vs RSI), MC Score +1 
 ---
 
 ### QUEUE ITEM 42 — Relative Momentum Sensitivity Sweep [PRIORITY: HIGH]
-**Status: PENDING**
+**Status: DONE — 2026-04-11 (Round 39)**
+Run ID: relmom-sensitivity-sweep_2026-04-11_11-52-18
+**Result: ROBUST — 125/125 profitable (100%), 124/125 WFA Pass (99.2%). CONFIRMED CHAMPION. CORRECTION: Trade count was misread in round_35.md — strategy has 831 trades (not 99); avg hold = 99 days (not 831 days).**
 
 **Why this matters:** Relative Momentum has only 99 trades in 36 years (avg hold 831 days). This is below the 500-trade threshold for full confidence. The strategy must be sensitivity-swept to ensure the 15% SPY outperformance threshold (rel_thresh=1.15) is not uniquely good. With only 99 trades, any overfit would be catastrophic in live trading.
 
@@ -1771,6 +1773,15 @@ _[Next agent: append your session below this line]_
 
 4. **Williams R's role clarified**: Best as a replacement FOR Price Momentum (they are signal substitutes), not as an addition to a portfolio that already contains Price Momentum.
 
-**Next recommended actions (pending):**
-1. Q42: Relative Momentum Sensitivity Sweep (99 trades — CRITICAL)
-2. Q41: 6-Strategy Portfolio on Sectors+DJI 46 with Relative Momentum
+- Round 39: Q42 — Relative Momentum sensitivity sweep (Run ID: relmom-sensitivity-sweep_2026-04-11_11-52-18)
+
+**Additional key finding (Round 39):**
+
+5. **CRITICAL CORRECTION: "99 trades" was a CSV column misread** — Round 35 swapped `Avg. Hold (d)` and `Trades` columns. Correct values: Trades=831, Avg. Hold=99 days. The "only 99 trades" PROVISIONAL concern was invalid.
+
+6. **Relative Momentum CONFIRMED champion** — Q42 sweep: 125/125 profitable (100%), 124/125 WFA Pass (99.2%), Sharpe range -0.36 to 2.08. Base params at 99th percentile (best of 125 variants). With 831 trades, well above 500-trade threshold.
+
+7. **Q42 min_val fix** — rel_thresh=1.15 is below the default min_val=2, same class of bug as Williams R. Used min_val=0.5 to properly sweep rel_thresh range (0.805-1.495).
+
+**Next recommended action:**
+- Q41: 6-Strategy Portfolio on Sectors+DJI 46 with Relative Momentum (MEDIUM priority)
