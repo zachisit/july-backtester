@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 9 Rounds × Multi-Agent Parallel Research
+**Research Loop:** 10 Rounds × Multi-Agent Parallel Research
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-10 (36 years)
@@ -54,6 +54,13 @@ Round 9 (weekly timeframe + new signals + SP500 combined portfolio, 2026-04-11)
   → SP500 combined portfolio at 3%: MA Bounce MC Score = +1 (first positive MC Score on large universe!)
   → NR7 Volatility Contraction FAILED: Sharpe -0.07 (below risk-free rate of 5%)
   → Infrastructure: added W and M timeframe support to get_bars_for_period()
+
+Round 10 (weekly timeframe confirmation — MAC Fast Exit + Donchian, 2026-04-11)
+  → CONFIRMED: Weekly timeframe is a STRUCTURAL improvement for ALL momentum strategies
+  → MAC Fast Exit Weekly: Sharpe 1.80 (vs 0.68 daily, +165%), RS(min) -2.54 (vs -4.46, 1.75× better)
+  → Donchian Weekly: Sharpe 1.68 (vs 0.63, +167%), RS(min) -2.06 = BEST OF ALL STRATEGIES EVER TESTED
+  → Pattern is consistent across 3 different architectures (trend MA, breakout channel, bounce)
+  → Next: combined weekly portfolio test (Q11) and Price Momentum on SP500 (Q10)
 ```
 
 ---
@@ -64,10 +71,18 @@ Timeframe noted: D = daily, W = weekly. Both use annualized Sharpe (252 bars/yr 
 
 | Rank | Strategy | TF | P&L | Sharpe | RS(min) | OOS | WFA | RollWFA |
 |---|---|---|---|---|---|---|---|---|
-| 🥇 | MA Bounce (50d/3bar)+SMA200 **[WEEKLY]** | **W** | **140,028%** | **+1.92** | **-2.32** | +123,865% | Pass | 3/3 |
+| 🥇 | MA Bounce (50d/3bar)+SMA200 | **W** | **140,028%** | **+1.92** | -2.32 | +123,865% | Pass | 3/3 |
 | 🥈 | Price Momentum (6m ROC, 15pct) | D | 107,513% | +0.67 | -15.92 | +93,844% | Pass | 3/3 |
 | 🥉 | MA Confluence (10/20/50) Fast Exit | D | 101,198% | +0.68 | -4.46 | +88,023% | Pass | 3/3 |
-| 4 | (unchanged ranks 4-10 — see RESEARCH_HANDOFF.md) | | | | | | | |
+| 4 | MA Confluence Fast Exit | **W** | 84,447% | **+1.80** | -2.54 | +72,265% | Pass | 3/3 |
+| 5 | Donchian Breakout (40/20) | **W** | 53,499% | **+1.68** | **-2.06** | +41,671% | Pass | 3/3 |
+| (6-12) | Daily strategies — see RESEARCH_HANDOFF.md for full table | | | | | | | |
+
+**Best-by-metric:**
+- Highest Sharpe: MA Bounce Weekly (+1.92)
+- Best RS(min): Donchian Weekly (-2.06)
+- Highest P&L: MA Bounce Weekly (140,028%)
+- Best OOS P&L: MA Bounce Weekly (+123,865%)
 | 4 | CMF Momentum (20d)+SMA200 | 51,173% | +0.63 | -15.03 | +43,803% | Pass | 3/3 | 0.18 |
 | 5 | Donchian (60d/20d)+MA Alignment | 42,263% | +0.64 | -3.98 | +35,177% | Pass | 3/3 | 0.28* |
 | 6 | MA Confluence (10/20/50) Full Stack | 29,771% | +0.54 | -4.36 | +22,911% | Pass | 3/3 | 0.17 |

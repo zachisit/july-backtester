@@ -171,7 +171,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        # Round 9: Price Momentum on 44 symbols (44-sym validation)
+        # Q8: MAC Fast Exit on weekly bars (44 symbols)
         "NDX Tech (44)": "nasdaq_100_tech.json",
     },
 
@@ -286,8 +286,8 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        # Round 9: Price Momentum 44-sym validation
-        "Price Momentum (6m ROC, 15pct) + SMA200",
+        # Q9: Donchian (40/20) on weekly bars
+        "Donchian Breakout (40/20)",
     ],
 
     # ============================================================
