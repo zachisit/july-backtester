@@ -1,0 +1,2 @@
+iteration	timestamp	strategy	score	sharpe	trades	win_rate	max_dd	runtime_sec
+0	2026-03-24T16:31:28.527398	AutoResearch SMA	1.5	-0.14	270	0.4296	0.0763	16.9

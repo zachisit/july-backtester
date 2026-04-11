@@ -1,0 +1,200 @@
+[2026-04-11 11:31:05.499176] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+2026-04-11 07:31:05,786 [INFO] ============================================================
+2026-04-11 07:31:05,787 [INFO]   RUN SUMMARY
+2026-04-11 07:31:05,787 [INFO] ============================================================
+2026-04-11 07:31:05,787 [INFO]   Run ID        : intl-etfs-weekly-5strat_2026-04-11_07-31-05
+2026-04-11 07:31:05,787 [INFO]   Data provider : norgate
+2026-04-11 07:31:05,787 [INFO]   Period Selected : 1990-01-01 -> 2026-04-11
+2026-04-11 07:31:05,787 [INFO]   Timeframe     : W x 1
+2026-04-11 07:31:05,789 [INFO]   Strategies    : 5
+2026-04-11 07:31:05,789 [INFO]   Stop configs  : 1
+2026-04-11 07:31:05,789 [INFO] ------------------------------------------------------------
+2026-04-11 07:31:05,789 [INFO]   Portfolio     : International ETFs (30) (30 symbols)
+2026-04-11 07:31:05,789 [INFO] ------------------------------------------------------------
+2026-04-11 07:31:05,789 [INFO]   Total symbols : 30
+2026-04-11 07:31:05,789 [INFO]   Total tasks   : 150  (symbols x strategies x stop configs)
+2026-04-11 07:31:05,789 [INFO] ============================================================
+2026-04-11 07:31:05,795 [WARNING]   -> STALE CACHE: 108 file(s) in 'data_cache' are older than 7 days. Delete data_cache/ to force a fresh fetch.
+2026-04-11 07:31:05,795 [INFO] Using Norgate data service.
+2026-04-11 07:31:05,796 [INFO] PORTFOLIO STRATEGY ANALYZER
+2026-04-11 07:31:05,796 [INFO] ------------------------------------------------------------
+2026-04-11 07:31:05,796 [INFO]   Data Period (config): 1990-01-01 -> 2026-04-11  (no comparison tickers)
+2026-04-11 07:31:05,797 [INFO] ------------------------------------------------------------
+2026-04-11 07:31:05,797 [INFO]   WFA split date   : 2019-01-08  (IS: 1990-01-01 -> 2019-01-08 | OOS: 2019-01-08 -> 2026-04-11)
+2026-04-11 07:31:05,797 [INFO] ========================= PROCESSING PORTFOLIOS =========================
+2026-04-11 07:31:05,797 [INFO] --> Preparing and running portfolio: International ETFs (30)
+  -> Fetching & Preparing Data:   0%|          | 0/30 [00:00<?, ? symbols/s]  -> Fetching & Preparing Data:  20%|██        | 6/30 [00:00<00:00, 59.90 symbols/s]  -> Fetching & Preparing Data:  43%|████▎     | 13/30 [00:00<00:00, 60.04 symbols/s]  -> Fetching & Preparing Data:  67%|██████▋   | 20/30 [00:00<00:00, 61.15 symbols/s]  -> Fetching & Preparing Data:  90%|█████████ | 27/30 [00:00<00:00, 63.75 symbols/s]  -> Fetching & Preparing Data: 100%|██████████| 30/30 [00:00<00:00, 62.42 symbols/s]
+2026-04-11 07:31:06,282 [INFO] =============== RUNNING SIMULATIONS FOR 'International ETFs (30)' ===============
+2026-04-11 07:31:06,282 [INFO] Found 5 tasks. Using up to 8 CPU cores.
+[2026-04-11 11:31:06.966805] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:31:07.881209] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:31:08.810407] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:31:09.732366] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:31:10.775324] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:31:11.775357] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:31:12.764863] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:31:13.900440] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+  -> Running sims:   0%|          | 0/5 [00:00<?, ?it/s]C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+2026-04-11 07:31:19,624 [INFO]   -> Progress: 1/5 tasks done | Elapsed: 5s | ETA: 21s remaining
+  -> Running sims:  20%|██        | 1/5 [00:05<00:21,  5.31s/it]2026-04-11 07:31:19,988 [INFO]   -> Progress: 2/5 tasks done | Elapsed: 6s | ETA: 9s remaining
+  -> Running sims:  40%|████      | 2/5 [00:05<00:07,  2.40s/it]2026-04-11 07:31:19,988 [INFO]   -> Progress: 3/5 tasks done | Elapsed: 6s | ETA: 4s remaining
+2026-04-11 07:31:19,988 [INFO]   -> Progress: 4/5 tasks done | Elapsed: 6s | ETA: 1s remaining
+  -> Running sims: 100%|██████████| 5/5 [00:05<00:00,  1.13s/it]
+2026-04-11 07:31:20,037 [WARNING] NOTE: Correlation is computed on exit-date P&L only, not daily mark-to-market. Two strategies holding the same stock simultaneously will appear uncorrelated if they exit on different days. Treat this matrix as a lower bound on true correlation.
+2026-04-11 07:31:20,063 [INFO]   Correlation matrix saved: output\runs\intl-etfs-weekly-5strat_2026-04-11_07-31-05\International_ETFs_(30)_strategy_correlation.csv
+2026-04-11 07:31:20,063 [WARNING] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+2026-04-11 07:31:20,064 [WARNING]   HIGH CORRELATION ALERT  |  Portfolio: International ETFs (30)
+2026-04-11 07:31:20,064 [WARNING]   Threshold: |r| > 0.70 — strategies below may overlap significantly
+2026-04-11 07:31:20,064 [WARNING] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+2026-04-11 07:31:20,064 [WARNING]     'Price Momentum (6m ROC, 15pct) + SMA200' <-> 'RSI Weekly Trend (55-cross) + SMA200'  r=+0.86  [HIGH OVERLAP — consider removing one]
+2026-04-11 07:31:20,064 [WARNING] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+================================================================================
+      Strategy Performance Summary for Portfolio: International ETFs (30)       
+================================================================================
+================================================================================
+
+--- Core Performance: International ETFs (30) ---
+--------------------------------------------------------------------------------------------
+Strategy                                  P&L (%)   Sharpe   Max DD   MC Score   WFA Verdict
+--------------------------------------------------------------------------------------------
+MA Bounce (50d/3bar) + SMA200 Gate        500.34%   0.88     29.28%   5          Pass       
+MA Confluence (10/20/50) Fast Exit        435.20%   0.81     31.37%   5          Pass       
+Donchian Breakout (40/20)                 285.60%   0.67     31.80%   5          Pass       
+Price Momentum (6m ROC, 15pct) + SMA200   637.45%   1.03     27.73%   5          Pass       
+RSI Weekly Trend (55-cross) + SMA200      773.83%   1.08     31.79%   5          Pass       
+--------------------------------------------------------------------------------------------
+
+--- Extended Metrics ---
+-------------------------------------------------------------------------------------------------------------------------------------------------
+Strategy                                  Calmar   RS(avg)   RS(min)   RS(last)   MaxRcvry   AvgRcvry   PF     WinRate   Trades   Expct(R)   SQN 
+-------------------------------------------------------------------------------------------------------------------------------------------------
+MA Bounce (50d/3bar) + SMA200 Gate        0.21     0.79      -2.64     2.14       1365       136        1.61   37.26%    1044     2.176      5.55
+MA Confluence (10/20/50) Fast Exit        0.18     0.74      -2.26     1.81       2436       161        1.47   42.89%    1441     1.391      5.72
+Donchian Breakout (40/20)                 0.14     0.58      -2.62     1.74       2457       188        1.49   41.93%    954      1.650      4.25
+Price Momentum (6m ROC, 15pct) + SMA200   0.25     0.81      -2.62     2.18       2324       149        2.29   48.61%    395      6.309      5.70
+RSI Weekly Trend (55-cross) + SMA200      0.24     0.94      -2.81     2.68       2352       114        2.31   34.86%    545      5.335      5.88
+-------------------------------------------------------------------------------------------------------------------------------------------------
+
+--- Robustness ---
+---------------------------------------------------------------------------------------------------------
+Strategy                                  OOS P&L    WFA Verdict   RollWFA      Corr    MC       MC Score
+---------------------------------------------------------------------------------------------------------
+MA Bounce (50d/3bar) + SMA200 Gate        +206.29%   Pass          Pass (3/3)   0.17    Robust   5       
+MA Confluence (10/20/50) Fast Exit        +179.33%   Pass          Pass (3/3)   0.15    Robust   5       
+Donchian Breakout (40/20)                 +109.35%   Pass          Pass (3/3)   0.20    Robust   5       
+Price Momentum (6m ROC, 15pct) + SMA200   +198.94%   Pass          Pass (3/3)   0.31*   Robust   5       
+RSI Weekly Trend (55-cross) + SMA200      +372.85%   Pass          Pass (3/3)   0.31*   Robust   5       
+---------------------------------------------------------------------------------------------------------
+  Exported 5 analyzer-compatible CSVs to output\runs\intl-etfs-weekly-5strat_2026-04-11_07-31-05\analyzer_csvs\International_ETFs_(30)
+
+--------------------------------------------------------------------------------
+Saving all valid trade logs for portfolio: International ETFs (30)...
+Saved 5 trade logs.
+--------------------------------------------------------------------------------
+
+
+================================================================================
+                        Overall Top Portfolio Strategies                        
+================================================================================
+                Total Backtest Runtime: 0 minutes, 14.52 seconds                
+================================================================================
+
+--- Core Performance: All Portfolios ---
+----------------------------------------------------------------------------------------------------------------------
+Portfolio                 Strategy                                  P&L (%)   Sharpe   Max DD   MC Score   WFA Verdict
+----------------------------------------------------------------------------------------------------------------------
+International ETFs (30)   MA Bounce (50d/3bar) + SMA200 Gate        500.34%   0.88     29.28%   5          Pass       
+International ETFs (30)   MA Confluence (10/20/50) Fast Exit        435.20%   0.81     31.37%   5          Pass       
+International ETFs (30)   Donchian Breakout (40/20)                 285.60%   0.67     31.80%   5          Pass       
+International ETFs (30)   Price Momentum (6m ROC, 15pct) + SMA200   637.45%   1.03     27.73%   5          Pass       
+International ETFs (30)   RSI Weekly Trend (55-cross) + SMA200      773.83%   1.08     31.79%   5          Pass       
+----------------------------------------------------------------------------------------------------------------------
+
+--- Extended Metrics ---
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Portfolio                 Strategy                                  Calmar   RS(avg)   RS(min)   RS(last)   MaxRcvry   AvgRcvry   PF     WinRate   Trades   Expct(R)   SQN 
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+International ETFs (30)   MA Bounce (50d/3bar) + SMA200 Gate        0.21     0.79      -2.64     2.14       1365       136        1.61   37.26%    1044     2.176      5.55
+International ETFs (30)   MA Confluence (10/20/50) Fast Exit        0.18     0.74      -2.26     1.81       2436       161        1.47   42.89%    1441     1.391      5.72
+International ETFs (30)   Donchian Breakout (40/20)                 0.14     0.58      -2.62     1.74       2457       188        1.49   41.93%    954      1.650      4.25
+International ETFs (30)   Price Momentum (6m ROC, 15pct) + SMA200   0.25     0.81      -2.62     2.18       2324       149        2.29   48.61%    395      6.309      5.70
+International ETFs (30)   RSI Weekly Trend (55-cross) + SMA200      0.24     0.94      -2.81     2.68       2352       114        2.31   34.86%    545      5.335      5.88
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--- Robustness ---
+---------------------------------------------------------------------------------------------------------------------------
+Portfolio                 Strategy                                  OOS P&L    WFA Verdict   RollWFA      MC       MC Score
+---------------------------------------------------------------------------------------------------------------------------
+International ETFs (30)   MA Bounce (50d/3bar) + SMA200 Gate        +206.29%   Pass          Pass (3/3)   Robust   5       
+International ETFs (30)   MA Confluence (10/20/50) Fast Exit        +179.33%   Pass          Pass (3/3)   Robust   5       
+International ETFs (30)   Donchian Breakout (40/20)                 +109.35%   Pass          Pass (3/3)   Robust   5       
+International ETFs (30)   Price Momentum (6m ROC, 15pct) + SMA200   +198.94%   Pass          Pass (3/3)   Robust   5       
+International ETFs (30)   RSI Weekly Trend (55-cross) + SMA200      +372.85%   Pass          Pass (3/3)   Robust   5       
+---------------------------------------------------------------------------------------------------------------------------2026-04-11 07:31:20,296 [INFO] All portfolio simulations complete in 0m 14.52s.
+2026-04-11 07:31:20,296 [INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-04-11 07:31:20,296 [INFO]   Run report:  python report.py --all output/runs/intl-etfs-weekly-5strat_2026-04-11_07-31-05
+2026-04-11 07:31:20,296 [INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+
+Successfully saved overall portfolio summary to 'output\runs\intl-etfs-weekly-5strat_2026-04-11_07-31-05\overall_portfolio_summary.csv'

@@ -1,0 +1,115 @@
+commit 40d8eb42254a0f9a5bd944c561ff22f1de9a316e
+Author: Suriya-002 <suriyarajavel02@gmail.com>
+Date:   Sat Mar 21 09:05:28 2026 -0400
+
+    test: add edge case tests for parameter sensitivity sweep (task 7)
+
+diff --git a/tests/test_sensitivity.py b/tests/test_sensitivity.py
+index 1f06baf..1517c34 100644
+--- a/tests/test_sensitivity.py
++++ b/tests/test_sensitivity.py
+@@ -85,6 +85,104 @@ class TestBuildParamGrid:
+         assert len(vals) == len(set(vals)), f"Duplicates found: {vals}"
+ 
+ 
++
++
++# ---------------------------------------------------------------------------
++# TestBuildParamGridEdgeCases (Task 7)
++# ---------------------------------------------------------------------------
++
++class TestBuildParamGridEdgeCases:
++    """Edge cases requested in the contributor task list."""
++
++    def test_param_at_floor_value_one(self):
++        """
++        Strategy with params={"fast": 1} — at floor.
++        With min_val=2, all *generated* values are clamped to min_val,
++        but the base value (1) is preserved as-is via the "ensure base
++        is present" guarantee. Verify the base appears and that generated
++        (non-base) values respect the floor.
++        """
++        params = {"fast": 1}
++        grid = build_param_grid(params, pct=0.20, steps=2, min_val=2)
++        vals = [g["fast"] for g in grid]
++        # Base value must be present
++        assert 1 in vals, "Base value 1 must appear in grid"
++        # All non-base values should be >= min_val
++        non_base = [v for v in vals if v != 1]
++        for v in non_base:
++            assert v >= 2, f"Non-base value {v} is below min_val=2"
++
++    def test_only_boolean_param_no_sweep(self):
++        """
++        Params containing only a boolean — no sweep should happen.
++        Booleans are not numeric for sweep purposes, so the grid should
++        contain exactly the base params dict unchanged.
++        """
++        params = {"use_filter": True}
++        grid = build_param_grid(params, pct=0.20, steps=2, min_val=2)
++        assert len(grid) == 1, f"Expected 1 grid point, got {len(grid)}"
++        assert grid[0] == params
++        assert grid[0]["use_filter"] is True
++
++    def test_boolean_with_numeric_only_numeric_varies(self):
++        """
++        Mixed params: one boolean + one numeric. Only the numeric key should
++        be varied; the boolean should pass through unchanged in every variant.
++        """
++        params = {"fast": 20, "use_filter": True}
++        grid = build_param_grid(params, pct=0.20, steps=2, min_val=2)
++        # Should have 5 variants (only "fast" varies)
++        assert len(grid) == 5, f"Expected 5 grid points, got {len(grid)}"
++        for g in grid:
++            assert g["use_filter"] is True, "Boolean param was modified"
++
++    def test_three_params_cartesian_125_points(self):
++        """
++        Cartesian product with 3 numeric params at steps=2 should produce
++        5 × 5 × 5 = 125 grid points. Confirm dedup still works (no duplicates).
++        """
++        params = {"fast": 20, "slow": 50, "signal": 10}
++        grid = build_param_grid(params, pct=0.20, steps=2, min_val=2)
++        assert len(grid) == 125, f"Expected 125 grid points, got {len(grid)}"
++        # Check no duplicate param combinations exist
++        seen = set()
++        for g in grid:
++            key = (g["fast"], g["slow"], g["signal"])
++            assert key not in seen, f"Duplicate grid point: {key}"
++            seen.add(key)
++
++    def test_three_params_base_present(self):
++        """
++        With 3 params, the base combination (20, 50, 10) must appear
++        exactly once in the 125-point grid.
++        """
++        params = {"fast": 20, "slow": 50, "signal": 10}
++        grid = build_param_grid(params, pct=0.20, steps=2, min_val=2)
++        base_count = sum(
++            1 for g in grid
++            if g["fast"] == 20 and g["slow"] == 50 and g["signal"] == 10
++        )
++        assert base_count == 1, f"Base appeared {base_count} times, expected 1"
++
++    def test_float_param_not_rounded_to_int(self):
++        """
++        Float params should remain floats after the sweep, not get rounded
++        to integers.
++        """
++        params = {"threshold": 0.5}
++        grid = build_param_grid(params, pct=0.20, steps=2, min_val=0.1)
++        for g in grid:
++            assert isinstance(g["threshold"], float), f"Expected float, got {type(g['threshold'])}"
++
++    def test_single_step_three_values(self):
++        """
++        steps=1 should produce 3 values per param: base-pct, base, base+pct.
++        """
++        params = {"fast": 100}
++        grid = build_param_grid(params, pct=0.10, steps=1, min_val=2)
++        vals = sorted(g["fast"] for g in grid)
++        assert vals == [90, 100, 110], f"Got {vals}"
++
+ # ---------------------------------------------------------------------------
+ # TestLabelForParams
+ # ---------------------------------------------------------------------------

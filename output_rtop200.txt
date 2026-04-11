@@ -1,0 +1,529 @@
+[2026-04-11 11:15:05.784738] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+2026-04-11 07:15:06,065 [INFO] ============================================================
+2026-04-11 07:15:06,065 [INFO]   RUN SUMMARY
+2026-04-11 07:15:06,065 [INFO] ============================================================
+2026-04-11 07:15:06,065 [INFO]   Run ID        : rtop200-weekly-5strat_2026-04-11_07-15-06
+2026-04-11 07:15:06,066 [INFO]   Data provider : norgate
+2026-04-11 07:15:06,066 [INFO]   Period Selected : 1990-01-01 -> 2026-04-11
+2026-04-11 07:15:06,066 [INFO]   Timeframe     : W x 1
+2026-04-11 07:15:06,068 [INFO]   Strategies    : 5
+2026-04-11 07:15:06,068 [INFO]   Stop configs  : 1
+2026-04-11 07:15:06,068 [INFO] ------------------------------------------------------------
+2026-04-11 07:15:06,068 [INFO]   Portfolio     : Russell Top 200 (198) (198 symbols)
+2026-04-11 07:15:06,068 [INFO] ------------------------------------------------------------
+2026-04-11 07:15:06,068 [INFO]   Total symbols : 198
+2026-04-11 07:15:06,068 [INFO]   Total tasks   : 990  (symbols x strategies x stop configs)
+2026-04-11 07:15:06,068 [INFO] ============================================================
+2026-04-11 07:15:06,073 [WARNING]   -> STALE CACHE: 108 file(s) in 'data_cache' are older than 7 days. Delete data_cache/ to force a fresh fetch.
+2026-04-11 07:15:06,073 [INFO] Using Norgate data service.
+2026-04-11 07:15:06,074 [INFO] PORTFOLIO STRATEGY ANALYZER
+2026-04-11 07:15:06,074 [INFO] ------------------------------------------------------------
+2026-04-11 07:15:06,074 [INFO]   Data Period (config): 1990-01-01 -> 2026-04-11  (no comparison tickers)
+2026-04-11 07:15:06,074 [INFO] ------------------------------------------------------------
+2026-04-11 07:15:06,075 [INFO]   WFA split date   : 2019-01-08  (IS: 1990-01-01 -> 2019-01-08 | OOS: 2019-01-08 -> 2026-04-11)
+2026-04-11 07:15:06,075 [INFO] ========================= PROCESSING PORTFOLIOS =========================
+2026-04-11 07:15:06,075 [INFO] --> Preparing and running portfolio: Russell Top 200 (198)
+  -> Fetching & Preparing Data:   0%|          | 0/198 [00:00<?, ? symbols/s]  -> Fetching & Preparing Data:   4%|▎         | 7/198 [00:00<00:02, 66.04 symbols/s]  -> Fetching & Preparing Data:   7%|▋         | 14/198 [00:00<00:03, 55.95 symbols/s]  -> Fetching & Preparing Data:  10%|█         | 20/198 [00:00<00:03, 55.90 symbols/s]  -> Fetching & Preparing Data:  14%|█▍        | 28/198 [00:00<00:02, 60.33 symbols/s]  -> Fetching & Preparing Data:  18%|█▊        | 35/198 [00:00<00:02, 60.87 symbols/s]  -> Fetching & Preparing Data:  21%|██        | 42/198 [00:00<00:02, 62.90 symbols/s]  -> Fetching & Preparing Data:  25%|██▍       | 49/198 [00:00<00:02, 59.98 symbols/s]  -> Fetching & Preparing Data:  28%|██▊       | 56/198 [00:00<00:02, 60.19 symbols/s]  -> Fetching & Preparing Data:  32%|███▏      | 63/198 [00:01<00:02, 51.89 symbols/s]  -> Fetching & Preparing Data:  35%|███▍      | 69/198 [00:01<00:02, 51.65 symbols/s]  -> Fetching & Preparing Data:  38%|███▊      | 75/198 [00:01<00:02, 50.39 symbols/s][2026-04-11 11:15:07.456277] ERROR: Norgate Data: price_timeseries: FI not found
+  -> Fetching & Preparing Data:  42%|████▏     | 83/198 [00:01<00:01, 57.70 symbols/s]  -> Fetching & Preparing Data:  46%|████▌     | 91/198 [00:01<00:01, 57.79 symbols/s]  -> Fetching & Preparing Data:  49%|████▉     | 97/198 [00:01<00:01, 51.25 symbols/s]  -> Fetching & Preparing Data:  53%|█████▎    | 104/198 [00:01<00:01, 53.21 symbols/s]  -> Fetching & Preparing Data:  56%|█████▌    | 110/198 [00:02<00:01, 48.18 symbols/s]  -> Fetching & Preparing Data:  58%|█████▊    | 115/198 [00:02<00:01, 46.03 symbols/s]  -> Norgate ERROR fetching data for 'FI': 
+[2026-04-11 11:15:08.286306] ERROR: Norgate Data: price_timeseries: MMC not found
+  -> Fetching & Preparing Data:  61%|██████    | 121/198 [00:02<00:01, 49.12 symbols/s]  -> Fetching & Preparing Data:  64%|██████▍   | 127/198 [00:02<00:01, 50.23 symbols/s]  -> Fetching & Preparing Data:  67%|██████▋   | 133/198 [00:02<00:01, 49.69 symbols/s]  -> Fetching & Preparing Data:  71%|███████   | 140/198 [00:02<00:01, 53.50 symbols/s]  -> Fetching & Preparing Data:  74%|███████▎  | 146/198 [00:02<00:01, 49.45 symbols/s]  -> Fetching & Preparing Data:  77%|███████▋  | 152/198 [00:02<00:00, 51.73 symbols/s]  -> Fetching & Preparing Data:  80%|███████▉  | 158/198 [00:02<00:00, 52.14 symbols/s]  -> Fetching & Preparing Data:  83%|████████▎ | 164/198 [00:03<00:00, 52.77 symbols/s]  -> Fetching & Preparing Data:  86%|████████▋ | 171/198 [00:03<00:00, 53.77 symbols/s]  -> Fetching & Preparing Data:  90%|████████▉ | 178/198 [00:03<00:00, 55.66 symbols/s]  -> Fetching & Preparing Data:  93%|█████████▎| 184/198 [00:03<00:00, 53.71 symbols/s]  -> Fetching & Preparing Data:  96%|█████████▌| 190/198 [00:03<00:00, 52.13 symbols/s]  -> Fetching & Preparing Data:  99%|█████████▉| 196/198 [00:03<00:00, 49.05 symbols/s]  -> Fetching & Preparing Data: 100%|██████████| 198/198 [00:03<00:00, 53.17 symbols/s]
+2026-04-11 07:15:09,803 [WARNING]   -> Skipped 4 symbol(s) with fewer than 250 bars: BAM (176 bars), CEG (221 bars), GEV (107 bars), NU (227 bars)
+2026-04-11 07:15:09,804 [INFO] =============== RUNNING SIMULATIONS FOR 'Russell Top 200 (198)' ===============
+2026-04-11 07:15:09,804 [INFO] Found 5 tasks. Using up to 8 CPU cores.
+[2026-04-11 11:15:10.471686] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:15:11.441614] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:15:12.602944] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:15:13.654350] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:15:14.692441] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:15:15.664669] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:15:16.641030] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-11 11:15:17.626752] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+  -> Norgate ERROR fetching data for 'MMC': 
+  -> Running sims:   0%|          | 0/5 [00:00<?, ?it/s]C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+C:\Users\krist\Desktop\github\july-backtester\custom_strategies\private\round13_strategies.py:169: FutureWarning: Downcasting object dtype arrays on .fillna, .ffill, .bfill is deprecated and will change in a future version. Call result.infer_objects(copy=False) instead. To opt-in to the future behavior, set `pd.set_option('future.no_silent_downcasting', True)`
+  rsi_cross_up = rsi_above_entry & ~rsi_above_entry.shift(1).fillna(False)
+2026-04-11 07:16:05,040 [INFO]   -> Progress: 1/5 tasks done | Elapsed: 47s | ETA: 188s remaining
+  -> Running sims:  20%|██        | 1/5 [00:47<03:08, 47.10s/it]2026-04-11 07:16:05,040 [INFO]   -> Progress: 2/5 tasks done | Elapsed: 47s | ETA: 71s remaining
+2026-04-11 07:16:05,040 [INFO]   -> Progress: 3/5 tasks done | Elapsed: 47s | ETA: 31s remaining
+2026-04-11 07:16:05,040 [INFO]   -> Progress: 4/5 tasks done | Elapsed: 47s | ETA: 12s remaining
+  -> Running sims: 100%|██████████| 5/5 [00:49<00:00,  7.50s/it]  -> Running sims: 100%|██████████| 5/5 [00:49<00:00,  9.88s/it]
+2026-04-11 07:16:07,392 [WARNING] NOTE: Correlation is computed on exit-date P&L only, not daily mark-to-market. Two strategies holding the same stock simultaneously will appear uncorrelated if they exit on different days. Treat this matrix as a lower bound on true correlation.
+2026-04-11 07:16:07,443 [INFO]   Correlation matrix saved: output\runs\rtop200-weekly-5strat_2026-04-11_07-15-06\Russell_Top_200_(198)_strategy_correlation.csv
+2026-04-11 07:16:07,443 [WARNING] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+2026-04-11 07:16:07,443 [WARNING]   HIGH CORRELATION ALERT  |  Portfolio: Russell Top 200 (198)
+2026-04-11 07:16:07,443 [WARNING]   Threshold: |r| > 0.70 — strategies below may overlap significantly
+2026-04-11 07:16:07,443 [WARNING] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+2026-04-11 07:16:07,443 [WARNING]     'Price Momentum (6m ROC, 15pct) + SMA200' <-> 'RSI Weekly Trend (55-cross) + SMA200'  r=+0.82  [HIGH OVERLAP — consider removing one]
+2026-04-11 07:16:07,443 [WARNING] !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+
+================================================================================
+       Strategy Performance Summary for Portfolio: Russell Top 200 (198)        
+================================================================================
+================================================================================
+
+--- Core Performance: Russell Top 200 (198) ---
+----------------------------------------------------------------------------------------------
+Strategy                                  P&L (%)     Sharpe   Max DD   MC Score   WFA Verdict
+----------------------------------------------------------------------------------------------
+MA Bounce (50d/3bar) + SMA200 Gate        35479.43%   1.86     42.56%   -1         Pass       
+MA Confluence (10/20/50) Fast Exit        11615.10%   1.53     44.29%   -1         Pass       
+Donchian Breakout (40/20)                 9423.74%    1.48     53.72%   -1         Pass       
+Price Momentum (6m ROC, 15pct) + SMA200   85677.09%   1.95     37.74%   -1         Pass       
+RSI Weekly Trend (55-cross) + SMA200      35197.14%   1.78     36.77%   -1         Pass       
+----------------------------------------------------------------------------------------------
+
+--- Extended Metrics ---
+--------------------------------------------------------------------------------------------------------------------------------------------------
+Strategy                                  Calmar   RS(avg)   RS(min)   RS(last)   MaxRcvry   AvgRcvry   PF     WinRate   Trades   Expct(R)   SQN  
+--------------------------------------------------------------------------------------------------------------------------------------------------
+MA Bounce (50d/3bar) + SMA200 Gate        0.41     2.12      -2.44     2.24       1463       48         1.98   41.54%    4692     5.026      11.98
+MA Confluence (10/20/50) Fast Exit        0.32     1.77      -2.08     1.66       1701       59         1.52   42.69%    6716     2.669      12.17
+Donchian Breakout (40/20)                 0.25     1.78      -3.10     0.92       1596       55         1.61   43.98%    4457     4.183      11.65
+Price Momentum (6m ROC, 15pct) + SMA200   0.54     2.17      -2.10     2.25       1260       47         2.72   43.89%    2233     13.624     10.27
+RSI Weekly Trend (55-cross) + SMA200      0.48     2.02      -1.85     2.07       1477       55         2.78   39.40%    2297     11.127     10.86
+--------------------------------------------------------------------------------------------------------------------------------------------------
+
+--- Robustness ---
+-----------------------------------------------------------------------------------------------------------------------------------
+Strategy                                  OOS P&L      WFA Verdict   RollWFA      Corr    MC                               MC Score
+-----------------------------------------------------------------------------------------------------------------------------------
+MA Bounce (50d/3bar) + SMA200 Gate        +21987.77%   Pass          Pass (3/3)   0.38    DD Understated, High Tail Risk   -1      
+MA Confluence (10/20/50) Fast Exit        +5636.11%    Pass          Pass (3/3)   0.24    DD Understated, High Tail Risk   -1      
+Donchian Breakout (40/20)                 +4200.00%    Pass          Pass (3/3)   0.33    DD Understated, High Tail Risk   -1      
+Price Momentum (6m ROC, 15pct) + SMA200   +56881.43%   Pass          Pass (3/3)   0.45*   DD Understated, High Tail Risk   -1      
+RSI Weekly Trend (55-cross) + SMA200      +24099.48%   Pass          Pass (3/3)   0.33*   DD Understated, High Tail Risk   -1      
+-----------------------------------------------------------------------------------------------------------------------------------
+  Exported 5 analyzer-compatible CSVs to output\runs\rtop200-weekly-5strat_2026-04-11_07-15-06\analyzer_csvs\Russell_Top_200_(198)
+
+--------------------------------------------------------------------------------
+Saving all valid trade logs for portfolio: Russell Top 200 (198)...
+Saved 5 trade logs.
+--------------------------------------------------------------------------------
+
+
+================================================================================
+                        Overall Top Portfolio Strategies                        
+================================================================================
+                Total Backtest Runtime: 1 minutes, 2.21 seconds                 
+================================================================================
+
+--- Core Performance: All Portfolios ---
+----------------------------------------------------------------------------------------------------------------------
+Portfolio               Strategy                                  P&L (%)     Sharpe   Max DD   MC Score   WFA Verdict
+----------------------------------------------------------------------------------------------------------------------
+Russell Top 200 (198)   MA Bounce (50d/3bar) + SMA200 Gate        35479.43%   1.86     42.56%   -1         Pass       
+Russell Top 200 (198)   MA Confluence (10/20/50) Fast Exit        11615.10%   1.53     44.29%   -1         Pass       
+Russell Top 200 (198)   Donchian Breakout (40/20)                 9423.74%    1.48     53.72%   -1         Pass       
+Russell Top 200 (198)   Price Momentum (6m ROC, 15pct) + SMA200   85677.09%   1.95     37.74%   -1         Pass       
+Russell Top 200 (198)   RSI Weekly Trend (55-cross) + SMA200      35197.14%   1.78     36.77%   -1         Pass       
+----------------------------------------------------------------------------------------------------------------------
+
+--- Extended Metrics ---
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Portfolio               Strategy                                  Calmar   RS(avg)   RS(min)   RS(last)   MaxRcvry   AvgRcvry   PF     WinRate   Trades   Expct(R)   SQN  
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Russell Top 200 (198)   MA Bounce (50d/3bar) + SMA200 Gate        0.41     2.12      -2.44     2.24       1463       48         1.98   41.54%    4692     5.026      11.98
+Russell Top 200 (198)   MA Confluence (10/20/50) Fast Exit        0.32     1.77      -2.08     1.66       1701       59         1.52   42.69%    6716     2.669      12.17
+Russell Top 200 (198)   Donchian Breakout (40/20)                 0.25     1.78      -3.10     0.92       1596       55         1.61   43.98%    4457     4.183      11.65
+Russell Top 200 (198)   Price Momentum (6m ROC, 15pct) + SMA200   0.54     2.17      -2.10     2.25       1260       47         2.72   43.89%    2233     13.624     10.27
+Russell Top 200 (198)   RSI Weekly Trend (55-cross) + SMA200      0.48     2.02      -1.85     2.07       1477       55         2.78   39.40%    2297     11.127     10.86
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--- Robustness ---
+---------------------------------------------------------------------------------------------------------------------------------------------------
+Portfolio               Strategy                                  OOS P&L      WFA Verdict   RollWFA      MC                               MC Score
+---------------------------------------------------------------------------------------------------------------------------------------------------
+Russell Top 200 (198)   MA Bounce (50d/3bar) + SMA200 Gate        +21987.77%   Pass          Pass (3/3)   DD Understated, High Tail Risk   -1      
+Russell Top 200 (198)   MA Confluence (10/20/50) Fast Exit        +5636.11%    Pass          Pass (3/3)   DD Understated, High Tail Risk   -1      
+Russell Top 200 (198)   Donchian Breakout (40/20)                 +4200.00%    Pass          Pass (3/3)   DD Understated, High Tail Risk   -1      2026-04-11 07:16:08,278 [INFO] All portfolio simulations complete in 1m 2.21s.
+2026-04-11 07:16:08,279 [INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-04-11 07:16:08,279 [INFO]   Run report:  python report.py --all output/runs/rtop200-weekly-5strat_2026-04-11_07-15-06
+2026-04-11 07:16:08,279 [INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Russell Top 200 (198)   Price Momentum (6m ROC, 15pct) + SMA200   +56881.43%   Pass          Pass (3/3)   DD Understated, High Tail Risk   -1      
+Russell Top 200 (198)   RSI Weekly Trend (55-cross) + SMA200      +24099.48%   Pass          Pass (3/3)   DD Understated, High Tail Risk   -1      
+---------------------------------------------------------------------------------------------------------------------------------------------------
+
+Successfully saved overall portfolio summary to 'output\runs\rtop200-weekly-5strat_2026-04-11_07-15-06\overall_portfolio_summary.csv'
