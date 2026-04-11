@@ -1,7 +1,7 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 8 Rounds × Multi-Agent Parallel Research
-**Last Updated:** 2026-04-10
+**Research Loop:** 9 Rounds × Multi-Agent Parallel Research
+**Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-10 (36 years)
 **Ecosystems tested:** AAPL single → tech_giants (6) → Nasdaq 100 Tech (44 symbols) → S&P 500 (500 symbols — universality confirmed)
@@ -47,17 +47,27 @@ Round 8 (4 experiments + 2 portfolio-level tests, 1990-2026)
   → ATR 3.5x trailing stop FAILED to rescue MC Score — synchronized tech crashes can't be stopped by position-level stops
   → Donchian + Volume Breakout: too selective (143 trades, negative Sharpe)
   → MA Bounce + OBV Gate at entry: OBV gate eliminates 55% of valid bounces (same mistake as RSI gate)
+
+Round 9 (weekly timeframe + new signals + SP500 combined portfolio, 2026-04-11)
+  → BREAKTHROUGH: MA Bounce on WEEKLY bars — Sharpe 1.92 (vs 0.61 daily), RS(min) -2.32 (vs -10.93 daily), P&L 140,028%
+  → BREAKTHROUGH: Price Momentum (6m ROC, 15pct) — P&L 107,513%, Sharpe +0.67, OOS +93,844% — NEW CHAMPION
+  → SP500 combined portfolio at 3%: MA Bounce MC Score = +1 (first positive MC Score on large universe!)
+  → NR7 Volatility Contraction FAILED: Sharpe -0.07 (below risk-free rate of 5%)
+  → Infrastructure: added W and M timeframe support to get_bars_for_period()
 ```
 
 ---
 
 ## 🏆 All-Time Champion Leaderboard (44 Symbols, 1990-2026)
 
-| Rank | Strategy | P&L | Sharpe | RS(min) | OOS | WFA | RollWFA | Corr |
+Timeframe noted: D = daily, W = weekly. Both use annualized Sharpe (252 bars/yr for D, 52 bars/yr for W).
+
+| Rank | Strategy | TF | P&L | Sharpe | RS(min) | OOS | WFA | RollWFA |
 |---|---|---|---|---|---|---|---|---|
-| 🥇 | MA Confluence (10/20/50) Fast Exit | 101,198% | +0.68 | -4.46 | +88,023% | Pass | 3/3 | — |
-| 🥈 | Donchian Breakout (40/20) | 48,426% | +0.63 | -3.66 | +41,665% | Pass | 3/3 | 0.39* |
-| 🥉 | MA Bounce (50d/3bar)+SMA200 | 45,283% | +0.61 | -10.93 | +40,519% | Pass | 3/3 | 0.16 |
+| 🥇 | MA Bounce (50d/3bar)+SMA200 **[WEEKLY]** | **W** | **140,028%** | **+1.92** | **-2.32** | +123,865% | Pass | 3/3 |
+| 🥈 | Price Momentum (6m ROC, 15pct) | D | 107,513% | +0.67 | -15.92 | +93,844% | Pass | 3/3 |
+| 🥉 | MA Confluence (10/20/50) Fast Exit | D | 101,198% | +0.68 | -4.46 | +88,023% | Pass | 3/3 |
+| 4 | (unchanged ranks 4-10 — see RESEARCH_HANDOFF.md) | | | | | | | |
 | 4 | CMF Momentum (20d)+SMA200 | 51,173% | +0.63 | -15.03 | +43,803% | Pass | 3/3 | 0.18 |
 | 5 | Donchian (60d/20d)+MA Alignment | 42,263% | +0.64 | -3.98 | +35,177% | Pass | 3/3 | 0.28* |
 | 6 | MA Confluence (10/20/50) Full Stack | 29,771% | +0.54 | -4.36 | +22,911% | Pass | 3/3 | 0.17 |

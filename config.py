@@ -69,6 +69,7 @@ CONFIG = {
     #"timeframe": "H",  # Hourly
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
     #"timeframe_multiplier": 5,       # e.g., 1, 5, 15, 30 for minutes
+    #"timeframe": "W",  # Weekly
 
     # ============================================================
     # SECTION 4: PRICE ADJUSTMENT & BENCHMARKS
@@ -170,7 +171,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        # Round 8: validate MAC+ATR 3.5x on 44 symbols
+        # Round 9: Price Momentum on 44 symbols (44-sym validation)
         "NDX Tech (44)": "nasdaq_100_tech.json",
     },
 
@@ -180,7 +181,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.10,
+    "allocation_per_trade": 0.10,  # 10% per position
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -285,9 +286,8 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        # Round 8: MAC+ATR 3.5x vs plain MAC on 44 symbols (MC Score test)
-        "MA Confluence (10/20/50) Fast Exit + ATR 3.5x",
-        "MA Confluence (10/20/50) Fast Exit",
+        # Round 9: Price Momentum 44-sym validation
+        "Price Momentum (6m ROC, 15pct) + SMA200",
     ],
 
     # ============================================================
