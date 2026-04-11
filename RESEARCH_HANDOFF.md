@@ -1895,12 +1895,36 @@ Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relati
 
 20. **Q47 hypothesis:** Testing BB Breakout as Donchian replacement (5-strategy: MA Bounce + MAC + RSI Weekly + Rel Mom + BB Breakout at 3.3%) — if BB ↔ RSI Weekly stays at r=0.7049 in this context, the replacement is REJECTED and R42 remains optimal. If the correlation drops below 0.70 without Donchian in the mix, BB Breakout may be viable.
 
-**Research loop STATUS: ACTIVE — Q47 (BB Breakout replacing Donchian) pending.**
+**Research loop STATUS: ACTIVE — Q47 DONE. Both production portfolios CONFIRMED FINAL. Identifying next research track.**
+
+---
+
+### Session 15 (continued) — Round 44: BB Breakout Replacing Donchian — REJECTED
+
+**Additional findings (Round 44 — Q47):**
+
+21. **DECISIVE REJECTION: BB Breakout cannot replace Donchian.** Without Donchian in the 5-strategy portfolio:
+    - BB ↔ RSI Weekly escalates: **r=0.7049** (R43, 6-strat) → **r=0.7874** (R44, 5-strat)
+    - BB ↔ Rel Mom escalates: **r=0.6924** (R43, below threshold) → **r=0.7203** (R44, above threshold)
+    - Both correlations INCREASE when Donchian is removed — Donchian acts as a structural buffer in the portfolio.
+
+22. **Donchian's hidden structural buffer role:** Donchian ↔ RSI Weekly r=0.22 (lowest of any trend-following pair in the portfolio) — its unique 40-week channel timing creates diversification that no other strategy replicates. Removing Donchian tightens the correlation cluster of remaining trend-followers.
+
+23. **BB Breakout MC Score drops from 5 → 2** when allocation increases from 2.8% (R43) to 3.3% (R44). The MC Score 5 in R43 was partially an allocation artifact, not a pure strategy property.
+
+24. **R42 5-strategy portfolio CONFIRMED FINAL:**
+    - MA Bounce + MAC + Donchian + RSI Weekly + Relative Momentum at 3.3% on NDX Tech 44
+    - No pair exceeds r=0.65. All 5 WFA Pass + RollWFA 3/3.
+    - No tested replacement (BB Breakout, Price Momentum) can improve this portfolio without introducing correlation violations or functional redundancy.
+
+**Research loop STATUS: ACTIVE — Both production portfolios FULLY CONFIRMED. New research track needed.**
 
 ---
 
 ### QUEUE ITEM 47 — BB Breakout Replacing Donchian (5-Strategy: MA Bounce + MAC + RSI Weekly + Rel Mom + BB Breakout) [PRIORITY: MEDIUM]
-**Status: PENDING**
+**Status: DONE — 2026-04-11 (Round 44)**
+**Run ID:** ndx44-5strat-bb-vs-donchian_2026-04-11_12-54-01
+**Key result:** REJECTED. Without Donchian, BB ↔ RSI Weekly escalates to r=0.7874 (was 0.7049 in R43) AND BB ↔ Rel Mom to r=0.7203 (was 0.6924 in R43) — both above 0.70. Donchian serves as a structural portfolio buffer that cannot be replaced. R42 5-strategy portfolio CONFIRMED FINAL.
 
 **Why this matters:** Round 43 found BB Breakout ↔ RSI Weekly r=0.7049 (above 0.70 threshold in 6-strategy context), ruling out BB Breakout as a 6th strategy. However, BB Breakout is superior to Donchian on almost every metric (Sharpe +0.08, MaxDD -13.45pp, MC Score +3). The only reason to keep Donchian is its exceptional RSI Weekly decorrelation (r=0.22). This run tests whether the BB Breakout vs Donchian tradeoff is worth it in a 5-strategy configuration at 3.3% allocation.
 
