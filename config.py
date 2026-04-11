@@ -65,7 +65,7 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    "timeframe": "W",  # Weekly — Q28: Nasdaq 100 Full
+    "timeframe": "W",  # Weekly — Q30: Sector ETFs + DJI 30 Combined (46 symbols)
     #"timeframe": "H",  # Hourly
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
     #"timeframe_multiplier": 5,       # e.g., 1, 5, 15, 30 for minutes
@@ -172,8 +172,9 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "Nasdaq 100 Full (101)": "nasdaq_100.json",
+        "Sectors+DJI (46)": "sectors_dji_combined.json",
     },
+    "min_bars_required": 100,  # sector ETFs have shorter history (1998+)
 
     # ============================================================
     # SECTION 8: ALLOCATION, EXECUTION FILTERING
