@@ -1938,7 +1938,7 @@ Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relati
 
 4. **Universe-specific correlation confirmed:** BB ↔ RSI Weekly is 0.4711 on Sectors+DJI 46 vs 0.7049 on NDX Tech 44. Same pair, different universe, completely different correlation due to sector rotation. Always test correlations on the actual production universe.
 
-**Research loop STATUS: ACTIVE — Q50 DONE. ALL production portfolios CONFIRMED FINAL (3 configurations fully characterized). New research direction needed.**
+**Research loop STATUS: ACTIVE — Q51 DONE. ALL THREE production portfolios CONFIRMED FINAL. Identifying next research track (Q52).**
 
 **Additional findings (Round 47 — Q50: Williams R as 6th):**
 - Williams R Weekly Trend (above-20) + SMA200 achieves Sharpe 1.82 — the highest Sharpe of ANY strategy in the 6-strategy portfolio, beating RSI Weekly (1.78) and Price Momentum (1.79)
@@ -1954,6 +1954,62 @@ Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relati
 - **Aggressive:** NDX Tech 44, 5 strategies (MA Bounce + MAC + Donchian + RSI Weekly + Relative Momentum), 3.3% allocation
 
 _[Next agent: append your session below this line]_
+
+---
+
+### Session 17 — 2026-04-11 (Round 48 completed)
+**Agent:** Claude Sonnet 4.6
+**Ran:** Round 48 — Q51: Williams R Weekly Trend replacing Price Momentum in Conservative v1 (5-strategy, Sectors+DJI 46, 3.3% allocation)
+**Run ID:** sectors-dji-5strat-williams-vs-pm_2026-04-11_13-13-12
+
+**Key findings:**
+
+1. **RSI Weekly MC Score drops 5 → 2 without Price Momentum** — This is the critical failure. In the original Conservative v1, RSI Weekly achieves MC Score 5. Without Price Momentum in the portfolio, RSI Weekly drops to MC Score 2 (Moderate Tail Risk).
+
+2. **Price Momentum is the "MC buffer" for RSI Weekly** — When Price Momentum and RSI Weekly both want to enter the same strong trending stock, the capital allocation engine forces one to wait. This natural capital competition prevents RSI Weekly from building excessively concentrated simultaneous positions — the scenario that Monte Carlo exploits. Price Momentum's PRESENCE (not its individual performance) is what gives RSI Weekly MC Score 5.
+
+3. **Second instance of portfolio-level structural buffer pattern** — Similar to Donchian in the Aggressive portfolio (R44), Price Momentum in the Conservative portfolio serves as a structural MC buffer. Removing a "weaker" strategy can degrade other strategies' MC robustness even when the replacement is technically better by individual metrics.
+
+4. **Williams R individual metrics are excellent at 3.3%** — Sharpe 1.86, OOS +2,156.89%, MC Score 5. The issue is not Williams R itself but what its presence does to RSI Weekly's tail risk profile.
+
+5. **Correlation improvement was genuine but not worth the trade-off** — Max pair correlation improved from r=0.6925 (PM↔RSI) to r=0.6413 (MAC↔Donchian), but losing RSI Weekly's MC Score 5 → 2 is a more significant quality downgrade.
+
+6. **ALL THREE production portfolios CONFIRMED FINAL — no further modifications needed:**
+   - **Conservative v1:** R29, 5 strategies × 3.3%, Sectors+DJI 46, ALL MC Score 5, max pair r=0.6925
+   - **Conservative v2:** R47, 6 strategies × 2.8%, Sectors+DJI 46, ALL 6 MC Score 5, Williams R as 6th
+   - **Aggressive:** R42, 5 strategies × 3.3%, NDX Tech 44, all WFA Pass, max pair r=0.65
+
+**Next recommended action:** Identify Q52 — all production portfolio configurations are finalized. Potential next tracks:
+- Williams R on NDX Tech 44 Aggressive portfolio compatibility test (does Williams R have r<0.70 with all 5 strategies on NDX?)
+- Alternative universe expansion (e.g., sector-specific sub-portfolios)
+- Stop-loss optimization study on Conservative v1/v2
+- Sensitivity sweep on Williams R parameters in Conservative v2
+
+---
+
+### QUEUE ITEM 51 — Williams R Replacing Price Momentum in Conservative Portfolio v1 (5-Strategy) [PRIORITY: MEDIUM]
+**Status: DONE — 2026-04-11 (Round 48)**
+**Run ID:** sectors-dji-5strat-williams-vs-pm_2026-04-11_13-13-12
+**Key result:** REJECTED — RSI Weekly MC Score drops 5 → 2 without Price Momentum. Price Momentum acts as "MC buffer" for RSI Weekly via capital competition dynamics. Williams R individual metrics are excellent (Sharpe 1.86, OOS +2,156%) but its presence causes RSI Weekly tail risk concentration. Original Conservative v1 (R29, Price Momentum) CONFIRMED SUPERIOR. ALL THREE production portfolio configurations CONFIRMED FINAL.
+
+**Why this matters:** Williams R Weekly Trend achieves Sharpe 1.82 (higher than Price Momentum 1.79) and Price Momentum ↔ RSI Weekly r=0.6925 is the near-threshold pair in the conservative portfolio. Williams R ↔ RSI Weekly r=0.6451 (lower than Price Momentum's 0.6925). Replacing Price Momentum with Williams R in the 5-strategy conservative v1 portfolio could: (1) lower the highest pair correlation, (2) improve average Sharpe, and (3) maintain ALL MC Score 5. If successful, this creates a superior Conservative v1 variant.
+
+**Config:**
+```python
+"timeframe": "W"
+"portfolios": {"Sectors+DJI 46": "sectors_dji_combined.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "Donchian Breakout (40/20)", "RSI Weekly Trend (55-cross) + SMA200",
+               "Williams R Weekly Trend (above-20) + SMA200"]
+"allocation_per_trade": 0.033   # 5 strategies: 1/N for N=5
+"min_bars_required": 100
+```
+
+**Run:** `rtk python main.py --name "sectors-dji-5strat-williams-vs-pm" --verbose`
+
+**Success criteria:** All 5 WFA Pass + RollWFA 3/3. All 5 MC Score 5. Williams R ↔ RSI Weekly < 0.6925 (the current PM ↔ RSI pair). Portfolio average Sharpe improves vs standard v1. If all criteria met → declare Williams R variant as the new Conservative v1.
+
+**Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250, portfolios=NDX Tech 44.
 
 ---
 

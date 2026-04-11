@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 47 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
+**Research Loop:** 48 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-11 (36 years)
@@ -281,6 +281,17 @@ Round 47 (Williams R Weekly Trend as 6th Strategy in Conservative Portfolio — 
   → Williams R is the DEFINITIVE WINNER among all 3 6th strategy candidates (Williams R > BB Breakout > Rel Mom)
   → Conservative portfolio v2: MA Bounce + MAC + Donchian + Price Momentum + RSI Weekly + Williams R at 2.8%
   → Conservative 6th strategy track CLOSED. ALL production portfolio configurations CONFIRMED FINAL.
+
+Round 48 (Williams R Replacing Price Momentum in Conservative Portfolio v1 — Q51, 2026-04-11)
+  → REJECTED: RSI Weekly MC Score drops 5 → 2 without Price Momentum in portfolio
+  → Price Momentum acts as "MC buffer" for RSI Weekly via capital competition dynamics
+  → Mechanism: when PM and RSI Weekly both want the same trending stock, capital allocation forces one to wait
+  → This competition prevents RSI Weekly from building excessively concentrated simultaneous positions
+  → Without PM: RSI Weekly has no capital competitor → Monte Carlo can now concentrate it fully in crashes
+  → Williams R individual metrics excellent (Sharpe 1.86, OOS +2,156.89%, MC Score 5) — the issue is portfolio-level
+  → Correlation improved (max r=0.6413 MAC↔Donchian vs 0.6925 PM↔RSI) but not worth RSI Weekly MC drop
+  → Second instance of structural buffer pattern: identical mechanism to Donchian in Aggressive portfolio (R44)
+  → Conservative v1 (R29, with Price Momentum) CONFIRMED FINAL. ALL THREE production portfolios now FINAL.
 ```
 
 ---
@@ -510,6 +521,16 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 - At 969 trades total (vs 831 in isolation), the strategy generates MORE trades at 2.8% allocation vs 10% in isolation — lower per-trade capital requirement allows more simultaneous positions before hitting cash ceiling
 - **Lesson: Long-duration, infrequent strategies (hold months, not days) have fundamentally different MC Score behavior. They are structurally resistant to the synchronized-crash tail risk that plagues high-frequency trend-following strategies on correlated universes.**
 
+### 28. Price Momentum Is the MC Buffer for RSI Weekly — Portfolio Composition Affects MC Robustness of Other Strategies (R48)
+- In the original Conservative v1 (R29, with Price Momentum), RSI Weekly achieves MC Score 5 — "Robust" with no tail risk
+- When Price Momentum is removed (Q51, Williams R replaces it), RSI Weekly drops to MC Score 2 — "Moderate Tail Risk"
+- Mechanism: Price Momentum and RSI Weekly often target the same trending stocks simultaneously; the capital allocation engine forces competition between them, limiting how many positions RSI Weekly can hold concurrently
+- Without this capital competition, RSI Weekly can build larger simultaneous position counts → Monte Carlo can construct synchronized crash scenarios that would not occur when capital is shared with Price Momentum
+- Williams R individual metrics are excellent (Sharpe 1.86, OOS +2,156%, MC Score 5) but its presence fails to provide the same capital competition buffering
+- **Lesson: MC Score is a portfolio-composition property, not just a strategy property. Adding or removing a strategy changes the MC Score of all other strategies — not just the one being changed.**
+- **Pattern (2nd instance):** Identical mechanism to Donchian in the Aggressive portfolio (R44). "Weaker" strategies by individual Sharpe can be structurally irreplaceable because of their buffering role in the combined portfolio's capital dynamics.
+- **Implication: Before replacing any confirmed strategy, test whether its removal degrades MC robustness of the remaining strategies. A replacement that looks better in isolation may create tail risk concentration in others.**
+
 ### 27. Low Correlation Alone Is Insufficient — Alpha Must Meet Minimum Threshold (R46)
 - Relative Momentum on Sectors+DJI 46 achieved the lowest maximum correlation of any strategy in any combined portfolio run (max r=0.2373) — extraordinary diversification
 - BUT: Sharpe 0.80, OOS P&L +51.38%, RS(avg) = -0.07 — the strategy fails to generate sufficient alpha on this universe
@@ -727,3 +748,4 @@ All 33 research questions have been answered across Rounds 1-31. Research is com
 37. ~~**BB Breakout as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R45 Q48. CONDITIONAL PASS. All 6 MC Score 5 (unprecedented). BB ↔ RSI Weekly r=0.4711 (sector rotation decorrelates). BB MaxDD 13.29% (lowest ever). BUT: BB OOS P&L only +170.96% (weakest of 6). Conservative portfolio v2 (6-strategy MaxDD-focused) defined. **CLOSED.**
 38. ~~**Relative Momentum as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R46 Q49. REJECTED. Sharpe 0.80, OOS +51.38%, RS(avg)=-0.07. Universe mismatch: sector ETF relative momentum is mean-reverting. Max r=0.2373 (lowest ever) but alpha insufficient. **CLOSED.**
 39. ~~**Williams R Weekly Trend as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R47 Q50. OUTSTANDING. Sharpe 1.82 (highest in portfolio), OOS +1,437.81% (8.4× better than BB Breakout). Williams R ↔ RSI Weekly r=0.6451. All 6 MC Score 5. Williams R is the WINNER among all 3 candidates. Conservative portfolio v2 CONFIRMED FINAL with Williams R. **CLOSED.**
+40. ~~**Williams R Replacing Price Momentum in Conservative Portfolio v1 (5-Strategy)**~~ — R48 Q51. REJECTED. RSI Weekly MC Score drops 5 → 2 without Price Momentum. Price Momentum is a structural "MC buffer" for RSI Weekly via capital competition dynamics — its presence prevents RSI Weekly from concentrating positions simultaneously. Williams R individual metrics excellent (Sharpe 1.86, OOS +2,156%) but portfolio-level effect overrides. Conservative v1 (R29, with Price Momentum) CONFIRMED SUPERIOR. ALL THREE production portfolios CONFIRMED FINAL. **CLOSED.**
