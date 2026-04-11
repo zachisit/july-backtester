@@ -645,6 +645,97 @@ RS(min) -2.06 is the single best rolling Sharpe stress score of all 15+ strategi
 
 ---
 
+### QUEUE ITEM 18 — 5-Strategy Weekly on SP500 (RSI Weekly + Existing 4) [PRIORITY: CRITICAL]
+**Status: DONE — 2026-04-11 — ALL 5 WFA Pass 3/3; Price Momentum SP500 BREAKTHROUGH (Sharpe 1.81, RS(min) -1.86)**
+**Run ID:** weekly-5strat-sp500_2026-04-11_06-08-36
+
+**Why this matters:** Russell 1000 universality confirmed all 4 original weekly strategies (Q16). RSI Weekly was never tested on any universe except NDX Tech 44. SP500 is a natural next step — smaller than Russell 1000 but more liquid and commonly traded. If all 5 strategies WFA Pass on SP500 weekly, the portfolio is confirmed universal across all major large-cap US equity universes. Also tests whether RSI Weekly's RS(min) -2.15 on NDX holds on a diversified 500-stock universe.
+
+**What to do:**
+1. Edit `config.py`:
+   - `"timeframe": "W"` (weekly bars)
+   - `"portfolios": {"SP500": "sp-500.json"}`
+   - `"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200", "RSI Weekly Trend (55-cross) + SMA200"]`
+   - `"allocation_per_trade": 0.033`
+
+2. Run: `rtk python main.py --name "weekly-5strat-sp500" --verbose`
+
+3. Reset `"timeframe": "D"` and `"strategies": "all"` after run.
+
+**Success criteria:** All 5 strategies WFA Pass + RollWFA 2/3+, Sharpe > 0.85, RS(min) > -8. RSI Weekly specifically must clear WFA Pass on 500 stocks.
+**Expected:** Sharpe 0.85-1.20 (lower than NDX — same dilution as seen in Russell 1000 test). RS(min) similar to or better than Russell 1000 result. MC Score should improve further on 500 stocks.
+
+---
+
+### QUEUE ITEM 19 — Block Bootstrap MC: Does Autocorrelation Change MC Scores? [PRIORITY: MEDIUM]
+**Status: TODO**
+
+**Why this matters:** All prior MC runs used `mc_sampling: "iid"` (independent resampling). Weekly strategies may have win/loss autocorrelation — e.g., NVDA tends to run for several consecutive winning weeks. If trade outcomes are autocorrelated, IID MC understates tail risk. Block bootstrap preserves these streaks. If MC Score WORSENS under block bootstrap (−1 → −2), the strategies are more fragile than IID MC suggests. If unchanged, IID was sufficient.
+
+**What to do:**
+1. Edit `config.py`:
+   - `"timeframe": "W"`
+   - `"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}`
+   - `"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200", "RSI Weekly Trend (55-cross) + SMA200"]`
+   - `"allocation_per_trade": 0.033`
+   - `"mc_sampling": "block"`  (change from default "iid")
+   - `"mc_block_size": null`   (auto = floor(sqrt(N)) trades per block)
+
+2. Run: `rtk python main.py --name "weekly-5strat-block-mc" --verbose`
+
+3. Reset `"timeframe": "D"`, `"mc_sampling": "iid"`, `"strategies": "all"` after run.
+
+**Success criteria:** MC Scores stay at -1 or better (same as IID). Any strategy reaching +1 under block bootstrap is extra confirmation.
+**Failure criteria:** Any strategy MC Score worsens to < -1 → strategies have stronger autocorrelation than assumed; real tail risk is higher than IID MC suggested.
+
+---
+
+### QUEUE ITEM 20 — Noise Injection Stress Test on 5-Strategy Combined [PRIORITY: MEDIUM]
+**Status: TODO**
+
+**Why this matters:** `noise_injection_pct: 0.01` injects ±1% uniform random noise into all OHLC bars before running strategies. If a strategy's Sharpe drops dramatically (e.g., 1.9 → 0.5) under 1% noise, its edge depends on exact price levels that may not hold in live trading with real bid/ask spreads. A robust strategy should show < 20% Sharpe degradation under ±1% noise.
+
+**What to do:**
+1. Edit `config.py`:
+   - `"timeframe": "W"`
+   - `"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}`
+   - `"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200", "RSI Weekly Trend (55-cross) + SMA200"]`
+   - `"allocation_per_trade": 0.033`
+   - `"noise_injection_pct": 0.01`  (±1% noise)
+
+2. Run: `rtk python main.py --name "weekly-5strat-noise-1pct" --verbose`
+
+3. Reset `"timeframe": "D"`, `"noise_injection_pct": 0.0`, `"strategies": "all"` after run.
+
+**Success criteria:** Each strategy Sharpe degrades < 20% vs clean run (e.g., ≥ 1.30 for MA Bounce vs 1.95 baseline). WFA Pass maintained. Indicates live-trading robustness.
+**Failure criteria:** Any strategy Sharpe drops > 40% → edge is sensitive to exact price level; would likely underperform in live trading vs backtest.
+
+---
+
+### QUEUE ITEM 21 — Sensitivity Sweep: RSI Weekly Threshold Variation [PRIORITY: LOW]
+**Status: TODO**
+
+**Why this matters:** RSI Weekly uses entry=55, exit=45. These exact thresholds were chosen by hypothesis, not grid search. The sensitivity sweep (`sensitivity_sweep_enabled: True`) tests ±20% variation across ±2 steps. For RSI, integer thresholds near 55 (48, 51, 55, 58, 62) should all produce similar results if the edge is robust. If only the exact 55/45 pair works, this suggests the parameters are overfit to historical NDX data.
+
+**What to do:**
+1. Edit `config.py`:
+   - `"timeframe": "W"`
+   - `"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}`
+   - `"strategies": ["RSI Weekly Trend (55-cross) + SMA200"]`  (only RSI Weekly)
+   - `"allocation_per_trade": 0.10`
+   - `"sensitivity_sweep_enabled": True`
+   - `"sensitivity_sweep_pct": 0.15`  (±15% per step — gentler than ±20% default)
+   - `"sensitivity_sweep_steps": 2`
+
+2. Run: `rtk python main.py --name "rsi-weekly-sensitivity" --verbose`
+
+3. Reset all sensitivity settings and `"strategies": "all"` after run.
+
+**Success criteria:** ≥ 70% of parameter variants profitable (ROBUST verdict). Sharpe range across variants stays above 1.0.
+**Failure criteria:** < 30% profitable variants (FRAGILE verdict) → the 55/45 thresholds are overfit; strategy edge is fragile.
+
+---
+
 ## EXECUTION PROTOCOL
 
 ### Commands (always prefix with `rtk` — project rule)
