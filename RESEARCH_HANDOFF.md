@@ -668,7 +668,8 @@ RS(min) -2.06 is the single best rolling Sharpe stress score of all 15+ strategi
 ---
 
 ### QUEUE ITEM 19 — Block Bootstrap MC: Does Autocorrelation Change MC Scores? [PRIORITY: MEDIUM]
-**Status: TODO**
+**Status: DONE — 2026-04-11 — Block bootstrap WORSENS MC: all 5 revert to -1 (IID +1 was optimistic)**
+**Run ID:** weekly-5strat-block-mc_2026-04-11_06-13-53
 
 **Why this matters:** All prior MC runs used `mc_sampling: "iid"` (independent resampling). Weekly strategies may have win/loss autocorrelation — e.g., NVDA tends to run for several consecutive winning weeks. If trade outcomes are autocorrelated, IID MC understates tail risk. Block bootstrap preserves these streaks. If MC Score WORSENS under block bootstrap (−1 → −2), the strategies are more fragile than IID MC suggests. If unchanged, IID was sufficient.
 
