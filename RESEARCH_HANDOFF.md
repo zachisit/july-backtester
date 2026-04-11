@@ -1938,7 +1938,7 @@ Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relati
 
 4. **Universe-specific correlation confirmed:** BB ↔ RSI Weekly is 0.4711 on Sectors+DJI 46 vs 0.7049 on NDX Tech 44. Same pair, different universe, completely different correlation due to sector rotation. Always test correlations on the actual production universe.
 
-**Research loop STATUS: ACTIVE — Q54 DONE. Williams R CONFIRMED ROBUST (81/81 variants profitable, WFA Pass 100%). Conservative v2 fully validated. Identifying Q55.**
+**Research loop STATUS: COMPLETE — Q54 DONE. Williams R CONFIRMED ROBUST (81/81 variants profitable, WFA Pass 100%). Conservative v2 fully validated. Stop Criteria C met (3 consecutive confirmations R49-R51). All production portfolios final. Research closed.**
 
 **Additional findings (Round 47 — Q50: Williams R as 6th):**
 - Williams R Weekly Trend (above-20) + SMA200 achieves Sharpe 1.82 — the highest Sharpe of ANY strategy in the 6-strategy portfolio, beating RSI Weekly (1.78) and Price Momentum (1.79)
@@ -2294,3 +2294,60 @@ _[Next agent: append your session below this line]_
 **Success criteria:** All 5 WFA Pass + RollWFA 3/3. No pair exceeds r=0.70 correlation. MaxDD for all strategies < 50%. Combined RS(min) all better than -3.
 
 **Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250.
+
+---
+
+### QUEUE ITEM 54 — Williams R Parameter Sensitivity Sweep on Sectors+DJI 46 [PRIORITY: HIGH]
+**Status: DONE — 2026-04-11 (Round 51)**
+**Run ID:** sectors-dji-williams-sweep_2026-04-11_13-31-37
+**Key result:** CONFIRMED ROBUST — 81/81 variants profitable (100%), 81/81 WFA Pass (100%). Sharpe range 1.59-2.03 (all above 1.4 minimum threshold). Base configuration NOT at distribution maximum (no cherry-pick evidence). Williams R confirmed robust on both NDX Tech 44 (R36) and Sectors+DJI 46 (R51). Conservative v2 fully validated. STOP CRITERIA MET: 3 consecutive confirmations (Q52, Q53, Q54) with no new champion or improvement → research declared COMPLETE.
+
+**Why this matters:** Williams R Weekly Trend was added to Conservative v2 in R47 (Sharpe 1.82, OOS +1,437.81%, MC Score 5). However, Williams R had been sensitivity-tested only on NDX Tech 44 (R36 sweep). Q54 confirms whether the Williams R configuration in Conservative v2 is genuinely robust or merely optimized for the specific -20/-80 threshold/14-period combination on Sectors+DJI 46. Technical note: sensitivity_sweep_min_val=-100 required for this sweep — default value of 2 clips Williams R thresholds (entry_level=-20, exit_level=-80) to 2.0, which is outside the valid -100 to 0 range, producing 0 trades.
+
+**Config:**
+```python
+"timeframe": "W"
+"portfolios": {"Sectors+DJI 46": "sectors_dji_combined.json"}
+"strategies": ["Williams R Weekly Trend (above-20) + SMA200"]
+"allocation_per_trade": 0.10   # isolated strategy test
+"min_bars_required": 100
+"sensitivity_sweep_enabled": True
+"sensitivity_sweep_pct": 0.20
+"sensitivity_sweep_steps": 1   # 3^4 = 81 variants
+"sensitivity_sweep_min_val": -100   # required for negative thresholds
+```
+
+**Run:** `rtk python main.py --name "sectors-dji-williams-sweep" --verbose`
+
+**Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250, portfolios=NDX Tech 44, sensitivity_sweep_enabled=False, sensitivity_sweep_steps=2, sensitivity_sweep_min_val=2.
+
+---
+
+### Session 18 — 2026-04-11 (Round 51 completed — RESEARCH COMPLETE)
+**Agent:** Claude Sonnet 4.6
+**Ran:** Round 51 — Q54: Williams R parameter sensitivity sweep on Sectors+DJI 46 (isolated, 10% allocation, 81 variants)
+**Run ID:** sectors-dji-williams-sweep_2026-04-11_13-31-37
+
+**Key findings:**
+
+1. **ROBUST: 81/81 variants profitable (100%), 81/81 WFA Pass (100%)** — Every single combination of wr_length (11/14/17), entry_level (-16/-20/-24), exit_level (-64/-80/-96), and sma_slow (32/40/48) is profitable and passes WFA.
+
+2. **Sharpe range 1.59-2.03 — all above minimum threshold** — Worst case Sharpe 1.59, best variant Sharpe 2.03. Base configuration (Sharpe 1.84) sits in the middle of the distribution — no cherry-pick evidence.
+
+3. **Williams R confirmed robust on BOTH production universes:**
+   - NDX Tech 44 (R36): 625/625 variants profitable (100%), Sharpe range 1.59-2.21
+   - Sectors+DJI 46 (R51): 81/81 variants profitable (100%), Sharpe range 1.59-2.03
+   - The strategy's edge (price near top of N-week range = genuine momentum) is structural, not universe-specific.
+
+4. **STOP CRITERIA MET — Research is COMPLETE:**
+   - 3 consecutive rounds (R49: Q52 Williams R/Aggressive, R50: Q53 ATR stops, R51: Q54 Williams R sweep) produced only confirmations, no new champions or improvements
+   - All 3 production portfolios are confirmed final and fully validated
+   - All key parameter sensitivity sweeps are complete for all 6 Conservative v2 strategies
+   - All queue items are marked DONE — no uncompleted items remain
+
+**FINAL PRODUCTION PORTFOLIO SUMMARY (RESEARCH COMPLETE):**
+- **Conservative v1 (R29):** Sectors+DJI 46, 5 strategies × 3.3%, ALL MC Score 5, max pair r=0.6925
+- **Conservative v2 (R47, validated R51):** Sectors+DJI 46, 6 strategies × 2.8%, ALL 6 MC Score 5, Williams R CONFIRMED ROBUST
+- **Aggressive (R42):** NDX Tech 44, 5 strategies × 3.3%, all WFA Pass, max pair r=0.65
+
+**Research loop STATUS: COMPLETE — Stop Criteria C met (3 consecutive confirmations). All production portfolios final. All queue items done. No further research needed.**
