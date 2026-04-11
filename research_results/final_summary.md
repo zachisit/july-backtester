@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 49 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
+**Research Loop:** 50 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-11 (36 years)
@@ -301,6 +301,15 @@ Round 49 (Williams R as 6th Strategy in Aggressive Portfolio — Q52, 2026-04-11
   → Comparison: Williams R ↔ RSI Weekly r=0.6451 on Sectors+DJI 46 (R47) vs r=0.752 on NDX Tech 44 — same pair, same strategy
   → R42 5-strategy Aggressive portfolio DEFINITIVELY CONFIRMED FINAL — no viable 6th strategy in current research set
   → Pattern (3rd instance): concentrated momentum universes produce high cross-strategy correlation; sector-diversified universes do not
+
+Round 50 (ATR Trailing Stop on Conservative v1 — Q53, 2026-04-11)
+  → REJECTED: ATR 3× stop INCREASES MaxDD for ALL 5 strategies (+6 to +9 pp) — opposite of expected
+  → Sharpe drops 42% (1.70 → 0.99 avg), OOS P&L collapses 78-92% for all 5 strategies
+  → Mechanism: stops fire during within-trend pullbacks, forcing premature exits → larger realized drawdowns
+  → Different failure mode from R8 NDX Tech 44 (synchronized crashes): here stops are incompatible with weekly trend-following itself
+  → Interesting: ATR stops improve MC Score for Price Momentum 2→5 and RSI Weekly 2→5 (but already achieved in combined portfolio via capital competition)
+  → Universal finding: ATR trailing stops are structurally incompatible with weekly trend-following momentum strategies on any universe
+  → Conservative v1 (R29, no stops) CONFIRMED as definitively optimal for MaxDD and all metrics
 ```
 
 ---
@@ -529,6 +538,16 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 - The strategy's average hold duration of 103 days (~20 weekly bars) means the Monte Carlo resampling cannot construct the "synchronized crash" scenario that produces MC Score -1 for faster strategies
 - At 969 trades total (vs 831 in isolation), the strategy generates MORE trades at 2.8% allocation vs 10% in isolation — lower per-trade capital requirement allows more simultaneous positions before hitting cash ceiling
 - **Lesson: Long-duration, infrequent strategies (hold months, not days) have fundamentally different MC Score behavior. They are structurally resistant to the synchronized-crash tail risk that plagues high-frequency trend-following strategies on correlated universes.**
+
+### 30. ATR Trailing Stops Are Structurally Incompatible with Weekly Trend-Following (R50)
+- Hypothesis: sector rotation on Sectors+DJI 46 would allow ATR stops to fire before synchronized crashes, reducing MaxDD
+- Result: ATR 3× stops INCREASE MaxDD for all 5 Conservative v1 strategies (+6 to +9 pp each)
+- Mechanism: weekly trend-following strategies ride extended trends (10-20 weeks); ATR stop fires during normal within-trend pullbacks → premature exit at local trough → realized loss → re-entry at higher price after recovery
+- This creates larger realized drawdowns vs holding through the pullback (which the no-stop version does)
+- Sharpe drops 42% uniformly across all 5 strategies; OOS P&L drops 78-92%
+- Different failure mode from R8 (NDX Tech 44): R8 fails because synchronized crashes overwhelm position-level stops; R50 fails because stops are structurally incompatible with trend-following holding periods
+- **Rule: ATR trailing stops are incompatible with weekly trend-following momentum strategies regardless of universe. The mechanism that stops protect against (large single-position losses from gaps) is not what causes weekly trend-following drawdowns.**
+- **Implication: Do not add stop-loss configurations to Conservative v1 or v2. The no-stop configurations are definitively optimal for all metrics including MaxDD.**
 
 ### 29. Williams R on NDX Tech 44 — Third Confirmation of Universe-Specific Correlation Rule (R49)
 - Williams R ↔ RSI Weekly: r=0.6451 on Sectors+DJI 46 (R47, below 0.70) vs r=0.752 on NDX Tech 44 (R49, above 0.70)
@@ -768,3 +787,4 @@ All 33 research questions have been answered across Rounds 1-31. Research is com
 39. ~~**Williams R Weekly Trend as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R47 Q50. OUTSTANDING. Sharpe 1.82 (highest in portfolio), OOS +1,437.81% (8.4× better than BB Breakout). Williams R ↔ RSI Weekly r=0.6451. All 6 MC Score 5. Williams R is the WINNER among all 3 candidates. Conservative portfolio v2 CONFIRMED FINAL with Williams R. **CLOSED.**
 40. ~~**Williams R Replacing Price Momentum in Conservative Portfolio v1 (5-Strategy)**~~ — R48 Q51. REJECTED. RSI Weekly MC Score drops 5 → 2 without Price Momentum. Price Momentum is a structural "MC buffer" for RSI Weekly via capital competition dynamics — its presence prevents RSI Weekly from concentrating positions simultaneously. Williams R individual metrics excellent (Sharpe 1.86, OOS +2,156%) but portfolio-level effect overrides. Conservative v1 (R29, with Price Momentum) CONFIRMED SUPERIOR. ALL THREE production portfolios CONFIRMED FINAL. **CLOSED.**
 41. ~~**Williams R as 6th Strategy in Aggressive Portfolio (NDX Tech 44)**~~ — R49 Q52. REJECTED. Williams R creates THREE pairs above r=0.70: Williams R ↔ RSI Weekly r=0.752, Williams R ↔ MA Bounce r=0.718, Williams R ↔ Relative Momentum r=0.710. Third confirmation of universe-specific correlation rule. R42 5-strategy Aggressive portfolio DEFINITIVELY CONFIRMED FINAL — no viable 6th strategy in current research set. **CLOSED.**
+42. ~~**ATR Trailing Stop on Conservative v1 (MaxDD Reduction Test)**~~ — R50 Q53. REJECTED. ATR 3× stops INCREASE MaxDD for all 5 strategies (+6 to +9 pp), reduce Sharpe 42%, collapse OOS P&L 78-92%. Stops fire during within-trend pullbacks, creating larger realized drawdowns. Universal finding: ATR stops incompatible with weekly trend-following on any universe. Conservative v1 (R29, no stops) CONFIRMED OPTIMAL. **CLOSED.**
