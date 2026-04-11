@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 44 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
+**Research Loop:** 45 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-11 (36 years)
@@ -255,6 +255,14 @@ Round 44 (BB Breakout Replacing Donchian — Q47, 2026-04-11)
   → BB Breakout MC Score drops from 5 (at 2.8% allocation) to 2 (at 3.3%) — allocation artifact, not pure property
   → R42 5-strategy portfolio CONFIRMED FINAL — no improvement possible with current strategy set
   → Both production portfolios (Conservative + Aggressive) are now fully validated
+
+Round 45 (BB Breakout as 6th Strategy in Conservative Portfolio — Q48, 2026-04-11)
+  → ALL 6 WFA Pass + RollWFA 3/3; ALL 6 MC Score 5 — UNPRECEDENTED (first time ever in research history)
+  → BB ↔ RSI Weekly r=0.4711 on Sectors+DJI 46 (vs r=0.7049 on NDX Tech 44 — sector rotation provides decorrelation)
+  → BB Breakout MaxDD 13.29% — new record for lowest MaxDD ever in any combined portfolio run
+  → CONDITIONAL PASS: BB Breakout can be added as 6th strategy; conservative portfolio v2 defined
+  → BUT: BB OOS P&L only +170.96% (weakest of 6), BB Sharpe 1.43 (weakest of 6)
+  → Q49 added: test Relative Momentum as 6th strategy (may have better OOS P&L than BB Breakout)
 ```
 
 ---
@@ -484,6 +492,20 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 - At 969 trades total (vs 831 in isolation), the strategy generates MORE trades at 2.8% allocation vs 10% in isolation — lower per-trade capital requirement allows more simultaneous positions before hitting cash ceiling
 - **Lesson: Long-duration, infrequent strategies (hold months, not days) have fundamentally different MC Score behavior. They are structurally resistant to the synchronized-crash tail risk that plagues high-frequency trend-following strategies on correlated universes.**
 
+### 25. BB Breakout ↔ RSI Weekly Correlation is Universe-Specific: 0.4711 on Sectors+DJI 46 vs 0.7049 on NDX Tech 44 (R43/R45)
+- The same BB Breakout / RSI Weekly strategy pair shows dramatically different correlations depending on the universe
+- NDX Tech 44: r=0.7049 — both fire on the same concentrated tech stock momentum breakouts simultaneously
+- Sectors+DJI 46: r=0.4711 — sector rotation means a BB breakout on XLU utilities fires at different times from RSI Weekly on XLK tech
+- This is a 0.26 difference driven entirely by the universe structure, not the strategy logic
+- **Lesson: Test exit-day strategy correlations on the exact production universe. A strategy pair that fails the correlation test on one universe may pass on a different universe due to structural diversification.**
+- **Implication: BB Breakout can be added to the Conservative Portfolio (Sectors+DJI 46) but not the Aggressive Portfolio (NDX Tech 44). Same strategy, different portfolio suitability based on universe correlation structure.**
+
+### 26. First 6-Strategy Portfolio with ALL 6 MC Score 5 (R45)
+- Sectors+DJI 46 with 5 conservative strategies + BB Breakout achieves MC Score 5 for all 6 simultaneously
+- This has never been achieved in any prior research run (even 5-strategy Sectors+DJI 46 all had MC Score 5, but adding a 6th is harder)
+- BB Breakout's long hold duration on the diversified 46-symbol universe means Monte Carlo cannot construct synchronized crash scenarios for it
+- **Lesson: Sectors+DJI 46 is a uniquely MC-robust universe for the current strategy set. Even a 6-strategy combined portfolio maintains full MC robustness due to sector rotation providing natural synchronized-crash immunity.**
+
 ### 24. Donchian's Structural Buffer Role — Removing the Lowest-Sharpe Strategy Can Worsen Portfolio Correlation (R44)
 - In the R44 test, removing Donchian (lowest Sharpe 1.63) and replacing with BB Breakout (Sharpe 1.71) caused BB ↔ RSI Weekly to escalate from r=0.7049 → r=0.7874 and BB ↔ Rel Mom from r=0.6924 → r=0.7203
 - Donchian's 40-week channel breakout timing is structurally different from all other strategies — it creates diversification via unique entry/exit timing, not via better individual metrics
@@ -664,3 +686,4 @@ All 33 research questions have been answered across Rounds 1-31. Research is com
 34. ~~**Optimized 5-Strategy NDX Tech 44 (replace Price Momentum with Relative Momentum)**~~ — R42 Q45. All 5 WFA Pass. No pair > r=0.65. Relative Momentum MaxDD 31.82% (-13pp vs Price Momentum). RSI Weekly OOS +28,214% (record). CONFIRMED SUPERIOR to original R16 portfolio. **CLOSED.**
 35. ~~**BB Breakout as 6th Strategy in Combined NDX Tech 44**~~ — R43 Q46. All 6 WFA Pass + RollWFA 3/3. BB Breakout MC Score 5 (second strategy to achieve this alongside Rel Mom). MaxDD 34.27% (second best). CRITICAL: BB ↔ RSI Weekly r=0.7049 — above 0.70 threshold. BB cannot be added as 6th strategy. Q47 tests BB as Donchian replacement. **CLOSED.**
 36. ~~**BB Breakout Replacing Donchian (5-Strategy Test)**~~ — R44 Q47. REJECTED. Without Donchian, BB ↔ RSI Weekly escalates to r=0.7874 and BB ↔ Rel Mom to r=0.7203 — both above 0.70. Donchian is a structural portfolio buffer (r=0.22 with RSI Weekly) that cannot be replaced. R42 5-strategy NDX Tech 44 portfolio CONFIRMED FINAL. **CLOSED.**
+37. ~~**BB Breakout as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R45 Q48. CONDITIONAL PASS. All 6 MC Score 5 (unprecedented). BB ↔ RSI Weekly r=0.4711 (sector rotation decorrelates). BB MaxDD 13.29% (lowest ever). BUT: BB OOS P&L only +170.96% (weakest of 6). Conservative portfolio v2 (6-strategy MaxDD-focused) defined. Q49 tests Relative Momentum as alternative 6th strategy. **CLOSED.**

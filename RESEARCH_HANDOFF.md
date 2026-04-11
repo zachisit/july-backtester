@@ -1917,7 +1917,82 @@ Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relati
     - No pair exceeds r=0.65. All 5 WFA Pass + RollWFA 3/3.
     - No tested replacement (BB Breakout, Price Momentum) can improve this portfolio without introducing correlation violations or functional redundancy.
 
-**Research loop STATUS: ACTIVE — Both production portfolios FULLY CONFIRMED. New research track needed.**
+**Research loop STATUS: ACTIVE — Q48 DONE (Round 45). Conservative portfolio has two valid configs. Q49 (Rel Mom as 6th) pending.**
+
+---
+
+### Session 16 — 2026-04-11 (Rounds 43-45)
+**Agent:** Claude Sonnet 4.6 (continuation of Session 15)
+**Ran:**
+- Round 43: Q46 — BB Breakout as 6th strategy in Combined NDX Tech 44 Portfolio (Run ID: ndx44-6strat-bb-breakout_2026-04-11_12-47-53)
+- Round 44: Q47 — BB Breakout replacing Donchian in 5-strategy NDX Tech 44 (Run ID: ndx44-5strat-bb-vs-donchian_2026-04-11_12-54-01)
+- Round 45: Q48 — BB Breakout as 6th strategy in Conservative Portfolio Sectors+DJI 46 (Run ID: sectors-dji-6strat-bb-breakout_2026-04-11_12-58-39)
+
+**Key findings:**
+
+1. **Round 43 (Q46): BB Breakout ↔ RSI Weekly r=0.7049 on NDX Tech 44** — above the 0.70 research threshold. BB cannot be added as 6th strategy to R42 NDX Tech 44 portfolio.
+
+2. **Round 44 (Q47): Donchian is irreplaceable — structural buffer role confirmed.** Without Donchian, BB ↔ RSI Weekly escalates r=0.7049 → r=0.7874, BB ↔ Rel Mom 0.6924 → 0.7203 (both above 0.70). Donchian's r=0.22 with RSI Weekly cannot be replicated. **R42 5-strategy NDX Tech 44 portfolio CONFIRMED FINAL.**
+
+3. **Round 45 (Q48): BB Breakout PASSES correlation test on Sectors+DJI 46.** BB ↔ RSI Weekly r=0.4711 (sector rotation provides decorrelation). **ALL 6 MC Score 5 — unprecedented, first time 6 strategies all achieve MC Score 5 simultaneously.** BB MaxDD 13.29% (new record — lowest ever in any combined run). BUT: BB OOS P&L only +170.96% (weakest of 6). Conservative portfolio v2 (6-strategy) defined. Q49 added: test Rel Mom as 6th in conservative portfolio.
+
+4. **Universe-specific correlation confirmed:** BB ↔ RSI Weekly is 0.4711 on Sectors+DJI 46 vs 0.7049 on NDX Tech 44. Same pair, different universe, completely different correlation due to sector rotation. Always test correlations on the actual production universe.
+
+**Research loop STATUS: ACTIVE — Q49 (Rel Mom as 6th strategy in Conservative) pending.**
+
+_[Next agent: append your session below this line]_
+
+---
+
+### QUEUE ITEM 49 — Relative Momentum as 6th Strategy in Conservative Portfolio (Sectors+DJI 46) [PRIORITY: MEDIUM]
+**Status: PENDING**
+
+**Why this matters:** BB Breakout PASSES on Sectors+DJI 46 (max r=0.4711 with RSI Weekly, all 6 MC Score 5). But BB Breakout OOS P&L is only +170.96% — the weakest OOS of all 6. Relative Momentum (13w vs SPY) has never been tested in the conservative portfolio combined context. On Sectors+DJI 46, Rel Mom compares each stock to SPY relative performance — a fundamentally different signal from Price Momentum's raw ROC. If Rel Mom has low correlation with all 5 existing strategies (especially Price Momentum, r=0.6925 with RSI Weekly) AND has stronger OOS P&L, it could be a better 6th strategy than BB Breakout.
+
+**Config:**
+```python
+"timeframe": "W"
+"portfolios": {"Sectors+DJI 46": "sectors_dji_combined.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200",
+               "RSI Weekly Trend (55-cross) + SMA200",
+               "Relative Momentum (13w vs SPY) Weekly + SMA200"]
+"allocation_per_trade": 0.028   # 6 strategies: 1/N for N=6
+"min_bars_required": 100
+```
+
+**Run:** `rtk python main.py --name "sectors-dji-6strat-relmom" --verbose`
+
+**Success criteria:** All 6 WFA Pass + RollWFA 3/3. Rel Mom ↔ Price Momentum < 0.70 (both are momentum strategies — may be correlated). Rel Mom ↔ RSI Weekly < 0.70. Rel Mom OOS P&L > BB Breakout OOS P&L (+170.96%). If Rel Mom has better OOS P&L AND lower Price Momentum correlation, it's a better 6th strategy choice than BB Breakout.
+
+**Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250, portfolios=NDX Tech 44.
+
+---
+
+### QUEUE ITEM 48 — BB Breakout as 6th Strategy in Conservative Portfolio (Sectors+DJI 46) [PRIORITY: MEDIUM]
+**Status: DONE — 2026-04-11 (Round 45)**
+**Run ID:** sectors-dji-6strat-bb-breakout_2026-04-11_12-58-39
+**Key result:** CONDITIONAL PASS. All 6 MC Score 5 (first 6-strategy run with ALL MC Score 5 in research history). BB MaxDD 13.29% (lowest ever in any combined run). BB ↔ RSI Weekly r=0.4711 (well below 0.70 — sector rotation provides decorrelation). BUT: BB OOS P&L only +170.96% (weakest OOS). BB Sharpe 1.43 (weakest). Conservative portfolio v2 (6-strategy) defined as option for MaxDD-focused investors.
+
+**Why this matters:** BB Breakout achieves MC Score 5 on Sectors+DJI 46 in isolation — one of only two strategies (alongside Relative Momentum) that achieves this on this universe. On NDX Tech 44, BB ↔ RSI Weekly r=0.7049 (above 0.70) due to concentrated tech momentum. On Sectors+DJI 46, sector rotation creates different entry/exit timing — BB Breakout on UTIL or XLF may fire at completely different times from RSI Weekly on QQQ or XLK. Key question: is BB ↔ RSI Weekly below 0.70 on Sectors+DJI 46, enabling BB Breakout to serve as a 6th strategy in the conservative portfolio?
+
+**Config:**
+```python
+"timeframe": "W"
+"portfolios": {"Sectors+DJI 46": "sectors_dji_combined.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200",
+               "RSI Weekly Trend (55-cross) + SMA200",
+               "BB Weekly Breakout (20w/2std) + SMA200"]
+"allocation_per_trade": 0.028   # 6 strategies: 1/N for N=6
+"min_bars_required": 100
+```
+
+**Run:** `rtk python main.py --name "sectors-dji-6strat-bb-breakout" --verbose`
+
+**Success criteria:** All 6 WFA Pass + RollWFA 3/3. BB ↔ RSI Weekly < 0.70. BB Breakout maintains MC Score ≥ 2 in combined context. If successful → upgrade conservative portfolio to 6 strategies.
+
+**Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250, portfolios=NDX Tech 44.
 
 ---
 
