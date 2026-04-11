@@ -70,7 +70,8 @@ CONFIG = {
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
     #"timeframe_multiplier": 5,       # e.g., 1, 5, 15, 30 for minutes
     #"timeframe": "W",  # Weekly
-    "timeframe": "W",  # Weekly
+    #"timeframe": "W",  # Weekly
+    "timeframe": "D",
     #"timeframe": "M",  # Monthly
 
     # ============================================================
@@ -170,10 +171,10 @@ CONFIG = {
     # Symbols with fewer bars than this are skipped entirely.
     # 250 ≈ one year of daily data. Increase if your strategies need
     #   longer lookback periods (e.g. 200d SMA needs at least 200 bars).
-    "min_bars_required": 100,  # reduced for sector ETFs (shorter history)
+    "min_bars_required": 250,
 
     "portfolios": {
-        "Sectors+DJI (46)": "sectors_dji_combined.json",
+        "NDX Tech (44)": "nasdaq_100_tech.json",  # primary research universe
     },
 
     # ============================================================
@@ -182,7 +183,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.028,  # 6 strategies: 6 × 0.028 ≈ 16.8% max exposure (matches 5 × 0.033 = 16.5%)
+    "allocation_per_trade": 0.10,
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -286,14 +287,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": [
-        "MA Bounce (50d/3bar) + SMA200 Gate",
-        "MA Confluence (10/20/50) Fast Exit",
-        "Donchian Breakout (40/20)",
-        "Price Momentum (6m ROC, 15pct) + SMA200",
-        "RSI Weekly Trend (55-cross) + SMA200",
-        "Relative Momentum (13w vs SPY) Weekly + SMA200",
-    ],
+    "strategies": "all",
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP

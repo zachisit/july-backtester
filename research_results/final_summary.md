@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 31 Rounds × Multi-Agent Parallel Research — **COMPLETE ✓**
+**Research Loop:** 41 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-11 (36 years)
@@ -208,6 +208,25 @@ Round 31 (Global Diversified 76 = Sectors+DJI+International ETFs — Q33, 2026-0
     → Use only ONE of the two in a live portfolio on Global Diversified 76
   → Sectors+DJI 46 remains superior: slightly better Sharpe (1.54-1.86) and MaxDD (21-30%)
   → Global Diversified 76 best for investors who explicitly want geographic diversification
+
+Rounds 32-40 (New Champions + Sweeps + Portfolio Tests — 2026-04-11)
+  → BB Weekly Breakout (20w/2std)+SMA200 CONFIRMED: Sharpe 2.08, RS(min) -3.50, 75/75 sweep variants profitable (ROBUST)
+  → Williams R Weekly Trend (above-20)+SMA200 CONFIRMED: Sharpe 1.94, RS(min) -2.12, 625/625 variants profitable (ROBUST)
+  → Relative Momentum (13w vs SPY) CONFIRMED: P&L 166,502% (all-time high), Sharpe 2.08, 831 trades (NOT 99 — earlier was column misread)
+  → Q42 sweep: 125/125 variants profitable (100%), 124/125 WFA Pass (99.2%). Base params at 99th percentile.
+  → Williams R in combined 5-strat portfolio: r=0.80 vs Price Momentum → RSI Weekly remains preferred
+  → Sectors+DJI 46 with 6 strategies + Relative Momentum: only 97 trades (ETF universe mismatch) → keep 5-strategy conservative portfolio unchanged
+  → ALL mean reversion strategies on weekly bars confirmed DEAD: RSI MeanRev 0 trades, BB MeanRev 22 trades/Sharpe -1.45
+
+Round 41 (6-Strategy NDX Tech 44 — "Aggressive" portfolio — Q44, 2026-04-11)
+  → ALL 6 strategies WFA Pass + RollWFA 3/3 on NDX Tech 44 weekly bars
+  → Relative Momentum: 969 trades (↑ from 831 in isolation), MC Score 5 (first ever on NDX Tech 44!)
+  → ALL 6 MaxDDs below 47% — first time all strategies < 50% on NDX Tech 44 combined
+  → CRITICAL DISCOVERY: Price Momentum ↔ RSI Weekly r=0.94 on NDX Tech 44 (HIGH ALERT)
+    → These two strategies are functionally identical in combined NDX Tech 44 context
+    → Do NOT run Price Momentum + RSI Weekly together on NDX Tech 44 weekly
+  → Correlation profile clarified: Relative Momentum r=0.08 vs MAC (confirmed), r=0.57-0.60 vs MA Bounce/PM/RSI
+  → Next step (Q45): Optimized 5-strategy portfolio dropping Price Momentum, keeping RSI Weekly + Relative Momentum
 ```
 
 ---
@@ -424,6 +443,19 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 - Both capture "sustained uptrend": ROC >15% 6-month return vs RSI >55 — on a 76-symbol universe with many sideways markets, only the strongest trends trigger both simultaneously
 - **Lesson: Strategy correlation is universe-dependent. Always check exit-day correlation on the actual production universe before running both. On diversified ETF/global universes, use only one of Price Momentum or RSI Weekly.**
 
+### 21. Price Momentum ↔ RSI Weekly r=0.94 on NDX Tech 44 in Combined Portfolio (R41)
+- In the 6-strategy combined run on NDX Tech 44, Price Momentum and RSI Weekly show exit-day correlation r=0.94 — the highest correlation pair ever observed in research
+- On NDX Tech 44 concentrated tech stocks (NVDA, AMZN, META), both strategies enter/exit the same positions simultaneously: ROC >15% over 26w AND RSI >55 on 14w both fire at the same time on the strongest uptrends
+- The r=0.94 was NOT observed in isolated single-strategy tests (each strategy looked independent in isolation); it only emerges in combined portfolio context
+- **Lesson: Test exit-day correlation in the COMBINED context (multi-strategy run), not from isolated strategy outputs. Correlations can be much higher in combined runs due to shared position dynamics.**
+- **Implication: For NDX Tech 44 weekly portfolio, choose ONE of Price Momentum or RSI Weekly. Preferred: RSI Weekly (higher combined OOS P&L +17,529% vs Price Momentum +9,321%).**
+
+### 22. Relative Momentum MC Score 5 on NDX Tech 44 — Long Hold Duration Unlocks MC Robustness (R41)
+- Relative Momentum (13w vs SPY) achieved MC Score 5 in the NDX Tech 44 combined run — the first strategy to do so on this concentrated universe
+- The strategy's average hold duration of 103 days (~20 weekly bars) means the Monte Carlo resampling cannot construct the "synchronized crash" scenario that produces MC Score -1 for faster strategies
+- At 969 trades total (vs 831 in isolation), the strategy generates MORE trades at 2.8% allocation vs 10% in isolation — lower per-trade capital requirement allows more simultaneous positions before hitting cash ceiling
+- **Lesson: Long-duration, infrequent strategies (hold months, not days) have fundamentally different MC Score behavior. They are structurally resistant to the synchronized-crash tail risk that plagues high-frequency trend-following strategies on correlated universes.**
+
 ---
 
 ## Recommended Live Implementation
@@ -569,3 +601,4 @@ All 33 research questions have been answered across Rounds 1-31. Research is com
 30. ~~**Sectors+DJI 46**~~ — R29 Q30. BREAKTHROUGH universe (Sharpe+MaxDD+MC simultaneously best). **CLOSED.**
 31. ~~**International ETFs 30**~~ — R30 Q32. All 5 WFA Pass + ALL MC Score +5. Sharpe 0.67-1.08. **CLOSED.**
 32. ~~**Global Diversified 76 (Sectors+DJI+International ETFs)**~~ — R31 Q33. All 5 WFA Pass. Sharpe 1.36-1.82. Donchian RS(min) -1.91 record. Price Momentum ↔ RSI Weekly r=0.81 on this universe. **CLOSED.**
+33. ~~**6-Strategy NDX Tech 44 (5 original + Relative Momentum)**~~ — R41 Q44. All 6 WFA Pass + RollWFA 3/3. All MaxDDs < 47%. Relative Momentum: 969 trades + MC Score **5** (unprecedented on NDX Tech 44). CRITICAL: Price Momentum ↔ RSI Weekly r=0.94 on NDX Tech 44 — do not run together. **CLOSED.**

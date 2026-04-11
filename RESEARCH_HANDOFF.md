@@ -1799,3 +1799,96 @@ _[Next agent: append your session below this line]_
 **Final production portfolios:**
 - **Conservative:** Sectors+DJI 46 (`sectors_dji_combined.json`), 5 strategies, 3.3% allocation, MC Score 5 for all
 - **Aggressive:** NDX Tech 44 (`nasdaq_100_tech.json`), 6 strategies (add Rel Mom + BB Breakout + Williams R), 2.8% allocation
+
+---
+
+### Session 15 — 2026-04-11 (Round 41 completed — 6-Strategy Aggressive Portfolio)
+**Agent:** Claude Sonnet 4.6 (continuation of Session 14)
+**Ran:**
+- Round 41: Q44 — 6-Strategy Combined Portfolio on NDX Tech 44 (5 original + Relative Momentum) (Run ID: ndx44-6strat-relmom_2026-04-11_12-37-08)
+
+**Key findings:**
+
+1. **All 6 WFA Pass + RollWFA 3/3** — capital competition does not introduce overfitting. ✓
+
+2. **Relative Momentum 969 trades on NDX Tech 44** (↑ from 831 in isolation at 10%). At 2.8% allocation, lower per-position capital ceiling allows more simultaneous entries across 44 symbols → more signals fire. Trade count INCREASES with lower allocation, not decreases.
+
+3. **Relative Momentum MC Score = 5 — unprecedented on NDX Tech 44** — first strategy ever to achieve MC Score 5 on NDX Tech 44 in combined context (previous best: +1 for Price Momentum/Donchian in Q17). The long hold duration (avg 103 days ≈ 20+ weekly bars) makes this strategy structurally immune to Monte Carlo synchronized-crash scenarios.
+
+4. **All 6 MaxDDs below 47%** — first time all strategies in any NDX Tech 44 combined run stay below 50%:
+   - MA Bounce: 40.41% | Price Momentum: 41.64% | Donchian: 43.68% | MAC: 45.16% | RSI Weekly: 46.14% | Rel Mom: 29.46%
+
+5. **CRITICAL DISCOVERY: Price Momentum ↔ RSI Weekly r=0.94 on NDX Tech 44** — extremely high overlap. On NDX Tech 44 concentrated tech stocks, both strategies enter/exit the SAME positions simultaneously (both triggered by strong uptrends in NVDA, AMZN, META). Running both in the same portfolio provides essentially zero additional diversification. This pair scored r=0.69 on Sectors+DJI 46 — the concentrated tech universe makes them nearly identical.
+
+6. **Relative Momentum correlation profile in combined context:**
+   - vs MAC: r=0.08 (confirmed near-zero — structural difference confirmed)
+   - vs Donchian: r=0.35 (acceptable)
+   - vs MA Bounce, Price Momentum, RSI Weekly: r=0.57-0.60 (moderate — all trend-following on same tech stocks)
+   - The historical "r=0.06 vs MAC" figure was for isolated comparison; in combined context the true correlation is confirmed at r=0.08
+
+7. **MAC remains the most decorrelated strategy** — max r=0.40 (vs Donchian). With Price Momentum, RSI Weekly, Rel Mom: r=0.03-0.08. This makes MAC the structural anchor of any combined portfolio.
+
+**Implications for production portfolio:**
+- Do NOT run Price Momentum + RSI Weekly together on NDX Tech 44 (r=0.94 is redundant)
+- Optimal 5-strategy NDX Tech 44 portfolio = MA Bounce + MAC + Donchian + RSI Weekly + Relative Momentum
+- RSI Weekly preferred over Price Momentum: higher OOS P&L (+17,529% vs +9,321%), higher combined P&L (20,699% vs 11,735%)
+- Q45 added to test this optimized combination
+
+**Research loop STATUS: ACTIVE — Q45 (Optimized 5-Strategy NDX Tech 44) pending.**
+
+_[Next agent: append your session below this line]_
+
+---
+
+### QUEUE ITEM 44 — 6-Strategy Combined Portfolio on NDX Tech 44 (5 Original + Relative Momentum) [PRIORITY: HIGH]
+**Status: DONE — 2026-04-11 (Round 41)**
+**Run ID:** ndx44-6strat-relmom_2026-04-11_12-37-08
+**Key result:** All 6 WFA Pass + RollWFA 3/3. Relative Momentum 969 trades (↑ from 831 isolated) + MC Score 5 (unprecedented on NDX Tech 44). CRITICAL: Price Momentum ↔ RSI Weekly r=0.94 (HIGH OVERLAP — do not run together on NDX Tech 44).
+
+**Why this matters:** Round 40 confirmed the "Aggressive" production portfolio recommendation: 5 original weekly champions + Relative Momentum on NDX Tech 44. But this combination has never actually been backtested — it was only proposed based on isolated stats. Relative Momentum has exceptional portfolio properties on NDX Tech 44 (831 trades, Sharpe 2.08, exit-day r=0.06 vs MAC — the lowest correlation in the research), making it the ideal 6th strategy for the aggressive portfolio. This run answers: (1) does Rel Mom maintain 831 trades and WFA Pass in combined context? (2) do the other 5 strategies maintain performance? (3) what are the actual exit-day correlations? (4) does MaxDD stay below 50% for all 6?
+
+**Config:**
+```python
+"timeframe": "W"
+"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200",
+               "RSI Weekly Trend (55-cross) + SMA200",
+               "Relative Momentum (13w vs SPY) Weekly + SMA200"]
+"allocation_per_trade": 0.028   # 1/N for N=6 strategies (same justification as Q41)
+"min_bars_required": 100
+```
+
+**Run:** `rtk python main.py --name "ndx44-6strat-relmom" --verbose`
+
+**Success criteria:** All 6 strategies WFA Pass + RollWFA 3/3. Relative Momentum maintains 700+ trades (stays above statistical minimum). All 6 strategies MaxDD < 55%. Rel Mom exit-day correlation with other 5 remains below 0.35.
+
+**After this:** If successful → declare the 6-strategy aggressive portfolio confirmed and move to Q45 (BB Breakout in combined portfolio). If Rel Mom collapses to <300 trades in combined run → capital competition explanation needed.
+
+**Reset config after run** to: timeframe="D", portfolios={"NDX Tech (44)": "nasdaq_100_tech.json"}, strategies="all", allocation=0.10, min_bars_required=250.
+
+---
+
+### QUEUE ITEM 45 — Optimized 5-Strategy NDX Tech 44 (Drop Price Momentum, Add Relative Momentum) [PRIORITY: HIGH]
+**Status: PENDING**
+
+**Why this matters:** Round 41 found Price Momentum ↔ RSI Weekly r=0.94 on NDX Tech 44 — effectively running the same strategy twice. The 6-strategy portfolio is really a 5-strategy portfolio with one strategy duplicated. Dropping Price Momentum (the lower OOS P&L performer in combined context: +9,321% vs RSI +17,529%) and keeping RSI Weekly + adding Relative Momentum creates a truly 5-way diversified portfolio. This should improve overall portfolio diversification while maintaining Sharpe.
+
+**Hypothesis:** The combination of MA Bounce + MAC + Donchian + RSI Weekly + Relative Momentum has better portfolio-level diversification than the original 5 (which includes Price Momentum + RSI at r=0.94).
+
+**Config:**
+```python
+"timeframe": "W"
+"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "Donchian Breakout (40/20)", "RSI Weekly Trend (55-cross) + SMA200",
+               "Relative Momentum (13w vs SPY) Weekly + SMA200"]
+"allocation_per_trade": 0.033   # standard 5-strategy allocation
+"min_bars_required": 100
+```
+
+**Run:** `rtk python main.py --name "ndx44-5strat-optimal" --verbose`
+
+**Success criteria:** All 5 WFA Pass + RollWFA 3/3. No pair exceeds r=0.70 correlation. MaxDD for all strategies < 50%. Combined RS(min) all better than -3.
+
+**Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250.
