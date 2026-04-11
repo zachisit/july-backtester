@@ -64,28 +64,33 @@ Secondary goal: find strategies that are **uncorrelated with existing champions*
 
 ---
 
-## CURRENT STATE — VALIDATED CHAMPIONS (as of Round 9 session — 2026-04-11)
+## CURRENT STATE — VALIDATED CHAMPIONS (as of Round 11 session — 2026-04-11)
 
 All tested on: `nasdaq_100_tech.json` (44 symbols), 1990-2026, Norgate total-return data.
 All use: wfa_split_ratio=0.80, wfa_folds=3. TF = timeframe (D=daily, W=weekly).
 
-**UNIVERSALITY CONFIRMED (2026-04-10):** All 3 primary champions also pass WFA+RollWFA 3/3 on `sp-500.json` (500 stocks). Strategies are not tech-regime-specific.
+**UNIVERSALITY CONFIRMED (2026-04-10):** All 3 primary daily champions also pass WFA+RollWFA 3/3 on `sp-500.json` (500 stocks). Strategies are not tech-regime-specific.
 **SP500 COMBINED (2026-04-11):** MA Bounce reaches MC Score +1 at 3% allocation on 500-stock universe — diversification partially fixes MC Score.
+**WEEKLY TIMEFRAME STRUCTURAL (2026-04-11):** ALL 4 strategies tested on weekly bars show Sharpe improvement of 165-215% and RS(min) improvement of 1.75-6.9×. Weekly timeframe is a proven structural improvement.
+**PRICE MOMENTUM IS TECH-SPECIFIC (2026-04-11):** 6m ROC > 15% FAILS on SP500 (RS(min) -17.09, worse than NDX -15.92). Only use on tech-heavy universes.
 
 | Rank | Strategy | Registered Name (exact) | File | TF | P&L | Sharpe | RS(min) | OOS P&L | WFA | RollWFA |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 🥇 | MA Bounce Weekly | `MA Bounce (50d/3bar) + SMA200 Gate` | `research_strategies_v4.py` | **W** | **140,028%** | **+1.92** | -2.32 | +123,865% | Pass | 3/3 |
-| 🥈 | Price Momentum (6m ROC, 15pct) | `Price Momentum (6m ROC, 15pct) + SMA200` | `round9_strategies.py` | D | 107,513% | +0.67 | -15.92 | +93,844% | Pass | 3/3 |
-| 🥉 | MA Confluence Fast Exit | `MA Confluence (10/20/50) Fast Exit` | `research_strategies_v3.py` | D | 101,198% | +0.68 | -4.46 | +88,023% | Pass | 3/3 |
+| 🥇† | Price Momentum Weekly | `Price Momentum (6m ROC, 15pct) + SMA200` | `round9_strategies.py` | **W** | **156,879%** | **+1.87** | -2.30 | +138,152% | Pass | 3/3 |
+| 🥇† | MA Bounce Weekly | `MA Bounce (50d/3bar) + SMA200 Gate` | `research_strategies_v4.py` | **W** | 140,028% | **+1.92** | -2.32 | +123,865% | Pass | 3/3 |
+| 3 | MA Confluence Fast Exit | `MA Confluence (10/20/50) Fast Exit` | `research_strategies_v3.py` | D | 101,198% | +0.68 | -4.46 | +88,023% | Pass | 3/3 |
 | 4 | MAC Fast Exit Weekly | `MA Confluence (10/20/50) Fast Exit` | `research_strategies_v3.py` | **W** | 84,447% | **+1.80** | -2.54 | +72,265% | Pass | 3/3 |
-| 5 | Donchian Weekly | `Donchian Breakout (40/20)` | `research_strategies_v2.py` | **W** | 53,499% | **+1.68** | **-2.06** | +41,671% | Pass | 3/3 |
-| 6 | CMF Momentum (20d)+SMA200 | `CMF Momentum (20d)+SMA200` | `research_strategies_v4.py` | D | 51,173% | +0.63 | -15.03 | +43,803% | Pass | 3/3 |
-| 7 | Donchian Breakout (40/20) Daily | `Donchian Breakout (40/20)` | `research_strategies_v2.py` | D | 48,426% | +0.63 | -3.66 | +41,665% | Pass | 3/3 |
-| 8 | MA Bounce Daily | `MA Bounce (50d/3bar) + SMA200 Gate` | `research_strategies_v4.py` | D | 45,283% | +0.61 | -10.93 | +40,519% | Pass | 3/3 |
-| 9 | Donchian (60d/20d)+MA Align | `Donchian Breakout (60d/20d)+MA Alignment` | `round6_strategies.py` | D | 42,263% | +0.64 | -3.98 | +35,177% | Pass | 3/3 |
-| 10 | MA Confluence Full Stack | `MA Confluence Full Stack (10/20/50)` | `research_strategies_v3.py` | D | 29,771% | +0.54 | -4.36 | +22,911% | Pass | 3/3 |
-| 11 | ROC (20d) + MA Full Stack Gate | `ROC (20d) + MA Full Stack Gate` | `round7_strategies.py` | D | 14,518% | +0.50 | -3.83 | +12,472% | Pass | 3/3 |
-| 12 | SMA (20/50) + OBV Confirm | `SMA Crossover (20/50) + OBV Confirmation` | `round7_strategies.py` | D | 10,841% | +0.46 | -4.25 | +8,832% | Pass | 3/3 |
+| 5 | Price Momentum Daily | `Price Momentum (6m ROC, 15pct) + SMA200` | `round9_strategies.py` | D | 107,513% | +0.67 | -15.92 | +93,844% | Pass | 3/3 |
+| 6 | Donchian Weekly | `Donchian Breakout (40/20)` | `research_strategies_v2.py` | **W** | 53,499% | **+1.68** | **-2.06** | +41,671% | Pass | 3/3 |
+| 7 | CMF Momentum (20d)+SMA200 | `CMF Momentum (20d)+SMA200` | `research_strategies_v4.py` | D | 51,173% | +0.63 | -15.03 | +43,803% | Pass | 3/3 |
+| 8 | Donchian Breakout (40/20) Daily | `Donchian Breakout (40/20)` | `research_strategies_v2.py` | D | 48,426% | +0.63 | -3.66 | +41,665% | Pass | 3/3 |
+| 9 | MA Bounce Daily | `MA Bounce (50d/3bar) + SMA200 Gate` | `research_strategies_v4.py` | D | 45,283% | +0.61 | -10.93 | +40,519% | Pass | 3/3 |
+| 10 | Donchian (60d/20d)+MA Align | `Donchian Breakout (60d/20d)+MA Alignment` | `round6_strategies.py` | D | 42,263% | +0.64 | -3.98 | +35,177% | Pass | 3/3 |
+| 11 | MA Confluence Full Stack | `MA Confluence Full Stack (10/20/50)` | `research_strategies_v3.py` | D | 29,771% | +0.54 | -4.36 | +22,911% | Pass | 3/3 |
+| 12 | ROC (20d) + MA Full Stack Gate | `ROC (20d) + MA Full Stack Gate` | `round7_strategies.py` | D | 14,518% | +0.50 | -3.83 | +12,472% | Pass | 3/3 |
+| 13 | SMA (20/50) + OBV Confirm | `SMA Crossover (20/50) + OBV Confirmation` | `round7_strategies.py` | D | 10,841% | +0.46 | -4.25 | +8,832% | Pass | 3/3 |
+
+†Co-champions: Price Momentum Weekly has higher P&L (156,879%); MA Bounce Weekly has higher Sharpe (+1.92).
 
 *MA Bounce Weekly uses the SAME registered strategy as MA Bounce Daily — just set `"timeframe": "W"` in config.
 *Donchian variants correlate 0.39-0.95 with each other — do not hold multiple Donchian variants in the same live portfolio.
@@ -448,62 +453,94 @@ RS(min) -2.06 is the single best rolling Sharpe stress score of all 15+ strategi
 ---
 
 ### QUEUE ITEM 10 — Price Momentum on SP500 [PRIORITY: HIGH]
-**Status: TODO**
+**Status: DONE — 2026-04-11 — FAILED UNIVERSALITY TEST**
+**Run ID:** price-momentum-sp500_2026-04-10_23-11-40
 
-**Why this matters:** Price Momentum (6m ROC, 15pct) has RS(min) = -15.92 on 44 NDX tech stocks — the worst of our top-3 champions. On SP500 (500 stocks), momentum crashes are less synchronized (not all sectors crash together). Hypothesis: RS(min) improves dramatically, and the diversification may bring MC Score from -1 toward +1 (like MA Bounce did on SP500).
+**Results (timeframe="D", 10% allocation, SP500 = 500 stocks, 1990-2026):**
+| Metric | SP500 | NDX 44 | Notes |
+|---|---|---|---|
+| P&L | 16,500% | 107,513% | Much lower — non-tech momentum less sustained |
+| Sharpe | +0.56 | +0.67 | Slightly lower |
+| RS(min) | **-17.09** | -15.92 | **WORSE on SP500** |
+| MaxDD | 63.77% | 54.77% | Worse |
+| OOS P&L | +11,432% | +93,844% | 8× lower |
+| WFA | Pass | Pass | — |
+| RollWFA | 3/3 | 3/3 | — |
+| MC Score | -1 | -1 | Same |
 
-**What to do:**
-1. Edit `config.py`:
-   - `"timeframe": "D"` (daily bars)
-   - `"portfolios": {"SP500 Diversified": "sp-500.json"}`
-   - `"strategies": ["Price Momentum (6m ROC, 15pct) + SMA200"]`
-   - `"allocation_per_trade": 0.10` (10% — matches Q2 universality test)
+**Why SP500 universality FAILED:** Price Momentum (6m ROC > 15%) is tech-sector-specific. Tech stocks sustain 15%+ 6-month returns for years (NVDA $100→$500+). Non-tech sectors (energy, utilities, staples) have cyclical patterns — 15% 6-month gains then sharp reversals. On SP500, strategy generates many cyclical momentum entries that reverse quickly, worsening RS(min).
 
-2. Run: `rtk python main.py --name "price-momentum-sp500"`
-
-**Success criteria:** WFA Pass + RollWFA 2/3+ + RS(min) > -8 + Sharpe > 0.50 on SP500.
+**LESSON:** Price Momentum (6m ROC) is NOT universal — only use on tech-heavy or quality-momentum universes.
 
 ---
 
 ### QUEUE ITEM 11 — Combined Weekly Portfolio [PRIORITY: CRITICAL]
-**Status: TODO**
+**Status: DONE — 2026-04-11 — OPTIMAL STRUCTURE CONFIRMED**
+**Run ID:** weekly-combined-5pct_2026-04-10_23-10-30
 
-**Why this matters:** All three weekly strategies achieve Sharpe 1.68-1.92 in isolation. The combined portfolio test will determine: (a) whether exit-day correlations are lower than daily strategies, and (b) whether the combined weekly portfolio has RS(min) > -3 and combined Sharpe > 1.5.
+**Results (timeframe="W", 5% allocation, 44 symbols, 1990-2026):**
+| Strategy | P&L | Sharpe | MaxDD | RS(min) | RS(avg) | OOS P&L | WFA | RollWFA | Trades | SQN | Corr |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| MA Bounce Weekly | 83,034% | **+2.04** | **54.45%** | -2.51 | +2.04 | +72,884% | Pass | 3/3 | 2,007 | 7.62 | 0.18 |
+| MAC Fast Exit Weekly | 29,119% | +1.78 | 57.52% | **-1.85** | +1.88 | +20,589% | Pass | 3/3 | 2,623 | 7.13 | 0.23 |
+| Donchian Weekly | 27,611% | +1.78 | 57.37% | -2.32 | +1.90 | +20,231% | Pass | 3/3 | 1,658 | 6.96 | 0.36 |
 
-**What to do:**
-1. Edit `config.py`:
-   - `"timeframe": "W"` (weekly bars)
-   - `"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}`
-   - `"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)"]`
-   - `"allocation_per_trade": 0.05` (5% per position — 3 simultaneous strategies)
+**Key findings:**
+- MaxDD improvements dramatic vs isolation: MA Bounce -8pp, MAC -15pp, Donchian -11pp
+- Sharpe IMPROVED in combined run for MA Bounce (1.92→2.04) and Donchian (1.68→1.78)
+- MAC RS(min) improved from -2.54 to **-1.85** — BEST RS(min) of all strategies in any test
+- Exit-day correlations 0.18/0.23/0.36 — very low; diversification is genuine
+- All WFA Pass + RollWFA 3/3 — no capital-competition overfitting
 
-2. Run: `rtk python main.py --name "weekly-combined-5pct"`
-
-3. **IMPORTANT:** Reset `"timeframe": "D"` after the run.
-
-4. Record: exit-day correlations (compare vs daily Q1 correlations of 0.13-0.19), combined Sharpe, combined RS(min), each strategy's WFA verdict.
-
-**Success criteria:** All WFA Pass + RollWFA 3/3. Combined RS(min) > -4. Exit-day correlations < 0.40. This would confirm the weekly combined portfolio is viable for live trading.
+**VERDICT: COMBINED WEEKLY PORTFOLIO IS THE OPTIMAL STRUCTURE.** MaxDD below 58% for all three, Sharpe 1.78-2.04, RS(min) -1.85 to -2.51. Dominates daily combined portfolio on every risk-adjusted metric.
 
 ---
 
 ### QUEUE ITEM 12 — Price Momentum on Weekly Bars [PRIORITY: MEDIUM]
+**Status: DONE — 2026-04-11 — NEW CO-CHAMPION #1**
+**Run ID:** price-momentum-weekly_2026-04-10_23-20-13
+
+**Results (timeframe="W", 10% allocation, 44 symbols, 1990-2026):**
+| Metric | Weekly | Daily | Improvement |
+|---|---|---|---|
+| P&L | **156,879%** | 107,513% | **+46%** |
+| Sharpe | **+1.87** | +0.67 | **+179%** |
+| RS(min) | **-2.30** | -15.92 | **6.9× better** |
+| WinRate | 41.88% | 36.62% | +5.3pp |
+| Trades | 671 | 975 | -31% (fewer, higher quality) |
+| MaxDD | 60.43% | 54.77% | +5.7pp worse |
+| OOS P&L | **+138,152%** | +93,844% | **+47%** |
+| WFA | Pass | Pass | — |
+| RollWFA | 3/3 | 3/3 | — |
+| SQN | 6.69 | 6.20 | Better |
+
+**Why weekly bars fix RS(min):** Daily ROC exits on any 2-3 week correction (false exit). Weekly ROC requires sustained multi-week decline → no false exits from short corrections. Fewer, higher-quality entries/exits → Sharpe nearly triples, RS(min) improves 6.9×.
+
+**LEADERBOARD POSITION:** Price Momentum Weekly at 156,879% P&L vs MA Bounce Weekly at 140,028%. Co-champions — Price Momentum #1 by P&L; MA Bounce #1 by Sharpe (1.92 vs 1.87).
+
+---
+
+### QUEUE ITEM 13 — 4-Strategy Combined Weekly Portfolio [PRIORITY: CRITICAL]
 **Status: TODO**
 
-**Why this matters:** Price Momentum (6m ROC, 15pct) on daily bars: RS(min) = -15.92 (worst of top-3). On weekly bars, the 126-bar ROC = ROC(25 weeks) ≈ same 6-month momentum. Exit condition (ROC < 0 OR SMA200 below close) fires on weekly closes — more patient, less noise-driven. Hypothesis: RS(min) improves significantly.
+**Why this matters:** Q11 proved the 3-strategy weekly combined portfolio is optimal (Sharpe 1.78-2.04, MaxDD 54-58%). Price Momentum Weekly is now co-champion at RS(min) -2.30 — does adding it as a 4th strategy further improve the combined portfolio? This is the final portfolio validation before declaring research complete.
 
 **What to do:**
 1. Edit `config.py`:
    - `"timeframe": "W"` (weekly bars)
    - `"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}`
-   - `"strategies": ["Price Momentum (6m ROC, 15pct) + SMA200"]`
-   - `"allocation_per_trade": 0.10`
+   - `"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200"]`
+   - `"allocation_per_trade": 0.04` (4% per position — 4 simultaneous strategies)
 
-2. Run: `rtk python main.py --name "price-momentum-weekly"`
+2. Run: `rtk python main.py --name "weekly-combined-4strat-4pct"`
 
-3. Reset `"timeframe": "D"` after run.
+3. **IMPORTANT:** Reset `"timeframe": "D"` after the run.
 
-**Success criteria:** RS(min) > -8 (improvement from -15.92 daily) AND WFA Pass AND Sharpe > 1.0.
+4. Record: exit-day correlation between Price Momentum W and the other three strategies (critical — is Price Momentum W correlated with MAC W since both are momentum?), each strategy's WFA verdict, combined MaxDD vs 3-strategy run.
+
+**Success criteria:** All WFA Pass + RollWFA 3/3. Price Momentum W shows RS(min) better than -3 in combined run. Exit-day correlations < 0.50 between Price Momentum W and MAC W (if correlated, they may not add diversification value).
+
+**Failure criteria:** Price Momentum W RS(min) worsens dramatically in combined portfolio (capital competition). Or exit-day correlation with MAC W > 0.70 (too correlated to add value).
 
 ---
 
@@ -744,3 +781,34 @@ _[Next agent: append your session below this line]_
 - Condition C (3+ consecutive rounds without breakthrough): NOT met — R10 found 2 more new champions
 
 **Note on leaderboard complexity:** The leaderboard now has 12 entries across daily and weekly timeframes. The top 5 weekly strategies (Bounce W, MAC W, Donchian W) have Sharpe 1.68-1.92. For live trading, the weekly strategies are clearly superior for risk-adjusted returns. For maximum absolute returns, daily MA Bounce Weekly provides both (140,028% AND Sharpe 1.92).
+
+---
+
+### Session 5 — 2026-04-11 (Round 11 completed — Combined Weekly + SP500 + Price Momentum Weekly)
+**Agent:** Claude Sonnet 4.6 (continuation of Session 4)
+**Ran:**
+- Queue Item 11: Combined weekly portfolio (MA Bounce W + MAC W + Donchian W at 5%) → **OPTIMAL STRUCTURE CONFIRMED**
+- Queue Item 10: Price Momentum on SP500 → **FAILED UNIVERSALITY** (RS(min) -17.09, worse than NDX)
+- Queue Item 12: Price Momentum on weekly bars → **NEW CO-CHAMPION #1** (P&L 156,879%, Sharpe 1.87, RS(min) -2.30)
+
+**Key findings:**
+1. **Combined weekly portfolio is the optimal production structure** — MA Bounce W Sharpe improved to 2.04 (from 1.92 isolated) in combined run. MAC W RS(min) improved to -1.85 (BEST of any strategy in any test). Donchian W Sharpe improved to 1.78. MaxDD reductions: -8pp, -15pp, -11pp. All WFA Pass + RollWFA 3/3. Exit-day correlations 0.18/0.23/0.36.
+
+2. **Price Momentum (6m ROC) is tech-sector-specific** — SP500 universality FAILED. RS(min) -17.09 on SP500 (worse than -15.92 on NDX). Non-tech cyclical momentum patterns generate many false entries. Unlike MAC and Donchian (which improve on SP500), Price Momentum degrades. Use ONLY on tech-heavy universes.
+
+3. **Weekly bars fully fix Price Momentum's RS(min) problem** — Sharpe 0.67 → 1.87 (+179%), RS(min) -15.92 → -2.30 (6.9× improvement). Same root cause as other strategies: weekly ROC requires sustained multi-week decline to exit; daily ROC exits on 2-3 week corrections. Price Momentum Weekly is now co-champion at P&L 156,879% (highest ever).
+
+4. **The "weekly timeframe structural improvement" is now fully confirmed** — 4 of 4 strategies tested (MA Bounce, MAC, Donchian, Price Momentum) all show Sharpe improvement 165-215% and RS(min) improvement 1.75-6.9× on weekly bars. This is a robust empirical finding, not strategy-specific.
+
+5. **Leaderboard updated to 13 entries** — Price Momentum Weekly becomes co-champion #1 with MA Bounce Weekly. Best-by-metric: Highest P&L = Price Momentum Weekly (156,879%); Highest Sharpe = MA Bounce Weekly (+1.92); Best RS(min) = Donchian Weekly (-2.06).
+
+**Next recommended actions:**
+1. **Queue Item 13: 4-strategy combined weekly portfolio** — MA Bounce W + MAC W + Donchian W + Price Momentum W at 4% allocation. Key question: what is exit-day correlation between Price Momentum W and MAC W? If low (<0.40), adding a 4th strategy further reduces combined MaxDD.
+2. If Q13 passes → declare research COMPLETE and document final live trading recommendations.
+
+**SUCCESS CRITERIA STATUS (after Round 11):**
+- Condition A (Combined portfolio validated): DONE ✓ — Q11 confirmed weekly combined portfolio is optimal structure. Sharpe 1.78-2.04, MaxDD 54-58%.
+- Condition B (New uncorrelated champion): EXCEEDED ✓ — 6+ new champions found across weekly timeframe variants and Price Momentum.
+- Condition C (3+ consecutive rounds without breakthrough): NOT met — R11 found Price Momentum Weekly as new co-champion #1.
+
+**Status:** Research NEARLY COMPLETE — one final experiment remaining (Q13: 4-strategy weekly combined). If Q13 passes validation, declare research complete and document live trading recommendations.
