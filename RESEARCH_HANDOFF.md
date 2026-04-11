@@ -93,6 +93,7 @@ All use: wfa_split_ratio=0.80, wfa_folds=3. TF = timeframe (D=daily, W=weekly).
 **SECTOR ETFs BREAKTHROUGH (2026-04-11):** All 5 strategies WFA Pass + MC Score +5 (ALL). 16 maximally diversified ETFs → zero correlated crashes → best possible MC robustness. RSI Weekly Sharpe 0.95, best OOS +166%.
 **BIOTECH CONFIRMED (2026-04-11):** All 5 WFA Pass on Nasdaq Biotech 257. Sharpe 0.68-0.81 (lower due to binary FDA events). MaxDD 55-67%. Strategies work even in the hardest sector.
 **ECOSYSTEM UNIVERSALITY (2026-04-11):** Framework confirmed on 6 distinct universes: NDX 44 → SP500 503 → Russell 1000 1,012 → Dow Jones 30 → Biotech 257 → Sector ETFs 16. All WFA Pass. Key finding: MC Score improves with sector diversification (NDX: -1, DJI: +5, Sectors: +5).
+**OPTIMIZED AGGRESSIVE PORTFOLIO (2026-04-11):** On NDX Tech 44, Price Momentum ↔ RSI Weekly r=0.94 (HIGH — functionally identical in combined context). Replace Price Momentum with Relative Momentum: MA Bounce + MAC + Donchian + RSI Weekly + Relative Momentum at 3.3% = Rel Mom MaxDD 31.82%, MC Score 2, no pair >0.65. Confirmed superior to original R16 5-strategy portfolio.
 **SP500 COMBINED (2026-04-11):** MA Bounce reaches MC Score +1 at 3% allocation on 500-stock universe — diversification partially fixes MC Score.
 **WEEKLY TIMEFRAME STRUCTURAL (2026-04-11):** ALL 4 strategies tested on weekly bars show Sharpe improvement of 165-215% and RS(min) improvement of 1.75-6.9×. Weekly timeframe is a proven structural improvement.
 **PRICE MOMENTUM IS TECH-SPECIFIC (2026-04-11):** 6m ROC > 15% FAILS on SP500 daily (RS(min) -17.09). On weekly bars, Price Momentum works on Russell 1000 (Sharpe 1.18, WFA Pass 3/3). The SP500 failure was a timeframe issue, not a signal issue.
@@ -1834,9 +1835,44 @@ _[Next agent: append your session below this line]_
 - RSI Weekly preferred over Price Momentum: higher OOS P&L (+17,529% vs +9,321%), higher combined P&L (20,699% vs 11,735%)
 - Q45 added to test this optimized combination
 
-**Research loop STATUS: ACTIVE — Q45 (Optimized 5-Strategy NDX Tech 44) pending.**
+**Research loop STATUS: ACTIVE — Q45 DONE. See Session 15 for Round 42 results.**
 
 _[Next agent: append your session below this line]_
+
+---
+
+### Session 15 (continued) — Round 42: Optimized 5-Strategy NDX Tech 44
+
+**Additional findings (Round 42 — Q45):**
+
+13. **Optimized 5-strategy portfolio CONFIRMED SUPERIOR to original R16** — MA Bounce + MAC + Donchian + RSI Weekly + Relative Momentum at 3.3% allocation on NDX Tech 44.
+    - All 5 WFA Pass + RollWFA 3/3 ✓
+    - No correlation pair exceeds 0.65 (max is RSI ↔ MA Bounce = 0.65, RSI ↔ Rel Mom = 0.65)
+    - Relative Momentum MaxDD 31.82% (13pp better than Price Momentum's 44.83% in R16)
+    - Relative Momentum MC Score 2 (better than Price Momentum's MC Score 1)
+    - RSI Weekly OOS P&L +28,214.84% (new record for this strategy in combined context)
+
+14. **The "r=0.94 problem" from Round 41 is fully resolved** — replacing Price Momentum with Relative Momentum eliminates the high-correlation pair (PM ↔ RSI = 0.94) and replaces it with a moderate-correlation pair (Rel Mom ↔ RSI = 0.65, below the 0.70 warning threshold).
+
+15. **Final production portfolio configuration (DEFINITIVE):**
+
+**Conservative/Risk-First:** Sectors+DJI 46, 5 strategies, 3.3% allocation
+- MA Bounce (50d/3bar) + SMA200 Gate
+- MA Confluence (10/20/50) Fast Exit
+- Donchian Breakout (40/20)
+- Price Momentum (6m ROC, 15pct) + SMA200
+- RSI Weekly Trend (55-cross) + SMA200
+
+**Aggressive/Return-First:** NDX Tech 44, 5 strategies, 3.3% allocation (optimized)
+- MA Bounce (50d/3bar) + SMA200 Gate
+- MA Confluence (10/20/50) Fast Exit
+- Donchian Breakout (40/20)
+- RSI Weekly Trend (55-cross) + SMA200
+- Relative Momentum (13w vs SPY) Weekly + SMA200
+
+Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relative Momentum belongs in the Aggressive portfolio (NDX Tech 44). The two portfolios use different 5th strategies because their universes have different correlation structures.
+
+**Research loop STATUS: COMPLETE — Rounds 41-42 fully close the "Aggressive" portfolio question. No further experiments warranted.**
 
 ---
 
@@ -1870,7 +1906,9 @@ _[Next agent: append your session below this line]_
 ---
 
 ### QUEUE ITEM 45 — Optimized 5-Strategy NDX Tech 44 (Drop Price Momentum, Add Relative Momentum) [PRIORITY: HIGH]
-**Status: PENDING**
+**Status: DONE — 2026-04-11 (Round 42)**
+**Run ID:** ndx44-5strat-optimal_2026-04-11_12-43-30
+**Key result:** All 5 WFA Pass + RollWFA 3/3. No correlation pair exceeds 0.65 (vs r=0.94 in 6-strat). Relative Momentum MaxDD 31.82% (13pp better than Price Momentum 44.83%). RSI Weekly OOS +28,214% (record). CONFIRMED SUPERIOR to original R16 portfolio.
 
 **Why this matters:** Round 41 found Price Momentum ↔ RSI Weekly r=0.94 on NDX Tech 44 — effectively running the same strategy twice. The 6-strategy portfolio is really a 5-strategy portfolio with one strategy duplicated. Dropping Price Momentum (the lower OOS P&L performer in combined context: +9,321% vs RSI +17,529%) and keeping RSI Weekly + adding Relative Momentum creates a truly 5-way diversified portfolio. This should improve overall portfolio diversification while maintaining Sharpe.
 

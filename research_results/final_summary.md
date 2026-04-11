@@ -226,7 +226,17 @@ Round 41 (6-Strategy NDX Tech 44 — "Aggressive" portfolio — Q44, 2026-04-11)
     → These two strategies are functionally identical in combined NDX Tech 44 context
     → Do NOT run Price Momentum + RSI Weekly together on NDX Tech 44 weekly
   → Correlation profile clarified: Relative Momentum r=0.08 vs MAC (confirmed), r=0.57-0.60 vs MA Bounce/PM/RSI
-  → Next step (Q45): Optimized 5-strategy portfolio dropping Price Momentum, keeping RSI Weekly + Relative Momentum
+
+Round 42 (Optimized 5-Strategy NDX Tech 44 — Q45, 2026-04-11)
+  → ALL 5 WFA Pass + RollWFA 3/3; no HIGH CORRELATION alerts
+  → Optimized portfolio: MA Bounce + MAC + Donchian + RSI Weekly + Relative Momentum at 3.3%
+  → SUPERIOR to original R16 5-strategy portfolio:
+    → Relative Momentum MaxDD 31.82% (vs Price Momentum 44.83% — 13pp better)
+    → Relative Momentum MC Score +2 (vs Price Momentum MC Score +1)
+    → RSI Weekly OOS +28,214% (vs +27,315% in R16 — new record in combined context)
+    → No pair exceeds r=0.65 (vs r=0.94 Price Momentum↔RSI Weekly in R41)
+  → RSI Weekly now highest P&L (33,311.90%) and OOS P&L of any strategy in combined context
+  → CONFIRMED FINAL "Aggressive" Production Portfolio for NDX Tech 44
 ```
 
 ---
@@ -460,21 +470,36 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 
 ## Recommended Live Implementation
 
-### Production Portfolio (5 strategies, weekly bars, 3.3% allocation each)
+### Production Portfolio — Conservative (5 strategies, weekly bars, 3.3% allocation each)
 
-**Config:** `"timeframe": "W"`, `"allocation_per_trade": 0.033`, `"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}`
+**Universe:** Sectors+DJI 46 (`sectors_dji_combined.json`, `min_bars_required=100`)
+**Config:** `"timeframe": "W"`, `"allocation_per_trade": 0.033`
 
-All 5 strategies run simultaneously on weekly bars. Execute signals end-of-week, filled at next week's open.
+| Strategy | File | Sharpe | MaxDD | RS(min) | MC Score |
+|---|---|---|---|---|---|
+| MA Bounce (50d/3bar) + SMA200 Gate | `research_strategies_v4.py` | 1.61 | 26.85% | -2.81 | **5** |
+| MA Confluence (10/20/50) Fast Exit | `research_strategies_v3.py` | 1.52 | 24.98% | **-1.89** | **5** |
+| Donchian Breakout (40/20) | `research_strategies_v2.py` | 1.47 | 23.59% | -2.36 | **5** |
+| Price Momentum (6m ROC, 15pct) + SMA200 | `round9_strategies.py` | **1.79** | **18.88%** | -2.26 | **5** |
+| RSI Weekly Trend (55-cross) + SMA200 | `round13_strategies.py` | 1.78 | 26.34% | -2.63 | **5** |
 
-| Strategy | File | Sharpe | MaxDD | RS(min) |
-|---|---|---|---|---|
-| MA Bounce (50d/3bar) + SMA200 Gate | `research_strategies_v4.py` | 1.95 | **44.46%** | -2.67 |
-| Price Momentum (6m ROC, 15pct) + SMA200 | `round9_strategies.py` | 1.80 | **44.83%** | -2.47 |
-| RSI Weekly Trend (55-cross) + SMA200 | `round13_strategies.py` | 1.91 | 49.36% | -2.73 |
-| MA Confluence (10/20/50) Fast Exit | `research_strategies_v3.py` | 1.76 | 49.77% | **-2.19** |
-| Donchian Breakout (40/20) | `research_strategies_v2.py` | 1.63 | **47.72%** | -2.49 |
+**All MaxDDs below 28%. ALL strategies MC Score +5.**
 
-**All MaxDDs below 50%. Donchian and Price Momentum: MC Score +1.**
+### Production Portfolio — Aggressive (5 strategies, weekly bars, 3.3% allocation each)
+
+**Universe:** NDX Tech 44 (`nasdaq_100_tech.json`)
+**Config:** `"timeframe": "W"`, `"allocation_per_trade": 0.033`
+
+| Strategy | File | Sharpe | MaxDD | RS(min) | MC Score |
+|---|---|---|---|---|---|
+| MA Bounce (50d/3bar) + SMA200 Gate | `research_strategies_v4.py` | **1.94** | 44.46% | -2.67 | -1 |
+| RSI Weekly Trend (55-cross) + SMA200 | `round13_strategies.py` | 1.91 | 49.36% | -2.73 | -1 |
+| Relative Momentum (13w vs SPY) Weekly + SMA200 | `round36_strategies.py` | 1.76 | **31.82%** | -2.70 | **2** |
+| MA Confluence (10/20/50) Fast Exit | `research_strategies_v3.py` | 1.73 | 49.77% | **-2.19** | -1 |
+| Donchian Breakout (40/20) | `research_strategies_v2.py` | 1.63 | 47.72% | -2.49 | **1** |
+
+**All MaxDDs below 50%. No pair exceeds r=0.65. Confirmed R42 (Rounds 41-42).**
+**Note: Do NOT add Price Momentum to this portfolio — it reaches r=0.94 with RSI Weekly on NDX Tech 44.**
 
 ### Alternative: Daily Champions (if weekly execution is not feasible)
 
@@ -602,3 +627,4 @@ All 33 research questions have been answered across Rounds 1-31. Research is com
 31. ~~**International ETFs 30**~~ — R30 Q32. All 5 WFA Pass + ALL MC Score +5. Sharpe 0.67-1.08. **CLOSED.**
 32. ~~**Global Diversified 76 (Sectors+DJI+International ETFs)**~~ — R31 Q33. All 5 WFA Pass. Sharpe 1.36-1.82. Donchian RS(min) -1.91 record. Price Momentum ↔ RSI Weekly r=0.81 on this universe. **CLOSED.**
 33. ~~**6-Strategy NDX Tech 44 (5 original + Relative Momentum)**~~ — R41 Q44. All 6 WFA Pass + RollWFA 3/3. All MaxDDs < 47%. Relative Momentum: 969 trades + MC Score **5** (unprecedented on NDX Tech 44). CRITICAL: Price Momentum ↔ RSI Weekly r=0.94 on NDX Tech 44 — do not run together. **CLOSED.**
+34. ~~**Optimized 5-Strategy NDX Tech 44 (replace Price Momentum with Relative Momentum)**~~ — R42 Q45. All 5 WFA Pass. No pair > r=0.65. Relative Momentum MaxDD 31.82% (-13pp vs Price Momentum). RSI Weekly OOS +28,214% (record). CONFIRMED SUPERIOR to original R16 portfolio. **CLOSED.**
