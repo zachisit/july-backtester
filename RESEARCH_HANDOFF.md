@@ -108,7 +108,7 @@ All use: wfa_split_ratio=0.80, wfa_folds=3. TF = timeframe (D=daily, W=weekly).
 **INTERNATIONAL ETFs CONFIRMED (2026-04-11):** All 5 WFA Pass + ALL MC Score +5 on 30 international ETFs (Q32). Sharpe 0.67-1.08 (weaker intl momentum persistence). Best role: complement to Sectors+DJI in global portfolio.
 **GLOBAL DIVERSIFIED 76 CONFIRMED (2026-04-11):** Sectors+DJI+International ETFs (76 symbols) — all 5 WFA Pass. Sharpe 1.36-1.82, MaxDD 22-34%. MAC+Donchian MC Score +5. Donchian RS(min) -1.91 (new record). HIGH CORRELATION: Price Momentum ↔ RSI Weekly r=0.81 — use only one in live portfolio. Sectors+DJI 46 remains superior conservative universe.
 **BB BREAKOUT NEW CO-CHAMPION (2026-04-11):** BB Weekly Breakout (20w/2std) + SMA200 confirmed Sharpe 2.08 (tied record), RS(min) -3.50, 798 trades. Sensitivity sweep ROBUST: 100% of 75 variants profitable. Registered name: `BB Weekly Breakout (20w/2std) + SMA200`, file `round34_strategies.py`.
-**WILLIAMS R NEW PROVISIONAL CHAMPION (2026-04-11):** Williams R Weekly Trend (above-20) + SMA200 confirmed Sharpe 1.94, RS(min) -2.12, 799 trades. Sensitivity sweep IMPAIRED (min_val=2 clips negative thresholds). Proper sweep pending (Q43). PROVISIONAL until Q43 complete.
+**WILLIAMS R CONFIRMED CHAMPION (2026-04-11):** Williams R Weekly Trend (above-20) + SMA200: Sharpe 1.94, RS(min) -2.12, 799 trades. Sweep (Q43) ROBUST: 625/625 variants profitable (100%), 625/625 WFA Pass (100%), Sharpe range 1.59-2.21. File `round34_strategies.py`.
 **RELATIVE MOMENTUM NEW PROVISIONAL CHAMPION (2026-04-11):** Relative Momentum (13w vs SPY) Weekly + SMA200 achieves P&L 166,502% (new all-time high), Sharpe 2.08 (tied record), but only 99 trades. PROVISIONAL until sensitivity sweep (Q42) completes.
 **MEAN REVERSION ANTI-PATTERN CONFIRMED (2026-04-11):** RSI MeanRev Weekly = 0 trades (conditions mutually exclusive). BB MeanRev Weekly = 22 trades, Sharpe -1.45. Weekly timeframe benefits ONLY trend-following strategies. Mean reversion is dead at weekly resolution.
 **BB SQUEEZE FAILED (2026-04-11):** BB Squeeze Breakout failed 6-symbol gate (WFA Likely Overfitted, Sharpe 0.45). Permanently disqualified.
@@ -117,7 +117,7 @@ All use: wfa_split_ratio=0.80, wfa_folds=3. TF = timeframe (D=daily, W=weekly).
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 🥇 NEW | Relative Momentum (13w vs SPY) | `Relative Momentum (13w vs SPY) Weekly + SMA200` | `round36_strategies.py` | **W** | **166,502%** | **+2.08** | -2.36 | +153,533% | Pass | 3/3 | PROVISIONAL |
 | 🥇 NEW | BB Breakout Weekly | `BB Weekly Breakout (20w/2std) + SMA200` | `round34_strategies.py` | **W** | 152,197% | **+2.08** | -3.50 | +131,460% | Pass | 3/3 | **CONFIRMED** ✓ |
-| 3 NEW | Williams R Weekly | `Williams R Weekly Trend (above-20) + SMA200` | `round34_strategies.py` | **W** | 156,992% | **+1.94** | **-2.12** | +133,655% | Pass | 3/3 | PROVISIONAL |
+| 3 NEW | Williams R Weekly | `Williams R Weekly Trend (above-20) + SMA200` | `round34_strategies.py` | **W** | 156,992% | **+1.94** | **-2.12** | +133,655% | Pass | 3/3 | **CONFIRMED** ✓ |
 | 4† | Price Momentum Weekly | `Price Momentum (6m ROC, 15pct) + SMA200` | `round9_strategies.py` | **W** | 156,879% | +1.87 | -2.30 | +138,152% | Pass | 3/3 | Confirmed |
 | 5† | MA Bounce Weekly | `MA Bounce (50d/3bar) + SMA200 Gate` | `research_strategies_v4.py` | **W** | 140,028% | +1.92 | -2.32 | +123,865% | Pass | 3/3 | Confirmed |
 | 6 | RSI Weekly Trend | `RSI Weekly Trend (55-cross) + SMA200` | `round13_strategies.py` | **W** | 135,445% | +1.85 | -2.15 | +114,357% | Pass | 3/3 | Confirmed |
@@ -1672,7 +1672,8 @@ Williams R: IMPAIRED — min_val=2 clips negative thresholds. Only base ran. Pen
 ---
 
 ### QUEUE ITEM 43 — Williams R Proper Sensitivity Sweep (min_val=-100) [PRIORITY: HIGH]
-**Status: PENDING**
+**Status: DONE — 2026-04-11 (Round 37)**
+Williams R: ROBUST — 625/625 variants profitable (100%), 625/625 WFA Pass (100%), Sharpe range 1.59-2.21. CONFIRMED champion.
 
 **Why this matters:** The Round 36 sweep was impaired: `sensitivity_sweep_min_val=2` clips negative-valued params (entry_level=-20, exit_level=-80) to 2.0, which is outside the Williams %R range. Need proper sweep with min_val=-100.
 
