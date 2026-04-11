@@ -171,7 +171,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        # Q12: Price Momentum on weekly bars (44 symbols)
+        # Q13: 4-strategy combined weekly portfolio (44 symbols)
         "NDX Tech (44)": "nasdaq_100_tech.json",
     },
 
@@ -181,7 +181,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.10,  # 10% per position
+    "allocation_per_trade": 0.04,  # 4% per position (final 4-strategy combined weekly portfolio)
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -286,7 +286,10 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        # Q10: Price Momentum SP500 universality test
+        # Q13: 4-strategy combined weekly portfolio
+        "MA Bounce (50d/3bar) + SMA200 Gate",
+        "MA Confluence (10/20/50) Fast Exit",
+        "Donchian Breakout (40/20)",
         "Price Momentum (6m ROC, 15pct) + SMA200",
     ],
 

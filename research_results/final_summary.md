@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 11 Rounds × Multi-Agent Parallel Research
+**Research Loop:** 12 Rounds × Multi-Agent Parallel Research — **COMPLETE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-10 (36 years)
@@ -66,6 +66,13 @@ Round 11 (combined weekly + SP500 + Price Momentum weekly, 2026-04-11)
   → CONFIRMED: Combined weekly portfolio is optimal structure — MA Bounce W Sharpe 2.04, MAC W RS(min) -1.85 (best ever), Donchian W Sharpe 1.78. MaxDD -8 to -15pp vs isolation.
   → FAILURE: Price Momentum SP500 universality FAILED — RS(min) -17.09 (worse than NDX -15.92). Price Momentum is tech-sector-specific signal.
   → FINDING: 4 of 4 strategies tested on weekly bars show 165-215% Sharpe improvement — weekly timeframe improvement is fully confirmed universal finding
+
+Round 12 (4-strategy combined weekly portfolio — FINAL VALIDATION, 2026-04-11)
+  → RESEARCH COMPLETE: 4-strategy weekly portfolio confirmed as optimal production structure
+  → All 4 strategies at 4% allocation: Sharpe 1.68-1.99, MaxDD 49.34-55.40%, RS(min) -2.10 to -2.70, WFA Pass all, RollWFA 3/3 all
+  → Adding Price Momentum W REDUCED MaxDD for all 3 existing strategies vs 3-strategy Q11 run
+  → Price Momentum W MaxDD 49.34% — BEST MaxDD ever; Expectancy(R) 21.45 — HIGHEST EVER
+  → All 4 strategies hold WFA Pass with no capital-competition overfitting
 ```
 
 ---
@@ -73,24 +80,27 @@ Round 11 (combined weekly + SP500 + Price Momentum weekly, 2026-04-11)
 ## 🏆 All-Time Champion Leaderboard (44 Symbols, 1990-2026)
 
 Timeframe noted: D = daily, W = weekly. Both use annualized Sharpe (252 bars/yr for D, 52 bars/yr for W).
+"Combined MaxDD" column = MaxDD in the final 4-strategy weekly combined portfolio (Q13, 4% allocation).
 
-| Rank | Strategy | TF | P&L | Sharpe | RS(min) | OOS | WFA | RollWFA |
-|---|---|---|---|---|---|---|---|---|
-| 🥇† | Price Momentum (6m ROC, 15pct) | **W** | **156,879%** | **+1.87** | -2.30 | +138,152% | Pass | 3/3 |
-| 🥇† | MA Bounce (50d/3bar)+SMA200 | **W** | 140,028% | **+1.92** | -2.32 | +123,865% | Pass | 3/3 |
-| 3 | MA Confluence (10/20/50) Fast Exit | D | 101,198% | +0.68 | -4.46 | +88,023% | Pass | 3/3 |
-| 4 | MA Confluence Fast Exit | **W** | 84,447% | **+1.80** | -2.54 | +72,265% | Pass | 3/3 |
-| 5 | Price Momentum (6m ROC, 15pct) | D | 107,513% | +0.67 | -15.92 | +93,844% | Pass | 3/3 |
-| 6 | Donchian Breakout (40/20) | **W** | 53,499% | **+1.68** | **-2.06** | +41,671% | Pass | 3/3 |
-| (7-13) | Daily strategies — see RESEARCH_HANDOFF.md for full table | | | | | | | |
+| Rank | Strategy | TF | P&L | Sharpe | RS(min) | OOS | WFA | RollWFA | Combined MaxDD |
+|---|---|---|---|---|---|---|---|---|---|
+| 🥇† | Price Momentum (6m ROC, 15pct) | **W** | **156,879%** | +1.87 | -2.30 | +138,152% | Pass | 3/3 | **49.34%** |
+| 🥇† | MA Bounce (50d/3bar)+SMA200 | **W** | 140,028% | **+1.92** | -2.32 | +123,865% | Pass | 3/3 | **50.57%** |
+| 3 | MA Confluence Fast Exit | **W** | 84,447% | +1.80 | -2.54 | +72,265% | Pass | 3/3 | 55.40% |
+| 4 | Donchian Breakout (40/20) | **W** | 53,499% | +1.68 | **-2.06** | +41,671% | Pass | 3/3 | 52.33% |
+| (Daily strategies) | MA Confluence Fast Exit | D | 101,198% | +0.68 | -4.46 | +88,023% | Pass | 3/3 | — |
+| (Daily strategies) | Price Momentum (6m ROC, 15pct) | D | 107,513% | +0.67 | -15.92 | +93,844% | Pass | 3/3 | — |
+| (7-13) | Other daily strategies — see RESEARCH_HANDOFF.md | | | | | | | |
 
 †Co-champions: Price Momentum Weekly has higher P&L; MA Bounce Weekly has higher Sharpe.
 
-**Best-by-metric:**
+**Best-by-metric (final):**
 - Highest Sharpe: MA Bounce Weekly (+1.92)
-- Best RS(min): Donchian Weekly (-2.06)
+- Best RS(min): Donchian Weekly (-2.06) / MAC Weekly in combined (-2.10)
 - Highest P&L: Price Momentum Weekly (156,879%)
 - Best OOS P&L: Price Momentum Weekly (+138,152%)
+- Best Combined MaxDD: Price Momentum Weekly (49.34%)
+- Highest Expectancy(R): Price Momentum Weekly (21.45 — in combined portfolio)
 | 4 | CMF Momentum (20d)+SMA200 | 51,173% | +0.63 | -15.03 | +43,803% | Pass | 3/3 | 0.18 |
 | 5 | Donchian (60d/20d)+MA Alignment | 42,263% | +0.64 | -3.98 | +35,177% | Pass | 3/3 | 0.28* |
 | 6 | MA Confluence (10/20/50) Full Stack | 29,771% | +0.54 | -4.36 | +22,911% | Pass | 3/3 | 0.17 |
