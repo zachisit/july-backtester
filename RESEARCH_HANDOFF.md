@@ -29,6 +29,10 @@ Then sync the private submodule:
   rtk git commit -m "chore: update private submodule pointer"
   rtk git push origin research/autonomous-strategy-loop
 Do NOT batch multiple rounds into one commit. One round = one commit.
+
+COMPACT EVERY 2 ROUNDS — run /compact after every 2nd round to prevent context
+overflow. Do this BEFORE the commit step, not after. Pattern: run → record →
+compact → commit → push → next round.
 ```
 
 **When Claude's context fills up (session ends):**
@@ -59,9 +63,10 @@ Do NOT batch multiple rounds into one commit. One round = one commit.
 5. Run it using the EXECUTION PROTOCOL below.
 6. Record results using the ROUND RECORDING FORMAT below.
 7. Update this file: mark queue item done, add new discoveries or anti-patterns, append to SESSION LOG.
-8. **Commit and push immediately** — main repo + private submodule (see COMMIT PROTOCOL below). Do this after EVERY round before moving to the next.
-9. If time permits, pop the next queue item and repeat from step 3.
-10. Stop when you hit SUCCESS/STOP CRITERIA or when your context window is getting full.
+8. **Every 2nd round: run `/compact` BEFORE committing** — keeps context from filling and losing work mid-round.
+9. **Commit and push immediately** — main repo + private submodule (see COMMIT PROTOCOL below). Do this after EVERY round before moving to the next.
+10. If time permits, pop the next queue item and repeat from step 3.
+11. Stop when you hit SUCCESS/STOP CRITERIA or when your context window is getting full.
 
 **The goal is autonomous iteration — do not wait for human approval between rounds. Run, record, commit, push, advance.**
 
