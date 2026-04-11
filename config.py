@@ -65,11 +65,12 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    "timeframe": "D",
+    #"timeframe": "D",
     #"timeframe": "H",  # Hourly
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
     #"timeframe_multiplier": 5,       # e.g., 1, 5, 15, 30 for minutes
     #"timeframe": "W",  # Weekly
+    "timeframe": "D",  # Daily (default)
     #"timeframe": "M",  # Monthly
 
     # ============================================================
@@ -90,7 +91,7 @@ CONFIG = {
     # have no SPY/VIX files). The engine falls back to config start_date/end_date for
     # the period. Strategies declaring dependencies=["spy"] etc. will be skipped.
     "comparison_tickers": [
-      #  {"symbol": "SPY",   "role": "both",       "label": "SPY"},
+       {"symbol": "SPY",   "role": "both",       "label": "SPY"},
       #  {"symbol": "I:VIX", "role": "both", "label": "VIX"},
       #  {"symbol": "I:TNX", "role": "both", "label": "TNX"},
     ],
@@ -285,7 +286,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200", "RSI Weekly Trend (55-cross) + SMA200"],
+    "strategies": "all",
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP

@@ -88,7 +88,7 @@ Secondary goal: find strategies that are **uncorrelated with existing champions*
 
 ---
 
-## CURRENT STATE — VALIDATED CHAMPIONS (as of Round 12 session — 2026-04-11)
+## CURRENT STATE — VALIDATED CHAMPIONS (as of Round 36 session — 2026-04-11)
 
 All tested on: `nasdaq_100_tech.json` (44 symbols), 1990-2026, Norgate total-return data.
 All use: wfa_split_ratio=0.80, wfa_folds=3. TF = timeframe (D=daily, W=weekly).
@@ -107,23 +107,30 @@ All use: wfa_split_ratio=0.80, wfa_folds=3. TF = timeframe (D=daily, W=weekly).
 **5-STRATEGY COMBINED (2026-04-11):** 5-strategy weekly portfolio at 3.3% allocation achieves ALL MaxDDs below 50%. Donchian and Price Momentum reach MC Score +1. RSI Weekly highest combined P&L (32,558%) and OOS (+27,315%).
 **INTERNATIONAL ETFs CONFIRMED (2026-04-11):** All 5 WFA Pass + ALL MC Score +5 on 30 international ETFs (Q32). Sharpe 0.67-1.08 (weaker intl momentum persistence). Best role: complement to Sectors+DJI in global portfolio.
 **GLOBAL DIVERSIFIED 76 CONFIRMED (2026-04-11):** Sectors+DJI+International ETFs (76 symbols) — all 5 WFA Pass. Sharpe 1.36-1.82, MaxDD 22-34%. MAC+Donchian MC Score +5. Donchian RS(min) -1.91 (new record). HIGH CORRELATION: Price Momentum ↔ RSI Weekly r=0.81 — use only one in live portfolio. Sectors+DJI 46 remains superior conservative universe.
+**BB BREAKOUT NEW CO-CHAMPION (2026-04-11):** BB Weekly Breakout (20w/2std) + SMA200 confirmed Sharpe 2.08 (tied record), RS(min) -3.50, 798 trades. Sensitivity sweep ROBUST: 100% of 75 variants profitable. Registered name: `BB Weekly Breakout (20w/2std) + SMA200`, file `round34_strategies.py`.
+**WILLIAMS R NEW PROVISIONAL CHAMPION (2026-04-11):** Williams R Weekly Trend (above-20) + SMA200 confirmed Sharpe 1.94, RS(min) -2.12, 799 trades. Sensitivity sweep IMPAIRED (min_val=2 clips negative thresholds). Proper sweep pending (Q43). PROVISIONAL until Q43 complete.
+**RELATIVE MOMENTUM NEW PROVISIONAL CHAMPION (2026-04-11):** Relative Momentum (13w vs SPY) Weekly + SMA200 achieves P&L 166,502% (new all-time high), Sharpe 2.08 (tied record), but only 99 trades. PROVISIONAL until sensitivity sweep (Q42) completes.
+**MEAN REVERSION ANTI-PATTERN CONFIRMED (2026-04-11):** RSI MeanRev Weekly = 0 trades (conditions mutually exclusive). BB MeanRev Weekly = 22 trades, Sharpe -1.45. Weekly timeframe benefits ONLY trend-following strategies. Mean reversion is dead at weekly resolution.
+**BB SQUEEZE FAILED (2026-04-11):** BB Squeeze Breakout failed 6-symbol gate (WFA Likely Overfitted, Sharpe 0.45). Permanently disqualified.
 
-| Rank | Strategy | Registered Name (exact) | File | TF | P&L | Sharpe | RS(min) | OOS P&L | WFA | RollWFA |
-|---|---|---|---|---|---|---|---|---|---|---|
-| 🥇† | Price Momentum Weekly | `Price Momentum (6m ROC, 15pct) + SMA200` | `round9_strategies.py` | **W** | **156,879%** | **+1.87** | -2.30 | +138,152% | Pass | 3/3 |
-| 🥇† | MA Bounce Weekly | `MA Bounce (50d/3bar) + SMA200 Gate` | `research_strategies_v4.py` | **W** | 140,028% | **+1.92** | -2.32 | +123,865% | Pass | 3/3 |
-| 3 **NEW** | RSI Weekly Trend | `RSI Weekly Trend (55-cross) + SMA200` | `round13_strategies.py` | **W** | 135,445% | **+1.85** | **-2.15** | +114,357% | Pass | 3/3 |
-| 4 | MAC Fast Exit Weekly | `MA Confluence (10/20/50) Fast Exit` | `research_strategies_v3.py` | **W** | 84,447% | **+1.80** | -2.54 | +72,265% | Pass | 3/3 |
-| 5 | Donchian Weekly | `Donchian Breakout (40/20)` | `research_strategies_v2.py` | **W** | 53,499% | **+1.68** | **-2.06** | +41,671% | Pass | 3/3 |
-| 6 | MA Confluence Fast Exit | `MA Confluence (10/20/50) Fast Exit` | `research_strategies_v3.py` | D | 101,198% | +0.68 | -4.46 | +88,023% | Pass | 3/3 |
-| 7 | Price Momentum Daily | `Price Momentum (6m ROC, 15pct) + SMA200` | `round9_strategies.py` | D | 107,513% | +0.67 | -15.92 | +93,844% | Pass | 3/3 |
-| 8 | CMF Momentum (20d)+SMA200 | `CMF Momentum (20d)+SMA200` | `research_strategies_v4.py` | D | 51,173% | +0.63 | -15.03 | +43,803% | Pass | 3/3 |
-| 9 | Donchian Breakout (40/20) Daily | `Donchian Breakout (40/20)` | `research_strategies_v2.py` | D | 48,426% | +0.63 | -3.66 | +41,665% | Pass | 3/3 |
-| 10 | MA Bounce Daily | `MA Bounce (50d/3bar) + SMA200 Gate` | `research_strategies_v4.py` | D | 45,283% | +0.61 | -10.93 | +40,519% | Pass | 3/3 |
-| 11 | Donchian (60d/20d)+MA Align | `Donchian Breakout (60d/20d)+MA Alignment` | `round6_strategies.py` | D | 42,263% | +0.64 | -3.98 | +35,177% | Pass | 3/3 |
-| 12 | MA Confluence Full Stack | `MA Confluence Full Stack (10/20/50)` | `research_strategies_v3.py` | D | 29,771% | +0.54 | -4.36 | +22,911% | Pass | 3/3 |
-| 13 | ROC (20d) + MA Full Stack Gate | `ROC (20d) + MA Full Stack Gate` | `round7_strategies.py` | D | 14,518% | +0.50 | -3.83 | +12,472% | Pass | 3/3 |
-| 14 | SMA (20/50) + OBV Confirm | `SMA Crossover (20/50) + OBV Confirmation` | `round7_strategies.py` | D | 10,841% | +0.46 | -4.25 | +8,832% | Pass | 3/3 |
+| Rank | Strategy | Registered Name (exact) | File | TF | P&L | Sharpe | RS(min) | OOS P&L | WFA | RollWFA | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 🥇 NEW | Relative Momentum (13w vs SPY) | `Relative Momentum (13w vs SPY) Weekly + SMA200` | `round36_strategies.py` | **W** | **166,502%** | **+2.08** | -2.36 | +153,533% | Pass | 3/3 | PROVISIONAL |
+| 🥇 NEW | BB Breakout Weekly | `BB Weekly Breakout (20w/2std) + SMA200` | `round34_strategies.py` | **W** | 152,197% | **+2.08** | -3.50 | +131,460% | Pass | 3/3 | **CONFIRMED** ✓ |
+| 3 NEW | Williams R Weekly | `Williams R Weekly Trend (above-20) + SMA200` | `round34_strategies.py` | **W** | 156,992% | **+1.94** | **-2.12** | +133,655% | Pass | 3/3 | PROVISIONAL |
+| 4† | Price Momentum Weekly | `Price Momentum (6m ROC, 15pct) + SMA200` | `round9_strategies.py` | **W** | 156,879% | +1.87 | -2.30 | +138,152% | Pass | 3/3 | Confirmed |
+| 5† | MA Bounce Weekly | `MA Bounce (50d/3bar) + SMA200 Gate` | `research_strategies_v4.py` | **W** | 140,028% | +1.92 | -2.32 | +123,865% | Pass | 3/3 | Confirmed |
+| 6 | RSI Weekly Trend | `RSI Weekly Trend (55-cross) + SMA200` | `round13_strategies.py` | **W** | 135,445% | +1.85 | -2.15 | +114,357% | Pass | 3/3 | Confirmed |
+| 7 | MAC Fast Exit Weekly | `MA Confluence (10/20/50) Fast Exit` | `research_strategies_v3.py` | **W** | 84,447% | +1.80 | -2.54 | +72,265% | Pass | 3/3 | Confirmed |
+| 8 | Donchian Weekly | `Donchian Breakout (40/20)` | `research_strategies_v2.py` | **W** | 53,499% | +1.68 | **-2.06** | +41,671% | Pass | 3/3 | Confirmed |
+| 9 | MA Confluence Fast Exit | `MA Confluence (10/20/50) Fast Exit` | `research_strategies_v3.py` | D | 101,198% | +0.68 | -4.46 | +88,023% | Pass | 3/3 | Confirmed |
+| 10 | Price Momentum Daily | `Price Momentum (6m ROC, 15pct) + SMA200` | `round9_strategies.py` | D | 107,513% | +0.67 | -15.92 | +93,844% | Pass | 3/3 | Confirmed |
+| 11 | CMF Momentum (20d)+SMA200 | `CMF Momentum (20d)+SMA200` | `research_strategies_v4.py` | D | 51,173% | +0.63 | -15.03 | +43,803% | Pass | 3/3 | Confirmed |
+| 12 | Donchian Breakout (40/20) Daily | `Donchian Breakout (40/20)` | `research_strategies_v2.py` | D | 48,426% | +0.63 | -3.66 | +41,665% | Pass | 3/3 | Confirmed |
+| 13 | MA Bounce Daily | `MA Bounce (50d/3bar) + SMA200 Gate` | `research_strategies_v4.py` | D | 45,283% | +0.61 | -10.93 | +40,519% | Pass | 3/3 | Confirmed |
+| 14 | Donchian (60d/20d)+MA Align | `Donchian Breakout (60d/20d)+MA Alignment` | `round6_strategies.py` | D | 42,263% | +0.64 | -3.98 | +35,177% | Pass | 3/3 | Confirmed |
+
+†Co-champions: Price Momentum Weekly #1 by P&L (156,879%); MA Bounce Weekly #1 by Sharpe (+1.92).
 
 †Co-champions: Price Momentum Weekly has higher P&L (156,879%); MA Bounce Weekly has higher Sharpe (+1.92).
 
@@ -171,6 +178,9 @@ These consumed compute and taught us something. Do not re-run them in any variat
 | NR7 Volatility Contraction + Breakout | Sharpe -0.07 on 6 symbols. P&L 369% over 36 years ≈ 4.5% annualized = BELOW the 5% risk-free rate. 563 trades with WinRate 41.56% but expected profit per trade too small to clear hurdle. | NR7 triggers too frequently (any 7-bar range compression), most resolve sideways. If retrying, combine with 90-day high filter OR volume >1.2× ADV to force NR7 events to coincide with actual trend momentum. |
 | MACD Weekly (3/6/2) + SMA200 | 4,238 trades on 44 symbols (too frequent for a weekly strategy), Sharpe only 1.05. MACD crossovers at weekly resolution still occur too frequently in sideways markets — the fast/slow EMA crossover mechanism is inherently noisy regardless of bar size. | MACD family does not benefit from weekly timeframe the way MA/RSI/ROC strategies do. Do not retry MACD variations on weekly bars without a fundamentally different filtering approach. |
 | Monthly timeframe (any strategy) | Sharpe 3.77-3.93 (extraordinary) but MaxDD 73-75%, MaxRecovery 3,930 days (11 years). Strategies correlate 0.97 at monthly granularity — no portfolio diversification benefit. | Monthly bars produce impressive theoretical Sharpe but catastrophic live-trading drawdowns. Weekly timeframe is the optimal production timeframe. Never recommend monthly for live trading. |
+| RSI MeanRev Weekly (30-bounce) + SMA200 | 0 trades across 44 stocks × 36 years. RSI(14w) < 30 AND price > SMA(40w) are mutually exclusive: a stock selling for 3-6 weeks has virtually always breached SMA(40w) by then. | Do not test any RSI mean reversion strategy on weekly bars with an uptrend gate. The two conditions are structurally incompatible at weekly resolution. |
+| BB MeanRev Weekly (lower-band) + SMA200 | 22 trades over 36 years, Sharpe -1.45. When close < lower BB(20w) in an uptrend, stock is in a severe pullback that almost always resolves to SMA(40w) breach within weeks → extended losing holds. | Do not test BB mean reversion on weekly bars. The weekly lower band fires only during severe pullbacks that continue lower. Mean reversion requires daily/intraday noise to work. |
+| BB Squeeze Breakout Weekly + SMA200 | Failed 6-symbol gate: WFA "Likely Overfitted", Sharpe 0.45. Requiring a 40-bar bandwidth minimum before the breakout fires generates too few trades on weekly bars for the strategy to be robust. | BB Squeeze on weekly bars has insufficient trade frequency for robust WFA validation. The squeeze condition is structurally too rare at weekly resolution. |
 
 ---
 
@@ -1121,6 +1131,35 @@ _[Next agent: append your session below this line]_
 
 ---
 
+### Session 13 — 2026-04-11 (Rounds 34-36 completed — New Oscillator Ecosystem + Sensitivity Sweep)
+**Agent:** Claude Sonnet 4.6 (continuation of Session 12)
+**Ran:**
+- Round 34/35 results finalized: BB Breakout (Sharpe 2.08), Williams R (Sharpe 1.94), Relative Momentum (Sharpe 2.08 / 166,502% P&L), BB Squeeze (FAILED), RSI MeanRev (FAILED), BB MeanRev (FAILED)
+- Round 36: Sensitivity sweep BB Breakout + Williams R (run ID: bb-wr-sensitivity-sweep_2026-04-11_08-33-40)
+- New queue items Q40-Q43 added; RESEARCH_HANDOFF.md updated; PROVISIONAL/CONFIRMED status applied
+
+**Key findings:**
+
+1. **BB Weekly Breakout CONFIRMED CHAMPION** — sweep ROBUST: 100% of 75 variants profitable, Sharpe 1.18-2.19. The breakout edge is structural. RS(min) -3.50 is worse than other weekly champions (-2.06 to -2.54) — not disqualifying, but in combined portfolio this needs watching. Registers at rank 2 co-champion (tied Sharpe 2.08 with Relative Momentum).
+
+2. **Williams R sweep IMPAIRED** — `sensitivity_sweep_min_val=2` clips negative threshold params (entry=-20, exit=-80) to 2.0. All swept variants had entry_level=2 → outside Williams %R range → 0 trades → filtered out. Only base variant appeared in CSV. Williams R remains PROVISIONAL. Q43 added: re-sweep with `sensitivity_sweep_min_val=-100`.
+
+3. **Relative Momentum is extraordinary but thin** — 99 trades / 36 years. P&L 166,502% (all-time high), Sharpe 2.08 (record), MaxDD 31.82% in combined portfolio. Exit-day correlation r=0.06 vs MAC (lowest ever). PROVISIONAL until Q42 sweep confirms robustness.
+
+4. **Mean reversion dead at weekly resolution** — RSI MeanRev 0 trades, BB MeanRev 22 trades / Sharpe -1.45. Anti-patterns added to WHAT HAS BEEN PROVEN TO FAIL.
+
+5. **sensitivity_sweep_min_val design insight** — Default value of 2 is correct for period/length parameters but breaks any strategy with negative-valued thresholds (Williams %R family, any -100 to 0 oscillator). Always set min_val to the indicator's actual lower bound before sweeping such strategies.
+
+**Next recommended actions (in priority order):**
+1. Q43: Williams R proper sweep with `min_val=-100` — needed to confirm champion status
+2. Q42: Relative Momentum sweep — critical for 99-trade strategy validation
+3. Q40: Williams R vs RSI Weekly replacement in 5-strategy portfolio
+4. Q41: 6-strategy portfolio on Sectors+DJI 46 with Relative Momentum
+
+**Status:** Research loop ACTIVE — 3 new provisional champions await sweep validation.
+
+---
+
 ### Session 3 — 2026-04-11 (Rounds 8 commit + Round 9 completed)
 **Agent:** Claude Sonnet 4.6 (continuation of Session 2)
 **Ran:**
@@ -1539,6 +1578,123 @@ Running all three simultaneously with a merged ticker list (~300-350 unique symb
 **Next recommended actions (completed):**
 - Q32: International ETFs (30 symbols) — DONE. All 5 WFA Pass + ALL MC Score +5. Sharpe 0.67-1.08.
 - Q33: Global Diversified 76 (Sectors+DJI+International ETFs) — DONE. All 5 WFA Pass. Sharpe 1.36-1.82.
+
+### QUEUE ITEM 34 — BB Breakout + Williams R: New Oscillator Champions on NDX Tech 44 [PRIORITY: HIGH]
+**Status: DONE — 2026-04-11 (Rounds 34-35)**
+BB Breakout: Sharpe 2.08, RS(min) -3.50, 798 trades, WFA Pass 3/3, OOS +131,460%. CONFIRMED champion.
+Williams R: Sharpe 1.94, RS(min) -2.12, 799 trades, WFA Pass 3/3, OOS +133,655%. PROVISIONAL.
+Relative Momentum (13w vs SPY): P&L 166,502%, Sharpe 2.08, 99 trades, WFA Pass 3/3. PROVISIONAL.
+BB Squeeze, RSI MeanRev, BB MeanRev: all FAILED.
+
+---
+
+### QUEUE ITEM 35 — BB Breakout + Williams R Sensitivity Sweep [PRIORITY: HIGH]
+**Status: DONE — 2026-04-11 (Round 36)**
+BB Breakout: ROBUST (100% of 75 variants profitable, Sharpe 1.18-2.19). CONFIRMED champion.
+Williams R: IMPAIRED — min_val=2 clips negative thresholds. Only base ran. Pending Q43.
+
+---
+
+### QUEUE ITEM 40 — Williams R as RSI Weekly Replacement in 5-Strategy Portfolio [PRIORITY: HIGH]
+**Status: PENDING**
+
+**Why this matters:** Williams R (Sharpe 1.94, RS(min) -2.12) outperforms RSI Weekly (Sharpe 1.85, RS(min) -2.15) on isolation. Both are momentum oscillators, but Williams R uses a different signal mechanism (%R near 14-week high vs RSI 55-cross). Test if the 5-strategy combined portfolio improves when Williams R replaces RSI Weekly.
+
+**Config changes:**
+```python
+"timeframe": "W"
+"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200",
+               "Williams R Weekly Trend (above-20) + SMA200"]
+"allocation_per_trade": 0.033
+"sensitivity_sweep_enabled": False
+```
+
+**Run:** `rtk python main.py --name "5strat-williams-r-replace" --verbose`
+
+**Success criteria:** All 5 strategies WFA Pass + RollWFA 3/3. Williams R RS(min) in combined run better than -3. MaxDD for all strategies stays below 55%. If Williams R MaxDD and Sharpe in combined run are better than RSI Weekly's (49.36% MaxDD, 1.91 Sharpe in 5-strategy run), it becomes the preferred replacement.
+
+**Reset config after run.**
+
+---
+
+### QUEUE ITEM 41 — 6-Strategy Portfolio on Sectors+DJI 46 (add Relative Momentum) [PRIORITY: MEDIUM]
+**Status: PENDING**
+
+**Why this matters:** Relative Momentum (13w vs SPY) has avg hold 831 days (3.3 years) — extremely different from existing champions. On Sectors+DJI 46 (MaxDD 21-30%), adding a strategy that holds for years with exit-day r=0.06 vs MAC could push MaxDD below 20%.
+
+**Config changes:**
+```python
+"timeframe": "W"
+"portfolios": {"Sectors+DJI (46)": "sectors_dji_combined.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200",
+               "RSI Weekly Trend (55-cross) + SMA200",
+               "Relative Momentum (13w vs SPY) Weekly + SMA200"]
+"allocation_per_trade": 0.028   # NOTE: 1/N for N=6 strategies, explicitly computed
+"min_bars_required": 100
+"comparison_tickers": [{"symbol": "SPY", "role": "both", "label": "SPY"}]
+```
+
+**Run:** `rtk python main.py --name "sectors-dji-6strat-relmom" --verbose`
+
+**Success criteria:** Relative Momentum WFA Pass + RollWFA 3/3 on Sectors+DJI 46. Combined MaxDD < 25% for all strategies.
+
+**Reset config after run.** Remove comparison_tickers SPY (or restore to default).
+
+---
+
+### QUEUE ITEM 42 — Relative Momentum Sensitivity Sweep [PRIORITY: HIGH]
+**Status: PENDING**
+
+**Why this matters:** Relative Momentum has only 99 trades in 36 years (avg hold 831 days). This is below the 500-trade threshold for full confidence. The strategy must be sensitivity-swept to ensure the 15% SPY outperformance threshold (rel_thresh=1.15) is not uniquely good. With only 99 trades, any overfit would be catastrophic in live trading.
+
+**Config changes:**
+```python
+"timeframe": "W"
+"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}
+"strategies": ["Relative Momentum (13w vs SPY) Weekly + SMA200"]
+"allocation_per_trade": 0.10
+"sensitivity_sweep_enabled": True
+"sensitivity_sweep_pct": 0.15
+"sensitivity_sweep_steps": 2
+"sensitivity_sweep_min_val": 2    # roc_bars and sma_slow are positive; rel_thresh is positive float
+"comparison_tickers": [{"symbol": "SPY", "role": "both", "label": "SPY"}]
+```
+
+**Run:** `rtk python main.py --name "relmom-sensitivity-sweep" --verbose`
+
+**Success criteria:** ≥ 70% of valid variants (≥50 trades) profitable (ROBUST verdict). Given only 99 base trades, many variants may fall below 50-trade minimum → check raw profitable-variant percentage of those with enough trades.
+
+**Reset config after run.**
+
+---
+
+### QUEUE ITEM 43 — Williams R Proper Sensitivity Sweep (min_val=-100) [PRIORITY: HIGH]
+**Status: PENDING**
+
+**Why this matters:** The Round 36 sweep was impaired: `sensitivity_sweep_min_val=2` clips negative-valued params (entry_level=-20, exit_level=-80) to 2.0, which is outside the Williams %R range. Need proper sweep with min_val=-100.
+
+**Config changes:**
+```python
+"timeframe": "W"
+"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}
+"strategies": ["Williams R Weekly Trend (above-20) + SMA200"]
+"allocation_per_trade": 0.10
+"sensitivity_sweep_enabled": True
+"sensitivity_sweep_pct": 0.15
+"sensitivity_sweep_steps": 2
+"sensitivity_sweep_min_val": -100   # CRITICAL: allows negative %R thresholds to vary
+```
+
+**Run:** `rtk python main.py --name "williams-r-sensitivity-proper" --verbose`
+
+**Success criteria:** ≥ 70% of valid variants profitable. If ROBUST → Williams R is CONFIRMED champion. If FRAGILE → Williams R remains PROVISIONAL with a specific fragility note.
+
+**Reset config after run** (including `sensitivity_sweep_min_val` back to 2).
+
+---
 
 ### QUEUE ITEM 33 — Global Diversified 76: Sectors+DJI+International ETFs [PRIORITY: HIGH]
 **Status: DONE — 2026-04-11**
