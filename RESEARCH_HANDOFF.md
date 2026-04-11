@@ -3,6 +3,34 @@
 
 ---
 
+## FOR THE HUMAN OPERATOR
+
+**One prompt to start a session:**
+```
+Read RESEARCH_HANDOFF.md in full, then continue the strategy research loop.
+Pop the first uncompleted queue item, run the backtest, record results in
+research_results/round_7.md, update RESEARCH_HANDOFF.md (mark item done,
+append to SESSION LOG), then immediately move to the next queue item.
+Keep going until you hit the stop criteria or your context window is full.
+```
+
+**When Claude's context fills up (session ends):**
+1. Make sure the agent committed and pushed `RESEARCH_HANDOFF.md` before it stopped
+2. Start a fresh Claude Code session in this repo
+3. Paste the exact prompt above — nothing else needed
+4. The updated SESSION LOG in this file is the memory. No conversation history required.
+
+**Running across timezones / multiple API keys:**
+- Each person clones the branch, runs the prompt above, lets it go
+- The only rule: one agent at a time. Parallel agents will produce conflicting writes to this file.
+- When handing off to another person: push `RESEARCH_HANDOFF.md` + any new `research_results/` files first.
+
+**When to stop handing off:**
+- Check SUCCESS/STOP CRITERIA section at the bottom of this file
+- If the SESSION LOG shows 3+ consecutive sessions with no new champion, research is done
+
+---
+
 ## HOW TO USE THIS FILE
 
 **You are a Claude agent picking up an ongoing strategy research loop.**
