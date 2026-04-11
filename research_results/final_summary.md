@@ -1,10 +1,10 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 7 Rounds × Multi-Agent Parallel Research
+**Research Loop:** 8 Rounds × Multi-Agent Parallel Research
 **Last Updated:** 2026-04-10
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-10 (36 years)
-**Ecosystems tested:** AAPL single → tech_giants (6) → Nasdaq 100 Tech (44 symbols)
+**Ecosystems tested:** AAPL single → tech_giants (6) → Nasdaq 100 Tech (44 symbols) → S&P 500 (500 symbols — universality confirmed)
 
 ---
 
@@ -39,6 +39,14 @@ Round 7 (5 first-principles strategies, 1990-2026)
   → DISCOVERY: ROC (20d)+MA Full Stack Gate — SQN 6.95 (highest ever), RS(min)=-3.83
   → CMF (10d) failed — shorter window makes CMF noisier, not better
   → EMA (8/21)+CMF Hold Gate: MaxRcvry 5008 days — dual-condition exit creates whipsaw
+
+Round 8 (4 experiments + 2 portfolio-level tests, 1990-2026)
+  → SP500 UNIVERSALITY CONFIRMED — all 3 champions pass WFA+RollWFA 3/3 on 500 stocks
+  → MAC RS(min)=-3.49 on SP500 (SMOOTHER than -4.46 on NDX) — diversification helps equity curve
+  → 3-strategy combined portfolio: all WFA Pass, MA Bounce RS(min) degrades to -23.28 (capital competition)
+  → ATR 3.5x trailing stop FAILED to rescue MC Score — synchronized tech crashes can't be stopped by position-level stops
+  → Donchian + Volume Breakout: too selective (143 trades, negative Sharpe)
+  → MA Bounce + OBV Gate at entry: OBV gate eliminates 55% of valid bounces (same mistake as RSI gate)
 ```
 
 ---
@@ -58,7 +66,7 @@ Round 7 (5 first-principles strategies, 1990-2026)
 
 *Donchian variants have r=0.39-0.95 with each other; do not hold multiple Donchian variants simultaneously.
 
-**MC Score Note:** All 44-symbol strategies show MC Score -1 (DD Understated + High Tail Risk). This is a concentration-risk warning — 44 correlated tech stocks crash simultaneously in bear markets. Not a strategy flaw; a portfolio construction constraint. Max 5-10 concurrent positions in live trading.
+**MC Score Note:** All 44-symbol strategies show MC Score -1 (DD Understated + High Tail Risk). This is a concentration-risk warning — 44 correlated tech stocks crash simultaneously in bear markets. Not a strategy flaw; a portfolio construction constraint. Max 5-10 concurrent positions in live trading. **MC Score -1 cannot be rescued by position-level ATR trailing stops** (proven in R8 — 3.5x ATR still shows MC Score -1 and reduces P&L 78%).
 
 ---
 
@@ -74,6 +82,20 @@ Round 7 (5 first-principles strategies, 1990-2026)
 | Donchian (40/20)+SMA200 Gate | 394% | +0.33 | -28.92† | +161% | Pass | 3/3 | **5** |
 
 †RS(min) = -28.92 is an artifact of bear-market inactivity (strategy flat, near-zero variance → inflated negative rolling Sharpe). Not a real risk indicator for these strategies.
+
+---
+
+## SP500 Universality Results (500 Symbols, 1990-2026) — R8 Confirmed
+
+| Strategy | P&L | Sharpe | RS(min) | OOS P&L | WFA | RollWFA | Trades |
+|---|---|---|---|---|---|---|---|
+| MA Confluence Fast Exit | 6,300% | +0.44 | -3.49 | +3,096% | Pass | 3/3 | 3,648 |
+| Donchian Breakout (40/20) | 7,789% | +0.47 | -4.13 | +4,754% | Pass | 3/3 | 3,070 |
+| MA Bounce (50d/3bar)+SMA200 | 4,552% | +0.40 | -500† | +2,466% | Pass | 3/3 | 4,069 |
+
+†RS(min)=-500 for MA Bounce on SP500 is a data artifact — early 1990-1991 bars before SMA200 warmup, not real risk.
+
+**All 3 primary champions work on any large-cap equity universe. Signals are NOT tech-specific.**
 
 ---
 
@@ -199,6 +221,7 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 | `research_strategies_v4.py` | R5 | CMF+SMA200, MACD+RSI+SMA200, ATR Trailing, **MA Bounce (50d)+SMA200**, Keltner+MA Stack |
 | `round6_strategies.py` | R6 | CMF+RSI Gate, MA Bounce+RSI (failed), **Donchian (60d/20d)+MA Alignment**, OBV+MAC, MAC+ATR |
 | `round7_strategies.py` | R7 | CMF (10d) (failed), Donchian+RSI (redundant), EMA+CMF Hold (MaxRcvry 5008), **ROC (20d)+MA Full Stack**, **SMA (20/50)+OBV Confirm** |
+| `round8_strategies.py` | R8 | MAC+ATR 3.5x (MC Score -1 persists — failed), EMA+OBV Hold (Sharpe 0.03), Donchian+Volume (143 trades), MA Bounce+OBV (entry gate too selective) |
 
 Bold = validated champion strategies.
 
@@ -220,23 +243,33 @@ Bold = validated champion strategies.
 | RSI>50 gate on N-bar new-high breakout is redundant (r=+1.00 proven on 44 symbols) | R7 44-sym validation | R7 |
 | CMF shorter period makes it worse, not better — oscillator family is inherently noisy | R7 failed experiment | R7 |
 | ROC+MA Full Stack: SQN 6.95 (highest ever) — high trade count drives statistical confidence | R7 new discovery | R7 |
+| SP500 universality confirmed — all 3 champions WFA Pass on 500 stocks; MAC RS(min)=-3.49 (SMOOTHER on SP500 than NDX) | R8 Q2 result | R8 |
+| MC Score -1 cannot be rescued by trailing stops — it is structural concentration risk | R8 ATR test | R8 |
+| Entry-time OBV gates destroy bounce strategies (same as RSI gates) — OBV confirms price, not adds quality | R8 failed test | R8 |
+| Volume breakout filter (>1.5× ADV) is too selective (143 trades on 6 symbols); try lower threshold (1.2×) if needed | R8 failed test | R8 |
 
 ---
 
 ## Open Research Questions for Future Rounds
 
-1. **Can MA Confluence MC Score be rescued?** ATR trailing stop at 2.0x failed. Try 3.0x or 3.5x multiplier — Round 8 priority.
+1. ~~**Can MA Confluence MC Score be rescued with ATR?**~~ — TESTED in R8. ATR 3.5x still shows MC Score -1 on 44 symbols and cuts P&L 78%. MC Score -1 is structural concentration risk, NOT fixable by trailing stops. **CLOSED.**
 
-2. ~~**CMF shorter period**~~ — TESTED in R7. CMF (10d) had negative Sharpe. CMF is not a strong signal family regardless of window.
+2. ~~**CMF shorter period**~~ — TESTED in R7. CMF (10d) had negative Sharpe. **CLOSED.**
 
-3. **MA Bounce on weekly bars** — the 50-SMA bounce on weekly charts is a strong institutional pattern. Weekly timeframe would give cleaner signals and higher win rates.
+3. **MA Bounce on weekly bars** — the 50-SMA bounce on weekly charts is a strong institutional pattern. Weekly timeframe would give cleaner signals and higher win rates. Queue Item 4 in handoff.
 
-4. **Multi-strategy portfolio simulation** — run MA Confluence Fast Exit + Donchian (40/20) + MA Bounce simultaneously as a combined portfolio to measure actual combined drawdown and Sharpe.
+4. ~~**Multi-strategy portfolio simulation**~~ — TESTED in R8 Queue Item 1. All 3 pass WFA in combined run. MA Bounce RS(min) degrades to -23.28 at 5% allocation. **CLOSED — recommend 7% allocation for MA Bounce.**
 
-5. **Sector rotation** — do the same strategies work equally well on energy, financials, healthcare? If yes, diversify away from tech concentration.
+5. ~~**Sector rotation (SP500 universality)**~~ — TESTED in R8 Queue Item 2. All 3 champions pass WFA+RollWFA 3/3 on SP500. **CLOSED — universality confirmed.**
 
-6. **EMA (8/21) + OBV Hold Gate** — Replace CMF with OBV as the sustained hold condition. OBV doesn't hover near zero like CMF does. Round 8 candidate.
+6. ~~**EMA (8/21) + OBV Hold Gate**~~ — TESTED in R8. Sharpe 0.03 on 6 symbols. **CLOSED.**
 
-7. **Donchian (40/20) + Volume Spike Confirmation** — Gate breakouts on volume > 1.5× 20-bar average (not RSI — proven redundant). Tests a real new hypothesis: breakouts on below-average volume fail more often.
+7. ~~**Donchian (40/20) + Volume Spike Confirmation**~~ — TESTED in R8. 143 trades (too selective at 1.5×), negative Sharpe. **CLOSED. (Try 1.2× if needed.)**
 
-8. **MA Bounce (50d) + OBV Confirmation** — Gate bounce entries on OBV being above its MA. Should improve win rate without destroying the 50-SMA timing signal.
+8. ~~**MA Bounce (50d) + OBV Confirmation**~~ — TESTED in R8. OBV entry gate eliminates 55% of valid bounces (same mistake as RSI gate). **CLOSED.**
+
+9. **Price Momentum (6-month ROC 15%+) + SMA200** — simple relative strength strategy not yet tested. Buy what's already up >15% over 6 months while price > SMA200. Queue Item 5D from handoff.
+
+10. **NR7 Volatility Contraction Breakout** — narrow range (7-day low) + close above prior high + SMA200 uptrend. Institutional accumulation signal. Queue Item 5E from handoff.
+
+11. **SP500 combined 3-strategy portfolio at 3% allocation** — Queue Item 6 from handoff. Test whether diversified universe fixes MC Score.

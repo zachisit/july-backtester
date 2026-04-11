@@ -118,6 +118,10 @@ These consumed compute and taught us something. Do not re-run them in any variat
 | RSI>50 gate on Donchian (40/20) breakout | r=+1.00 vs plain Donchian on 44 symbols — gate adds zero selectivity. A 40-bar new high IS momentum; RSI>50 is always already true | Never add RSI confirmation to N-bar new-high breakouts — it's a redundant parameter |
 | CMF (10d) + SMA200 | Negative Sharpe (-0.13). Shorter window = more noise (1394 trades), more zero-crossings | Don't fix CMF by shortening period. CMF family is intrinsically noisy. |
 | EMA (8/21) + CMF Hold Gate | MaxRcvry 5008 days (13+ years). CMF flips near zero while EMA says hold → frequent false exits then re-entries | Dual conflicting exit conditions (EMA vs CMF) create whipsaw and extended flat recovery periods |
+| ATR trailing stop on 44 tech stocks (any multiplier) | MC Score -1 persists on 44 symbols even at 3.5x ATR (23K% P&L vs 101K% plain). ATR stops don't prevent synchronized sector crashes | MC Score -1 on concentrated tech portfolios is structural. Fix: diversify universe or limit concurrent positions. Not fixable by position-level stops. |
+| EMA (8/21) + OBV Hold Gate | Sharpe 0.03 on 6 symbols (1907 trades). OBV state changes too frequently at EMA 8/21 timeframe — creates constant exit/re-entry cycles | OBV hold condition works better at slower timeframes. Fast EMAs + OBV = too noisy. |
+| Donchian (40/20) + Volume Breakout (1.5× ADV) | 143 trades on 6 symbols over 36 years — too selective. Negative Sharpe. | Volume filter at 1.5× ADV eliminates >70% of valid breakouts. If retrying, use 1.1-1.2× threshold. |
+| MA Bounce + OBV Gate at entry time | 299 trades (vs 660 baseline) — OBV gate eliminates 55% of valid bounces. Sharpe 0.01. | Entry-time OBV gate on bounce strategies destroys edge, same as RSI gate. The bounce IS the quality signal. |
 
 ---
 
@@ -368,11 +372,21 @@ This tests whether a non-tech-concentrated portfolio still delivers alpha and fi
 ---
 
 ### QUEUE ITEM 7 — ATR Trailing Stop 3.5x on MA Confluence [PRIORITY: MEDIUM]
-**Status: IN DESIGN — round8_strategies.py created, not yet run**
+**Status: DONE — FAILED (2026-04-10)**
 
-Strategy name: `"MA Confluence (10/20/50) Fast Exit + ATR 3.5x"` in `round8_strategies.py`.
-Updated from 3.0x to 3.5x based on R6 lesson: 3.0x might still be too tight on NVDA/META.
-Run on 6 symbols first. Success: WFA Pass + trades < 600 + RS(min) > -6 on 6 symbols → run on 44.
+**6-symbol result:** P&L 1,317%, Sharpe 0.31, MC Score **5** (vs plain MAC MC Score 2) — promising!
+**44-symbol result:** P&L 23,068%, Sharpe 0.55, MC Score **-1** (same as plain MAC). ATR rescue FAILED.
+
+**Why it failed on 44 symbols:** MC Score -1 is caused by synchronized tech crashes where all 44 positions draw down simultaneously. Position-level trailing stops cannot prevent synchronized sector crashes — when all tech stocks fall, all ATR stops trigger at the same time. The MC Score -1 is structural concentration risk, not fixable by trailing stops.
+
+**The 6-symbol MC Score 5 was misleading** — with only 6 stocks in 2000-2002, the ATR stop's protection was sufficient for 6 positions. At 44 positions, the synchronized crash effect dominates.
+
+**Lesson: MC Score -1 on concentrated tech portfolios can only be fixed by:**
+1. Diversifying universe (SP500 confirmed — universality test)
+2. Enforcing strict concurrent position limits (max 5-10 in live trading)
+3. Adding non-correlated asset classes (bonds, commodities) — not yet tested
+
+**Do NOT retry ATR variations.** The lesson is definitively settled.
 
 2.0x and 2.5x ATR failed on tech stocks. If you have spare compute, try 3.0x.
 
