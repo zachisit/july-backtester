@@ -13,6 +13,22 @@ the first uncompleted queue item, run the backtest, record results in
 research_results/round_[N+1].md, update RESEARCH_HANDOFF.md (mark item done,
 append to SESSION LOG), then immediately move to the next queue item.
 Keep going until you hit the stop criteria or your context window is full.
+
+COMMIT AND PUSH AFTER EVERY SINGLE ROUND — no exceptions. After recording
+results and updating RESEARCH_HANDOFF.md, run:
+  rtk git add -A
+  rtk git commit -m "research: round [N+1] complete — [one-line summary]"
+  rtk git push origin research/autonomous-strategy-loop
+Then sync the private submodule:
+  cd custom_strategies/private
+  rtk git add -A
+  rtk git commit -m "research: sync round [N+1]"
+  rtk git push origin research/autonomous-strategy-loop
+  cd ../..
+  rtk git add custom_strategies/private
+  rtk git commit -m "chore: update private submodule pointer"
+  rtk git push origin research/autonomous-strategy-loop
+Do NOT batch multiple rounds into one commit. One round = one commit.
 ```
 
 **When Claude's context fills up (session ends):**
@@ -42,10 +58,11 @@ Keep going until you hit the stop criteria or your context window is full.
 4. Run it using the EXECUTION PROTOCOL below.
 5. Record results using the ROUND RECORDING FORMAT below.
 6. Update this file: mark queue item done, add new discoveries or anti-patterns, append to SESSION LOG.
-7. If time permits, pop the next queue item and repeat.
-8. Stop when you hit SUCCESS/STOP CRITERIA or when your context window is getting full.
+7. **Commit and push immediately** — main repo + private submodule (see COMMIT PROTOCOL below). Do this after EVERY round before moving to the next.
+8. If time permits, pop the next queue item and repeat from step 3.
+9. Stop when you hit SUCCESS/STOP CRITERIA or when your context window is getting full.
 
-**The goal is autonomous iteration — do not wait for human approval between rounds. Run, record, advance.**
+**The goal is autonomous iteration — do not wait for human approval between rounds. Run, record, commit, push, advance.**
 
 ---
 
@@ -834,6 +851,37 @@ RS(min) -2.06 is the single best rolling Sharpe stress score of all 15+ strategi
 
 ## EXECUTION PROTOCOL
 
+### COMMIT PROTOCOL — Run after EVERY round, no exceptions
+
+After writing round_[N+1].md and updating RESEARCH_HANDOFF.md, run these commands in order:
+
+```bash
+# 1. Commit main repo
+rtk git add research_results/round_[N+1].md research_results/final_summary.md RESEARCH_HANDOFF.md config.py
+# (add any new strategy files or ticker JSONs created this round)
+rtk git commit -m "research: round [N+1] complete — [one-line summary of key finding]"
+rtk git push origin research/autonomous-strategy-loop
+
+# 2. Sync private submodule
+cd custom_strategies/private
+cp ../../research_results/round_[N+1].md research_results/
+cp ../../research_results/final_summary.md research_results/
+cp ../../RESEARCH_HANDOFF.md .
+rtk git add -A
+rtk git commit -m "research: sync round [N+1]"
+rtk git push origin research/autonomous-strategy-loop
+cd ../..
+
+# 3. Update submodule pointer in main repo
+rtk git add custom_strategies/private
+rtk git commit -m "chore: update private submodule pointer to round [N+1]"
+rtk git push origin research/autonomous-strategy-loop
+```
+
+**One round = one commit. Do NOT batch multiple rounds. If the power goes out, the last push is safe.**
+
+---
+
 ### Commands (always prefix with `rtk` — project rule)
 ```bash
 # Standard run
@@ -886,7 +934,7 @@ rtk python main.py --dry-run 2>&1 | head -30
 
 ## ROUND RECORDING FORMAT
 
-When you complete a run, create or append to `research_results/round_7.md` using this format:
+When you complete a run, create `research_results/round_[N+1].md` (where N is the last completed round from the SESSION LOG) using this format:
 
 ```markdown
 # Research Round 7 — [Section Name]
