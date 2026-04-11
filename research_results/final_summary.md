@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 16 Rounds × Multi-Agent Parallel Research — **COMPLETE ✓**
+**Research Loop:** 20 Rounds × Multi-Agent Parallel Research — **COMPLETE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-10 (36 years)
@@ -101,6 +101,33 @@ Round 16 (5-strategy combined weekly portfolio, 2026-04-11)
   → RSI Weekly contributes highest combined P&L (32,558%) and OOS (+27,315%) in the 5-strategy portfolio
   → Sharpe range 1.63-1.95, RS(min) -2.19 to -2.73 (all better than -3)
   → All 5 WFA Pass + RollWFA 3/3 — no capital-competition overfitting
+
+Round 17 (5-strategy weekly on SP500 — universality + Price Momentum breakthrough, 2026-04-11)
+  → ALL 5 WFA Pass + RollWFA 3/3 on SP500 503 symbols
+  → BREAKTHROUGH: Price Momentum SP500 weekly — Sharpe 1.81, RS(min) -1.86, OOS +50,953%
+    (vs SP500 DAILY: Sharpe 0.56, RS(min) -17.09 — daily failure was timeframe artifact)
+  → Donchian achieves MC Score +1 on SP500 combined run
+  → Price Momentum vs RSI Weekly correlation = 0.83 on SP500 (lower on NDX tech universe)
+  → Universality now confirmed: NDX 44 ✓ → Russell 1000 1,012 ✓ → SP500 503 ✓ for all 5 strategies
+
+Round 18 (block bootstrap MC — autocorrelation effect on MC Scores, 2026-04-11)
+  → Block bootstrap: all 5 strategies revert to MC Score -1 (Donchian and Price Momentum had been +1 under IID)
+  → IID MC was optimistic — weekly momentum trades ARE autocorrelated (winning streaks cluster in trends)
+  → Block bootstrap block size auto = floor(sqrt(N)) captures 8-13 months of trade history per block
+  → Conclusion: MC Score -1 is the honest authoritative risk assessment for concentrated tech portfolios
+
+Round 19 (±1% OHLC noise injection stress test, 2026-04-11)
+  → ALL 5 strategies pass: Sharpe changes -1.0% to +1.2% — essentially zero
+  → RSI Weekly Sharpe 1.91 → 1.92 (+0.5%); Price Momentum 1.80 → 1.80 (0.0%)
+  → Weekly strategies are noise-immune: long-window indicators (SMA40w, RSI14w) dilute 1-bar noise
+  → Trade counts change < 1% — strategies' signals are stable at ±1% perturbation
+
+Round 20 (RSI Weekly parameter sensitivity sweep — Q21, 2026-04-11)
+  → 625 grid variants tested (5^4 combinations of rsi_period, rsi_entry, rsi_exit, sma_slow)
+  → 535 valid variants (≥50 trades): 534/535 (99.8%) profitable, 535/535 (100%) WFA Pass
+  → Mean Sharpe 1.58 across valid variants; range -0.98 to 2.10
+  → ROBUST VERDICT: RSI Weekly edge is NOT parameter-specific. 55/45 thresholds are within a wide profitable family.
+  → Best discovered variant: rsi_period=10, rsi_entry=63.25, rsi_exit=51.75 → Sharpe 2.10
 ```
 
 ---
@@ -274,6 +301,19 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 - Strategy correlation = 0.97 at monthly granularity — any two momentum strategies become identical at monthly bars
 - **Lesson: finer timeframes are not always worse; weekly occupies the optimal tradeoff between noise filtering and drawdown containment. Monthly sacrifices too much capital at risk.**
 
+### 15. Block Bootstrap MC Is More Conservative Than IID for Momentum Strategies (R18)
+- IID MC treats each trade as independent — this overstates robustness for momentum strategies
+- Block bootstrap preserves win/loss streaks; Donchian and Price Momentum lose MC Score +1
+- Auto block size = floor(sqrt(N)) captures 8-13 months of trade history per block
+- **Lesson: Use block bootstrap MC for final risk assessment of momentum portfolios. Accept MC Score -1 as the correct assessment on concentrated tech universes.**
+
+### 16. RSI Weekly Parameter Sensitivity: Edge Is Structural, Not Threshold-Specific (R20)
+- 534/535 valid variants (99.8%) profitable across 5^4 = 625 parameter combinations
+- 100% of valid variants pass WFA — extraordinary; no parameter set breaks out-of-sample
+- The 55-cross threshold sits near the 85th percentile of all valid variants by Sharpe
+- Better variant found: rsi_period=10, rsi_entry=63.25, rsi_exit=51.75 (Sharpe 2.10 vs 1.85 base)
+- **Lesson: RSI Weekly's edge is a momentum regime condition (RSI crosses a meaningful threshold with SMA200 trend gate), not a specific numerical threshold. The strategy is genuinely robust.**
+
 ### 14. Uncorrelated Strategies Compound MC Score Improvements (R16)
 - 4-strategy weekly portfolio: all MC Score -1 on NDX Tech 44
 - 5-strategy weekly portfolio: Donchian and Price Momentum reach MC Score +1
@@ -366,7 +406,7 @@ Bold = validated champion strategies.
 
 ## Open Research Questions — All Closed
 
-All 20 research questions have been answered across Rounds 1-16. Research is complete.
+All 21 research questions have been answered across Rounds 1-20. Research is complete.
 
 1. ~~**Can MA Confluence MC Score be rescued with ATR?**~~ — R8. **CLOSED.**
 2. ~~**CMF shorter period**~~ — R7. **CLOSED.**
@@ -389,3 +429,4 @@ All 20 research questions have been answered across Rounds 1-16. Research is com
 18. ~~**MACD weekly + RSI weekly**~~ — R14 Q15. MACD failed; RSI Weekly rank 3 champion. **CLOSED.**
 19. ~~**Russell 1000 universality**~~ — R15 Q16. All 4 WFA Pass 3/3 on 1,012 symbols. **CLOSED.**
 20. ~~**5-strategy combined weekly portfolio**~~ — R16 Q17. ALL MaxDDs below 50%. **CLOSED.**
+21. ~~**RSI Weekly parameter sensitivity sweep (±15% ×2 steps)**~~ — R20 Q21. 99.8% profitable, 100% WFA Pass. ROBUST. **CLOSED.**

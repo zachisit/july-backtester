@@ -181,7 +181,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.10,  # 10% per position
+    "allocation_per_trade": 0.10,  # 10% per position — isolation test
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -293,7 +293,7 @@ CONFIG = {
     # Automatically varies each numeric param in a strategy's @register_strategy
     # params dict by ±pct across ±steps steps, then prints a fragility verdict.
     # Opt-in only — keep disabled for normal runs (multiplies task count).
-    "sensitivity_sweep_enabled": False,   # opt-in
+    "sensitivity_sweep_enabled": False,
     "sensitivity_sweep_pct": 0.20,        # ±20% per step
     "sensitivity_sweep_steps": 2,         # 2 steps each side → 5 values per param
     "sensitivity_sweep_min_val": 2,       # floor (prevents e.g. SMA period = 0)
