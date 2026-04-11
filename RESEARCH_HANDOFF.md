@@ -1938,16 +1938,29 @@ Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relati
 
 4. **Universe-specific correlation confirmed:** BB ↔ RSI Weekly is 0.4711 on Sectors+DJI 46 vs 0.7049 on NDX Tech 44. Same pair, different universe, completely different correlation due to sector rotation. Always test correlations on the actual production universe.
 
-**Research loop STATUS: ACTIVE — Q49 DONE. Conservative 6th strategy track closed. Q50 (Williams %R on Sectors+DJI 46) pending — optional low priority.**
+**Research loop STATUS: ACTIVE — Q50 DONE. ALL production portfolios CONFIRMED FINAL (3 configurations fully characterized). New research direction needed.**
 
-**Rel Mom on Sectors+DJI 46 additional finding (Round 46):** Max r=0.2373 — lowest maximum correlation of any strategy in any combined portfolio run in research history. But Sharpe 0.80 disqualifies it. Lesson: Low correlation without sufficient alpha does not improve a portfolio. The two conditions are both necessary.
+**Additional findings (Round 47 — Q50: Williams R as 6th):**
+- Williams R Weekly Trend (above-20) + SMA200 achieves Sharpe 1.82 — the highest Sharpe of ANY strategy in the 6-strategy portfolio, beating RSI Weekly (1.78) and Price Momentum (1.79)
+- OOS P&L +1,437.81% — 8.4× better than BB Breakout's +170.96%
+- Williams R ↔ RSI Weekly r=0.6451 (well below 0.70)
+- ALL 6 MC Score 5 maintained
+- **Conservative portfolio v2 (6-strategy) is now definitively: MA Bounce + MAC + Donchian + Price Momentum + RSI Weekly + Williams R Weekly Trend at 2.8% on Sectors+DJI 46**
+- Conservative 6th strategy comparison: Williams R (Sharpe 1.82, OOS +1,437%) > BB Breakout (Sharpe 1.43, OOS +170%) > Relative Momentum (Sharpe 0.80, OOS +51%) — CLOSED
+
+**CURRENT PRODUCTION PORTFOLIO SUMMARY:**
+- **Conservative v1:** Sectors+DJI 46, 5 strategies (MA Bounce + MAC + Donchian + Price Momentum + RSI Weekly), 3.3% allocation, ALL MC Score 5
+- **Conservative v2:** Sectors+DJI 46, 6 strategies (v1 + Williams R Weekly Trend), 2.8% allocation, ALL 6 MC Score 5
+- **Aggressive:** NDX Tech 44, 5 strategies (MA Bounce + MAC + Donchian + RSI Weekly + Relative Momentum), 3.3% allocation
 
 _[Next agent: append your session below this line]_
 
 ---
 
 ### QUEUE ITEM 50 — Williams %R as 6th Strategy in Conservative Portfolio (Sectors+DJI 46) [PRIORITY: LOW]
-**Status: PENDING**
+**Status: DONE — 2026-04-11 (Round 47)**
+**Run ID:** sectors-dji-6strat-williams_2026-04-11_13-08-10
+**Key result:** OUTSTANDING — Williams R achieves Sharpe 1.82 (HIGHEST in the 6-strategy portfolio), OOS P&L +1,437.81% (8.4× better than BB Breakout +170.96%). MC Score 5. Williams R ↔ RSI Weekly r=0.6451 (below 0.70). Williams R is the DEFINITIVE WINNER among all 3 6th strategy candidates (vs BB Breakout, Relative Momentum). Conservative portfolio v2 upgraded to use Williams R. Conservative 6th strategy track CLOSED.
 
 **Why this matters:** BB Breakout is confirmed as the best 6th strategy for the conservative portfolio (OOS +170.96%, all 6 MC Score 5), but its Sharpe (1.43) and OOS P&L are the weakest in the portfolio. Williams %R (14-period, oversold threshold) was confirmed robust in isolation in earlier rounds (R34-36 area) with different entry mechanics from all 5 existing conservative strategies. Williams %R enters on extreme oversold readings (mean reversion), unlike the trend-following signals of the 5 confirmed strategies. This different market timing may produce lower correlations with Price Momentum and RSI Weekly than BB Breakout achieves. If Williams %R has Sharpe > 1.43 AND OOS P&L > +170.96% on Sectors+DJI 46, it's a better 6th strategy than BB Breakout.
 

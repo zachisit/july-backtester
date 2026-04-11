@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 46 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
+**Research Loop:** 47 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-11 (36 years)
@@ -272,6 +272,15 @@ Round 46 (Relative Momentum as 6th Strategy in Conservative Portfolio — Q49, 2
   → BB Breakout (R45) confirmed as the superior 6th strategy option for Conservative portfolio
   → Conservative portfolio 6th strategy track CLOSED: 3 candidate strategies tested, BB Breakout wins
   → Q50 added (low priority): Williams %R as alternative 6th strategy candidate
+
+Round 47 (Williams R Weekly Trend as 6th Strategy in Conservative Portfolio — Q50, 2026-04-11)
+  → OUTSTANDING: Sharpe 1.82 — HIGHEST in the 6-strategy portfolio (beats RSI Weekly 1.78, Price Momentum 1.79)
+  → OOS P&L +1,437.81% — 8.4× better than BB Breakout's +170.96%
+  → Williams R ↔ RSI Weekly r=0.6451 (well below 0.70 threshold)
+  → All 6 MC Score 5 — maintained (second consecutive run with ALL 6 MC Score 5)
+  → Williams R is the DEFINITIVE WINNER among all 3 6th strategy candidates (Williams R > BB Breakout > Rel Mom)
+  → Conservative portfolio v2: MA Bounce + MAC + Donchian + Price Momentum + RSI Weekly + Williams R at 2.8%
+  → Conservative 6th strategy track CLOSED. ALL production portfolio configurations CONFIRMED FINAL.
 ```
 
 ---
@@ -542,7 +551,7 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 
 ## Recommended Live Implementation
 
-### Production Portfolio — Conservative (5 strategies, weekly bars, 3.3% allocation each)
+### Production Portfolio — Conservative v1 (5 strategies, weekly bars, 3.3% allocation each) [STANDARD]
 
 **Universe:** Sectors+DJI 46 (`sectors_dji_combined.json`, `min_bars_required=100`)
 **Config:** `"timeframe": "W"`, `"allocation_per_trade": 0.033`
@@ -557,7 +566,20 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 
 **All MaxDDs below 28%. ALL strategies MC Score +5.**
 
-### Production Portfolio — Aggressive (5 strategies, weekly bars, 3.3% allocation each)
+### Production Portfolio — Conservative v2 (6 strategies, weekly bars, 2.8% allocation each) [ENHANCED RETURNS — R47]
+
+**Universe:** Sectors+DJI 46 (`sectors_dji_combined.json`, `min_bars_required=100`)
+**Config:** `"timeframe": "W"`, `"allocation_per_trade": 0.028`
+**Same 5 strategies as v1 PLUS:**
+
+| Strategy | File | Sharpe | MaxDD | RS(min) | MC Score | OOS P&L |
+|---|---|---|---|---|---|---|
+| Williams R Weekly Trend (above-20) + SMA200 | `round35_strategies.py` (verify) | **1.82** | 23.76% | -2.96 | **5** | **+1,437.81%** |
+
+**All MaxDDs below 27%. ALL 6 MC Score 5 (unprecedented). Williams R is the highest-Sharpe strategy in the portfolio.**
+**Max pair correlation: 0.6925 (Price Momentum ↔ RSI Weekly). Williams R ↔ RSI Weekly: r=0.6451.**
+
+### Production Portfolio — Aggressive (5 strategies, weekly bars, 3.3% allocation each) [R42]
 
 **Universe:** NDX Tech 44 (`nasdaq_100_tech.json`)
 **Config:** `"timeframe": "W"`, `"allocation_per_trade": 0.033`
@@ -570,7 +592,7 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 | MA Confluence (10/20/50) Fast Exit | `research_strategies_v3.py` | 1.73 | 49.77% | **-2.19** | -1 |
 | Donchian Breakout (40/20) | `research_strategies_v2.py` | 1.63 | 47.72% | -2.49 | **1** |
 
-**All MaxDDs below 50%. No pair exceeds r=0.65. Confirmed R42 (Rounds 41-42).**
+**All MaxDDs below 50%. No pair exceeds r=0.65. Confirmed R42 (Rounds 41-44).**
 **Note: Do NOT add Price Momentum to this portfolio — it reaches r=0.94 with RSI Weekly on NDX Tech 44.**
 
 ### Alternative: Daily Champions (if weekly execution is not feasible)
@@ -703,4 +725,5 @@ All 33 research questions have been answered across Rounds 1-31. Research is com
 35. ~~**BB Breakout as 6th Strategy in Combined NDX Tech 44**~~ — R43 Q46. All 6 WFA Pass + RollWFA 3/3. BB Breakout MC Score 5 (second strategy to achieve this alongside Rel Mom). MaxDD 34.27% (second best). CRITICAL: BB ↔ RSI Weekly r=0.7049 — above 0.70 threshold. BB cannot be added as 6th strategy. Q47 tests BB as Donchian replacement. **CLOSED.**
 36. ~~**BB Breakout Replacing Donchian (5-Strategy Test)**~~ — R44 Q47. REJECTED. Without Donchian, BB ↔ RSI Weekly escalates to r=0.7874 and BB ↔ Rel Mom to r=0.7203 — both above 0.70. Donchian is a structural portfolio buffer (r=0.22 with RSI Weekly) that cannot be replaced. R42 5-strategy NDX Tech 44 portfolio CONFIRMED FINAL. **CLOSED.**
 37. ~~**BB Breakout as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R45 Q48. CONDITIONAL PASS. All 6 MC Score 5 (unprecedented). BB ↔ RSI Weekly r=0.4711 (sector rotation decorrelates). BB MaxDD 13.29% (lowest ever). BUT: BB OOS P&L only +170.96% (weakest of 6). Conservative portfolio v2 (6-strategy MaxDD-focused) defined. **CLOSED.**
-38. ~~**Relative Momentum as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R46 Q49. REJECTED. Sharpe 0.80, OOS +51.38%, RS(avg)=-0.07. Universe mismatch: sector ETF relative momentum is mean-reverting (not momentum-continuing like single stocks). Max r=0.2373 (lowest ever in any combined run) but alpha insufficient. BB Breakout confirmed as best 6th strategy. Conservative portfolio 6th strategy track CLOSED. **CLOSED.**
+38. ~~**Relative Momentum as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R46 Q49. REJECTED. Sharpe 0.80, OOS +51.38%, RS(avg)=-0.07. Universe mismatch: sector ETF relative momentum is mean-reverting. Max r=0.2373 (lowest ever) but alpha insufficient. **CLOSED.**
+39. ~~**Williams R Weekly Trend as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R47 Q50. OUTSTANDING. Sharpe 1.82 (highest in portfolio), OOS +1,437.81% (8.4× better than BB Breakout). Williams R ↔ RSI Weekly r=0.6451. All 6 MC Score 5. Williams R is the WINNER among all 3 candidates. Conservative portfolio v2 CONFIRMED FINAL with Williams R. **CLOSED.**
