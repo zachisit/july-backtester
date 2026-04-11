@@ -810,3 +810,126 @@ Stop Criteria C met: 3 consecutive rounds (R49, R50, R51) produced only confirma
 41. ~~**Williams R as 6th Strategy in Aggressive Portfolio (NDX Tech 44)**~~ — R49 Q52. REJECTED. Williams R creates THREE pairs above r=0.70: Williams R ↔ RSI Weekly r=0.752, Williams R ↔ MA Bounce r=0.718, Williams R ↔ Relative Momentum r=0.710. Third confirmation of universe-specific correlation rule. R42 5-strategy Aggressive portfolio DEFINITIVELY CONFIRMED FINAL — no viable 6th strategy in current research set. **CLOSED.**
 42. ~~**ATR Trailing Stop on Conservative v1 (MaxDD Reduction Test)**~~ — R50 Q53. REJECTED. ATR 3× stops INCREASE MaxDD for all 5 strategies (+6 to +9 pp), reduce Sharpe 42%, collapse OOS P&L 78-92%. Stops fire during within-trend pullbacks, creating larger realized drawdowns. Universal finding: ATR stops incompatible with weekly trend-following on any universe. Conservative v1 (R29, no stops) CONFIRMED OPTIMAL. **CLOSED.**
 43. ~~**Williams R Parameter Sensitivity Sweep on Sectors+DJI 46**~~ — R51 Q54. CONFIRMED ROBUST. 81/81 variants profitable (100%), 81/81 WFA Pass (100%). Sharpe range 1.59-2.03 (all above threshold). Base config NOT at maximum (no cherry-pick evidence). Williams R confirmed robust on BOTH universes (NDX Tech 44 R36 + Sectors+DJI 46 R51). Conservative v2 Williams R configuration fully validated. **CLOSED.**
+
+---
+
+## 4H Polygon Research Chapter — Separate Research Track
+
+**Research Loop:** 7 Rounds (4H-R1 through 4H-R7) — IN PROGRESS (sensitivity sweep pending)
+**Data Provider:** Polygon.io (intraday 4-hour bars)
+**Period:** 2018-01-01 → 2026-04-10 (8 years; WFA split: 2024-08-07)
+**Universe:** `liquid_4h.json` — 20 liquid ETFs and mega-cap stocks (SPY excluded; used as benchmark)
+**Timeframe Config:** `timeframe="H"`, `timeframe_multiplier=4`
+**WFA:** 80/20 split, 3 rolling folds
+
+### Context: Why a Separate 4H Track
+
+After the Norgate/weekly research declared COMPLETE (R51), the user pivoted to Polygon intraday data. The 4H (4-hour bar) timeframe represents a structurally different research problem from the weekly strategies:
+
+- **Different quality metrics**: Sharpe is SYSTEMATICALLY NEGATIVE at 4H due to the per-bar risk-free rate applied to 1,638 bars/year (vs 252 daily). Primary quality metrics are **Calmar, OOS P&L, WFA verdict**.
+- **Different bar-count math**: `get_bars_for_period("Xd", "H", 4)` ignores the multiplier (bug). Manual helper `_b(days) = max(2, round(days × 1.625))` used in strategies_4h.py.
+- **Different universe**: 20 highly liquid instruments with Polygon 4H data from 2018.
+- **Same strategic framework**: WFA 80/20 + RollWFA 3/3, sensitivity sweeps for champion validation, anti-overfitting guard rules.
+
+### 4H Research Architecture
+
+```
+4H-Round 1: Initial discovery — 3 strategies tested; EMA Velocity Breakout confirmed champion
+4H-Round 2: Keltner Channel Breakout confirmed champion; Volume Surge rejected
+4H-Round 3: Donchian Channel Momentum rejected (shift(1) bug — too many entries)
+4H-Round 4: Donchian Turtle (corrected shift(1)) confirmed champion
+4H-Round 5: MACD Histogram Crossover rejected (low Calmar + PF)
+4H-Round 6: Williams %R Dip-Recovery rejected (WFA Overfitted — mean-reversion fails at 4H)
+4H-Round 7: Relative Strength Momentum confirmed champion; 4-strategy portfolio FINAL
+```
+
+### 4H Structural Findings
+
+| Finding | Round |
+|---|---|
+| **Mean-reversion FAILS at 4H** — RSI Dip (R1) and Williams %R Dip (R6) both WFA Overfitted; overfit IS bull run, fails OOS | R1, R6 |
+| **Trend-following WORKS at 4H** — all 4 confirmed champions are trend-following (EMA cross, ATR channel, N-bar high, relative momentum) | R1-R7 |
+| **Negative Sharpe is systematic at 4H** — not a quality signal; use Calmar and OOS P&L as primary metrics | R1 |
+| **Volume surge filter generates excessive trades** — 3,000+ trades from Volume Surge = noise entries, not quality signals | R2 |
+| **shift(1) is mandatory on Donchian at 4H** — without it, price equals rolling max on every trending bar → 3,065 entries (R3 bug vs R4 fix) | R3, R4 |
+| **MACD Histogram at 4H is low-quality** — PF 1.16, Calmar 0.26; crossovers too frequent even at 4H resolution | R5 |
+| **Relative performance vs SPY is a distinct signal** — entry timing uncorrelated (r=0.03) with EMA Velocity despite using same universe | R7 |
+
+### 4H Strategy Results
+
+| Round | Strategy | Status | Calmar | OOS P&L | WFA | MC | MaxDD | Trades |
+|---|---|---|---|---|---|---|---|---|
+| R1 | EMA Velocity Breakout (4H) | **CHAMPION** | 0.66 | +48.68% | Pass (3/3) | 5 | 19.68% | 1,019 |
+| R1 | ADX Trend Strength Entry (4H) | REJECTED | — | — | — | — | — | 127 |
+| R1 | RSI Dip Buy within Trend (4H) | REJECTED | — | OOS -2.51% | Overfitted | — | — | 266 |
+| R2 | Keltner Channel Breakout (4H) | **CHAMPION** | 0.65 | +33.01% | Pass (3/3) | 5 | 16.09% | 2,043 |
+| R2 | Volume Surge Momentum (4H) | REJECTED | 0.37 | +16.70% | Pass | — | — | 3,151 |
+| R3 | Donchian Channel Momentum (4H) | REJECTED | 0.42 | +11.69% | Pass | — | — | 3,065 |
+| R4 | Donchian Turtle (4H) | **CHAMPION** | 0.58 | +25.93% | Pass (3/3) | 5 | 16.31% | 2,124 |
+| R5 | MACD Histogram Crossover (4H) | REJECTED | 0.26 | +17.89% | Pass | — | — | 2,602 |
+| R6 | Williams %R Dip-Recovery (4H) | REJECTED | 0.03 | -5.60% | Overfitted | — | — | 1,238 |
+| R7 | Relative Strength Momentum (4H) | **CHAMPION** | 0.82 | +49.11% | Pass (3/3) | 5 | 15.94% | 2,332 |
+
+### 4H Production Portfolio v1 — Confirmed (4 Strategies)
+
+**Config:** Liquid 4H (20) universe, 10% allocation per strategy (4 × 10% = 40% deployed), Polygon data, 2018-2026
+
+| Rank | Strategy | Calmar | OOS P&L | MaxDD | WFA | MC Score | Max Pair r |
+|---|---|---|---|---|---|---|---|
+| 1 | Relative Strength Momentum (4H) | **0.82** | **+49.11%** | **15.94%** | Pass | 5 | — |
+| 2 | EMA Velocity Breakout (4H) | 0.66 | +48.68% | 19.68% | Pass | 5 | — |
+| 3 | Keltner Channel Breakout (4H) | 0.65 | +33.01% | 16.09% | Pass | 5 | — |
+| 4 | Donchian Turtle (4H) | 0.58 | +25.93% | 16.31% | Pass | 5 | — |
+
+**Max pairwise exit-day correlation: 0.22** (Keltner ↔ Donchian). All other pairs ≤ 0.06.
+
+All 4 strategies: MC Score 5, WFA Pass (3/3). SPY benchmark B&H: +154.39% (2018-2026).
+
+### 4H Pairwise Correlation Matrix
+
+| | EMA | Keltner | Donchian | RS-Momentum |
+|---|---|---|---|---|
+| EMA | — | 0.03 | 0.03 | 0.03 |
+| Keltner | 0.03 | — | 0.22 | 0.22 |
+| Donchian | 0.03 | 0.22 | — | 0.20 |
+| RS-Momentum | 0.03 | 0.22 | 0.20 | — |
+
+### 4H Strategy Implementation
+
+All four strategies are in `custom_strategies/strategies_4h.py`. They are guarded with `if _TF == "H":` to prevent registration at daily or weekly timeframes.
+
+**Key config for 4H research:**
+```python
+"data_provider": "polygon"
+"timeframe": "H"
+"timeframe_multiplier": 4
+"portfolios": {"Liquid 4H (20)": "liquid_4h.json"}
+"min_bars_required": 500   # ~3 months of 4H bars
+"start_date": "2018-01-01"
+"wfa_split_ratio": 0.80
+"wfa_folds": 3
+```
+
+### 4H Open Research Questions
+
+| # | Question | Status |
+|---|---|---|
+| 4H-1 | EMA Velocity Breakout sensitivity sweep | PENDING (optional — champion confirmed, sweep not yet run) |
+| 4H-2 | Keltner Channel Breakout sensitivity sweep | PENDING (optional) |
+| 4H-3 | Donchian Turtle sensitivity sweep | PENDING (optional) |
+| 4H-4 | **Relative Strength Momentum sensitivity sweep** | **IN PROGRESS** (4H-R8, started 2026-04-11) |
+| 4H-5 | Search for 5th strategy (Hull MA, ATR Expansion, EMA Triple) | PENDING (optional) |
+| 4H-6 | Combined 4-strategy portfolio correlation run | PENDING (individual strategy runs only; combined portfolio not yet validated) |
+
+### 4H vs Weekly Comparison
+
+| Dimension | Weekly (Norgate) | 4H (Polygon) |
+|---|---|---|
+| Primary quality metric | Sharpe, RS(min) | Calmar, OOS P&L |
+| Champion count | 6+ confirmed | 4 confirmed |
+| Max Calmar | ~0.57 (Donchian Weekly) | 0.82 (RS Momentum) |
+| MaxDD range | 44-67% (weekly) | 15-20% (4H) |
+| Trade count | 670-2,332 per champion | 1,019-2,332 per champion |
+| Universe size | 16-503 symbols | 20 symbols |
+| Data period | 1990-2026 (36 years) | 2018-2026 (8 years) |
+| MC Score | -1 to +5 (universe-dependent) | ALL 5 (maximum, all champions) |
