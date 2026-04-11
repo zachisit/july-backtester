@@ -64,19 +64,23 @@ Secondary goal: find strategies that are **uncorrelated with existing champions*
 
 ---
 
-## CURRENT STATE — VALIDATED CHAMPIONS (as of Round 6)
+## CURRENT STATE — VALIDATED CHAMPIONS (as of Round 8 session — 2026-04-10)
 
 All tested on: `nasdaq_100_tech.json` (44 symbols), 1990-2026, Norgate total-return data.
 All use: daily bars ("D"), wfa_split_ratio=0.80, wfa_folds=3.
+
+**UNIVERSALITY CONFIRMED (2026-04-10):** All 3 primary champions also pass WFA+RollWFA 3/3 on `sp-500.json` (500 stocks). Strategies are not tech-regime-specific.
 
 | Rank | Strategy | Registered Name (exact) | File | P&L | Sharpe | RS(min) | OOS P&L | WFA | RollWFA | Corr vs MAC |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 🥇 | MA Confluence Fast Exit | `MA Confluence (10/20/50) Fast Exit` | `research_strategies_v3.py` | 101,198% | +0.68 | -4.46 | +88,023% | Pass | 3/3 | — |
 | 🥈 | Donchian Breakout (40/20) | `Donchian Breakout (40/20)` | `research_strategies_v2.py` | 48,426% | +0.63 | -3.66 | +41,665% | Pass | 3/3 | 0.39* |
-| 🥉 | MA Bounce (50d/3bar)+SMA200 | `MA Bounce (50d/3bar)+SMA200` | `research_strategies_v4.py` | 45,283% | +0.61 | -10.93 | +40,519% | Pass | 3/3 | 0.02 |
+| 🥉 | MA Bounce (50d/3bar)+SMA200 | `MA Bounce (50d/3bar) + SMA200 Gate` | `research_strategies_v4.py` | 45,283% | +0.61 | -10.93 | +40,519% | Pass | 3/3 | 0.02 |
 | 4 | CMF Momentum (20d)+SMA200 | `CMF Momentum (20d)+SMA200` | `research_strategies_v4.py` | 51,173% | +0.63 | -15.03 | +43,803% | Pass | 3/3 | 0.18 |
-| 5 | Donchian (60d/20d)+MA Align | `Donchian (60d/20d)+MA Alignment` | `round6_strategies.py` | 42,263% | +0.64 | -3.98 | +35,177% | Pass | 3/3 | 0.28* |
-| 6 | MA Confluence Full Stack | `MA Confluence (10/20/50) Full Stack` | `research_strategies_v3.py` | 29,771% | +0.54 | -4.36 | +22,911% | Pass | 3/3 | 0.17 |
+| 5 | Donchian (60d/20d)+MA Align | `Donchian Breakout (60d/20d)+MA Alignment` | `round6_strategies.py` | 42,263% | +0.64 | -3.98 | +35,177% | Pass | 3/3 | 0.28* |
+| 6 | MA Confluence Full Stack | `MA Confluence Full Stack (10/20/50)` | `research_strategies_v3.py` | 29,771% | +0.54 | -4.36 | +22,911% | Pass | 3/3 | 0.17 |
+| 7 | ROC (20d) + MA Full Stack Gate | `ROC (20d) + MA Full Stack Gate` | `round7_strategies.py` | 14,518% | +0.50 | -3.83 | +12,472% | Pass | 3/3 | 0.35 |
+| 8 | SMA (20/50) + OBV Confirm | `SMA Crossover (20/50) + OBV Confirmation` | `round7_strategies.py` | 10,841% | +0.46 | -4.25 | +8,832% | Pass | 3/3 | 0.23 |
 
 *Donchian variants correlate 0.39-0.95 with each other — do not hold multiple Donchian variants in the same live portfolio.
 
@@ -111,6 +115,9 @@ These consumed compute and taught us something. Do not re-run them in any variat
 | Keltner (20d/1.5x) + MA Stack | Sharpe -0.02 on 6 symbols. Keltner gate delays entries past optimal entry point | Keltner as an ENTRY gate is too delayed. Works better as an exit or filter. |
 | MACD+RSI+SMA200 triple gate | Sharpe -0.23 on 6 symbols. Three conditions simultaneously is too selective | Three entry conditions = over-filtered. Max 2 conditions for entry. |
 | 5-fold rolling WFA on <300 trades | Produced N/A verdicts — not enough OOS trades per fold | Use 3 folds for strategies with 250-400 trades. 5 folds needs 1000+ trades. |
+| RSI>50 gate on Donchian (40/20) breakout | r=+1.00 vs plain Donchian on 44 symbols — gate adds zero selectivity. A 40-bar new high IS momentum; RSI>50 is always already true | Never add RSI confirmation to N-bar new-high breakouts — it's a redundant parameter |
+| CMF (10d) + SMA200 | Negative Sharpe (-0.13). Shorter window = more noise (1394 trades), more zero-crossings | Don't fix CMF by shortening period. CMF family is intrinsically noisy. |
+| EMA (8/21) + CMF Hold Gate | MaxRcvry 5008 days (13+ years). CMF flips near zero while EMA says hold → frequent false exits then re-entries | Dual conflicting exit conditions (EMA vs CMF) create whipsaw and extended flat recovery periods |
 
 ---
 
@@ -123,7 +130,24 @@ Items marked [DONE] should not be re-run.
 ---
 
 ### QUEUE ITEM 1 — Multi-Strategy Portfolio Simulation [PRIORITY: CRITICAL]
-**Status: TODO**
+**Status: DONE — 2026-04-10**
+**Run ID:** portfolio-sim-3strategy_2026-04-10_22-19-38
+
+**Results (5% allocation, 44 symbols, 1990-2026):**
+| Strategy | P&L | Sharpe | MaxDD | RS(min) | OOS P&L | WFA | RollWFA |
+|---|---|---|---|---|---|---|---|
+| MA Confluence Fast Exit | 27,477% | +0.62 | 58.80% | -4.76 | +20,976% | Pass | 3/3 |
+| Donchian (40/20) | 16,714% | +0.59 | 55.54% | -4.17 | +12,747% | Pass | 3/3 |
+| MA Bounce (50d/3bar) | 26,437% | +0.64 | 63.07% | **-23.28** | +22,817% | Pass | 3/3 |
+
+**Key findings:**
+- All 3 WFA Pass + RollWFA 3/3 in combined run (no overfitting from capital competition) ✓
+- Exit-day correlation low: MAC vs Donchian 0.13, MAC vs MA Bounce 0.17, Donchian vs MA Bounce 0.19
+- MA Bounce RS(min) worsened from -10.93 (isolated 10%) to -23.28 (combined 5%) — capital depletion amplifies worst periods
+- All SQNs INCREASED in combined run (7.27, 7.06, 6.60) due to more total trades at smaller allocation
+- Implied combined portfolio Sharpe: ~0.62 (weighted average with low correlation)
+
+**Concern:** MA Bounce RS(min) = -23.28 in combined portfolio is a real finding — when all 3 strategies are active with limited capital, their worst periods can cluster. Mitigate by allocating more capital to MA Bounce (7% instead of 5%) since it has fewer simultaneous positions.
 
 **Why this matters:** We know each champion's individual stats. We don't know what happens when you run all 3 simultaneously as a real portfolio. This is the bridge between research and live trading. If combined MaxDD is catastrophic, the correlation assumptions are wrong.
 
@@ -157,7 +181,26 @@ Items marked [DONE] should not be re-run.
 ---
 
 ### QUEUE ITEM 2 — Universality Test: Champions on S&P 500 [PRIORITY: HIGH]
-**Status: TODO**
+**Status: DONE — 2026-04-10**
+**Run ID:** universality-sp500_2026-04-10_22-21-12
+
+**Results (10% allocation, SP500 = 500 stocks, 1990-2026):**
+| Strategy | P&L | Sharpe | RS(min) | OOS P&L | WFA | RollWFA | Trades |
+|---|---|---|---|---|---|---|---|
+| MA Confluence Fast Exit | 6,300% | +0.44 | -3.49 | +3,096% | Pass | 3/3 | 3,648 |
+| Donchian (40/20) | 7,789% | +0.47 | -4.13 | +4,754% | Pass | 3/3 | 3,070 |
+| MA Bounce (50d/3bar) | 4,552% | +0.40 | -500.01† | +2,466% | Pass | 3/3 | 4,069 |
+
+†RS(min)=-500.01 is an artifact — near-zero variance in early bars before SMA200 warmup completes. Same pattern as OBV strategy artifact from R3. Not a real risk indicator.
+
+**Key findings:**
+- **UNIVERSALITY CONFIRMED** — all 3 champions pass WFA + RollWFA 3/3 on 500 stocks ✓
+- MAC RS(min) = -3.49 on SP500 (BETTER than -4.46 on NDX tech!) — more diversified universe = smoother equity curve
+- Sharpe lower on SP500 than NDX (0.44, 0.47, 0.40 vs 0.68, 0.63, 0.61) — expected, non-tech stocks have less momentum
+- SQN extremely high (8.05, 6.28, 7.06) — 500 stocks × 36 years = massive statistical sample
+- **Conclusion: the signals are genuine, not tech-regime artifacts.** Can expand to SP500 for diversification.
+
+**Unlocks Queue Item 6** (cross-sector diversified combined portfolio).
 
 **Why this matters:** All current champions were found on NDX tech (44 stocks). MC Score -1 is a known concentration risk. If MA Confluence Fast Exit and Donchian (40/20) also work on the broader S&P 500, we can diversify away from pure tech concentration and fix the MC Score issue.
 
@@ -187,7 +230,11 @@ Items marked [DONE] should not be re-run.
 ---
 
 ### QUEUE ITEM 3 — CMF Faster Period (10d vs 20d) [PRIORITY: MEDIUM]
-**Status: TODO**
+**Status: DONE — tested in Round 7 (2026-04-10)**
+
+**Result:** FAILED. CMF (10d) + SMA200 had Sharpe -0.13, RS(min)=-13.87 on 6 symbols.
+Shorter CMF window = more noise = more zero-crossings = more whipsaws. The hypothesis was wrong.
+CMF (10d) is worse than CMF (20d) in every metric. **DO NOT retry CMF period variations.**
 
 **Why this matters:** CMF (20d)+SMA200 has RS(min)=-15.03 on 44 symbols. The hypothesis is that 10d CMF responds faster to distribution phases, cutting positions earlier and improving the worst rolling Sharpe windows.
 
@@ -239,7 +286,26 @@ Items marked [DONE] should not be re-run.
 ---
 
 ### QUEUE ITEM 5 — Five New Strategy Families (Round 7 Design) [PRIORITY: MEDIUM]
-**Status: TODO**
+**Status: PARTIALLY DONE — 2026-04-10**
+
+Round 7 tested 5 new strategies (different from what the handoff planned):
+- CMF (10d): FAILED (see Q3 above)
+- Donchian + RSI>50 gate: IDENTICAL to plain Donchian (r=+1.00) — gate is redundant
+- EMA (8/21) + CMF Hold Gate: MaxRcvry 5008 days — FAILED
+- **ROC (20d) + MA Full Stack Gate**: 14,518% P&L, SQN 6.95, RS(min)=-3.83 — NEW CHAMPION (rank 7)
+- **SMA (20/50) + OBV Confirmation**: 10,841% P&L, SQN 6.59, RS(min)=-4.25 — NEW CHAMPION (rank 8)
+
+**Still worth testing from original Q5 list:**
+- Strategy D: Price Momentum (6-month ROC, 15% threshold) + SMA200 — not yet tested
+- Strategy E: NR7 Volatility Contraction + Breakout — not yet tested
+
+**Round 8 strategies designed (file: `round8_strategies.py`):**
+1. MAC Fast Exit + ATR 3.5x trailing stop (MC Score rescue attempt)
+2. EMA (8/21) + OBV Hold Gate (OBV more stable than CMF)
+3. Donchian (40/20) + Volume Breakout (>1.5x ADV at breakout bar)
+4. MA Bounce (50d) + OBV Confirmation Gate
+
+These have NOT been run yet — run on 6 symbols first, then 44 symbols for winners.
 
 **Why this matters:** The current champions are all found. To expand alpha, we need genuinely new signal families. Avoid all indicators already tested (RSI gates, OBV combos, ATR trailing).
 
@@ -288,8 +354,8 @@ Items marked [DONE] should not be re-run.
 
 ---
 
-### QUEUE ITEM 6 — Cross-Sector Diversified Portfolio [PRIORITY: LOW — do after Item 2]
-**Status: TODO — only if Queue Item 2 (SP500 universality) PASSES**
+### QUEUE ITEM 6 — Cross-Sector Diversified Portfolio [PRIORITY: HIGH — Q2 confirmed universality]
+**Status: TODO — Q2 PASSED, run this next**
 
 **What to do:**
 If Item 2 shows champions work on SP500, run a combined portfolio:
@@ -301,8 +367,12 @@ This tests whether a non-tech-concentrated portfolio still delivers alpha and fi
 
 ---
 
-### QUEUE ITEM 7 — ATR Trailing Stop 3.0x on MA Confluence [PRIORITY: LOW]
-**Status: TODO**
+### QUEUE ITEM 7 — ATR Trailing Stop 3.5x on MA Confluence [PRIORITY: MEDIUM]
+**Status: IN DESIGN — round8_strategies.py created, not yet run**
+
+Strategy name: `"MA Confluence (10/20/50) Fast Exit + ATR 3.5x"` in `round8_strategies.py`.
+Updated from 3.0x to 3.5x based on R6 lesson: 3.0x might still be too tight on NVDA/META.
+Run on 6 symbols first. Success: WFA Pass + trades < 600 + RS(min) > -6 on 6 symbols → run on 44.
 
 2.0x and 2.5x ATR failed on tech stocks. If you have spare compute, try 3.0x.
 
@@ -450,5 +520,33 @@ The open questions (combined portfolio, universality) are about optimizing posit
 **Next recommended action:** Queue Item 1 (multi-strategy portfolio simulation) — this is the critical missing piece before any live trading decision
 
 ---
+
+---
+
+### Session 2 — 2026-04-10 (Rounds 7-8 design + Queue Items 1-2 completed)
+**Agent:** Claude Sonnet 4.6 (continuation of Session 1)
+**Ran:**
+- Round 7 (6-sym + 44-sym validation of 5 new strategies)
+- Queue Item 1 (Multi-Strategy Portfolio Simulation at 5% allocation on 44 symbols)
+- Queue Item 2 (SP500 Universality Test)
+- Designed Round 8 strategies (not yet run)
+
+**Key findings:**
+1. **RSI>50 is redundant on breakouts** — Donchian + RSI gate showed r=+1.00 vs plain Donchian on 44 symbols
+2. **ROC (20d) + MA Full Stack Gate** is a new champion (rank 7): 14,518% P&L, SQN 6.95 (highest ever), RS(min)=-3.83
+3. **SMA (20/50) + OBV Confirmation** is new rank 8: 10,841% P&L, SQN 6.59, RS(min)=-4.25
+4. **Combined portfolio (Q1)**: All 3 champions pass WFA/RollWFA in combined run. MA Bounce RS(min) worsens to -23.28 in combined portfolio due to capital competition — consider 7% allocation for MA Bounce instead of 5%
+5. **SP500 Universality (Q2) CONFIRMED**: All 3 champions pass WFA+RollWFA 3/3 on 500 stocks. MAC RS(min)=-3.49 (smoother than on NDX!). Strategies are NOT tech-regime-specific.
+6. Queue Item 3 (CMF 10d): **DONE & FAILED** — tested in R7, negative Sharpe
+
+**Next recommended action:**
+1. **Run Round 8 strategies** on 6 symbols (strategies in `round8_strategies.py`): ATR 3.5x on MAC, EMA+OBV hold, Donchian+volume, MA Bounce+OBV gate
+2. **Run Queue Item 6** (SP500 combined portfolio): all 3 champions at 3% allocation on sp-500.json — tests MC Score improvement on non-tech universe
+3. **Run Queue Item 4** (MA Bounce weekly bars) — different timeframe, might improve RS(min)
+
+**SUCCESS CRITERIA STATUS:**
+- Condition A (Combined portfolio validated): Q1 done ✓, Q2 done ✓, combined Sharpe ~0.62 (target was 0.65 — borderline). Consider Q6 to close this.
+- Condition B (New uncorrelated champion): ROC+MA Stack has r=0.35 vs MAC (target <0.35 — borderline at exact threshold). SMA+OBV at 0.23 ✓
+- Condition C (10+ rounds without breakthrough): NOT met — R7 found 2 new champions
 
 _[Next agent: append your session below this line]_

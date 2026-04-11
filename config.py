@@ -170,9 +170,8 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        # Round 7: validate top performers on 44 symbols
-        "NDX Tech (44)": "nasdaq_100_tech.json",
-        #"Tech Giants (6)": "tech_giants.json",
+        # Queue Item 2: SP500 universality test
+        "SP500": "sp-500.json",
     },
 
     # ============================================================
@@ -286,13 +285,10 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        # Round 7: validate top 3 new strategies on 44 symbols
-        "Donchian (40/20) + RSI Momentum Gate",
-        "ROC (20d) + MA Full Stack Gate",
-        "SMA Crossover (20/50) + OBV Confirmation",
-        # Benchmarks (existing champions)
+        # Queue Item 1: 3-strategy combined portfolio simulation
         "MA Confluence (10/20/50) Fast Exit",
         "Donchian Breakout (40/20)",
+        "MA Bounce (50d/3bar) + SMA200 Gate",
     ],
 
     # ============================================================
