@@ -2351,3 +2351,88 @@ _[Next agent: append your session below this line]_
 - **Aggressive (R42):** NDX Tech 44, 5 strategies × 3.3%, all WFA Pass, max pair r=0.65
 
 **Research loop STATUS: COMPLETE — Stop Criteria C met (3 consecutive confirmations). All production portfolios final. All queue items done. No further research needed.**
+
+---
+
+## 4H POLYGON RESEARCH CHAPTER (NEW — 2026-04-11)
+
+**Context:** User pivoted from Norgate/weekly research (now COMPLETE, R1-R51) to
+Polygon/4H intraday research. Config changed to: data_provider=polygon, timeframe=H,
+timeframe_multiplier=4, portfolios=Liquid 4H (20), start_date=2018-01-01.
+New Polygon API key: see .env file.
+
+**Key technical notes for 4H research:**
+- `get_bars_for_period("Xd", "H", 4)` in timeframe_utils.py is BUGGED — ignores
+  multiplier for H timeframe, returns 1H bar counts (6.5× too many). Use manual
+  `_b(days) = max(2, round(days * 6.5/4))` helper instead (implemented in strategies_4h.py).
+- Sharpe is SYSTEMATICALLY NEGATIVE at 4H due to bar-level rf_daily = 5%/409 bars.
+  Primary quality metrics are: Calmar, OOS P&L, WFA verdict. Sharpe is secondary.
+- All strategies guarded with `if _TF == "H":` to prevent registration at other timeframes.
+- Universe: `tickers_to_scan/liquid_4h.json` — 20 ETFs + mega-caps, SPY excluded
+  (used as comparison_ticker benchmark).
+
+**4H Research Status: IN PROGRESS**
+
+**4H Round History:**
+
+| Round | Strategy Tested | Result | Calmar | OOS | Trades |
+|---|---|---|---|---|---|
+| R1 | EMA Velocity Breakout (4H) | CHAMPION | 0.66 | +48.68% | 1019 |
+| R1 | ADX Trend Strength Entry (4H) | REJECTED (127 trades) | — | — | 127 |
+| R1 | RSI Dip Buy within Trend (4H) | REJECTED (WFA Overfitted) | — | — | 266 |
+| R2 | Keltner Channel Breakout (4H) | CHAMPION | 0.65 | +33.01% | 2043 |
+| R2 | Volume Surge Momentum (4H) | REJECTED (PF 1.18, 3151 trades) | 0.37 | +16.70% | 3151 |
+| R3 | Donchian Channel Momentum (4H) | REJECTED (shift(1) bug, 3065 trades) | 0.42 | +11.69% | 3065 |
+| R4 | Donchian Turtle (4H) | CHAMPION | 0.58 | +25.93% | 2124 |
+| R5 | MACD Histogram Crossover (4H) | REJECTED (PF 1.16, Calmar 0.26) | 0.26 | +17.89% | 2602 |
+| R6 | Williams %R Dip-Recovery (4H) | REJECTED (WFA Overfitted, OOS -5.60%) | 0.03 | -5.60% | 1238 |
+| R7 | Relative Strength Momentum (4H) | CHAMPION | 0.82 | +49.11% | 2332 |
+
+**4H Structural Findings:**
+1. MEAN-REVERSION FAILS AT 4H: RSI Dip (R1), Williams %R (R6) both WFA Overfitted.
+   The dip-recovery pattern at 8.6-day resolution overfit IS bull run, fails OOS.
+2. TREND-FOLLOWING WORKS: All 4 champions are trend-following (EMA cross, ATR
+   channel, N-bar high breakout, relative momentum). Confirmed signal archetype.
+3. NEGATIVE SHARPE IS SYSTEMATIC: Not a quality issue. Use Calmar/OOS/WFA instead.
+4. VOLUME FILTERS GENERATE EXCESSIVE TRADES: 3000+ trades = noise entries.
+
+**4H Production Portfolio v1 — CONFIRMED (4 strategies)**
+Config: Liquid 4H (20), allocation_per_trade=0.10, stop_loss=none
+
+| Rank | Strategy | File | Calmar | OOS | WFA | MC | MaxDD |
+|---|---|---|---|---|---|---|---|
+| 1 | Relative Strength Momentum (4H) | strategies_4h.py | 0.82 | +49.11% | Pass | 5 | 15.94% |
+| 2 | EMA Velocity Breakout (4H) | strategies_4h.py | 0.66 | +48.68% | Pass | 5 | 19.68% |
+| 3 | Keltner Channel Breakout (4H) | strategies_4h.py | 0.65 | +33.01% | Pass | 5 | 16.09% |
+| 4 | Donchian Turtle (4H) | strategies_4h.py | 0.58 | +25.93% | Pass | 5 | 16.31% |
+
+Max pairwise correlation: 0.22 (Keltner ↔ Donchian). All others ≤ 0.06.
+
+**All rejected candidates:** ADX Entry, RSI Dip, Volume Surge, Donchian Channel
+Momentum (bug), MACD Histogram, Williams %R Dip-Recovery.
+
+**Next recommended 4H action:**
+- Option A: Sensitivity sweep on Relative Strength Momentum (new champion, R7)
+  to confirm non-overfitting of the rs_threshold=0.01 and rs_period parameters.
+- Option B: Search for a 5th strategy to complement the current 4-strategy portfolio.
+  Suggested candidates: Hull MA Cross, ATR Expansion Entry, EMA Triple Alignment.
+- Option C: Declare 4H portfolio COMPLETE (4 strong strategies is production-ready).
+
+---
+
+### Session 19 — 2026-04-11 (4H Research Rounds 1-7)
+**Agent:** Claude Sonnet 4.6
+**Ran:** 4H research rounds 1-7 on Polygon/H×4 data, Liquid 4H (20) universe
+**Period:** 2018-01-02 → 2026-04-10, WFA split 2024-08-07
+
+**Key findings:**
+1. EMA Velocity Breakout (4H): Champion (R1). P&L +175.85%, OOS +48.68%, Calmar 0.66
+2. Keltner Channel Breakout (4H): Champion (R2). P&L +128.76%, OOS +33.01%, Calmar 0.65
+3. Donchian Turtle (4H): Champion (R4). P&L +110.37%, OOS +25.93%, Calmar 0.58
+4. Relative Strength Momentum (4H): Champion (R7). P&L +176.84%, OOS +49.11%, Calmar 0.82
+
+All four: MC Score 5, WFA Pass (3/3). Max pairwise r = 0.22.
+Round files: research_results/4h_round_1.md through 4h_round_7.md
+
+**Next recommended action:** Sensitivity sweep on Relative Strength Momentum or
+search for 5th strategy. Current 4-strategy portfolio is production-ready as-is.

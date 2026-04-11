@@ -16,7 +16,7 @@ CONFIG = {
     # SECTION 1: DATA PROVIDER
     # ============================================================
     # Options: "polygon", "norgate", "yahoo", "csv", "parquet"
-    "data_provider": "norgate",
+    "data_provider": "polygon",
 
     # --- CSV Data Directory (only used when data_provider = "csv") ---
     # Path to the folder containing per-symbol CSV files.
@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "1990-01-01",
+    "start_date": "2018-01-01",  # Polygon 4H data; go back as far as available
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -66,12 +66,11 @@ CONFIG = {
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
     #"timeframe": "D",
-    #"timeframe": "H",  # Hourly
+    "timeframe": "H",              # 4-hour bars via Polygon
+    "timeframe_multiplier": 4,     # H + multiplier=4 → 4-hour bars
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
     #"timeframe_multiplier": 5,       # e.g., 1, 5, 15, 30 for minutes
     #"timeframe": "W",  # Weekly
-    #"timeframe": "W",  # Weekly
-    "timeframe": "D",
     #"timeframe": "M",  # Monthly
 
     # ============================================================
@@ -171,10 +170,10 @@ CONFIG = {
     # Symbols with fewer bars than this are skipped entirely.
     # 250 ≈ one year of daily data. Increase if your strategies need
     #   longer lookback periods (e.g. 200d SMA needs at least 200 bars).
-    "min_bars_required": 250,
+    "min_bars_required": 500,  # 4H bars: ~500 bars ≈ 3 months (252d × 1.6 bars/d)
 
     "portfolios": {
-        "NDX Tech (44)": "nasdaq_100_tech.json",  # primary research universe
+        "Liquid 4H (20)": "liquid_4h.json",  # 4H research universe — Polygon
     },
 
     # ============================================================
@@ -287,7 +286,12 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": "all",
+    "strategies": [
+        "EMA Velocity Breakout (4H)",
+        "Keltner Channel Breakout (4H)",
+        "Donchian Turtle (4H)",
+        "Relative Strength Momentum (4H)",
+    ],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
