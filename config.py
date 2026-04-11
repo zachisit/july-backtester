@@ -65,7 +65,7 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    "timeframe": "W",  # Weekly — Q33: Global Diversified (US Sectors+DJI+International ETFs = 76 symbols)
+    "timeframe": "D",
     #"timeframe": "H",  # Hourly
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
     #"timeframe_multiplier": 5,       # e.g., 1, 5, 15, 30 for minutes
@@ -172,9 +172,8 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "Global Diversified (76)": "global_diversified.json",
+        "NDX Tech (44)": "nasdaq_100_tech.json",
     },
-    "min_bars_required": 100,  # ETFs have shorter history (sector ETFs 1998+, intl ETFs 2003+)
 
     # ============================================================
     # SECTION 8: ALLOCATION, EXECUTION FILTERING
@@ -182,7 +181,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.033,  # 3.3% per position — Q33: 76 symbols
+    "allocation_per_trade": 0.10,
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
