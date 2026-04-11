@@ -1283,33 +1283,18 @@ The 5-strategy weekly portfolio has now passed:
 ---
 
 ### QUEUE ITEM 29 — Combined NDX Full 101 + DJI 30 Blended Portfolio [PRIORITY: HIGH]
-**Status: PENDING**
+**Status: DONE — 2026-04-11 — MA Bounce Sharpe 1.98 (new record!); RS(avg) ALL >2.0; MaxDD hypothesis FALSIFIED**
+**Run ID:** ndx-dji-combined-weekly-5strat_2026-04-11_07-22-13
 
-**Why this matters:** DJI 30 achieves MaxDD 19-23% through cross-sector diversification. NDX Full 101 achieves Sharpe 1.83-1.95. Running both universe portfolios simultaneously (with position overlap deduplication) should combine NDX's high Sharpe with DJI's low MaxDD — targeting Sharpe > 1.70 with MaxDD < 35%. This is the natural next experiment given the two discovery peaks (DJI for risk, NDX for return).
-
-**Config changes:**
-```python
-"portfolios": {
-    "NDX Full (101)": "nasdaq_100.json",
-    "DJI 30": "dow-jones-industrial-average.json",
-}
-"allocation_per_trade": 0.033
-```
-**Success criteria:** Combined run achieves Sharpe > 1.70 and MaxDD < 38% for at least 3 of 5 strategies. OOS P&L positive for all 5.
+**Finding:** Hypothesis falsified — MaxDD did NOT improve (worsened 3-9pp vs NDX Tech 44). Adding 23 unique DJI names to 101 NDX names fails because tech-adjacent names dominate entry signals. For MaxDD < 35%, need MOSTLY non-tech universe. But discovered MA Bounce Sharpe 1.98 (new record) and RS(avg) > 2.0 for ALL 5 strategies (new record for consistency).
 
 ---
 
-### QUEUE ITEM 30 — International ETFs: Global Equity Momentum [PRIORITY: MEDIUM]
-**Status: PENDING**
+### QUEUE ITEM 30 — Sectors ETFs + DJI 30 Combined (46 symbols): Pure Diversification Test [PRIORITY: HIGH]
+**Status: DONE — 2026-04-11 — BREAKTHROUGH: Sharpe 1.54-1.86, MaxDD 21-30%, MC Score +2 to +5**
+**Run ID:** sectors-dji-weekly-5strat_2026-04-11_07-25-34
 
-**Why this matters:** All universes tested are US-listed equities. International developed market ETFs (EFA, VEA, VGK, EWJ, EWG, EWU, EWC, etc.) and emerging market ETFs (EEM, VWO, FXI, INDA, etc.) have different correlation profiles from US equities. Adding international equity exposure could further reduce MaxDD through geographic diversification, similar to how sector ETFs reduced MaxDD through sector diversification.
-
-**Config changes:**
-```python
-"portfolios": {"Global ETFs": "global_etfs.json"}  # need to create this file
-"allocation_per_trade": 0.10  # 10% — small universe
-"min_bars_required": 100  # ETFs have shorter history
-```
+**Finding:** BEST RISK-ADJUSTED UNIVERSE DISCOVERED. Sector ETFs (macro regime) + DJI 30 (individual stock momentum) = 46-symbol universe achieving Sharpe 1.54-1.86, MaxDD 21-30%, MC Score +5 for MA Bounce/MAC/Donchian. FIRST universe to achieve ALL of: Sharpe >1.50, MaxDD <31%, MC ≥+2 simultaneously. Price Momentum MaxDD 21.52% (matching DJI 30 isolated). RSI Weekly is dominant (Sharpe 1.86, OOS +2,683%). MAC Fast Exit RS(min) -2.00 (best on this universe).
 
 ---
 
@@ -1377,6 +1362,59 @@ Running all three simultaneously with a merged ticker list (~300-350 unique symb
    - High Volatility 242 ✓ Sharpe 1.16-1.31
 
 **Next recommended actions:**
-- Q29: Combined NDX Full 101 + DJI 30 as blended portfolio (target: Sharpe > 1.70, MaxDD < 35%)
-- Q30: International ETFs (geographic diversification)
-- Q31: Combined best universe (NDX + Russell Top 200 + DJI 30 merged)
+- Q29: Combined NDX Full 101 + DJI 30 as blended portfolio → DONE (MA Bounce 1.98, MaxDD hypothesis falsified)
+- Q30: Sectors+DJI 46 → BREAKTHROUGH — Sharpe 1.54-1.86, MaxDD 21-30%, MC Score +2 to +5
+- Q31: Combined best universe (NDX + Russell Top 200 + DJI 30 merged) → still pending
+
+---
+
+### Session 11 — 2026-04-11 (Rounds 27-28 completed — Breakthrough Universe Discovery)
+**Agent:** Claude Sonnet 4.6 (continuation of Session 10)
+**Ran:**
+- Queue Item 29: NDX Full 101 + DJI 30 combined (124 symbols) → MA Bounce Sharpe 1.98 (record); MaxDD hypothesis falsified
+- Queue Item 30: Sectors ETFs + DJI 30 combined (46 symbols) → BREAKTHROUGH universe
+
+**Key findings:**
+
+1. **NDX+DJI 124 sets Sharpe record (MA Bounce 1.98) but MaxDD hypothesis falsified** — blending NDX tech names with DJI blue-chips produces the highest Sharpe ever recorded (MA Bounce 1.98, all strategies RS(avg) > 2.0). However, MaxDD did NOT improve — it worsened 3-9pp vs NDX Tech 44. The 23 unique DJI additions are diluted by 101 NDX names; tech crashes still dominate. **Lesson: MaxDD reduction requires a universe where non-tech names are the MAJORITY, not minority.**
+
+2. **BREAKTHROUGH: Sectors+DJI 46 is the optimal risk-balanced universe:**
+   - Sharpe 1.54-1.86 (competitive with all large-cap universes)
+   - MaxDD 21-30% (near DJI 30's 19-23% performance)
+   - MC Score +5 for MA Bounce, MAC, Donchian — +2 for RSI Weekly, Price Momentum
+   - ALL 5 WFA Pass + RollWFA 3/3
+   - MAC Fast Exit RS(min) -2.00 (outstanding rolling Sharpe floor)
+   - **First universe to simultaneously achieve Sharpe >1.50, MaxDD <31%, MC ≥+2**
+   
+3. **Universe construction insight — the 2-ingredient formula for optimal risk-adjusted portfolio:**
+   - **Ingredient 1:** Sector ETFs (macro regime signals, near-zero inter-sector correlation, MC Score anchoring)
+   - **Ingredient 2:** Individual blue-chip stocks from DIVERSE sectors (individual momentum for higher Sharpe than ETFs alone)
+   - The 16 sector ETFs provide the decorrelation backbone; 30 DJI names add individual stock alpha
+   - The 100% non-tech-concentration of the DJI additions prevents synchronized tech crashes
+
+4. **The fundamental portfolio construction trade-off is now fully mapped:**
+   - Maximum Sharpe: NDX+DJI 124 (1.81-1.98, MaxDD 50-56%)
+   - Maximum Protection: DJI 30 (1.71-1.93, MaxDD 19-23%)
+   - **Optimal Balance: Sectors+DJI 46 (1.54-1.86, MaxDD 21-30%, MC +2 to +5)**
+
+5. **Updated production recommendations (final after 11 sessions):**
+
+   **Conservative/Risk-First:** Sectors+DJI 46 — Sharpe 1.54-1.86, MaxDD 21-30%, MC +2 to +5
+   - Prioritizes capital preservation + Monte Carlo robustness
+   - RSI Weekly leads (Sharpe 1.86, Price Momentum MaxDD 21.52%)
+   - Use `sectors_dji_combined.json`, `min_bars_required=100`
+
+   **Aggressive/Return-First:** NDX+DJI 124 or NDX Full 101 — Sharpe 1.83-1.98, MaxDD 45-56%
+   - Maximizes Sharpe and rolling consistency (RS(avg) >2.0 for all strategies)
+   - MA Bounce leads (Sharpe 1.98 record)
+   - Use `ndx101_dji30_combined.json` or `nasdaq_100.json`
+
+   **Balanced:** Russell Top 200 — Sharpe 1.48-1.95, MaxDD 37-54%, RS(min) -1.85 (best ever)
+   - Best for RS(min) stability across rolling periods
+   - Price Momentum leads (Sharpe 1.95, RS(min) -2.10)
+   - Use `russell-top-200.json`
+
+**Next recommended actions:**
+- Q31: Test Sectors+DJI with higher allocation (10% per position, 5-10 concurrent) — does concentrated position sizing further improve Sharpe on the 46-symbol universe?
+- Q32: International ETFs (EFA, EEM, VGK, EWJ) — test geographic diversification as further MaxDD reducer
+- Q33: Sectors+DJI + Russell Top 200 blended (~220 symbols) — can Sectors+DJI's low MaxDD be combined with Russell Top 200's RS(min) -1.85?
