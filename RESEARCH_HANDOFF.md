@@ -1624,7 +1624,9 @@ Key metrics: Williams R Sharpe 1.92, MaxDD 46.49% (-2.87pp vs RSI), MC Score +1 
 ---
 
 ### QUEUE ITEM 41 — 6-Strategy Portfolio on Sectors+DJI 46 (add Relative Momentum) [PRIORITY: MEDIUM]
-**Status: PENDING**
+**Status: DONE — 2026-04-11 (Round 40)**
+Run ID: sectors-dji-6strat-relmom_2026-04-11_12-01-41
+**Result: Relative Momentum INCOMPATIBLE with Sectors+DJI 46 — only 97 trades (sector ETFs can't diverge 15% from SPY). Existing 5-strategy production portfolio unchanged. All 6 strategies MC Score 5.**
 
 **Why this matters:** Relative Momentum (13w vs SPY) has avg hold 831 days (3.3 years) — extremely different from existing champions. On Sectors+DJI 46 (MaxDD 21-30%), adding a strategy that holds for years with exit-day r=0.06 vs MAC could push MaxDD below 20%.
 
@@ -1783,5 +1785,22 @@ _[Next agent: append your session below this line]_
 
 7. **Q42 min_val fix** — rel_thresh=1.15 is below the default min_val=2, same class of bug as Williams R. Used min_val=0.5 to properly sweep rel_thresh range (0.805-1.495).
 
-**Next recommended action:**
-- Q41: 6-Strategy Portfolio on Sectors+DJI 46 with Relative Momentum (MEDIUM priority)
+- Round 40: Q41 — 6-Strategy Portfolio on Sectors+DJI 46 with Relative Momentum (Run ID: sectors-dji-6strat-relmom_2026-04-11_12-01-41)
+
+**Additional key findings (Round 40):**
+
+8. **Relative Momentum INCOMPATIBLE with Sectors+DJI 46** — only 97 trades (vs 831 on NDX Tech 44). Sector ETFs are correlated with SPY by construction; they cannot outperform SPY by 15%+ in 13 weeks frequently enough to generate adequate trades. Universe-signal mismatch.
+
+9. **RS(min) = -1,615.81 is an artifact** — caused by near-zero variance rolling Sharpe during warmup before first trade fires. RS(avg) = -0.07, RS(last) = 0.82 are the meaningful figures. WFA Pass + RollWFA 3/3 confirm the strategy is not broken.
+
+10. **Relative Momentum diversification confirmed** — lowest correlation of all 6 strategies in combined run (max r=0.24 vs MA Bounce). But 97 trades is far below the 500-trade statistical minimum; the diversification benefit cannot compensate for the thin signal on this universe.
+
+11. **Production portfolio recommendation UNCHANGED** — 5-strategy Sectors+DJI 46 at 3.3% allocation remains the conservative production portfolio. Relative Momentum belongs only on individual-stock universes (NDX Tech 44, SP500, Russell 1000) where stocks can diverge meaningfully from SPY.
+
+12. **ALL 6 strategies MC Score 5** — sector diversification produces maximum Monte Carlo robustness for every strategy in the run.
+
+**Research loop STATUS: COMPLETE — All queue items (Q40, Q41, Q42, Q43) done. No further research warranted.**
+
+**Final production portfolios:**
+- **Conservative:** Sectors+DJI 46 (`sectors_dji_combined.json`), 5 strategies, 3.3% allocation, MC Score 5 for all
+- **Aggressive:** NDX Tech 44 (`nasdaq_100_tech.json`), 6 strategies (add Rel Mom + BB Breakout + Williams R), 2.8% allocation
