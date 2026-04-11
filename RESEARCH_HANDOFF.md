@@ -8,8 +8,9 @@
 **One prompt to start a session:**
 ```
 Read RESEARCH_HANDOFF.md in full, then continue the strategy research loop.
-Pop the first uncompleted queue item, run the backtest, record results in
-research_results/round_7.md, update RESEARCH_HANDOFF.md (mark item done,
+Check the SESSION LOG to find the last completed round number N, then pop
+the first uncompleted queue item, run the backtest, record results in
+research_results/round_[N+1].md, update RESEARCH_HANDOFF.md (mark item done,
 append to SESSION LOG), then immediately move to the next queue item.
 Keep going until you hit the stop criteria or your context window is full.
 ```
