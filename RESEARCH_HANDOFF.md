@@ -70,6 +70,7 @@ All tested on: `nasdaq_100_tech.json` (44 symbols), 1990-2026, Norgate total-ret
 All use: wfa_split_ratio=0.80, wfa_folds=3. TF = timeframe (D=daily, W=weekly).
 
 **UNIVERSALITY CONFIRMED (2026-04-10):** All 3 primary daily champions also pass WFA+RollWFA 3/3 on `sp-500.json` (500 stocks). Strategies are not tech-regime-specific.
+**DOW JONES 30 BREAKTHROUGH (2026-04-11):** All 5 strategies WFA Pass + RollWFA 3/3 on DJI 30. MaxDD only 19-23% (vs 44-50% on NDX). MC Score +5 for 3 of 5 strategies. Sharpe 1.71-1.93. Sector diversification halves drawdowns while maintaining Sharpe.
 **SP500 COMBINED (2026-04-11):** MA Bounce reaches MC Score +1 at 3% allocation on 500-stock universe — diversification partially fixes MC Score.
 **WEEKLY TIMEFRAME STRUCTURAL (2026-04-11):** ALL 4 strategies tested on weekly bars show Sharpe improvement of 165-215% and RS(min) improvement of 1.75-6.9×. Weekly timeframe is a proven structural improvement.
 **PRICE MOMENTUM IS TECH-SPECIFIC (2026-04-11):** 6m ROC > 15% FAILS on SP500 daily (RS(min) -17.09). On weekly bars, Price Momentum works on Russell 1000 (Sharpe 1.18, WFA Pass 3/3). The SP500 failure was a timeframe issue, not a signal issue.
@@ -736,6 +737,84 @@ RS(min) -2.06 is the single best rolling Sharpe stress score of all 15+ strategi
 
 **Success criteria:** ≥ 70% of parameter variants profitable (ROBUST verdict). Sharpe range across variants stays above 1.0.
 **Failure criteria:** < 30% profitable variants (FRAGILE verdict) → the 55/45 thresholds are overfit; strategy edge is fragile.
+
+---
+
+### QUEUE ITEM 22 — Dow Jones 30: Blue-Chip Industrial Universe [PRIORITY: HIGH]
+**Status: DONE — 2026-04-11 — ALL 5 WFA Pass, MaxDD 19-23% (HALF of NDX), MC Score +5 for 3 strategies**
+**Run ID:** dji-weekly-5strat_2026-04-11_06-57-53
+
+**Why this matters:** All research to date has been on tech-heavy universes (NDX, SP500 with 28% tech weight, Russell 1000). The Dow Jones 30 is the opposite: 30 mega-cap diversified industrial/consumer/financial giants (AAPL, MSFT, JNJ, KO, JPM, HD, etc.). If weekly momentum strategies work here, the edge is truly universal across market caps and sectors. If not, the edge is tech-specific momentum that doesn't generalize to slower-moving industrials.
+
+**What to do:**
+1. Edit `config.py`:
+   - `"timeframe": "W"`
+   - `"portfolios": {"Dow Jones 30": "dow-jones-industrial-average.json"}`
+   - `"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200", "RSI Weekly Trend (55-cross) + SMA200"]`
+   - `"allocation_per_trade": 0.033`
+2. Run: `rtk python main.py --name "dji-weekly-5strat" --verbose`
+3. Reset config after run.
+
+**Success criteria:** ≥ 3 of 5 strategies WFA Pass, Sharpe > 0.50, RS(min) > -8.
+**Expected:** Fewer trades (30 symbols × 36 years weekly), lower Sharpe than tech (industrials trend slower), but better WFA stability (more predictable trends, fewer binary events).
+
+---
+
+### QUEUE ITEM 23 — Nasdaq Biotech (257): Binary-Event Sector [PRIORITY: HIGH]
+**Status: TODO**
+
+**Why this matters:** Biotech is structurally different from all tested universes — returns are driven by FDA approval events, clinical trial results, and partnership announcements. These are near-random binary events. Momentum strategies might fail entirely (if stock moves are random binary jumps) or might succeed (if post-approval momentum is real and sustained). This tests whether weekly momentum strategies are universal or tech/industrial-specific.
+
+**What to do:**
+1. Edit `config.py`:
+   - `"timeframe": "W"`
+   - `"portfolios": {"Nasdaq Biotech (257)": "nasdaq_biotech_tickers.json"}`
+   - `"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200", "RSI Weekly Trend (55-cross) + SMA200"]`
+   - `"allocation_per_trade": 0.033`
+2. Run: `rtk python main.py --name "biotech-weekly-5strat" --verbose`
+3. Reset config after run.
+
+**Success criteria:** ≥ 2 of 5 strategies WFA Pass, Sharpe > 0.40.
+**Expected failure mode:** WFA "Likely Overfitted" due to binary event randomness; RS(min) very negative due to FDA cliff events. If strategies fail, the lesson is that momentum requires sustained trends, not discrete jump events.
+
+---
+
+### QUEUE ITEM 24 — Sector ETFs (16): Cross-Sector Rotation [PRIORITY: MEDIUM]
+**Status: TODO**
+
+**Why this matters:** Sector rotation is a classic institutional strategy. The 16 sector ETFs (XLK, XLF, XLE, XLY, XLP, XLI, XLB, XLU, IYR, IBB, ITA, IHI, GDX, XOP, XRT, ITB) represent different corners of the market that rotate in/out of favor. With only 16 symbols and weekly bars, trade counts will be very low — but the test reveals whether the momentum framework detects sector leadership cycles. Note: sector ETFs were created 1998-2006 so historical data is shorter.
+
+**What to do:**
+1. Edit `config.py`:
+   - `"timeframe": "W"`
+   - `"portfolios": {"Sector ETFs (16)": "sectors.json"}`
+   - `"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200", "RSI Weekly Trend (55-cross) + SMA200"]`
+   - `"allocation_per_trade": 0.10` (higher allocation — only 16 symbols, few concurrent positions)
+   - `"min_bars_required": 100` (ETFs have shorter history — reduce bar requirement)
+2. Run: `rtk python main.py --name "sectors-weekly-5strat" --verbose`
+3. Reset config after run.
+
+**Success criteria:** Any strategy WFA Pass with positive OOS P&L on sector ETFs. Trade count will be very low — may produce N/A WFA results.
+**Expected:** Few trades, possible WFA N/A. Interesting as a diagnostic for sector rotation detection, not a primary production universe.
+
+---
+
+### QUEUE ITEM 25 — Russell 2000 (Small Caps, ~1,969 symbols): Size Effect Test [PRIORITY: CRITICAL]
+**Status: TODO**
+
+**Why this matters:** The size effect (Fama-French) documents that small caps historically outperform large caps on a risk-adjusted basis. Academic research shows momentum is stronger in small caps (less efficient pricing, slower institutional reaction). However, small caps also have: higher transaction costs, lower liquidity, more failed companies (survivorship bias concern), and more volatile earnings. This tests whether the 5 weekly strategies capture small-cap momentum OR whether the strategies only work on large, liquid, trending stocks.
+
+**What to do:**
+1. Edit `config.py`:
+   - `"timeframe": "W"`
+   - `"portfolios": {"Russell 2000": "russell-2000.json"}`
+   - `"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit", "Donchian Breakout (40/20)", "Price Momentum (6m ROC, 15pct) + SMA200", "RSI Weekly Trend (55-cross) + SMA200"]`
+   - `"allocation_per_trade": 0.033`
+2. Run: `rtk python main.py --name "russell2000-weekly-5strat" --verbose`
+3. Reset config after run. (Long run — ~1,969 symbols × 5 strategies)
+
+**Success criteria:** ≥ 3 of 5 WFA Pass, Sharpe > 0.60 on small caps. Would confirm the momentum edge exists across the full size spectrum.
+**Expected:** Higher P&L potential (stronger small-cap momentum) but worse RS(min) (more concentrated drawdowns when small caps crash). MC Score may improve (size diversity) or worsen (synchronized small-cap crashes in 2000, 2008, 2020).
 
 ---
 
