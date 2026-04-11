@@ -1938,7 +1938,7 @@ Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relati
 
 4. **Universe-specific correlation confirmed:** BB ↔ RSI Weekly is 0.4711 on Sectors+DJI 46 vs 0.7049 on NDX Tech 44. Same pair, different universe, completely different correlation due to sector rotation. Always test correlations on the actual production universe.
 
-**Research loop STATUS: ACTIVE — Q51 DONE. ALL THREE production portfolios CONFIRMED FINAL. Identifying next research track (Q52).**
+**Research loop STATUS: ACTIVE — Q52 DONE. ALL THREE production portfolios CONFIRMED FINAL. R42 Aggressive definitively closed (Williams R fails: 3 pairs > 0.70). Identifying Q53.**
 
 **Additional findings (Round 47 — Q50: Williams R as 6th):**
 - Williams R Weekly Trend (above-20) + SMA200 achieves Sharpe 1.82 — the highest Sharpe of ANY strategy in the 6-strategy portfolio, beating RSI Weekly (1.78) and Price Momentum (1.79)
@@ -1979,11 +1979,22 @@ _[Next agent: append your session below this line]_
    - **Conservative v2:** R47, 6 strategies × 2.8%, Sectors+DJI 46, ALL 6 MC Score 5, Williams R as 6th
    - **Aggressive:** R42, 5 strategies × 3.3%, NDX Tech 44, all WFA Pass, max pair r=0.65
 
-**Next recommended action:** Identify Q52 — all production portfolio configurations are finalized. Potential next tracks:
-- Williams R on NDX Tech 44 Aggressive portfolio compatibility test (does Williams R have r<0.70 with all 5 strategies on NDX?)
-- Alternative universe expansion (e.g., sector-specific sub-portfolios)
-- Stop-loss optimization study on Conservative v1/v2
-- Sensitivity sweep on Williams R parameters in Conservative v2
+**Additional findings (Round 49 — Q52: Williams R on NDX Tech 44):**
+- Williams R ↔ RSI Weekly r=0.752, Williams R ↔ MA Bounce r=0.718, Williams R ↔ Relative Momentum r=0.710 — all above 0.70
+- Third confirmation of universe-specific correlation: NDX Tech 44 concentrated momentum produces high cross-strategy correlations
+- Williams R individual metrics excellent (Sharpe 1.83, OOS +7,417.87%, MC Score 2) but portfolio-level correlation prevents addition
+- R42 Aggressive portfolio DEFINITIVELY CONFIRMED FINAL — no viable 6th strategy exists in current research set
+
+**CURRENT PRODUCTION PORTFOLIO SUMMARY (FINAL — ALL CONFIRMED):**
+- **Conservative v1:** Sectors+DJI 46, 5 strategies (MA Bounce + MAC + Donchian + Price Momentum + RSI Weekly), 3.3% allocation, ALL MC Score 5
+- **Conservative v2:** Sectors+DJI 46, 6 strategies (v1 + Williams R Weekly Trend), 2.8% allocation, ALL 6 MC Score 5
+- **Aggressive:** NDX Tech 44, 5 strategies (MA Bounce + MAC + Donchian + RSI Weekly + Relative Momentum), 3.3% allocation, max pair r=0.65
+
+**Next recommended action:** Identify Q53 — all production portfolios are FINAL. Remaining directions:
+- Williams R parameter sensitivity sweep in Conservative v2 (confirm robustness at -15/-25 threshold variants)
+- Stop-loss optimization on Conservative portfolios (reduce MaxDD further?)
+- New universe test (e.g., commodities ETFs, real estate ETFs)
+- If research is deemed complete, update STOP CRITERIA and formally close
 
 ---
 
@@ -2008,6 +2019,35 @@ _[Next agent: append your session below this line]_
 **Run:** `rtk python main.py --name "sectors-dji-5strat-williams-vs-pm" --verbose`
 
 **Success criteria:** All 5 WFA Pass + RollWFA 3/3. All 5 MC Score 5. Williams R ↔ RSI Weekly < 0.6925 (the current PM ↔ RSI pair). Portfolio average Sharpe improves vs standard v1. If all criteria met → declare Williams R variant as the new Conservative v1.
+
+**Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250, portfolios=NDX Tech 44.
+
+---
+
+### QUEUE ITEM 52 — Williams R as 6th Strategy in Aggressive Portfolio (NDX Tech 44) [PRIORITY: MEDIUM]
+**Status: DONE — 2026-04-11 (Round 49)**
+**Run ID:** ndx44-6strat-williams_2026-04-11_13-21-43
+**Key result:** REJECTED — Williams R creates THREE pairs above 0.70: Williams R ↔ RSI Weekly r=0.752, Williams R ↔ MA Bounce r=0.718, Williams R ↔ Relative Momentum r=0.710. Third confirmation of universe-specific correlation rule: concentrated NDX tech produces high cross-strategy correlation that diversified Sectors+DJI 46 avoids. R42 Aggressive portfolio DEFINITIVELY CONFIRMED FINAL — no viable 6th strategy in current research set.
+
+**Why this matters:** Williams R Weekly Trend is the best 6th strategy for Conservative v2 (Sharpe 1.82, all correlations < 0.70). Does the same strategy work as a 6th strategy for the Aggressive portfolio (NDX Tech 44)? R40 showed Williams R ↔ MA Bounce r=0.75 when replacing RSI Weekly in the 5-strategy NDX portfolio, but R42 uses Relative Momentum instead of Price Momentum. The correlation structure with Relative Momentum in place of Price Momentum has not been tested. If all 6 pairs stay below r=0.70, the Aggressive portfolio gains a 6th strategy. Expected result: Williams R likely exceeds 0.70 with RSI Weekly on NDX (both are momentum oscillators on concentrated tech), confirming R42 as final.
+
+**Config:**
+```python
+"timeframe": "W"
+"portfolios": {"NDX Tech (44)": "nasdaq_100_tech.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate", "MA Confluence (10/20/50) Fast Exit",
+               "Donchian Breakout (40/20)", "RSI Weekly Trend (55-cross) + SMA200",
+               "Relative Momentum (12m, top 30pct) + SMA200",
+               "Williams R Weekly Trend (above-20) + SMA200"]
+"allocation_per_trade": 0.028   # 6 strategies: 1/N for N=6
+"min_bars_required": 100
+```
+
+**Run:** `rtk python main.py --name "ndx44-6strat-williams" --verbose`
+
+**Success criteria:** All 6 WFA Pass + RollWFA 3/3. All pairs r < 0.70. If all criteria met AND Williams R has acceptable individual metrics → Aggressive portfolio upgrades to 6 strategies.
+
+**Failure criteria:** Williams R ↔ RSI Weekly or Williams R ↔ MA Bounce > r=0.70 on NDX Tech 44 → R42 5-strategy portfolio CONFIRMED FINAL (no further upgrades possible).
 
 **Reset config after run** to: timeframe="D", strategies="all", allocation=0.10, min_bars_required=250, portfolios=NDX Tech 44.
 

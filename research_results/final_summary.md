@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 48 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
+**Research Loop:** 49 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-11 (36 years)
@@ -292,6 +292,15 @@ Round 48 (Williams R Replacing Price Momentum in Conservative Portfolio v1 — Q
   → Correlation improved (max r=0.6413 MAC↔Donchian vs 0.6925 PM↔RSI) but not worth RSI Weekly MC drop
   → Second instance of structural buffer pattern: identical mechanism to Donchian in Aggressive portfolio (R44)
   → Conservative v1 (R29, with Price Momentum) CONFIRMED FINAL. ALL THREE production portfolios now FINAL.
+
+Round 49 (Williams R as 6th Strategy in Aggressive Portfolio — Q52, 2026-04-11)
+  → REJECTED: Williams R creates THREE pairs above r=0.70 on NDX Tech 44
+  → Williams R ↔ RSI Weekly r=0.752, Williams R ↔ MA Bounce r=0.718, Williams R ↔ Relative Momentum r=0.710
+  → Third confirmation of universe-specific correlation: NDX Tech 44 concentrated tech produces high cross-strategy correlation
+  → Williams R individual metrics outstanding (Sharpe 1.83, OOS +7,417.87%) — rejected purely for portfolio-level correlation
+  → Comparison: Williams R ↔ RSI Weekly r=0.6451 on Sectors+DJI 46 (R47) vs r=0.752 on NDX Tech 44 — same pair, same strategy
+  → R42 5-strategy Aggressive portfolio DEFINITIVELY CONFIRMED FINAL — no viable 6th strategy in current research set
+  → Pattern (3rd instance): concentrated momentum universes produce high cross-strategy correlation; sector-diversified universes do not
 ```
 
 ---
@@ -521,6 +530,15 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 - At 969 trades total (vs 831 in isolation), the strategy generates MORE trades at 2.8% allocation vs 10% in isolation — lower per-trade capital requirement allows more simultaneous positions before hitting cash ceiling
 - **Lesson: Long-duration, infrequent strategies (hold months, not days) have fundamentally different MC Score behavior. They are structurally resistant to the synchronized-crash tail risk that plagues high-frequency trend-following strategies on correlated universes.**
 
+### 29. Williams R on NDX Tech 44 — Third Confirmation of Universe-Specific Correlation Rule (R49)
+- Williams R ↔ RSI Weekly: r=0.6451 on Sectors+DJI 46 (R47, below 0.70) vs r=0.752 on NDX Tech 44 (R49, above 0.70)
+- Williams R ↔ MA Bounce: r=0.32 on Sectors+DJI 46 (R48 5-strat test) vs r=0.718 on NDX Tech 44 (R49)
+- Williams R ↔ Relative Momentum: r=0.710 on NDX Tech 44 — barely above threshold, but still a fail
+- Three pairs exceeded 0.70 simultaneously, making Williams R impossible to add to the Aggressive portfolio
+- Williams R individual metrics on NDX Tech 44 are excellent (Sharpe 1.83, OOS +7,417%) — rejected purely for portfolio correlation
+- **Rule (3rd confirmed instance):** Concentrated tech momentum universes produce high cross-strategy correlation. Diversified sector/macro universes allow the same strategy pairs to remain below threshold.
+- **Implication: The universe determines strategy pair compatibility. Williams R belongs in Conservative portfolios (Sectors+DJI 46) — not in the Aggressive portfolio (NDX Tech 44). R42 Aggressive portfolio is definitively closed.**
+
 ### 28. Price Momentum Is the MC Buffer for RSI Weekly — Portfolio Composition Affects MC Robustness of Other Strategies (R48)
 - In the original Conservative v1 (R29, with Price Momentum), RSI Weekly achieves MC Score 5 — "Robust" with no tail risk
 - When Price Momentum is removed (Q51, Williams R replaces it), RSI Weekly drops to MC Score 2 — "Moderate Tail Risk"
@@ -749,3 +767,4 @@ All 33 research questions have been answered across Rounds 1-31. Research is com
 38. ~~**Relative Momentum as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R46 Q49. REJECTED. Sharpe 0.80, OOS +51.38%, RS(avg)=-0.07. Universe mismatch: sector ETF relative momentum is mean-reverting. Max r=0.2373 (lowest ever) but alpha insufficient. **CLOSED.**
 39. ~~**Williams R Weekly Trend as 6th Strategy in Conservative Portfolio (Sectors+DJI 46)**~~ — R47 Q50. OUTSTANDING. Sharpe 1.82 (highest in portfolio), OOS +1,437.81% (8.4× better than BB Breakout). Williams R ↔ RSI Weekly r=0.6451. All 6 MC Score 5. Williams R is the WINNER among all 3 candidates. Conservative portfolio v2 CONFIRMED FINAL with Williams R. **CLOSED.**
 40. ~~**Williams R Replacing Price Momentum in Conservative Portfolio v1 (5-Strategy)**~~ — R48 Q51. REJECTED. RSI Weekly MC Score drops 5 → 2 without Price Momentum. Price Momentum is a structural "MC buffer" for RSI Weekly via capital competition dynamics — its presence prevents RSI Weekly from concentrating positions simultaneously. Williams R individual metrics excellent (Sharpe 1.86, OOS +2,156%) but portfolio-level effect overrides. Conservative v1 (R29, with Price Momentum) CONFIRMED SUPERIOR. ALL THREE production portfolios CONFIRMED FINAL. **CLOSED.**
+41. ~~**Williams R as 6th Strategy in Aggressive Portfolio (NDX Tech 44)**~~ — R49 Q52. REJECTED. Williams R creates THREE pairs above r=0.70: Williams R ↔ RSI Weekly r=0.752, Williams R ↔ MA Bounce r=0.718, Williams R ↔ Relative Momentum r=0.710. Third confirmation of universe-specific correlation rule. R42 5-strategy Aggressive portfolio DEFINITIVELY CONFIRMED FINAL — no viable 6th strategy in current research set. **CLOSED.**
