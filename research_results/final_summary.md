@@ -1,6 +1,6 @@
 # Autonomous Strategy Research — Final Summary
 
-**Research Loop:** 50 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
+**Research Loop:** 51 Rounds × Multi-Agent Parallel Research — **ACTIVE ✓**
 **Last Updated:** 2026-04-11
 **Data Provider:** Norgate (total-return adjusted daily bars)
 **Full Period:** 1990-01-01 → 2026-04-11 (36 years)
@@ -310,6 +310,16 @@ Round 50 (ATR Trailing Stop on Conservative v1 — Q53, 2026-04-11)
   → Interesting: ATR stops improve MC Score for Price Momentum 2→5 and RSI Weekly 2→5 (but already achieved in combined portfolio via capital competition)
   → Universal finding: ATR trailing stops are structurally incompatible with weekly trend-following momentum strategies on any universe
   → Conservative v1 (R29, no stops) CONFIRMED as definitively optimal for MaxDD and all metrics
+
+Round 51 (Williams R Parameter Sensitivity Sweep on Sectors+DJI 46 — Q54, 2026-04-11)
+  → ROBUST: 81/81 variants profitable (100%), 81/81 WFA Pass (100%) — unambiguous robustness
+  → Swept: wr_length [11/14/17] × entry_level [-16/-20/-24] × exit_level [-64/-80/-96] × sma_slow [32/40/48] (full 3^4 = 81 cartesian product)
+  → Sharpe range 1.59-2.03 (all above 1.4 minimum threshold); worst case Sharpe 1.59 still excellent
+  → Base config (Sharpe 1.84) is NOT at distribution maximum (best variant Sharpe 2.03, wr=14/entry=-16/exit=-96/sma=48)
+  → No cherry-pick evidence: base sits in middle of distribution, confirming no curve-fitting to specific parameter set
+  → Williams R confirmed robust on BOTH production universes: NDX Tech 44 (R36, 625/625) AND Sectors+DJI 46 (R51, 81/81)
+  → Key infrastructure note: sensitivity_sweep_min_val=-100 required for negative-threshold strategies (Williams R, any -100 to 0 oscillator)
+  → Conservative v2 (R47, Williams R as 6th strategy) fully validated. All three production portfolios CONFIRMED AND VALIDATED.
 ```
 
 ---
@@ -568,6 +578,16 @@ Same strategy, same parameters, different scale. The compounding of 44 uncorrela
 - **Pattern (2nd instance):** Identical mechanism to Donchian in the Aggressive portfolio (R44). "Weaker" strategies by individual Sharpe can be structurally irreplaceable because of their buffering role in the combined portfolio's capital dynamics.
 - **Implication: Before replacing any confirmed strategy, test whether its removal degrades MC robustness of the remaining strategies. A replacement that looks better in isolation may create tail risk concentration in others.**
 
+### 31. Williams R Edge Is Structural — Confirmed Robust on Both Production Universes (R36/R51)
+- Williams R on NDX Tech 44 (R36): 625/625 variants profitable (100%), 625/625 WFA Pass (100%), Sharpe range 1.59-2.21
+- Williams R on Sectors+DJI 46 (R51): 81/81 variants profitable (100%), 81/81 WFA Pass (100%), Sharpe range 1.59-2.03
+- Both sweeps show base configuration NOT at the distribution maximum — no cherry-picking evidence in either universe
+- The price-near-top-of-N-week-range signal (Williams %R above -20 threshold) is genuine momentum, not a statistical artifact
+- MC Score -1 in isolation (46 symbols, 10% allocation) is expected — the same result seen for ALL strategies in isolation at high allocation; in Conservative v2 combined context (2.8% allocation), Williams R achieves MC Score 5
+- **Rule: When 100% of parameter variants are profitable and WFA Pass on a 36-year dataset, the strategy edge is structural, not overfitted. These are the two strongest robustness signals available.**
+- **Implication: Williams R Weekly Trend (above-20) + SMA200 at base parameters (wr=14, entry=-20, exit=-80, sma=40) is verified as a sound configuration with no evidence of curve-fitting. Conservative v2 is fully validated.**
+- **Infrastructure note: `sensitivity_sweep_min_val=-100` is required for any strategy with negative-valued thresholds (Williams %R, any oscillator measured on -100 to 0 scale). Default min_val=2 clips these values outside their valid range, producing 0 trades and a false "all variants pass" result.**
+
 ### 27. Low Correlation Alone Is Insufficient — Alpha Must Meet Minimum Threshold (R46)
 - Relative Momentum on Sectors+DJI 46 achieved the lowest maximum correlation of any strategy in any combined portfolio run (max r=0.2373) — extraordinary diversification
 - BUT: Sharpe 0.80, OOS P&L +51.38%, RS(avg) = -0.07 — the strategy fails to generate sufficient alpha on this universe
@@ -788,3 +808,4 @@ All 33 research questions have been answered across Rounds 1-31. Research is com
 40. ~~**Williams R Replacing Price Momentum in Conservative Portfolio v1 (5-Strategy)**~~ — R48 Q51. REJECTED. RSI Weekly MC Score drops 5 → 2 without Price Momentum. Price Momentum is a structural "MC buffer" for RSI Weekly via capital competition dynamics — its presence prevents RSI Weekly from concentrating positions simultaneously. Williams R individual metrics excellent (Sharpe 1.86, OOS +2,156%) but portfolio-level effect overrides. Conservative v1 (R29, with Price Momentum) CONFIRMED SUPERIOR. ALL THREE production portfolios CONFIRMED FINAL. **CLOSED.**
 41. ~~**Williams R as 6th Strategy in Aggressive Portfolio (NDX Tech 44)**~~ — R49 Q52. REJECTED. Williams R creates THREE pairs above r=0.70: Williams R ↔ RSI Weekly r=0.752, Williams R ↔ MA Bounce r=0.718, Williams R ↔ Relative Momentum r=0.710. Third confirmation of universe-specific correlation rule. R42 5-strategy Aggressive portfolio DEFINITIVELY CONFIRMED FINAL — no viable 6th strategy in current research set. **CLOSED.**
 42. ~~**ATR Trailing Stop on Conservative v1 (MaxDD Reduction Test)**~~ — R50 Q53. REJECTED. ATR 3× stops INCREASE MaxDD for all 5 strategies (+6 to +9 pp), reduce Sharpe 42%, collapse OOS P&L 78-92%. Stops fire during within-trend pullbacks, creating larger realized drawdowns. Universal finding: ATR stops incompatible with weekly trend-following on any universe. Conservative v1 (R29, no stops) CONFIRMED OPTIMAL. **CLOSED.**
+43. ~~**Williams R Parameter Sensitivity Sweep on Sectors+DJI 46**~~ — R51 Q54. CONFIRMED ROBUST. 81/81 variants profitable (100%), 81/81 WFA Pass (100%). Sharpe range 1.59-2.03 (all above threshold). Base config NOT at maximum (no cherry-pick evidence). Williams R confirmed robust on BOTH universes (NDX Tech 44 R36 + Sectors+DJI 46 R51). Conservative v2 Williams R configuration fully validated. **CLOSED.**

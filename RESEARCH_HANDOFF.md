@@ -1938,7 +1938,7 @@ Note: Price Momentum belongs in the Conservative portfolio (Sectors+DJI); Relati
 
 4. **Universe-specific correlation confirmed:** BB ↔ RSI Weekly is 0.4711 on Sectors+DJI 46 vs 0.7049 on NDX Tech 44. Same pair, different universe, completely different correlation due to sector rotation. Always test correlations on the actual production universe.
 
-**Research loop STATUS: ACTIVE — Q53 DONE. ATR stops rejected on Conservative v1 (increase MaxDD). R29 no-stop configuration CONFIRMED OPTIMAL. Identifying Q54.**
+**Research loop STATUS: ACTIVE — Q54 DONE. Williams R CONFIRMED ROBUST (81/81 variants profitable, WFA Pass 100%). Conservative v2 fully validated. Identifying Q55.**
 
 **Additional findings (Round 47 — Q50: Williams R as 6th):**
 - Williams R Weekly Trend (above-20) + SMA200 achieves Sharpe 1.82 — the highest Sharpe of ANY strategy in the 6-strategy portfolio, beating RSI Weekly (1.78) and Price Momentum (1.79)
@@ -2004,10 +2004,19 @@ _[Next agent: append your session below this line]_
 - Universal finding: ATR trailing stops are incompatible with weekly trend-following momentum strategies on any universe
 - Conservative v1 (R29, no stops) CONFIRMED as definitively optimal
 
-**Next recommended action:** Identify Q54 — all production portfolios FINAL, stops tested. Remaining directions:
-- Williams R parameter sensitivity sweep in Conservative v2 (confirm Sharpe 1.82 is robust to ±20% parameter changes)
-- New universe test (commodities ETFs, real estate ETFs)
-- If 3+ consecutive sessions produce no new champion/improvement → formally close research
+**Additional findings (Round 51 — Q54: Williams R parameter sensitivity sweep on Sectors+DJI 46):**
+- Williams R CONFIRMED ROBUST: 81/81 variants profitable (100%), 81/81 WFA Pass (100%)
+- Swept: wr_length [11/14/17], entry_level [-16/-20/-24], exit_level [-64/-80/-96], sma_slow [32/40/48] — full 3^4 = 81 cartesian product
+- Sharpe range 1.59-2.03 (all above 1.4 minimum threshold); base (Sharpe 1.84) NOT at distribution maximum (best variant Sharpe 2.03)
+- Base configuration is NOT cherry-picked: sits in middle of distribution, confirming no curve-fitting
+- Key technical note: required sensitivity_sweep_min_val=-100 to allow negative parameter sweeping; default min_val=2 clips Williams R thresholds to 2.0 (outside -100 to 0 range), producing 0 trades
+- Williams R confirmed robust on BOTH universes: NDX Tech 44 (R36, 625/625 variants) AND Sectors+DJI 46 (R51, 81/81 variants)
+- Conservative v2 Williams R configuration fully validated. MC Score -1 in isolation (10% allocation, 46 symbols) is expected and not concerning
+
+**Next recommended action:** Q55 — all production portfolios FINAL, all key parameter sweeps done. Remaining directions:
+- 3+ consecutive sessions (R49-R51) have produced only confirmations, no new champions → consider formally closing research
+- Optional remaining tests: Conservative v2 combined portfolio sensitivity sweep, new universe test (commodities ETFs, real estate ETFs)
+- If no new research direction identified → update STOP CRITERIA to RESEARCH COMPLETE and document final state
 
 ---
 
