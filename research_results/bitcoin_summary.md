@@ -52,9 +52,9 @@
 
 | Rank | Strategy | File | Calmar | OOS P&L | WFA | RollWFA | MaxDD | MC Score | Sweep |
 |---|---|---|---|---|---|---|---|---|---|
-| 1 PROVISIONAL | MA Bounce (50d/3bar) + SMA200 Gate | `research_strategies_v4.py` | **1.22** | +476.29% | Pass | 3/3 | 46.29% | N/A* | Pending BTC-Q2 |
+| 1 ✓ CONFIRMED | MA Bounce (50d/3bar) + SMA200 Gate | `mean_reversion.py` | **1.22** | +476.29% | Pass | 3/3 | 46.29% | N/A* | **ROBUST (75/75, 93.3% WFA Pass)** |
 
-*MC N/A: 42 trades < `min_trades_for_mc=50`. Lower threshold to 20 for Bitcoin research.
+*MC N/A: 42 trades < `min_trades_for_mc=50`. Lowering to 20 in next round (BTC-Q4).
 
 ---
 
@@ -63,6 +63,7 @@
 | Round | Strategy/Focus | Result | Calmar | OOS P&L | Trades | Notes |
 |---|---|---|---|---|---|---|
 | BTC-R1 | 5 existing equity daily champions transfer test | PARTIAL PASS | 0.63–1.22 | -161% to +1257% | 16–49 | MA Bounce top (Calmar 1.22); MA Confluence FAILS; Donchian passes |
+| BTC-R2 | MA Bounce sensitivity sweep (75 variants) | **ROBUST** | 0.62–1.93 | -84% to +5001% | 42 (base) | 75/75 profitable, 70/75 WFA Pass. MA Bounce CONFIRMED champion. |
 
 ---
 
@@ -93,4 +94,4 @@ TBD — Pending BTC-Q2 (MA Bounce sweep) and BTC-Q3 (Bitcoin-specific strategies
 
 ---
 
-*Last updated: 2026-04-12 (BTC-R1 complete; BTC-Q2 pending)*
+*Last updated: 2026-04-12 (BTC-R2 complete; MA Bounce CONFIRMED; BTC-Q3 next)*

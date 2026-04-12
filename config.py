@@ -286,13 +286,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": [
-        "MA Confluence (10/20/50) Fast Exit",
-        "Donchian Breakout (40/20)",
-        "MA Bounce (50d/3bar) + SMA200 Gate",
-        "Price Momentum (6m ROC, 15pct) + SMA200",
-        "CMF Momentum (20d) + SMA200 Gate",
-    ],
+    "strategies": "all",
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
@@ -300,7 +294,7 @@ CONFIG = {
     # Automatically varies each numeric param in a strategy's @register_strategy
     # params dict by ±pct across ±steps steps, then prints a fragility verdict.
     # Opt-in only — keep disabled for normal runs (multiplies task count).
-    "sensitivity_sweep_enabled": False,
+    "sensitivity_sweep_enabled": False,    # disabled between rounds
     "sensitivity_sweep_pct": 0.20,        # ±20% per step
     "sensitivity_sweep_steps": 2,         # 2 steps each side → 5 values per param
     "sensitivity_sweep_min_val": 2,       # floor for generated values (prevents SMA period = 0)
