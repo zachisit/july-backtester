@@ -2537,7 +2537,7 @@ Design 3 Bitcoin-native strategies from first principles:
 **Status: DONE — 2026-04-12 — Applied in BTC-R3. MC runs but returns -1 for all single-asset strategies (structural, not disqualifying). Protocol updated: MC Score is not used as a disqualifying criterion for Bitcoin single-asset research.**
 
 ### BTC-Q5a — RSI Trend Sensitivity Sweep [PRIORITY: HIGH — Next]
-**Status: PENDING**
+**Status: DONE — 2026-04-12 — ROBUST (594/625 profitable 95%, 84% WFA Pass). RSI Trend CONFIRMED champion.**
 BTC RSI Trend (14/60/40) + SMA200 is provisional champion with Calmar 1.32. Must confirm robustness.
 Params to sweep: rsi_length (14), entry_level (60), exit_level (40), gate_length (200).
 
@@ -2554,7 +2554,7 @@ Success: >= 70% variants profitable + WFA Pass -> ROBUST -> CONFIRMED champion.
 Reset config after run.
 
 ### BTC-Q5b — Donchian 52/13 Sensitivity Sweep [PRIORITY: HIGH]
-**Status: PENDING**
+**Status: DONE — 2026-04-12 — ROBUST (25/25 profitable 100%, 73.3% WFA Pass). Donchian CONFIRMED champion.**
 BTC Donchian Wider (52/13) is provisional champion with Calmar 0.84. Must confirm robustness.
 Params to sweep: entry_period (52), exit_period (13).
 
@@ -2649,5 +2649,39 @@ Round file: research_results/btc_round_3.md
 Summary updated: research_results/bitcoin_summary.md
 
 **Next recommended action:** BTC-Q5a — RSI Trend sensitivity sweep, then BTC-Q5b — Donchian 52/13 sweep.
+
+_[Next agent: append your session below this line]_
+
+---
+
+### Session 24 — 2026-04-12 (Bitcoin Research Rounds 4+5 — RSI Trend and Donchian 52/13 Sweeps)
+**Agent:** Claude Sonnet 4.6
+**Ran:** BTC-R4 (RSI Trend sweep) + BTC-R5 (Donchian 52/13 sweep) — BTC-Q5a and BTC-Q5b
+**Run IDs:**
+- BTC-R4: btc-daily-r4-rsi-sweep_2026-04-12_11-24-44 (625 variants)
+- BTC-R5: btc-daily-r5-donchian-sweep_2026-04-12_11-27-09 (25 variants)
+
+**BTC-R4 — RSI Trend sweep findings:**
+1. 594/625 (95%) profitable — second best sweep result in all research
+2. 84% WFA Pass on scorable (300) variants
+3. Base rank 14/625 (top 2.2%) — not cherry-picked
+4. Fragile zone: rsi_length=8 + entry_level ≤ 48 (mean-reversion entries, too noisy)
+5. VERDICT: ROBUST — BTC RSI Trend CONFIRMED #1 Bitcoin Champion (Calmar 1.32)
+
+**BTC-R5 — Donchian 52/13 sweep findings:**
+1. 25/25 (100%) profitable
+2. 73.3% WFA Pass on scorable (15) variants — just above 70% threshold
+3. Base rank 9/25 (mid-range, not cherry-picked)
+4. Fragile zone: entry_period=31 (too short, IS overfit)
+5. VERDICT: ROBUST — Donchian 52/13 CONFIRMED #3 Bitcoin Champion (Calmar 0.84)
+
+**All 3 Bitcoin champions now CONFIRMED:**
+1. BTC RSI Trend (14/60/40) + SMA200 — Calmar 1.32 (CONFIRMED, btc_strategies.py)
+2. MA Bounce (50d/3bar) + SMA200 Gate — Calmar 1.22 (CONFIRMED, research_strategies_v4.py)
+3. BTC Donchian Wider (52/13) — Calmar 0.84 (CONFIRMED, btc_strategies.py)
+
+Round files: research_results/btc_round_4.md, research_results/btc_round_5.md
+
+**Next recommended action:** BTC-Q6 — 3-strategy combined Bitcoin portfolio test.
 
 _[Next agent: append your session below this line]_

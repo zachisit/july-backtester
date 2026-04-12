@@ -52,9 +52,9 @@
 
 | Rank | Strategy | File | Calmar | OOS P&L | WFA | RollWFA | MaxDD | MC | Sweep | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 PROVISIONAL | BTC RSI Trend (14/60/40) + SMA200 | `btc_strategies.py` | **1.32** | +732.31% | Pass | 2/2 | 43.72% | -1† | Pending BTC-Q5 | PROVISIONAL |
-| 2 ✓ CONFIRMED | MA Bounce (50d/3bar) + SMA200 Gate | `research_strategies_v4.py` | 1.22 | +476.29% | Pass | 3/3 | 46.29% | -1† | **ROBUST (75/75)** | CONFIRMED |
-| 3 PROVISIONAL | BTC Donchian Wider (52/13) | `btc_strategies.py` | 0.84 | +805.13% | Pass | 3/3 | 53.02% | -1† | Pending BTC-Q5 | PROVISIONAL |
+| 1 ✓ CONFIRMED | BTC RSI Trend (14/60/40) + SMA200 | `btc_strategies.py` | **1.32** | +732.31% | Pass | 2/2 | 43.72% | -1† | **ROBUST (594/625, 95%)** | CONFIRMED |
+| 2 ✓ CONFIRMED | MA Bounce (50d/3bar) + SMA200 Gate | `research_strategies_v4.py` | 1.22 | +476.29% | Pass | 3/3 | 46.29% | -1† | **ROBUST (75/75, 100%)** | CONFIRMED |
+| 3 ✓ CONFIRMED | BTC Donchian Wider (52/13) | `btc_strategies.py` | 0.84 | +805.13% | Pass | 3/3 | 53.02% | -1† | **ROBUST (25/25, 100%)** | CONFIRMED |
 
 †MC Score -1 is expected/structural for single-asset Bitcoin. MC is NOT a disqualifying criterion for Bitcoin research. WFA + RollWFA are primary robustness checks.
 
@@ -67,6 +67,8 @@
 | BTC-R1 | 5 existing equity daily champions transfer test | PARTIAL PASS | 0.63–1.22 | -161% to +1257% | 16–49 | MA Bounce top (Calmar 1.22); MA Confluence FAILS; Donchian passes |
 | BTC-R2 | MA Bounce sensitivity sweep (75 variants) | **ROBUST** | 0.62–1.93 | -84% to +5001% | 42 (base) | 75/75 profitable, 70/75 WFA Pass. MA Bounce CONFIRMED champion. |
 | BTC-R3 | 3 Bitcoin-specific strategies | PARTIAL PASS | 0.75–1.32 | +732% to +2050% | 20–24 | RSI Trend BEST (Calmar 1.32); Donchian 52/13 provisional; SMA200 Pure Trend rejected. |
+| BTC-R4 | RSI Trend sensitivity sweep (625 variants) | **ROBUST** | -0.14–1.86 | varies | 22 (base) | 594/625 profitable, 84% WFA Pass. RSI Trend CONFIRMED #1 champion. |
+| BTC-R5 | Donchian 52/13 sensitivity sweep (25 variants) | **ROBUST** | 0.66–1.05 | varies | 24 (base) | 25/25 profitable, 73.3% WFA Pass. Donchian CONFIRMED #3 champion. |
 
 ---
 
@@ -98,4 +100,4 @@ TBD — Pending BTC-Q2 (MA Bounce sweep) and BTC-Q3 (Bitcoin-specific strategies
 
 ---
 
-*Last updated: 2026-04-12 (BTC-R3 complete; RSI Trend new provisional #1; BTC-Q5 sweeps next)*
+*Last updated: 2026-04-12 (BTC-R5 complete; 3 CONFIRMED champions; BTC-Q6 combined portfolio next)*
