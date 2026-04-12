@@ -227,7 +227,7 @@ CONFIG = {
     # ============================================================
     # SECTION 10: MONTE CARLO SETTINGS
     # ============================================================
-    "min_trades_for_mc": 50,
+    "min_trades_for_mc": 20,  # BTC-Q4: lowered from 50 — single-asset Bitcoin generates 20-50 trades
     "num_mc_simulations": 1000,
 
     # ============================================================

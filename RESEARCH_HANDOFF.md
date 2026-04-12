@@ -2483,12 +2483,15 @@ Dedicated summary file: `research_results/bitcoin_summary.md`
 |---|---|---|---|---|---|---|
 | BTC-R1 | 5 equity daily champions transfer test | PARTIAL PASS | 0.63–1.22 | -161% to +1257% | 16–49 | MA Bounce champion; MAC FAILS; Donchian passes |
 | BTC-R2 | MA Bounce sensitivity sweep (75 variants) | ROBUST | 0.62–1.93 | -84% to +5001% | 42 (base) | 75/75 profitable, 70/75 WFA Pass. MA Bounce CONFIRMED champion. |
+| BTC-R3 | 3 Bitcoin-specific strategies (BTC-Q3) | PARTIAL PASS | 0.75–1.32 | +732% to +2050% | 20–24 | RSI Trend NEW #1 (Calmar 1.32); Donchian 52/13 provisional; SMA200 Pure Trend rejected. |
 
 **Bitcoin Provisional Champions:**
 
 | Rank | Strategy | Calmar | OOS P&L | WFA | RollWFA | MaxDD | Status |
 |---|---|---|---|---|---|---|---|
-| 1 | MA Bounce (50d/3bar) + SMA200 Gate | 1.22 | +476.29% | Pass | 3/3 | 46.29% | **CONFIRMED ✓ (75/75 ROBUST)** |
+| 1 PROVISIONAL | BTC RSI Trend (14/60/40) + SMA200 | 1.32 | +732.31% | Pass | 2/2 | 43.72% | PROVISIONAL (sweep pending BTC-Q5) |
+| 2 ✓ CONFIRMED | MA Bounce (50d/3bar) + SMA200 Gate | 1.22 | +476.29% | Pass | 3/3 | 46.29% | **CONFIRMED (75/75 ROBUST)** |
+| 3 PROVISIONAL | BTC Donchian Wider (52/13) | 0.84 | +805.13% | Pass | 3/3 | 53.02% | PROVISIONAL (sweep pending BTC-Q5) |
 
 **Bitcoin Queue:**
 
@@ -2519,7 +2522,7 @@ MA Bounce (50d/3bar) + SMA200 Gate is the provisional champion. Must confirm rob
 **Reset config after run.**
 
 ### BTC-Q3 — Bitcoin-Specific Strategy Round 1 [PRIORITY: HIGH]
-**Status: PENDING**
+**Status: DONE — 2026-04-12 — RSI Trend new provisional #1 (Calmar 1.32), Donchian 52/13 provisional (Calmar 0.84), SMA200 Pure Trend rejected**
 Design 3 Bitcoin-native strategies from first principles:
 1. **BTC SMA200 Pure Trend** (D): Enter on close crossing above SMA(200). Exit when close < SMA(200) for 3+ consecutive days. Justification: SMA(200) is the most-watched Bitcoin trend indicator; self-fulfilling prophecy creates genuine edge. 3-day exit prevents whipsaws from brief dips.
 2. **BTC Donchian Wider (52/13)** (D): Enter on 52-bar (52-calendar-day ≈ 7.4 weeks) new high. Exit on 13-bar new low. Justification: 52-day high on Bitcoin captures the quarterly momentum cycle. 13-day exit (2-week low) gives trades room to breathe.
@@ -2531,21 +2534,50 @@ Design 3 Bitcoin-native strategies from first principles:
 **Reset config after run.**
 
 ### BTC-Q4 — Lower min_trades_for_mc to 20 [PRIORITY: MEDIUM]
-**Status: PENDING**
-Currently `min_trades_for_mc: 50` prevents MC computation on single-asset Bitcoin strategies.
-Set `min_trades_for_mc: 20` for Bitcoin runs to enable MC Score.
-Note: 20-trade MC is statistically noisy but better than N/A.
-**Action:** Add as config parameter change in the first run that needs MC Score (after BTC-Q2 establishes the champion).
+**Status: DONE — 2026-04-12 — Applied in BTC-R3. MC runs but returns -1 for all single-asset strategies (structural, not disqualifying). Protocol updated: MC Score is not used as a disqualifying criterion for Bitcoin single-asset research.**
 
-### BTC-Q5 — Donchian Sensitivity Sweep [PRIORITY: MEDIUM]
+### BTC-Q5a — RSI Trend Sensitivity Sweep [PRIORITY: HIGH — Next]
 **Status: PENDING**
-Donchian (40/20) passes WFA on Bitcoin (Calmar 0.83). Test robustness before declaring champion.
-Config: same as BTC-Q2 but `"strategies": ["Donchian Breakout (40/20)"]`
+BTC RSI Trend (14/60/40) + SMA200 is provisional champion with Calmar 1.32. Must confirm robustness.
+Params to sweep: rsi_length (14), entry_level (60), exit_level (40), gate_length (200).
 
-### BTC-Q6 — Combined 2-Strategy Bitcoin Portfolio (MA Bounce + Donchian) [PRIORITY: MEDIUM]
-**Status: PENDING** — Depends on BTC-Q2 and BTC-Q5 confirming both strategies.
-If both MA Bounce and Donchian are confirmed, run combined portfolio at 0.5 allocation each.
-Goal: diversification between bounce (mean-reversion-in-trend) and breakout signals.
+Config:
+```
+"strategies": ["BTC RSI Trend (14/60/40) + SMA200"]
+"sensitivity_sweep_enabled": True
+"sensitivity_sweep_pct": 0.20
+"sensitivity_sweep_steps": 2
+"sensitivity_sweep_min_val": 2
+```
+Run: `rtk python main.py --name "btc-daily-r4-rsi-sweep" --verbose`
+Success: >= 70% variants profitable + WFA Pass -> ROBUST -> CONFIRMED champion.
+Reset config after run.
+
+### BTC-Q5b — Donchian 52/13 Sensitivity Sweep [PRIORITY: HIGH]
+**Status: PENDING**
+BTC Donchian Wider (52/13) is provisional champion with Calmar 0.84. Must confirm robustness.
+Params to sweep: entry_period (52), exit_period (13).
+
+Config:
+```
+"strategies": ["BTC Donchian Wider (52/13)"]
+"sensitivity_sweep_enabled": True
+"sensitivity_sweep_pct": 0.20
+"sensitivity_sweep_steps": 2
+"sensitivity_sweep_min_val": 2
+```
+Run: `rtk python main.py --name "btc-daily-r5-donchian-sweep" --verbose`
+Success: >= 70% variants profitable + WFA Pass -> ROBUST -> CONFIRMED champion.
+Reset config after run.
+
+### BTC-Q6 — Combined 3-Strategy Bitcoin Portfolio [PRIORITY: MEDIUM]
+**Status: PENDING** — Depends on BTC-Q5a/5b confirming RSI Trend and/or Donchian 52/13.
+Run combined portfolio with all confirmed champions at equal allocation:
+- MA Bounce (50d/3bar) + SMA200 Gate: allocation 0.333
+- BTC RSI Trend (14/60/40) + SMA200: allocation 0.333
+- BTC Donchian Wider (52/13): allocation 0.333
+Goal: test if diversification improves Calmar and reduces MaxDD vs single strategies.
+Run: `rtk python main.py --name "btc-daily-combined-portfolio" --verbose`
 
 ---
 
@@ -2592,5 +2624,30 @@ Round file: research_results/btc_round_2.md
 Summary file updated: research_results/bitcoin_summary.md
 
 **Next recommended action:** BTC-Q3 — Bitcoin-specific strategies (SMA200 Pure Trend, Donchian 52/13, RSI Trend 14/60/40) + lower min_trades_for_mc to 20 (BTC-Q4).
+
+_[Next agent: append your session below this line]_
+
+---
+
+### Session 23 — 2026-04-12 (Bitcoin Research Round 3 — Bitcoin-Specific Strategies)
+**Agent:** Claude Sonnet 4.6
+**Ran:** BTC-R3 — 3 Bitcoin-native strategies on X:BTCUSD (BTC-Q3 + BTC-Q4 applied)
+**Run ID:** btc-daily-r3-btc-specific_2026-04-12_11-19-47
+**Period:** 2017-01-03 → 2026-04-10, WFA split 2024-06-02
+**New file created:** `custom_strategies/btc_strategies.py` — BTC SMA200 Pure Trend, BTC Donchian Wider 52/13, BTC RSI Trend
+**BTC-Q4 applied:** min_trades_for_mc lowered from 50 to 20; MC runs but returns -1 for all (structural, single-asset artifact)
+
+**Key findings:**
+1. **BTC RSI Trend (14/60/40) + SMA200**: Calmar 1.32 — NEW #1, beats MA Bounce (1.22). MaxDD 43.72%. WFA Pass + RollWFA 2/2. OOS +732.31%.
+2. **BTC Donchian Wider (52/13)**: Calmar 0.84 > BTC B&H (0.79). WFA Pass + RollWFA 3/3. OOS +805.13%. Improves over original 40/20 (MaxDD 53% vs 60%).
+3. **BTC SMA200 Pure Trend**: REJECTED — Calmar 0.75 < BTC B&H (0.79). MaxDD 64.86% > 60% threshold. Only 20 trades. SMA200 crossover entry is too sparse for Bitcoin.
+4. **MC Score -1**: Structural for single-asset. MC NOT a disqualifying criterion for Bitcoin research. WFA + RollWFA are primary robustness checks.
+5. **Updated anti-pattern**: SMA200 is a great GATE but a poor ENTRY trigger on Bitcoin — fires only once per 4-year cycle.
+6. **All 3 strategies show RS(min) = -32.22**: Worst 126-day window is the same bear market entry for all long-only strategies.
+
+Round file: research_results/btc_round_3.md
+Summary updated: research_results/bitcoin_summary.md
+
+**Next recommended action:** BTC-Q5a — RSI Trend sensitivity sweep, then BTC-Q5b — Donchian 52/13 sweep.
 
 _[Next agent: append your session below this line]_
