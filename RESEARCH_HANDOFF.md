@@ -2749,3 +2749,51 @@ Summary file updated: research_results/bitcoin_summary.md
 4. **BTC-R11 (Medium)**: 5-strategy combined portfolio test at 0.2 allocation each.
 
 _[Next agent: append your session below this line]_
+
+---
+
+### Session 27 — 2026-04-12 (Bitcoin Research Rounds 8, 9, 10 — New Families + Combined Portfolio)
+**Agent:** Claude Sonnet 4.6
+**Ran:** BTC-R8 (6 new signal families base test), BTC-R9 (BB Breakout/PM sweeps + PM54 confirmation), BTC-R10 (6-strategy combined portfolio)
+**Run IDs:**
+- btc-daily-r8-new-families_2026-04-12_12-49-37 (R8 base)
+- btc-daily-r8-r9-sweep_2026-04-12_12-50-40 (R8/R9 sweep)
+- btc-daily-r9-pm54-base_2026-04-12_12-53-23 (R9 PM54 dedicated sweep)
+- btc-daily-r10-combined-6_2026-04-12_12-55-32 (R10 combined portfolio)
+**New file:** `custom_strategies/btc_strategies_v3.py`
+
+**BTC-R8 (6 new signal families):**
+- CMF (20d/0.05) + SMA200: Calmar 0.73 — FAIL (below BTC B&H 0.79)
+- CMF (14d/0.05) + SMA120: Calmar 0.53 — FAIL
+- Price Momentum (90d/5%) + SMA200: Calmar 0.84 — SURVIVE to sweep (MaxDD 64.89% yellow)
+- Price Momentum (180d/5%) + SMA200: Calmar 0.53, 12 trades — FAIL
+- BB Breakout (20d/2.5σ) + SMA200: Calmar 0.88, MaxDD 27.94% — SURVIVE to sweep
+- BB Breakout (30d/2.0σ) + SMA200: Calmar 0.73 — FAIL
+
+**BTC-R9 (sweeps + confirmation):**
+- BB Breakout sweep (93 variants): WFA pass rate 48.6% < 70% → REJECTED (signal too sparse for robust WFA)
+- Price Momentum (90d) sweep (125 variants): 100% profitable, 99.2% WFA pass — roc_length=54 zone discovered (Calmar 1.29, MaxDD 45.2%)
+- PM54 dedicated sweep (125 variants): 125/125 profitable, 95.8% WFA pass, Calmar ceiling 1.51 → **CONFIRMED NEW #4**
+
+**BTC-R10 (6-strategy combined portfolio at 0.167 alloc):**
+- ALL 6 strategies MC Score = 5 (Robust) — maximum classification
+- MaxDD reduced to 10-25% (from 34-53% at 100%)
+- All WFA Pass + RollWFA maintained
+
+**BITCOIN RESEARCH COMPLETE — FINAL STATE:**
+- 6 confirmed champions: RSI(20/60/56)+SMA120 (1.77), RSI(11/60/56)+SMA120 (1.63), RSI(14/60/40)+SMA200 (1.32), PM(54d/5%)+SMA200 (1.29), MA Bounce (1.22), Donchian 52/13 (0.84)
+- 4 signal families: RSI trend, MA bounce, Donchian breakout, price momentum
+- Failed families: CMF (Calmar too low), BB Breakout (WFA fragility)
+- Combined portfolio validated: all 6 at 0.167 = MC Score 5, MaxDD 10-25%
+
+Round files: btc_round_8.md, btc_round_9.md, btc_round_10.md
+Summary updated: bitcoin_summary.md
+
+**RESEARCH STOPPED HERE.** Rationale:
+- 2 consecutive signal families (CMF, BB Breakout) rejected
+- RSI Trend parameter space exhausted (3 confirmed variants)
+- 4 signal families with 6 champions covers the main systematic signal types available
+- Combined portfolio validated with all MC Robust
+- Further testing would risk p-hacking / false positives from family exhaustion
+
+_[Next agent: append your session below this line]_

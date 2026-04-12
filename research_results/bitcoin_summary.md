@@ -12,7 +12,7 @@
 1. **Transfer test**: Do the equity daily champions (MA Confluence, Donchian, MA Bounce, Price Momentum, CMF) work on Bitcoin?
 2. **Bitcoin-specific strategies**: Develop strategies tuned for Bitcoin's unique characteristics (halving cycles, 4-year macro patterns, high volatility).
 3. **Risk-adjusted alpha**: Can any systematic strategy achieve Calmar ≥ 0.5 on Bitcoin daily with MaxDD < 70%?
-4. **BTC B&H benchmark**: Bitcoin buy-and-hold from 2017-2026 is ~8,400% return, ~80% MaxDD, Calmar ≈ 0.83. Can strategies improve the Calmar while preserving returns?
+4. **BTC B&H benchmark**: Bitcoin buy-and-hold from 2017-2026 is ~8,400% return, ~80% MaxDD, Calmar ≈ 0.79. Can strategies improve the Calmar while preserving returns?
 
 ---
 
@@ -48,17 +48,18 @@
 
 ---
 
-## Champion Leaderboard
+## Champion Leaderboard — FINAL (6 Confirmed Champions)
 
 | Rank | Strategy | File | Calmar | OOS P&L | WFA | RollWFA | MaxDD | MC | Sweep | Status |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1 ✓ CONFIRMED | BTC RSI Trend (20/60/56) + SMA120 | `btc_strategies_v2.py` | **1.77** | +800.70% | Pass | 3/3 | **34.04%** | -1† | **ROBUST (570/625, 91.2%)** | CONFIRMED |
-| 2 ✓ CONFIRMED | BTC RSI Trend (11/60/56) + SMA120 | `btc_strategies_v2.py` | **1.63** | +1,198.95% | Pass | 3/3 | 39.96% | -1† | **ROBUST (625/625, 100%)** | CONFIRMED |
-| 3 ✓ CONFIRMED | BTC RSI Trend (14/60/40) + SMA200 | `btc_strategies.py` | 1.32 | +732.31% | Pass | 2/2 | 43.72% | -1† | **ROBUST (594/625, 95%)** | CONFIRMED |
-| 4 ✓ CONFIRMED | MA Bounce (50d/3bar) + SMA200 Gate | `research_strategies_v4.py` | 1.22 | +476.29% | Pass | 3/3 | 46.29% | -1† | **ROBUST (75/75, 100%)** | CONFIRMED |
-| 5 ✓ CONFIRMED | BTC Donchian Wider (52/13) | `btc_strategies.py` | 0.84 | +805.13% | Pass | 3/3 | 53.02% | -1† | **ROBUST (25/25, 100%)** | CONFIRMED |
+| 1 ✓ CONFIRMED | BTC RSI Trend (20/60/56) + SMA120 | `btc_strategies_v2.py` | **1.77** | +800.70% | Pass | 3/3 | **34.04%** | -1† | **ROBUST (91.2%, WFA 92.3%)** | CONFIRMED |
+| 2 ✓ CONFIRMED | BTC RSI Trend (11/60/56) + SMA120 | `btc_strategies_v2.py` | **1.63** | +1,198.95% | Pass | 3/3 | 39.96% | -1† | **ROBUST (100%, WFA 77.1%)** | CONFIRMED |
+| 3 ✓ CONFIRMED | BTC RSI Trend (14/60/40) + SMA200 | `btc_strategies.py` | 1.32 | +732.31% | Pass | 2/2 | 43.72% | -1† | **ROBUST (94.7%, WFA 84%)** | CONFIRMED |
+| 4 ✓ CONFIRMED | BTC Price Momentum (54d/5%) + SMA200 | `btc_strategies_v3.py` | **1.29** | +1,887.50% | Pass | 3/3 | **45.21%** | -1† | **ROBUST (100%, WFA 95.8%)** | CONFIRMED |
+| 5 ✓ CONFIRMED | MA Bounce (50d/3bar) + SMA200 Gate | `research_strategies_v4.py` | 1.22 | +476.29% | Pass | 3/3 | 46.29% | -1† | **ROBUST (100%, WFA 93%)** | CONFIRMED |
+| 6 ✓ CONFIRMED | BTC Donchian Wider (52/13) | `btc_strategies.py` | 0.84 | +805.13% | Pass | 3/3 | 53.02% | -1† | **ROBUST (100%, WFA 73.3%)** | CONFIRMED |
 
-†MC Score -1 is expected/structural for single-asset Bitcoin. MC is NOT a disqualifying criterion for Bitcoin research. WFA + RollWFA are primary robustness checks.
+†MC Score -1 is expected/structural for single-asset Bitcoin at 100% allocation. At reduced allocation (0.167), ALL strategies achieve MC Score = 5 (Robust).
 
 ---
 
@@ -69,10 +70,13 @@
 | BTC-R1 | 5 existing equity daily champions transfer test | PARTIAL PASS | 0.63–1.22 | -161% to +1257% | 16–49 | MA Bounce top (Calmar 1.22); MA Confluence FAILS; Donchian passes |
 | BTC-R2 | MA Bounce sensitivity sweep (75 variants) | **ROBUST** | 0.62–1.93 | -84% to +5001% | 42 (base) | 75/75 profitable, 70/75 WFA Pass. MA Bounce CONFIRMED champion. |
 | BTC-R3 | 3 Bitcoin-specific strategies | PARTIAL PASS | 0.75–1.32 | +732% to +2050% | 20–24 | RSI Trend BEST (Calmar 1.32); Donchian 52/13 provisional; SMA200 Pure Trend rejected. |
-| BTC-R4 | RSI Trend sensitivity sweep (625 variants) | **ROBUST** | -0.14–1.86 | varies | 22 (base) | 594/625 profitable, 84% WFA Pass. RSI Trend CONFIRMED #3. Sweep revealed exit=56 + gate=120 as optimal zone. |
+| BTC-R4 | RSI Trend sensitivity sweep (625 variants) | **ROBUST** | -0.14–1.86 | varies | 22 (base) | 594/625 profitable, 84% WFA Pass. Sweep ceiling Calmar 1.86, reveals exit=56 + gate=120 optimal zone. |
 | BTC-R5 | Donchian 52/13 sensitivity sweep (25 variants) | **ROBUST** | 0.66–1.05 | varies | 24 (base) | 25/25 profitable, 73.3% WFA Pass. Donchian CONFIRMED champion. |
 | BTC-R6 | Combined 3-strategy portfolio (0.333 alloc each) | VIABLE | 0.61–1.01 | +27% to +43% OOS | 22–42 | MaxDD 24-30% vs 44-53% at 100%. MC Score 0-5. Production viable. |
-| BTC-R7 | Optimized RSI variants (exit=56, gate=120) base + sweep | **ROBUST** | 1.63–1.77 | +800% to +1199% | 49–84 | Both CONFIRMED. 20/60/56/SMA120 = NEW #1 (Calmar 1.77, MaxDD 34.04%). |
+| BTC-R7 | Optimized RSI variants (exit=56, gate=120) base + sweep | **ROBUST** | 1.63–1.77 | +800% to +1199% | 49–84 | Both CONFIRMED. 20/60/56/SMA120 = NEW #1. |
+| BTC-R8 | 6 new signal families: CMF ×2, Price Momentum ×2, BB Breakout ×2 | PARTIAL PASS | 0.53–0.88 | varies | 12–42 | CMF FAILS (Calmar < BTC B&H). BB Breakout (20/2.5σ) and Price Momentum (90d/5%) survive to sweep. |
+| BTC-R9 | Sweep of BB Breakout + Price Momentum + confirm PM54 | PARTIAL | 0.58–1.51 | varies | 26 (PM54) | BB Breakout REJECTED (WFA pass 48.6%). PM54 CONFIRMED NEW #4 (Calmar 1.29, MaxDD 45%). |
+| BTC-R10 | 6-strategy combined portfolio (0.167 alloc each) | **ALL ROBUST** | 0.52–1.04 | all positive | varies | MaxDD 10-25%. ALL 6 MC Score = 5 (Robust). RESEARCH COMPLETE. |
 
 ---
 
@@ -82,72 +86,96 @@
 |---|---|---|
 | MA Confluence Fast Exit | WFA Overfitted; OOS -160.96%. Fast MA-misalignment exit fires constantly on BTC's volatile bars → premature exits during valid uptrends. | Never use MA Confluence Fast Exit on Bitcoin. |
 | Price Momentum (6m ROC >15%) | 16 trades / 9 years — insufficient for WFA validation. | For BTC single-asset, use ROC threshold ≤ 5% or shorter lookback. |
-| BTC SMA200 Pure Trend (crossover entry) | Calmar 0.75 < BTC B&H (0.79). MaxDD 64.86%. Only 20 trades. SMA200 crossover fires once per 4-year cycle — too sparse. | SMA200 is a great GATE (filter) but a poor ENTRY trigger for Bitcoin. Use MA Bounce or RSI crossover for actual entries. |
+| BTC SMA200 Pure Trend (crossover entry) | Calmar 0.75 < BTC B&H. Only 20 trades. SMA200 crossover fires once per 4-year cycle — too sparse. | SMA200 is a great GATE but a poor ENTRY trigger for Bitcoin. |
+| CMF (all variants) | Calmar 0.53–0.73 < BTC B&H (0.79). Volume flow filters bear markets but also misses bull run gains. | CMF has exceptional RS(min) but fails risk-adjusted return threshold. Signal family rejected. |
+| BB Breakout (upper band) | WFA pass rate 48.6% < 70% on scorable variants. 60% of variants WFA N/A (signal fires too rarely). | BB upper breakouts on daily BTC are too sparse (~3/year) for robust validation. |
+| Price Momentum (90d/180d) | MaxDD 64-74% (yellow zone). 90-day ROC enters too late in bull runs. | Use 54-day ROC for Bitcoin's ~7-week momentum cycles, not 90+ day. |
 
 ---
 
 ## Key Structural Findings
 
-### BTC-R1 (2026-04-12) — Transfer Test: 5 Equity Champions on Bitcoin
-1. **MA Bounce outperforms BTC B&H risk-adjusted**: Calmar 1.22 vs BTC B&H Calmar ~0.79. MaxDD 46.29% vs ~84% B&H.
-2. **MA Confluence fails WFA on Bitcoin**: Fast-exit logic overfitted to equities' smooth trends. Bitcoin volatility breaks the mechanism.
-3. **MC Score not computable on single asset**: All strategies below `min_trades_for_mc=50`. Lower threshold to 20 for Bitcoin.
-4. **RS(min) is severely negative on Bitcoin**: Range -3.14 to -67.08. Acceptable Bitcoin threshold: RS(min) > -20 (green), -20 to -50 (yellow), < -50 (red).
-5. **CMF best RS(min) = -3.14**: Volume signal avoids selling-pressure periods naturally; may capture on-chain-like dynamics.
-6. **Donchian Calmar = BTC B&H Calmar**: Not a risk-adjusted improvement but provides lower-MaxDD (60%) exposure vs B&H (84%).
-
 ### BTC-R7 (2026-04-12) — Optimized RSI Trend Family
-1. **exit_level=56 is the critical insight**: Tighter exit preserves more momentum gain before exhaustion. exit=40 was too loose — held positions through excessive retracements.
-2. **gate_length=120 captures earlier re-entries**: 80 bars earlier than SMA200 per cycle. On Bitcoin's 4-year halving cycle, this means entering the bull market ~80 days sooner.
-3. **RSI(20) = highest Calmar ever on Bitcoin (1.77)**: Slower RSI with tighter exit produces better risk-adjusted returns than either the base (14/60/40) or the faster (11/60/56) variant.
-4. **RSI(20) base rank 2/625**: Near-maximum in parameter space — the params are genuinely near-optimal, not just mediocre within a wide distribution.
-5. **RSI(20) WFA pass rate 92.3%**: Highest WFA robustness of any Bitcoin strategy tested.
+1. **exit_level=56 is the critical insight**: Tighter exit captures more momentum gain before exhaustion. exit=40 was too loose.
+2. **gate_length=120 captures earlier re-entries**: 80 bars earlier than SMA200 per cycle.
+3. **RSI(20) = highest Calmar on Bitcoin (1.77)**: Fewer entries, higher conviction, lower MaxDD.
+4. **RSI(20) base rank 2/625**: Near-maximum in parameter space.
+
+### BTC-R9 (2026-04-12) — Price Momentum Discovery
+1. **54-day ROC optimal for Bitcoin**: Matches Bitcoin's ~7.7-week momentum cycle within halving bull markets.
+2. **99.2% WFA pass rate**: The Price Momentum (90d) signal family is structurally robust, but the 54d parameter zone achieves MaxDD < 60%.
+3. **Sweep Calmar ceiling 1.51** (at 54d): Above MA Bounce (1.22), confirming price momentum as a genuine new signal family.
+
+### BTC-R10 (2026-04-12) — Combined 6-Strategy Portfolio
+1. **All 6 MC Score = 5 at 0.167 allocation**: Unprecedented — every strategy achieves maximum MC robustness.
+2. **MaxDD 10-25%**: Bitcoin returns at equity-portfolio drawdown levels.
+3. **4 signal families**: RSI trend (3 strategies), MA bounce, Donchian breakout, price momentum.
 
 ---
 
-## Production Portfolio — UPDATED AFTER BTC-R7
+## Production Portfolio — RESEARCH COMPLETE (6 Confirmed Champions)
 
-**Option A — New Best Single Strategy (Recommended)**
+**Option A — Maximum Risk-Adjusted Return (Best Single Strategy)**
 ```
 allocation_per_trade: 1.0
 strategies: ["BTC RSI Trend (20/60/56) + SMA120"]
 Expected: Calmar 1.77, MaxDD ~34%, Total Return ~7,841% (2017-2026)
-Best for: Bitcoin investors who can tolerate 30-40% drawdowns — best Calmar ever achieved
+Best for: Bitcoin investors tolerating 30-40% drawdowns; highest Calmar achieved
 ```
 
-**Option A2 — Higher Frequency Variant**
+**Option B — Maximum Total Return (High Frequency Variant)**
 ```
 allocation_per_trade: 1.0
 strategies: ["BTC RSI Trend (11/60/56) + SMA120"]
-Expected: Calmar 1.63, MaxDD ~40%, Total Return ~10,321% (2017-2026)
-Best for: Return maximizers — higher total return but slightly higher drawdown
+Expected: Calmar 1.63, MaxDD ~40%, Total Return ~10,321%
+Best for: Return maximizers; highest total P&L across all single strategies
 ```
 
-**Option B — Combined 5-Strategy Portfolio (Maximum Diversification)**
+**Option C — Equal-Weight All 6 Champions (Maximum Diversification)**
 ```
-allocation_per_trade: 0.2
-strategies: ["BTC RSI Trend (20/60/56) + SMA120",
-             "BTC RSI Trend (11/60/56) + SMA120",
-             "BTC RSI Trend (14/60/40) + SMA200",
-             "MA Bounce (50d/3bar) + SMA200 Gate",
-             "BTC Donchian Wider (52/13)"]
-Expected: MaxDD ~20-25%, diversified signal families (momentum + MA bounce + breakout)
-Best for: Maximum risk diversification with 5 confirmed champions
-```
-
-**Option C — Original 3-Strategy Portfolio (Tested in BTC-R6)**
-```
-allocation_per_trade: 0.333
-strategies: ["MA Bounce (50d/3bar) + SMA200 Gate",
-             "BTC RSI Trend (14/60/40) + SMA200",
-             "BTC Donchian Wider (52/13)"]
-Expected: MaxDD ~25-30%, MC Score 2-5
+allocation_per_trade: 0.167
+strategies: [
+    "BTC RSI Trend (20/60/56) + SMA120",
+    "BTC RSI Trend (11/60/56) + SMA120",
+    "BTC RSI Trend (14/60/40) + SMA200",
+    "BTC Price Momentum (54d/5%) + SMA200",
+    "MA Bounce (50d/3bar) + SMA200 Gate",
+    "BTC Donchian Wider (52/13)"
+]
+Expected: MaxDD 10-25% per strategy, all MC Score 5 (Robust), 4 signal families
+Best for: Maximum diversification, minimum drawdown, all MC Robust
 ```
 
-**All 5 champions confirmed across all 8 anti-overfitting rules:**
+**Option D — Diverse 4-Strategy Portfolio (One Per Signal Family)**
+```
+allocation_per_trade: 0.25
+strategies: [
+    "BTC RSI Trend (20/60/56) + SMA120",
+    "BTC Price Momentum (54d/5%) + SMA200",
+    "MA Bounce (50d/3bar) + SMA200 Gate",
+    "BTC Donchian Wider (52/13)"
+]
+Expected: MaxDD ~20-30%, 4 genuinely different signal families
+Best for: Diversification without over-weighting the RSI Trend family
+```
+
+**All 6 champions confirmed across all 8 anti-overfitting rules:**
 - ✓ WFA Pass | ✓ RollWFA ≥ 2/3 | ✓ Calmar > 0.5 | ✓ Calmar > BTC B&H (0.79)
 - ✓ OOS Positive | ✓ MaxDD < 60% | ✓ Trades ≥ 20 | ✓ Sensitivity sweep ≥ 70% profitable
 
 ---
 
-*Last updated: 2026-04-12 (BTC-R7 complete — 2 new confirmed champions; 5 total; new #1 Calmar 1.77)*
+## Signal Family Summary
+
+| Family | Strategies Confirmed | Calmar Range | Notes |
+|---|---|---|---|
+| RSI Trend (momentum) | 3 | 1.32–1.77 | Dominant family; exit=56 + SMA120 are optimal params |
+| MA Bounce (pullback) | 1 | 1.22 | Entry on SMA50 pullback — opposite logic to RSI Trend |
+| Donchian Breakout | 1 | 0.84 | 52-day new high; structural complement to momentum |
+| Price Momentum (ROC) | 1 | 1.29 | 54d ROC > 5% + SMA200 gate; ~7-week cycle alignment |
+| CMF (volume flow) | 0 | 0.53–0.73 | FAILED: Calmar < BTC B&H threshold |
+| BB Breakout | 0 | N/A | FAILED: WFA fragility (signal too sparse) |
+
+---
+
+*Last updated: 2026-04-12 (BTC-R10 complete — RESEARCH COMPLETE — 6 confirmed champions, 4 signal families, production portfolios defined)*
