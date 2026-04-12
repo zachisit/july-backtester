@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2018-01-01",  # Polygon 4H data; go back as far as available
+    "start_date": "2017-01-01",  # Bitcoin Polygon daily — full cycle history
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -65,9 +65,9 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    #"timeframe": "D",
-    "timeframe": "H",              # 4-hour bars via Polygon
-    "timeframe_multiplier": 4,     # H + multiplier=4 → 4-hour bars
+    "timeframe": "D",              # Daily bars — Bitcoin research (reset after each run)
+    #"timeframe": "H",              # 4-hour bars via Polygon
+    #"timeframe_multiplier": 4,     # H + multiplier=4 → 4-hour bars
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
     #"timeframe_multiplier": 5,       # e.g., 1, 5, 15, 30 for minutes
     #"timeframe": "W",  # Weekly
@@ -170,10 +170,10 @@ CONFIG = {
     # Symbols with fewer bars than this are skipped entirely.
     # 250 ≈ one year of daily data. Increase if your strategies need
     #   longer lookback periods (e.g. 200d SMA needs at least 200 bars).
-    "min_bars_required": 500,  # 4H bars: ~500 bars ≈ 3 months (252d × 1.6 bars/d)
+    "min_bars_required": 250,  # Daily bars: 250 ≈ ~8 months (needed for SMA200 warmup)
 
     "portfolios": {
-        "Liquid 4H (20)": "liquid_4h.json",  # 4H research universe — Polygon
+        "Bitcoin (BTC)": "bitcoin.json",  # Single-asset Bitcoin research
     },
 
     # ============================================================
@@ -182,13 +182,13 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.10,  # default single-strategy allocation
+    "allocation_per_trade": 1.0,  # 100% equity — single-asset system (1/N for N=1)
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
     # order is allowed to consume.  0.05 = no position may exceed 5 % of ADV.
     # Set to None or 0 to disable the filter entirely.
-    "max_pct_adv": 0.05,
+    "max_pct_adv": 0.0,  # disabled — crypto has billions in daily volume
 
     # --- Allocation Per Trade Settings ---
     # At what time do you want the fill to occur.
@@ -287,10 +287,11 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EMA Velocity Breakout (4H)",
-        "Keltner Channel Breakout (4H)",
-        "Donchian Turtle (4H)",
-        "Relative Strength Momentum (4H)",
+        "MA Confluence (10/20/50) Fast Exit",
+        "Donchian Breakout (40/20)",
+        "MA Bounce (50d/3bar) + SMA200 Gate",
+        "Price Momentum (6m ROC, 15pct) + SMA200",
+        "CMF Momentum (20d) + SMA200 Gate",
     ],
 
     # ============================================================

@@ -2455,3 +2455,116 @@ search for 5th strategy. Current 4-strategy portfolio is production-ready as-is.
 **4H Research COMPLETE:**
 Stop Criteria C satisfied — 4 confirmed champions, all 7 anti-overfitting rules satisfied.
 Round file: research_results/4h_round_8.md
+
+---
+
+## BITCOIN DAILY RESEARCH CHAPTER (NEW — 2026-04-12)
+
+**Context:** User pivoted from 4H Polygon research (COMPLETE, 4H Rounds 1-8) to
+Bitcoin-only strategy research. Config changed to: data_provider=polygon, timeframe=D,
+portfolios=Bitcoin (BTC) ["X:BTCUSD"], start_date=2017-01-01, allocation_per_trade=1.0.
+Dedicated summary file: `research_results/bitcoin_summary.md`
+
+**Key technical notes for Bitcoin daily research:**
+- Symbol format: `X:BTCUSD` for Polygon crypto (passes normalize_ticker unchanged)
+- Bitcoin trades 365 days/year (including weekends). 200 bars = 200 calendar days ≈ 6.7 months (shorter lookback than equities' ~10 months)
+- `allocation_per_trade = 1.0` — single-asset system; "all in" when signal fires (1/N for N=1)
+- `max_pct_adv = 0.0` — disabled; BTC volume is $30B+/day, no ADV constraint needed
+- `min_trades_for_mc = 50` causes MC Score N/A for all single-asset strategies. Lower to 20 for Bitcoin.
+- RS(min) thresholds for Bitcoin: > -20 (green), -20 to -50 (yellow), < -50 (red) — much wider than equity -8/-20
+- Calmar is the primary quality metric for Bitcoin (not Sharpe). Calmar > 0.5 = acceptable. BTC B&H Calmar ≈ 0.79.
+- Primary benchmark: MA Bounce must beat BTC B&H Calmar (0.79) to be a genuine champion.
+
+**Bitcoin Research Status: IN PROGRESS**
+
+**Bitcoin Round History:**
+
+| Round | Strategy/Focus | Result | Calmar | OOS P&L | Trades | Notes |
+|---|---|---|---|---|---|---|
+| BTC-R1 | 5 equity daily champions transfer test | PARTIAL PASS | 0.63–1.22 | -161% to +1257% | 16–49 | MA Bounce champion; MAC FAILS; Donchian passes |
+
+**Bitcoin Provisional Champions:**
+
+| Rank | Strategy | Calmar | OOS P&L | WFA | RollWFA | MaxDD | Status |
+|---|---|---|---|---|---|---|---|
+| 1 | MA Bounce (50d/3bar) + SMA200 Gate | 1.22 | +476.29% | Pass | 3/3 | 46.29% | PROVISIONAL (sweep pending) |
+
+**Bitcoin Queue:**
+
+### BTC-Q1 — Transfer Test (DONE — BTC-R1, 2026-04-12)
+Tested 5 equity daily champions on X:BTCUSD. Result: MA Bounce champion (Calmar 1.22 > BTC B&H 0.79).
+MA Confluence FAILS (WFA Overfitted). Donchian passes. CMF marginal. Price Momentum sparse.
+
+### BTC-Q2 — MA Bounce Sensitivity Sweep [PRIORITY: HIGH — Next]
+**Status: PENDING**
+MA Bounce (50d/3bar) + SMA200 Gate is the provisional champion. Must confirm robustness via sensitivity sweep.
+
+**Config:**
+```python
+"timeframe": "D"
+"portfolios": {"Bitcoin (BTC)": "bitcoin.json"}
+"strategies": ["MA Bounce (50d/3bar) + SMA200 Gate"]
+"allocation_per_trade": 1.0
+"max_pct_adv": 0.0
+"min_bars_required": 250
+"sensitivity_sweep_enabled": True
+"sensitivity_sweep_pct": 0.20
+"sensitivity_sweep_steps": 2
+"sensitivity_sweep_min_val": 2
+```
+**Run:** `rtk python main.py --name "btc-daily-r2-mabounce-sweep" --verbose`
+**Success criteria:** ≥ 70% of variants profitable → ROBUST → declare MA Bounce CONFIRMED Bitcoin champion.
+**Failure criteria:** < 30% profitable → FRAGILE → strategy parameters are Bitcoin-specific curve fits.
+**Reset config after run.**
+
+### BTC-Q3 — Bitcoin-Specific Strategy Round 1 [PRIORITY: HIGH]
+**Status: PENDING**
+Design 3 Bitcoin-native strategies from first principles:
+1. **BTC SMA200 Pure Trend** (D): Enter on close crossing above SMA(200). Exit when close < SMA(200) for 3+ consecutive days. Justification: SMA(200) is the most-watched Bitcoin trend indicator; self-fulfilling prophecy creates genuine edge. 3-day exit prevents whipsaws from brief dips.
+2. **BTC Donchian Wider (52/13)** (D): Enter on 52-bar (52-calendar-day ≈ 7.4 weeks) new high. Exit on 13-bar new low. Justification: 52-day high on Bitcoin captures the quarterly momentum cycle. 13-day exit (2-week low) gives trades room to breathe.
+3. **BTC RSI Trend Daily (14/60/40)** (D): RSI(14) > 60 AND price > SMA(200) → enter. RSI(14) < 40 → exit. Justification: RSI > 60 on daily BTC = confirmed uptrend momentum (not just a bounce). RSI < 40 = confirmed weakness. SMA200 prevents entries during bear markets.
+
+**Create:** `custom_strategies/btc_strategies.py`
+**Run on 6-sym gate?** Not applicable — Bitcoin is single-asset. Run on X:BTCUSD directly.
+**Success criteria:** Any strategy Calmar > 0.5, WFA Pass, OOS positive, Trades ≥ 25.
+**Reset config after run.**
+
+### BTC-Q4 — Lower min_trades_for_mc to 20 [PRIORITY: MEDIUM]
+**Status: PENDING**
+Currently `min_trades_for_mc: 50` prevents MC computation on single-asset Bitcoin strategies.
+Set `min_trades_for_mc: 20` for Bitcoin runs to enable MC Score.
+Note: 20-trade MC is statistically noisy but better than N/A.
+**Action:** Add as config parameter change in the first run that needs MC Score (after BTC-Q2 establishes the champion).
+
+### BTC-Q5 — Donchian Sensitivity Sweep [PRIORITY: MEDIUM]
+**Status: PENDING**
+Donchian (40/20) passes WFA on Bitcoin (Calmar 0.83). Test robustness before declaring champion.
+Config: same as BTC-Q2 but `"strategies": ["Donchian Breakout (40/20)"]`
+
+### BTC-Q6 — Combined 2-Strategy Bitcoin Portfolio (MA Bounce + Donchian) [PRIORITY: MEDIUM]
+**Status: PENDING** — Depends on BTC-Q2 and BTC-Q5 confirming both strategies.
+If both MA Bounce and Donchian are confirmed, run combined portfolio at 0.5 allocation each.
+Goal: diversification between bounce (mean-reversion-in-trend) and breakout signals.
+
+---
+
+### Session 21 — 2026-04-12 (Bitcoin Research Round 1 — Transfer Test)
+**Agent:** Claude Sonnet 4.6
+**Ran:** BTC-R1 — 5 existing equity daily champions on X:BTCUSD (Polygon daily, 2017-2026)
+**Run ID:** btc-daily-r1-existing-champs_2026-04-12_11-08-14
+**Period:** 2017-01-03 → 2026-04-10, WFA split 2024-06-02, 3 rolling folds
+**New file created:** `research_results/bitcoin_summary.md` — dedicated Bitcoin research tracker
+**New file created:** `tickers_to_scan/bitcoin.json` — ["X:BTCUSD"]
+
+**Key findings:**
+1. **MA Bounce provisional champion**: Calmar 1.22 > BTC B&H Calmar ~0.79. MaxDD 46.29% vs B&H ~84%. WFA Pass + RollWFA 3/3. OOS +476.29%.
+2. **MA Confluence FAILS on Bitcoin**: WFA "Likely Overfitted", OOS -160.96%. Fast-exit logic designed for smooth equity trends is a bug on Bitcoin's volatile bars.
+3. **Donchian passes but marginal**: Calmar 0.83 = BTC B&H Calmar. MaxDD 60.14%. Provides lower-DD exposure but no risk-adjusted improvement vs B&H.
+4. **MC Score unavailable**: All strategies below min_trades_for_mc=50 (single asset generates 16-49 trades over 9 years). Need to lower threshold to 20 for Bitcoin research.
+5. **CMF has best RS(min) = -3.14**: Volume-flow signal avoids selling pressure periods naturally.
+6. **Price Momentum too sparse**: 16 trades / 9 years with 15% ROC threshold — needs lower threshold (5%) for Bitcoin.
+7. **User direction**: Focus SOLELY on Bitcoin daily strategies using Polygon. No other universes.
+
+**Next recommended action:** BTC-Q2 — MA Bounce sensitivity sweep to confirm champion status.
+
+_[Next agent: append your session below this line]_
