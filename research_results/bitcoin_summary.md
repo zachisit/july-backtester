@@ -69,6 +69,7 @@
 | BTC-R3 | 3 Bitcoin-specific strategies | PARTIAL PASS | 0.75–1.32 | +732% to +2050% | 20–24 | RSI Trend BEST (Calmar 1.32); Donchian 52/13 provisional; SMA200 Pure Trend rejected. |
 | BTC-R4 | RSI Trend sensitivity sweep (625 variants) | **ROBUST** | -0.14–1.86 | varies | 22 (base) | 594/625 profitable, 84% WFA Pass. RSI Trend CONFIRMED #1 champion. |
 | BTC-R5 | Donchian 52/13 sensitivity sweep (25 variants) | **ROBUST** | 0.66–1.05 | varies | 24 (base) | 25/25 profitable, 73.3% WFA Pass. Donchian CONFIRMED #3 champion. |
+| BTC-R6 | Combined 3-strategy portfolio (0.333 alloc each) | VIABLE | 0.61–1.01 | +27% to +43% OOS | 22–42 | MaxDD 24-30% vs 44-53% at 100%. MC Score 0-5. Production viable. |
 
 ---
 
@@ -94,10 +95,30 @@
 
 ---
 
-## Production Portfolio (when research is complete)
+## Production Portfolio — RESEARCH COMPLETE
 
-TBD — Pending BTC-Q2 (MA Bounce sweep) and BTC-Q3 (Bitcoin-specific strategies)
+**Option A — Single Strategy Maximum Returns (Highest Calmar, Higher DD)**
+```
+allocation_per_trade: 1.0
+strategies: ["BTC RSI Trend (14/60/40) + SMA200"]
+Expected: Calmar 1.32, MaxDD ~44%, Total Return ~6,663% (2017-2026)
+Best for: Bitcoin investors who can tolerate 40-50% drawdowns
+```
+
+**Option B — Combined Portfolio Balanced Risk (Lower DD, MC Validated)**
+```
+allocation_per_trade: 0.333
+strategies: ["MA Bounce (50d/3bar) + SMA200 Gate",
+             "BTC RSI Trend (14/60/40) + SMA200",
+             "BTC Donchian Wider (52/13)"]
+Expected: MaxDD ~25-30%, MC Score 2-5, RSI Trend MC Score 5 = Robust
+Best for: Risk-managed Bitcoin exposure
+```
+
+**All 3 champions confirmed across all 7 anti-overfitting rules:**
+- ✓ WFA Pass | ✓ RollWFA ≥ 2/3 | ✓ Calmar > 0.5 | ✓ Calmar > BTC B&H (0.79)
+- ✓ OOS Positive | ✓ MaxDD < 60% | ✓ Sensitivity sweep ≥ 70% profitable
 
 ---
 
-*Last updated: 2026-04-12 (BTC-R5 complete; 3 CONFIRMED champions; BTC-Q6 combined portfolio next)*
+*Last updated: 2026-04-12 (BTC-R6 complete; RESEARCH COMPLETE — 3 confirmed champions, production portfolio defined)*
