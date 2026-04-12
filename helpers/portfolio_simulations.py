@@ -3,11 +3,17 @@ import numpy as np
 from config import CONFIG
 from .simulations import calculate_advanced_metrics
 
-def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config):
+def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config, delisting_dates=None):
     """
     Runs a portfolio simulation with integrated stop-loss handling and logs
     a rich set of features for each trade for future machine learning analysis.
     (Version hardened against KeyError from misaligned dates).
+
+    Parameters
+    ----------
+    delisting_dates : dict[str, str], optional
+        {symbol: "YYYY-MM-DD"} mapping of delisting dates from helpers/survivorship.py.
+        When provided, open positions are force-closed on delisting.
     """
     from helpers.timeframe_utils import get_bars_per_year
 
@@ -381,11 +387,24 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
     pnl_list = [t['Profit'] for t in trade_log]
     if not pnl_list: return None
-    
+
+    # --- SURVIVORSHIP BIAS ADJUSTMENT ---
+    # Force-close open positions when stocks are delisted
+    survivorship_stats = {}
+    if delisting_dates and CONFIG.get("include_delisted", False):
+        from helpers.survivorship import adjust_for_survivorship
+        delisting_price_assumption = CONFIG.get("delisting_price_assumption", "last_close")
+        trade_log, survivorship_stats = adjust_for_survivorship(
+            trade_log, delisting_dates, initial_capital, delisting_price_assumption
+        )
+        # Recompute pnl_list after adjustment
+        pnl_list = [t['Profit'] for t in trade_log]
+        if not pnl_list: return None
+
     duration_list = [t['HoldDuration'] for t in trade_log]
     final_pnl_percent = (portfolio_timeline.dropna().iloc[-1] / initial_capital) - 1
     metrics = calculate_advanced_metrics(pnl_list, portfolio_timeline.dropna(), duration_list)
 
     return {**metrics, "pnl_percent": final_pnl_percent, "Trades": len(pnl_list),
             "trade_pnl_list": pnl_list, "trade_log": trade_log, "initial_capital": initial_capital,
-            "portfolio_timeline": portfolio_timeline.dropna()}
+            "portfolio_timeline": portfolio_timeline.dropna(), **survivorship_stats}
