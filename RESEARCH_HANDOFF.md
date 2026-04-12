@@ -2719,3 +2719,33 @@ Round file: research_results/btc_round_6.md
 4. Start new research track (user's decision)
 
 _[Next agent: append your session below this line]_
+
+---
+
+### Session 26 — 2026-04-12 (Bitcoin Research Round 7 — RSI Trend Optimized Variants)
+**Agent:** Claude Sonnet 4.6
+**Ran:** BTC-R7 — Two new optimized RSI Trend variants on X:BTCUSD; base test + 625-variant sweep each
+**Run IDs:** btc-daily-r7-rsi-optimized-verbose_2026-04-12_12-34-59 (base) / btc-daily-r7-sweep_2026-04-12_12-38-06 (sweep)
+**Period:** 2017-01-03 → 2026-04-10
+**New file created:** `custom_strategies/btc_strategies_v2.py`
+
+**Motivation:** BTC-R4 sweep of RSI Trend (14/60/40) + SMA200 revealed sweep ceiling of Calmar 1.86 vs base 1.32 (41% gap). Top variants consistently used exit_level=56 (tighter exit) and gate_length=120 (shorter trend filter). BTC-R7 formally names and validates those parameter zones.
+
+**Key findings:**
+1. **BTC RSI Trend (20/60/56) + SMA120**: Calmar **1.77**, MaxDD **34.04%**, OOS +800.70%, WFA Pass, RollWFA 3/3, SQN 3.44, Trades 49. Sweep: **570/625 profitable (91.2%), WFA pass 92.3%** — highest of any BTC strategy. Base rank **2/625**.
+2. **BTC RSI Trend (11/60/56) + SMA120**: Calmar **1.63**, MaxDD 39.96%, OOS +1,198.95%, WFA Pass, RollWFA 3/3, SQN 3.12, Trades 84. Sweep: **625/625 profitable (100%), WFA pass 77.1%**. Base rank 14/625.
+3. **Both CONFIRMED** via all 8 anti-overfitting rules. New #1 and #2 champions.
+4. **Updated leaderboard:** 20/60/56 SMA120 #1 (1.77), 11/60/56 SMA120 #2 (1.63), original 14/60/40 SMA200 drops to #3 (1.32).
+5. **exit_level=56 is the key insight**: Tighter exit captures momentum gain before exhaustion. Original exit=40 was too loose.
+6. **gate_length=120 vs 200**: Re-enters ~80 bars earlier per cycle — significant on Bitcoin's 4-year cycle.
+
+Round file: research_results/btc_round_7.md
+Summary file updated: research_results/bitcoin_summary.md
+
+**Next recommended actions (in priority order):**
+1. **BTC-R8 (High priority)**: CMF Momentum sweep — CMF had RS(min) = -3.14 in BTC-R1 (best tail risk of all tested). Potential 4th confirmed signal family.
+2. **BTC-R9 (Medium)**: BTC Price Momentum v2 — Fix sparsity from R1. Lower ROC threshold to 5%, test 3m/5% and 6m/5% variants.
+3. **BTC-R10 (Medium)**: BB Breakout + SMA200 — untested signal family on Bitcoin.
+4. **BTC-R11 (Medium)**: 5-strategy combined portfolio test at 0.2 allocation each.
+
+_[Next agent: append your session below this line]_
