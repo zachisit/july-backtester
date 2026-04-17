@@ -16,7 +16,7 @@ CONFIG = {
     # SECTION 1: DATA PROVIDER
     # ============================================================
     # Options: "polygon", "norgate", "yahoo", "csv", "parquet"
-    "data_provider": "polygon",
+    "data_provider": "norgate",
 
     # --- CSV Data Directory (only used when data_provider = "csv") ---
     # Path to the folder containing per-symbol CSV files.
@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2017-01-01",  # Bitcoin Polygon daily — full cycle history
+    "start_date": "2004-01-01",  # EC-R4: modern era (post dot-com crash)
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -65,7 +65,7 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    "timeframe": "D",              # Daily bars — Bitcoin research (reset after each run)
+    "timeframe": "D",              # Daily bars — EC-R1 smooth curve research
     #"timeframe": "H",              # 4-hour bars via Polygon
     #"timeframe_multiplier": 4,     # H + multiplier=4 → 4-hour bars
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
@@ -170,10 +170,10 @@ CONFIG = {
     # Symbols with fewer bars than this are skipped entirely.
     # 250 ≈ one year of daily data. Increase if your strategies need
     #   longer lookback periods (e.g. 200d SMA needs at least 200 bars).
-    "min_bars_required": 250,  # Daily bars: 250 ≈ ~8 months (needed for SMA200 warmup)
+    "min_bars_required": 250,  # Daily bars: 250 ≈ ~1 year (needed for SMA200 warmup)
 
     "portfolios": {
-        "Bitcoin (BTC)": "bitcoin.json",  # Single-asset Bitcoin research
+        "Sectors+DJI 46": "sectors_dji_combined.json",  # EC-R6: relative momentum test
     },
 
     # ============================================================
@@ -182,13 +182,13 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 1.0,  # 100% equity — single-asset system (1/N for N=1)
+    "allocation_per_trade": 0.10,  # 10% equity per position — multi-asset system
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
     # order is allowed to consume.  0.05 = no position may exceed 5 % of ADV.
     # Set to None or 0 to disable the filter entirely.
-    "max_pct_adv": 0.0,  # disabled — crypto has billions in daily volume
+    "max_pct_adv": 0.05,  # 5% ADV cap — Norgate equity universe
 
     # --- Allocation Per Trade Settings ---
     # At what time do you want the fill to occur.
@@ -227,7 +227,7 @@ CONFIG = {
     # ============================================================
     # SECTION 10: MONTE CARLO SETTINGS
     # ============================================================
-    "min_trades_for_mc": 20,  # BTC-Q4: lowered from 50 — single-asset Bitcoin generates 20-50 trades
+    "min_trades_for_mc": 50,  # EC-R1: multi-asset weekly
     "num_mc_simulations": 1000,
 
     # ============================================================
@@ -286,7 +286,9 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": "all",
+    "strategies": [
+        "EC: Price Momentum v3 (6.5m/18%) + SPY SMA96 Gate",  # FINAL EC DAILY CHAMPION (EC-R11 confirmed)
+    ],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
@@ -294,7 +296,7 @@ CONFIG = {
     # Automatically varies each numeric param in a strategy's @register_strategy
     # params dict by ±pct across ±steps steps, then prints a fragility verdict.
     # Opt-in only — keep disabled for normal runs (multiplies task count).
-    "sensitivity_sweep_enabled": False,    # disabled between rounds
+    "sensitivity_sweep_enabled": False,    # disabled — EC research complete
     "sensitivity_sweep_pct": 0.20,        # ±20% per step
     "sensitivity_sweep_steps": 2,         # 2 steps each side → 5 values per param
     "sensitivity_sweep_min_val": 2,       # floor for generated values (prevents SMA period = 0)

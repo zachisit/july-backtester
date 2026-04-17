@@ -2796,4 +2796,53 @@ Summary updated: bitcoin_summary.md
 - Combined portfolio validated with all MC Robust
 - Further testing would risk p-hacking / false positives from family exhaustion
 
+---
+
+### Session 28 — 2026-04-16 (Chapter 4: Smooth Curve Research — EC-R1 Setup)
+**Agent:** Claude Sonnet 4.6
+**Goal:** Produce steady, steadily-increasing equity curves. Prior research optimized for
+Sharpe, but actual PDF tearsheets show "horrible" equity curves — MaxRecovery 3-5 years.
+
+**Root cause audit:**
+- Conservative v2 (best prior portfolio) actual Calmar: 0.30-0.52
+- MaxRecovery: 1,085-1,722 days (3-5 years underwater after worst drawdowns)
+- Source: output/runs/sectors-dji-6strat-williams_2026-04-11_13-08-10/overall_portfolio_summary.csv
+- The per-stock SMA200 gate filters individual stocks but NOT market-wide crashes
+- During 2001-2003, 2008-2009, 2022 all 46 stocks fall together → gate fires too late
+
+**Solution implemented:**
+New file: `custom_strategies/smooth_curve_strategies.py`
+6 SPY macro regime-filtered versions of all 6 Conservative v2 champions.
+Each adds `dependencies=["spy"]` and gates on SPY > SMA(200d equivalent).
+When SPY < SMA40w → force exits AND prevent new entries.
+Historical bear markets filtered: 2001-03, 2008-09, Dec 2018, Mar-May 2020, Jan-Nov 2022
+
+**New validation criteria (Calmar-first, not Sharpe-first):**
+| Metric | Target | Prior Conservative v2 |
+|---|---|---|
+| Calmar | ≥ 1.0 | 0.30-0.52 |
+| MaxRecovery | ≤ 365 days | 1,085-1,722 days |
+| MaxDD | ≤ 25% | 18-27% |
+| WFA | Pass | Pass |
+
+**6 new EC: strategies in smooth_curve_strategies.py:**
+| Strategy Name | Based On |
+|---|---|
+| EC: MA Bounce + SPY Regime Gate | MA Bounce (50d/3bar) + SMA200 Gate |
+| EC: MAC Fast Exit + SPY Regime Gate | MA Confluence (10/20/50) Fast Exit |
+| EC: Donchian (40/20) + SPY Regime Gate | Donchian (40/20) + SMA200 Trend Gate |
+| EC: Price Momentum (6m/15%) + SPY Regime Gate | Price Momentum (6m ROC, 15pct) + SMA200 |
+| EC: RSI Weekly Trend (55) + SPY Regime Gate | RSI Weekly Trend (55-cross) + SMA200 |
+| EC: Williams R Weekly (>-20) + SPY Regime Gate | Williams R Weekly Trend (above-20) + SMA200 |
+
+**EC-R1 config (run with Norgate weekly on Sectors+DJI 46):**
+```
+data_provider: "norgate", timeframe: "W", start_date: "1990-01-01"
+portfolios: {"Sectors+DJI 46": "sectors_dji_combined.json"}
+allocation_per_trade: 0.10, strategies: "all" (with other strategies disabled/isolated)
+comparison_tickers: [{"symbol": "SPY", "role": "both", "label": "SPY"}]
+```
+**Next step:** Run EC-R1. Record Calmar + MaxRecovery as PRIMARY metrics. If Calmar ≥ 0.8,
+run sensitivity sweep. If Calmar ≥ 1.0 + MaxRecovery ≤ 365d, declare new champion.
+
 _[Next agent: append your session below this line]_
