@@ -576,6 +576,210 @@ def ec2_donchian_spy_sma50(df, spy_df=None, **kwargs):
     return df
 
 
+# ===========================================================================
+# EC-R13 STRATEGIES — Visual Smoothness Architecture
+#
+# EC-R12 finding: 5% allocation alone doesn't fix jagged curves. The root cause
+# is strategy-level: momentum selects high-volatility stocks → explosive single-
+# stock moves spike the portfolio curve regardless of position count.
+#
+# EC-R13 approach: eliminate high-volatility stock selection entirely via:
+#   S1: SMA200 Universe Filter — hold any symbol above SMA200 (no momentum bias)
+#   S2: MA Bounce + Low-Vol ATR Filter — same bounce logic but screen out >2.5% ATR
+#   S3: EMA21/63 Trend — medium-term trend holding weeks-to-months, not spike-chasing
+# ===========================================================================
+
+@register_strategy(
+    name="EC: SMA200 Universe Filter + SPY SMA96 Gate",
+    dependencies=["spy"],
+    params={
+        "sma_length":      get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("96d",  _TF, _MUL),
+    },
+)
+def ec_sma200_universe_filter(df, spy_df=None, **kwargs):
+    """Hold whenever price > SMA200 and macro regime OK. No momentum bias.
+    In bull markets holds 20-30 of 46 symbols simultaneously → naturally smooth."""
+    sma_length = kwargs["sma_length"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    above_sma  = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+    df["Signal"] = np.where(above_sma & spy_ok, 1, -1)
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC: MA Bounce + Low-Vol ATR Filter + SPY SMA96 Gate",
+    dependencies=["spy"],
+    params={
+        "ma_length":       get_bars_for_period("50d",  _TF, _MUL),
+        "filter_bars":     3,
+        "gate_length":     get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("96d",  _TF, _MUL),
+        "atr_period":      14,
+        "max_atr_pct":     0.025,   # skip entries where ATR_14/Close > 2.5%
+    },
+)
+def ec_ma_bounce_low_vol(df, spy_df=None, **kwargs):
+    """MA Bounce with ATR volatility filter — avoids high-vol names that cause spikes."""
+    df = ma_bounce_logic(df, ma_length=kwargs["ma_length"], filter_bars=kwargs["filter_bars"])
+    bounce_signal = df["Signal"].copy()
+
+    df = calculate_sma(df, length=kwargs["gate_length"])
+    sma_col    = f'SMA_{kwargs["gate_length"]}'
+    is_uptrend = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    # ATR-based volatility screen: true range / close
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    df["Signal"] = np.where(
+        bounce_signal == 1,
+        np.where(is_uptrend & spy_ok & low_vol, 1, -1),
+        -1,
+    )
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC: EMA21/63 Trend + SMA200 + SPY SMA96 Gate",
+    dependencies=["spy"],
+    params={
+        "ema_fast":        21,
+        "ema_slow":        63,
+        "sma_trend":       get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("96d",  _TF, _MUL),
+    },
+)
+def ec_ema_trend(df, spy_df=None, **kwargs):
+    """EMA21 > EMA63 medium-term trend — holds for weeks-to-months, no momentum spike bias."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+    sma_length = kwargs["sma_trend"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    is_uptrend = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    in_trend = ema_fast > ema_slow
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(ema_slow.iloc[i]) or pd.isna(df[sma_col].iloc[i]):
+            signals.append(-1)
+            continue
+        trend_ok = in_trend.iloc[i] and is_uptrend.iloc[i] and spy_ok.iloc[i]
+        if not in_position:
+            if trend_ok:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if not trend_ok:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+# ===========================================================================
+# EC-R14 STRATEGIES — Sharpe-Optimized Smooth Curve Architecture
+#
+# EC-R13 finding: MA Bounce + Low-Vol ATR filter is architecturally correct.
+# Sharpe 0.88 (portfolio-level) is the new proxy metric for visual smoothness.
+# EC-R14 targets: Sharpe > 1.0.
+#
+# S1: SMA200 + Low-Vol Filter — hold all above SMA200 where ATR < 2.5%
+#     (removes high-vol names that cause correlated staircase jumps)
+# S2: MA Bounce + tighter ATR 1.5% — fewer but calmer entries than 2.5%
+# S3: MA Bounce on ETF-only universe — inherently diversified instruments,
+#     no single-stock spike risk (handled via config universe swap, strategy
+#     code identical to MA Bounce + Low-Vol but threshold adjusted)
+# ===========================================================================
+
+@register_strategy(
+    name="EC: SMA200 + Low-Vol Filter + SPY SMA96 Gate",
+    dependencies=["spy"],
+    params={
+        "sma_length":      get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("96d",  _TF, _MUL),
+        "atr_period":      14,
+        "max_atr_pct":     0.025,
+    },
+)
+def ec_sma200_low_vol(df, spy_df=None, **kwargs):
+    """Hold whenever above SMA200 AND low-vol AND SPY gate OK.
+    Removes high-volatility names from the always-hold basket → no correlated spikes."""
+    sma_length = kwargs["sma_length"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    above_sma  = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    df["Signal"] = np.where(above_sma & spy_ok & low_vol, 1, -1)
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC: MA Bounce + Tight Low-Vol (1.5% ATR) + SPY SMA96 Gate",
+    dependencies=["spy"],
+    params={
+        "ma_length":       get_bars_for_period("50d",  _TF, _MUL),
+        "filter_bars":     3,
+        "gate_length":     get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("96d",  _TF, _MUL),
+        "atr_period":      14,
+        "max_atr_pct":     0.015,   # tighter: ATR_14/Close < 1.5% (was 2.5%)
+    },
+)
+def ec_ma_bounce_tight_low_vol(df, spy_df=None, **kwargs):
+    """MA Bounce with tighter ATR threshold (1.5%) — selects only calmer names."""
+    df = ma_bounce_logic(df, ma_length=kwargs["ma_length"], filter_bars=kwargs["filter_bars"])
+    bounce_signal = df["Signal"].copy()
+
+    df = calculate_sma(df, length=kwargs["gate_length"])
+    sma_col    = f'SMA_{kwargs["gate_length"]}'
+    is_uptrend = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    df["Signal"] = np.where(
+        bounce_signal == 1,
+        np.where(is_uptrend & spy_ok & low_vol, 1, -1),
+        -1,
+    )
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
 @register_strategy(
     name="EC2: Price Momentum (6m/15%) + SPY SMA50 Gate",
     dependencies=["spy"],

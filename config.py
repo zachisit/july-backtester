@@ -173,7 +173,7 @@ CONFIG = {
     "min_bars_required": 250,  # Daily bars: 250 ≈ ~1 year (needed for SMA200 warmup)
 
     "portfolios": {
-        "Sectors+DJI 46": "sectors_dji_combined.json",  # EC-R6: relative momentum test
+        "Sectors+DJI 46": "sectors_dji_combined.json",  # EC-R13 winner universe
     },
 
     # ============================================================
@@ -182,7 +182,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.05,  # 5% equity per position — EC-R12: 20 positions for smoother curve
+    "allocation_per_trade": 0.05,  # 5% equity per position — EC champion
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -287,9 +287,7 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC: Price Momentum v3 (6.5m/18%) + SPY SMA96 Gate",  # EC-R12: test at 5% allocation
-        "EC: MA Bounce + SPY Regime Gate",                     # EC-R12: holds more positions simultaneously
-        "EC: Donchian (40/20) + SPY Regime Gate",              # EC-R12: trend-following, many positions
+        "EC: MA Bounce + Low-Vol ATR Filter + SPY SMA96 Gate",  # EC champion — final configuration
     ],
 
     # ============================================================
