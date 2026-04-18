@@ -3410,4 +3410,74 @@ Copies in `custom_strategies/private/research_results/pdfs/ec_daily/`:
 "wfa_folds": 3,
 ```
 
+---
+
+## SESSION 34 — Human Review of EC-R24 PDFs + EC-R25 Direction
+
+**Date:** 2026-04-18
+
+### Human Verdict on EC-R24 PDFs
+
+- **EMA21/63 + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]**: TOO JAGGED — REJECTED
+- **MA Bounce + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]**: "Could possibly work" — not ideal, still not the steady incline sought. Pending further validation.
+- **SMA200 Hold + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]**: "Could possibly work" — same assessment. Pending further validation.
+
+**Human's words:** "I'm still not seeing a steady incline of equity curve like the ideal EC we're looking for."
+
+The gap between current results and the ideal is confirmed: even EC-R24's best curves have visible staircase/step patterns, just smaller ones. The ideal is a **steady, gradual, uninterrupted upward slope** — no visible discrete steps.
+
+### Norgate Data Depth Finding — IMPORTANT
+
+Current `start_date: "2004-01-01"` is NOT using full available Norgate history.
+
+**Actual Norgate data availability:**
+- **SPY ETF**: starts 1993-01-29 (ETF inception)
+- **S&P 500 stocks** (XOM, GE etc.): start 1990-01-02
+- **Effective start with SPY gate**: ~1993-02 (SPY inception + 96-bar SMA warmup)
+
+**Action required for EC-R25:** Set `start_date: "1993-01-01"`. This adds 11 years of unseen data including:
+- 1994: Bond market crash (rising rates)
+- 1997-1998: Asian financial crisis + Russian default + LTCM
+- 2000-2003: Dot-com crash and 3-year bear market
+- 2004-present: Already tested
+
+This is a significant validity test. If the strategies survive 1993-2003 intact, confidence in robustness increases substantially.
+
+### EC-R25 Directive: Universality Test + Extended History
+
+**Two surviving strategies to test:**
+1. `EC-R24: MA Bounce + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]`
+2. `EC-R24: SMA200 Hold + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]`
+
+**Run them on multiple universes simultaneously** with `start_date: "1993-01-01"`:
+
+```python
+"portfolios": {
+    "S&P 500":        "norgate:S&P 500 Current & Past",
+    "Sectors+DJI 46": "sectors_dji_combined.json",
+    "Russell Top 200": "russell-top-200.json",
+},
+"allocation_per_trade": 0.025,
+"start_date": "1993-01-01",
+```
+
+**What to look for:**
+1. Do metrics hold up across all three universes? (WFA Pass, MC Score 5, positive OOS)
+2. Are the equity curves visually smooth across all universes? (agent must check images for each)
+3. Does the 1993-2004 extension change the visual shape significantly? (dot-com crash is a key test)
+4. Which universe produces the smoothest curve? That becomes the production universe candidate.
+
+**Note on allocation:** 2.5% alloc on Sectors+DJI 46 (46 symbols) means max 40 positions but only 46 available — at full bull market deployment that's 100% capital used. On Russell Top 200 (200 symbols) it's ~40 of 200 deployed at any time. Both are fine.
+
+**After running EC-R25:** Report back to human with PDF URLs for all universe combinations of the best-performing strategy. The human will make the final visual assessment of whether the curve shape is acceptable.
+
+### Constraint Reminder (from Session 32)
+
+Any strategy presented to the human MUST have:
+1. Visually smooth equity curve — no staircase steps or jagged upthrusts
+2. No prolonged flat periods (>2 years)
+3. WFA Pass (≥ 2/3 folds), MC Score ≥ 4
+4. MaxDD < 30%
+5. Beating SPY CAGR is a soft goal only
+
 _[Next agent: append your session below this line]_
