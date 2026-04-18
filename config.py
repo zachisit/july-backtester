@@ -173,7 +173,7 @@ CONFIG = {
     "min_bars_required": 250,  # Daily bars: 250 ≈ ~1 year (needed for SMA200 warmup)
 
     "portfolios": {
-        "Sectors+DJI 46": "sectors_dji_combined.json",  # EC-R27: longer EMA on proven universe
+        "S&P 500": "norgate:S&P 500 Current & Past",  # EC-R31: maximum diversification
     },
 
     # ============================================================
@@ -182,7 +182,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.025,  # 2.5% equity per position — EC-R24 (S&P 500, medium allocation)
+    "allocation_per_trade": 0.005,  # 0.5% — EC-R30 (200 positions, each step ~0.075% portfolio)
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -287,10 +287,7 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R25: EMA21/63 + Low-Vol ATR (No SPY Gate) [S&P500 2.5%]",
-        "EC-R27: EMA30/90 + Low-Vol ATR (No Gate) [DJI46]",
-        "EC-R27: EMA40/120 + Low-Vol ATR (No Gate) [DJI46]",
-        "EC-R27: EMA50/150 + Low-Vol ATR (No Gate) [DJI46]",
+        "EC-R28: EMA50/150 + ATR 2.5% (No Gate) [Russell200 1%]",
     ],
 
     # ============================================================

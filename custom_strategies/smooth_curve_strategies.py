@@ -1790,6 +1790,194 @@ def ec_r27_ema50_150_no_gate(df, **kwargs):
     return df
 
 
+# ===========================================================================
+# EC-R28/R29 STRATEGIES — Law of Large Numbers + Tighter Volatility Filter
+#
+# EC-R27 finding: EMA50/150 on Sectors+DJI 46 is closest to steady incline
+# but visible step-up moves remain in 2017-2020. Root cause: 46 symbols are
+# too few and too correlated — many exit/enter simultaneously in strong
+# market moves, creating portfolio-level steps.
+#
+# Two new directions:
+# EC-R28: Russell Top 200 at 1% alloc → 100+ concurrent positions →
+#   each step = 1% × avg_gain ≈ 0.15% → imperceptible individually.
+#   Law of large numbers should smooth the portfolio return distribution.
+#
+# EC-R29: Tighter ATR filter (1.5% vs 2.5%) on Sectors+DJI 46 →
+#   only the calmest 15-20 of 46 stocks qualify at any time →
+#   smaller individual stock moves → smaller portfolio steps.
+#
+# Both use EMA50/150 (best performer from EC-R27) and no SPY macro gate.
+# ===========================================================================
+
+@register_strategy(
+    name="EC-R28: EMA50/150 + Tight ATR 1.5% (No Gate) [Russell200 1%]",
+    dependencies=[],
+    params={
+        "ema_fast":    50,
+        "ema_slow":    150,
+        "sma_trend":   get_bars_for_period("200d", _TF, _MUL),
+        "atr_period":  14,
+        "max_atr_pct": 0.015,   # 1.5% — tighter than 2.5%
+    },
+)
+def ec_r28_ema50_150_tight_atr(df, **kwargs):
+    """EMA50>EMA150 + ATR<1.5% + SMA200. No SPY macro gate.
+    Tighter ATR filter selects only the calmest stocks. At 1% allocation on
+    Russell Top 200, law of large numbers smooths the aggregate portfolio curve."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+    sma_length = kwargs["sma_trend"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    is_uptrend = df["Close"] > df[sma_col]
+    in_trend   = ema_fast > ema_slow
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]) or pd.isna(atr.iloc[i]):
+            signals.append(-1)
+            continue
+        entry_ok = in_trend.iloc[i] and is_uptrend.iloc[i] and low_vol.iloc[i]
+        exit_ok  = not in_trend.iloc[i] or not is_uptrend.iloc[i]
+        if not in_position:
+            if entry_ok:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if exit_ok:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R28: EMA50/150 + ATR 2.5% (No Gate) [Russell200 1%]",
+    dependencies=[],
+    params={
+        "ema_fast":    50,
+        "ema_slow":    150,
+        "sma_trend":   get_bars_for_period("200d", _TF, _MUL),
+        "atr_period":  14,
+        "max_atr_pct": 0.025,   # standard 2.5%
+    },
+)
+def ec_r28_ema50_150_standard_atr(df, **kwargs):
+    """EMA50>EMA150 + ATR<2.5% + SMA200. No SPY macro gate.
+    Same params as EC-R27 champion on Russell Top 200 at 1% alloc.
+    100+ concurrent positions → law of large numbers portfolio smoothing."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+    sma_length = kwargs["sma_trend"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    is_uptrend = df["Close"] > df[sma_col]
+    in_trend   = ema_fast > ema_slow
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]) or pd.isna(atr.iloc[i]):
+            signals.append(-1)
+            continue
+        entry_ok = in_trend.iloc[i] and is_uptrend.iloc[i] and low_vol.iloc[i]
+        exit_ok  = not in_trend.iloc[i] or not is_uptrend.iloc[i]
+        if not in_position:
+            if entry_ok:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if exit_ok:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R29: EMA50/150 + Tight ATR 1.5% (No Gate) [DJI46]",
+    dependencies=[],
+    params={
+        "ema_fast":    50,
+        "ema_slow":    150,
+        "sma_trend":   get_bars_for_period("200d", _TF, _MUL),
+        "atr_period":  14,
+        "max_atr_pct": 0.015,   # tighter: 1.5% vs 2.5%
+    },
+)
+def ec_r29_ema50_150_tight_dji46(df, **kwargs):
+    """EMA50>EMA150 + ATR<1.5% + SMA200. No SPY macro gate.
+    Tighter ATR on Sectors+DJI 46: only the calmest 15-20 of 46 instruments.
+    Smaller individual stock moves → smaller portfolio steps on each exit."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+    sma_length = kwargs["sma_trend"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    is_uptrend = df["Close"] > df[sma_col]
+    in_trend   = ema_fast > ema_slow
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]) or pd.isna(atr.iloc[i]):
+            signals.append(-1)
+            continue
+        entry_ok = in_trend.iloc[i] and is_uptrend.iloc[i] and low_vol.iloc[i]
+        exit_ok  = not in_trend.iloc[i] or not is_uptrend.iloc[i]
+        if not in_position:
+            if entry_ok:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if exit_ok:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
 @register_strategy(
     name="EC2: Price Momentum (6m/15%) + SPY SMA50 Gate",
     dependencies=["spy"],
