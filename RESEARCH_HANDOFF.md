@@ -3592,4 +3592,58 @@ If still too jagged:
 - Tighten ATR to 2.0%
 - Accept as best achievable and present for production decision
 
+---
+
+## SESSION 36 — EC-R28 through EC-R33: Weekly Bars Breakthrough
+
+**Date:** 2026-04-18
+
+### EC-R28/R30/R31: Law of Large Numbers on Daily Bars — Partially Effective
+
+Steps in daily strategies are driven by CORRELATED market moves, not position size.
+Even at 0.5% alloc on S&P 500 (500 stocks), visible steps remain in strong bull markets.
+EC-R31 S&P 500 0.5% best section (2012-2020) was genuinely gradual but visible steps persist.
+
+### EC-R32: Trailing ATR Stop — REJECTED
+
+Catastrophic churn: 47-91K trades (vs 7K for EMA exit). Root cause: rolling 30-day high is too close to current price in uptrends → any minor pullback triggers exit.
+
+### EC-R33: WEEKLY BARS — BEST CURVES OF 33 ROUNDS
+
+Weekly bars: exits at most once/week per stock → 5× less frequent → distributed → smooth.
+
+| Strategy | Universe | P&L | Sharpe | MaxDD | OOS | MC |
+|---|---|---|---|---|---|---|
+| **EMA12w/26w** | **Sectors+DJI 46** | **1443%** | **1.60** | **20.72%** | **+656%** | **5** |
+| EMA21w/52w | Sectors+DJI 46 | 2627% | 1.68 | 27.80% | +1588% | 5 |
+| EMA12w/26w | Russell Top 200 | 7849% | 1.61 | 34.40% | +4772% | 2 |
+
+Russell Top 200 rejected: MC Score 2, MaxDD > 30% cap.
+
+**EMA12w/26w on Sectors+DJI 46 is the BEST RESULT IN THE ENTIRE EC RESEARCH:**
+- Sharpe 1.60 (highest ever)
+- Visual: 2000-2020 is genuinely gradual — closest to "steady incline" achieved
+- No flat 2007-2010 period (GFC is a real -10% drawdown)
+- Only 1956 trades over 33 years → exits spaced weeks apart
+- MC Score 5 (Robust), WFA Pass 3/3
+
+**Awaiting human visual review.**
+
+### Directions for EC-R34
+
+If accepted: sensitivity sweep, test 3.5% alloc, production planning.
+If still too jagged: EMA12w/26w on S&P 500 weekly at 1% alloc (more diversification on weekly timeframe).
+
+### Config State at Session End
+
+```python
+"portfolios": {"Sectors+DJI 46": "sectors_dji_combined.json"},
+"allocation_per_trade": 0.025,
+"start_date": "1993-01-01",
+"timeframe": "W",
+"min_bars_required": 104,
+"strategies": ["EC-R33: EMA12w/26w + ATR 8% (No Gate) [Russell200 weekly]"],
+"data_provider": "norgate", "wfa_folds": 3,
+```
+
 _[Next agent: append your session below this line]_

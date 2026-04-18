@@ -65,7 +65,8 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    "timeframe": "D",              # Daily bars — EC-R1 smooth curve research
+    #"timeframe": "D",              # Daily bars
+    "timeframe": "W",              # EC-R33: Weekly bars — fewer exits, smoother curve
     #"timeframe": "H",              # 4-hour bars via Polygon
     #"timeframe_multiplier": 4,     # H + multiplier=4 → 4-hour bars
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
@@ -170,10 +171,11 @@ CONFIG = {
     # Symbols with fewer bars than this are skipped entirely.
     # 250 ≈ one year of daily data. Increase if your strategies need
     #   longer lookback periods (e.g. 200d SMA needs at least 200 bars).
-    "min_bars_required": 250,  # Daily bars: 250 ≈ ~1 year (needed for SMA200 warmup)
+    "min_bars_required": 104,  # Weekly bars: 104 ≈ 2 years (needed for EMA warmup)
 
     "portfolios": {
-        "S&P 500": "norgate:S&P 500 Current & Past",  # EC-R31: maximum diversification
+        "Russell Top 200": "russell-top-200.json",  # EC-R33: weekly bars
+        "Sectors+DJI 46":  "sectors_dji_combined.json",
     },
 
     # ============================================================
@@ -182,7 +184,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.005,  # 0.5% — EC-R30 (200 positions, each step ~0.075% portfolio)
+    "allocation_per_trade": 0.025,  # 2.5% — EC-R33 weekly bars
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -287,7 +289,8 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R28: EMA50/150 + ATR 2.5% (No Gate) [Russell200 1%]",
+        "EC-R33: EMA12w/26w + ATR 8% (No Gate) [Russell200 weekly]",
+        "EC-R33: EMA21w/52w + ATR 8% (No Gate) [Russell200 weekly]",
     ],
 
     # ============================================================

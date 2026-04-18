@@ -1978,6 +1978,298 @@ def ec_r29_ema50_150_tight_dji46(df, **kwargs):
     return df
 
 
+# ===========================================================================
+# EC-R32 STRATEGIES — Trailing Stop Exit to Stagger Exits
+#
+# EC-R28/R31 finding: correlated EMA crossovers still create visible steps
+# because many stocks cross their EMA threshold simultaneously in strong
+# market moves. Individual positions have NO independent exit timing.
+#
+# EC-R32 hypothesis: Replace the EMA exit signal with a TRAILING STOP
+# exit (price falls X×ATR below 30-day rolling high). Each position has
+# its OWN 30-day high → exits at DIFFERENT times based on each stock's
+# individual price action → staggered exits → smoother portfolio curve.
+#
+# Entry: EMA50>EMA150 AND ATR<2.5% AND above SMA200 (same as EC-R28)
+# Exit: price falls 2×ATR below its rolling 30-day high OR SMA200 breach
+#   — The 2×ATR trailing stop fires at different times per stock
+#   — SMA200 is the hard safety net for prolonged downtrends
+# ===========================================================================
+
+@register_strategy(
+    name="EC-R32: EMA50/150 + Trailing ATR Stop (No Gate) [Russell200 1%]",
+    dependencies=[],
+    params={
+        "ema_fast":         50,
+        "ema_slow":         150,
+        "sma_trend":        get_bars_for_period("200d", _TF, _MUL),
+        "atr_period":       14,
+        "max_atr_pct":      0.025,
+        "trail_window":     30,
+        "trail_atr_mult":   2.0,
+    },
+)
+def ec_r32_ema_trailing_stop(df, **kwargs):
+    """EMA50>EMA150 entry + ATR trailing stop exit. No SPY macro gate.
+    Key difference: each position exits when IT personally falls 2×ATR below
+    its own 30-day high — staggered timing vs simultaneous EMA crossover.
+    SMA200 is the secondary exit for prolonged downtrends."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+    sma_length = kwargs["sma_trend"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    is_uptrend = df["Close"] > df[sma_col]
+    in_trend   = ema_fast > ema_slow
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    trail_window  = kwargs["trail_window"]
+    trail_mult    = kwargs["trail_atr_mult"]
+
+    signals = []
+    in_position   = False
+    entry_high    = None
+
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]) or pd.isna(atr.iloc[i]):
+            signals.append(-1)
+            continue
+
+        close = df["Close"].iloc[i]
+        atr_i = atr.iloc[i]
+
+        if not in_position:
+            entry_ok = in_trend.iloc[i] and is_uptrend.iloc[i] and low_vol.iloc[i]
+            if entry_ok:
+                in_position = True
+                entry_high  = close
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            # Update rolling high since entry
+            start = max(0, i - trail_window + 1)
+            rolling_high = df["Close"].iloc[start:i+1].max()
+            trailing_stop = rolling_high - trail_mult * atr_i
+
+            # Exit conditions
+            trail_hit  = close < trailing_stop
+            sma_exit   = not is_uptrend.iloc[i]
+
+            if trail_hit or sma_exit:
+                in_position = False
+                entry_high  = None
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R32: EMA50/150 + Trailing ATR Stop 3x (No Gate) [Russell200 1%]",
+    dependencies=[],
+    params={
+        "ema_fast":         50,
+        "ema_slow":         150,
+        "sma_trend":        get_bars_for_period("200d", _TF, _MUL),
+        "atr_period":       14,
+        "max_atr_pct":      0.025,
+        "trail_window":     30,
+        "trail_atr_mult":   3.0,
+    },
+)
+def ec_r32_ema_trailing_stop_wide(df, **kwargs):
+    """Same as EC-R32 but 3×ATR trailing stop (wider = fewer exits = longer holds).
+    Wider stop allows more room for normal volatility before exiting."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+    sma_length = kwargs["sma_trend"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    is_uptrend = df["Close"] > df[sma_col]
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+    in_trend = ema_fast > ema_slow
+
+    trail_window = kwargs["trail_window"]
+    trail_mult   = kwargs["trail_atr_mult"]
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]) or pd.isna(atr.iloc[i]):
+            signals.append(-1)
+            continue
+        close = df["Close"].iloc[i]
+        atr_i = atr.iloc[i]
+
+        if not in_position:
+            if in_trend.iloc[i] and is_uptrend.iloc[i] and low_vol.iloc[i]:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            start = max(0, i - trail_window + 1)
+            rolling_high = df["Close"].iloc[start:i+1].max()
+            trail_hit  = close < (rolling_high - trail_mult * atr_i)
+            sma_exit   = not is_uptrend.iloc[i]
+            if trail_hit or sma_exit:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+# ===========================================================================
+# EC-R33 STRATEGIES — Weekly Bars on Russell Top 200 (No SPY Gate)
+#
+# Daily EMA strategies still have correlated exits in strong trending
+# markets because many stocks cross their daily EMA simultaneously.
+#
+# Weekly bars fundamentally change the exit frequency:
+#   - 52 signal opportunities per year vs 252 for daily
+#   - Each position held for weeks to months per bar
+#   - Exits happen at MOST once per week per stock → much less correlated
+#   - Portfolio equity shows smoother progression with fewer discrete steps
+#
+# Parameters for weekly bars:
+#   - EMA12w (12 weeks ≈ 3 months) / EMA26w (26 weeks ≈ 6 months)
+#   - ATR filter: weekly ATR < 8% (weekly ATR ≈ √5 × daily ATR ≈ 5.6% for 2.5% daily)
+#   - SMA40w (40 weeks ≈ 200 days) as trend filter
+#
+# Note: These strategies are weekly-only. Config must set timeframe="W".
+# ===========================================================================
+
+if _TF == "W":
+    @register_strategy(
+        name="EC-R33: EMA12w/26w + ATR 8% (No Gate) [Russell200 weekly]",
+        dependencies=[],
+        params={
+            "ema_fast":    12,    # 12 weeks ≈ 3 months
+            "ema_slow":    26,    # 26 weeks ≈ 6 months
+            "sma_trend":   40,    # 40 weeks ≈ 200 trading days
+            "atr_period":  14,    # 14-week ATR
+            "max_atr_pct": 0.08,  # 8% weekly ATR ≈ 2.5% daily ATR × √5
+        },
+    )
+    def ec_r33_ema_weekly_12_26(df, **kwargs):
+        """EMA12w>EMA26w + weekly ATR<8% + SMA40w. No SPY gate. Weekly bars.
+        Weekly signals mean exits happen at most once per week per stock.
+        Much less correlated with other stocks → smoother portfolio curve."""
+        ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+        ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+        sma_length = kwargs["sma_trend"]
+        df         = calculate_sma(df, sma_length)
+        sma_col    = f"SMA_{sma_length}"
+        is_uptrend = df["Close"] > df[sma_col]
+        in_trend   = ema_fast > ema_slow
+
+        hl  = df["High"] - df["Low"]
+        hpc = (df["High"] - df["Close"].shift(1)).abs()
+        lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+        tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+        atr = tr.rolling(kwargs["atr_period"]).mean()
+        low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+        signals = []
+        in_position = False
+        for i in range(len(df)):
+            if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]) or pd.isna(atr.iloc[i]):
+                signals.append(-1)
+                continue
+            entry_ok = in_trend.iloc[i] and is_uptrend.iloc[i] and low_vol.iloc[i]
+            exit_ok  = not in_trend.iloc[i] or not is_uptrend.iloc[i]
+            if not in_position:
+                if entry_ok:
+                    in_position = True
+                    signals.append(1)
+                else:
+                    signals.append(-1)
+            else:
+                if exit_ok:
+                    in_position = False
+                    signals.append(-1)
+                else:
+                    signals.append(1)
+
+        df["Signal"] = signals
+        df.drop(columns=[sma_col], errors="ignore", inplace=True)
+        return df
+
+    @register_strategy(
+        name="EC-R33: EMA21w/52w + ATR 8% (No Gate) [Russell200 weekly]",
+        dependencies=[],
+        params={
+            "ema_fast":    21,    # 21 weeks ≈ 5 months
+            "ema_slow":    52,    # 52 weeks = 1 year
+            "sma_trend":   104,   # 104 weeks = 2 years (longer than SMA200d on weekly)
+            "atr_period":  14,
+            "max_atr_pct": 0.08,
+        },
+    )
+    def ec_r33_ema_weekly_21_52(df, **kwargs):
+        """EMA21w>EMA52w + weekly ATR<8% + SMA104w. No SPY gate. Weekly bars.
+        Longer 21w/52w trend windows = hold positions even longer → fewer exits."""
+        ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+        ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+        sma_length = kwargs["sma_trend"]
+        df         = calculate_sma(df, sma_length)
+        sma_col    = f"SMA_{sma_length}"
+        is_uptrend = df["Close"] > df[sma_col]
+        in_trend   = ema_fast > ema_slow
+
+        hl  = df["High"] - df["Low"]
+        hpc = (df["High"] - df["Close"].shift(1)).abs()
+        lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+        tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+        atr = tr.rolling(kwargs["atr_period"]).mean()
+        low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+        signals = []
+        in_position = False
+        for i in range(len(df)):
+            if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]) or pd.isna(atr.iloc[i]):
+                signals.append(-1)
+                continue
+            entry_ok = in_trend.iloc[i] and is_uptrend.iloc[i] and low_vol.iloc[i]
+            exit_ok  = not in_trend.iloc[i] or not is_uptrend.iloc[i]
+            if not in_position:
+                if entry_ok:
+                    in_position = True
+                    signals.append(1)
+                else:
+                    signals.append(-1)
+            else:
+                if exit_ok:
+                    in_position = False
+                    signals.append(-1)
+                else:
+                    signals.append(1)
+
+        df["Signal"] = signals
+        df.drop(columns=[sma_col], errors="ignore", inplace=True)
+        return df
+
+
 @register_strategy(
     name="EC2: Price Momentum (6m/15%) + SPY SMA50 Gate",
     dependencies=["spy"],
