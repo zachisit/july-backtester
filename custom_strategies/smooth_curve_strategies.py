@@ -780,6 +780,117 @@ def ec_ma_bounce_tight_low_vol(df, spy_df=None, **kwargs):
     return df
 
 
+# ===========================================================================
+# EC-R20 STRATEGIES — Beat SPY + No Prolonged Drawdowns
+#
+# EC-R19 findings: Low-vol ATR filter structurally caps CAGR below SPY (selects
+# boring low-return stocks by design). SPY SMA96 gate causes 1-2 year exclusion
+# periods after bear markets (2022-2024 drawdown was directly caused by slow
+# SPY SMA96 re-entry).
+#
+# EC-R20 requirements (ALL must pass):
+#   1. Visually gradual increase — no staircases, no jagged upthrusts
+#   2. No prolonged drawdowns (> 12 months duration)
+#   3. CAGR must exceed SPY B&H return
+#   4. WFA Pass (3/3), MC Score >= 4, OOS P&L positive
+#
+# Three architecture directions:
+#   A: S&P 500 + MA Bounce (no ATR filter) + per-stock SMA200 only (no SPY gate)
+#   B: S&P 500 + SMA200 hold + fast SPY SMA50 gate
+#   C: S&P 500 + EMA21/63 trend + per-stock SMA200 only (no SPY gate)
+# ===========================================================================
+
+@register_strategy(
+    name="EC-R20: MA Bounce + SMA200 Gate (No ATR, No SPY Gate)",
+    dependencies=["spy"],
+    params={
+        "ma_length":   get_bars_for_period("50d",  _TF, _MUL),
+        "filter_bars": 3,
+        "gate_length": get_bars_for_period("200d", _TF, _MUL),
+    },
+)
+def ec_r20_ma_bounce_no_atr(df, spy_df=None, **kwargs):
+    """MA Bounce without ATR filter — all stocks eligible, no SPY macro gate.
+    S&P 500 universe gives 50-100 concurrent setups; breadth smooths exits.
+    Individual SMA200 per stock handles drawdown protection without slow SPY re-entry."""
+    df = ma_bounce_logic(df, ma_length=kwargs["ma_length"], filter_bars=kwargs["filter_bars"])
+    bounce_signal = df["Signal"].copy()
+    df = calculate_sma(df, length=kwargs["gate_length"])
+    sma_col    = f'SMA_{kwargs["gate_length"]}'
+    is_uptrend = df["Close"] > df[sma_col]
+    df["Signal"] = np.where(bounce_signal == 1, np.where(is_uptrend, 1, -1), -1)
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R20: SMA200 Hold + SPY SMA50 Gate",
+    dependencies=["spy"],
+    params={
+        "sma_length":      get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("50d",  _TF, _MUL),
+    },
+)
+def ec_r20_sma200_hold_spy50(df, spy_df=None, **kwargs):
+    """Hold whenever stock above SMA200 AND SPY > SMA50. Always-invested approach
+    with fast SPY re-entry (SMA50 clears within weeks of bear market bottom vs
+    months for SMA96/SMA200). S&P 500 breadth ensures many concurrent positions."""
+    sma_length = kwargs["sma_length"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    above_sma  = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+    df["Signal"] = np.where(above_sma & spy_ok, 1, -1)
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R20: EMA21/63 Trend + SMA200 Gate (No SPY Gate)",
+    dependencies=["spy"],
+    params={
+        "ema_fast":    21,
+        "ema_slow":    63,
+        "sma_trend":   get_bars_for_period("200d", _TF, _MUL),
+    },
+)
+def ec_r20_ema_trend_no_spy(df, spy_df=None, **kwargs):
+    """EMA21 > EMA63 medium-term trend with per-stock SMA200 gate, no SPY macro gate.
+    Avoids the 2022-2024 prolonged exclusion caused by slow SPY SMA96 re-entry.
+    S&P 500 breadth: always holds multiple concurrent positions → smooth portfolio curve."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"], adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"], adjust=False).mean()
+    sma_length = kwargs["sma_trend"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    is_uptrend = df["Close"] > df[sma_col]
+    in_trend   = ema_fast > ema_slow
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]):
+            signals.append(-1)
+            continue
+        trend_ok = in_trend.iloc[i] and is_uptrend.iloc[i]
+        if not in_position:
+            if trend_ok:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if not trend_ok:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
 @register_strategy(
     name="EC2: Price Momentum (6m/15%) + SPY SMA50 Gate",
     dependencies=["spy"],

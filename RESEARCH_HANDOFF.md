@@ -3148,3 +3148,63 @@ All modification paths exhausted:
 ```
 
 _[Next agent: append your session below this line]_
+
+---
+
+## SESSION 31 — EC-R20 Directive Update + New Round
+
+**Date:** 2026-04-17
+**Branch:** research/autonomous-strategy-loop
+
+### USER FEEDBACK (explicit directive — overrides all prior chapter goals)
+
+The EC-R19 champion (`MA Bounce + Low-Vol ATR Filter + SPY SMA96 Gate`) was **REJECTED** by the user for:
+1. **2022-2024 prolonged drawdown** — a ~2-year flat/down period is unacceptable for a "gradual increase" curve
+2. **Does not beat SPY** — CAGR 9.22% is below SPY B&H (~10-11%). A strategy that underperforms SPY is a "dud" regardless of metrics.
+3. **Not gradual enough** — the plateau periods and staircase pattern violate the visual smoothness requirement
+
+### UPDATED CHAPTER 3 / EC RESEARCH REQUIREMENTS (ALL must pass simultaneously)
+
+**Hard requirements — any failure = reject the strategy:**
+1. **Visually gradual increase** — the equity curve must slope upward steadily. No staircase plateaus, no jagged upthrusts.
+2. **No prolonged drawdowns** — any drawdown period exceeding 12 months in duration is a disqualifier. Recovery must be visible within a year.
+3. **Beats SPY** — total CAGR over the backtest period must EXCEED SPY B&H return. No exceptions.
+4. Standard validation gates still apply: WFA Pass (3/3), MC Score ≥ 4, OOS P&L positive.
+
+### ROOT CAUSE ANALYSIS — Why EC-R19 Champion Failed Both New Requirements
+
+**Cannot beat SPY:**
+- Low-vol ATR filter (ATR/Close < 2.5%) structurally selects boring, low-returning stocks
+- By design these are stocks with small daily ranges — i.e., the market's underperformers
+- SPY CAGR is driven by its largest components (AAPL, MSFT, NVDA, AMZN) — all high-ATR stocks that are excluded by the 2.5% filter
+- No amount of parameter tuning can fix this: the filter IS the problem
+
+**Prolonged 2022-2024 drawdown:**
+- SPY SMA96 gate took the strategy FULLY OUT of the market in 2022 (correct)
+- But SPY SMA96 re-entry is SLOW — took until late 2023 for SPY to clear SMA96 convincingly
+- By that time, the market had already recovered 18+ months of gains that the strategy missed
+- Individual SMA200 gates per stock would have re-admitted stocks faster
+
+### HYPOTHESIS FOR EC-R20
+
+Three new architecture directions (run simultaneously for comparison):
+
+**Direction A: Large universe + no low-vol filter + individual SMA200 gate only**
+- Universe: S&P 500 ("norgate:S&P 500 Current & Past")
+- Strategy: MA Bounce with NO ATR filter (all stocks eligible)
+- Gate: individual stock SMA200 only — NO SPY macro gate
+- Hypothesis: 500 symbols → ~50-100 concurrent MA bounce setups → each exit is tiny portfolio impact → smooth. No low-vol filter → growth stocks eligible → beats SPY.
+
+**Direction B: SMA200 "stay invested" + fast SPY re-entry**
+- Universe: S&P 500
+- Strategy: hold any stock above its SMA200 (no bounce required — always-in approach)
+- Gate: SPY SMA50 (fast, re-enters within weeks not months after bear market bottom)
+- Hypothesis: Always deployed → no cash drag. Fast re-entry → doesn't miss recovery. Broad universe → beats SPY.
+
+**Direction C: EMA21/63 trend on S&P 500, no SPY gate**
+- Universe: S&P 500
+- Strategy: hold when EMA21 > EMA63 AND above SMA200 per stock
+- Gate: individual SMA200 only — NO SPY macro gate
+- Hypothesis: medium-term trend holding → smooth exits. No SPY gate → no prolonged exclusion periods.
+
+_[Next agent: append your session below this line]_
