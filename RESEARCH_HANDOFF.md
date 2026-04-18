@@ -3480,4 +3480,116 @@ Any strategy presented to the human MUST have:
 4. MaxDD < 30%
 5. Beating SPY CAGR is a soft goal only
 
+---
+
+## SESSION 35 — Human Review of EC-R24 + Root Cause Diagnosis + EC-R25/R26/R27 Plan
+
+**Date:** 2026-04-18
+
+### Human Verdict on EC-R24 MA Bounce and SMA200 Hold
+
+Both rejected. Reason: **flat span from 2007-2010 is "suspect"** — the strategy is sitting in cash for 2+ years by hiding behind the SPY SMA96 macro gate during the GFC. This looks like cherry-picking the out-of-market period, which is the definition of overfitting to a specific crash.
+
+Human's words: "both have a flat spanse of time between 2007-2010 or so which is suspect. they're both not a true steady incline... the strategy cannot be overfit."
+
+### Root Cause Diagnosis — The SPY Gate Problem
+
+Every strategy since EC-R13 has used a SPY macro gate (SMA50, SMA96, or SMA200). This gate:
+- Is the source of ALL flat periods (GFC 2007-2010, COVID 2020, rate hike 2022)
+- Creates the APPEARANCE of overfitting — deliberately avoids every major crash
+- A multi-year flat line = "strategy only grows when market cooperates" = not a steady incline
+
+A truly non-overfit smooth curve must show SOME participation during bear markets: either a modest real drawdown that recovers, or active gains from defensive positioning.
+
+### Three Research Directions for EC-R25+
+
+**Direction 1: Remove SPY gate (per-stock SMA200 only)**
+Each stock exits when IT falls below SMA200 (not when SPY falls). No coordinated mass exit. In 2008-2009: low-vol (ATR<2.5%) stocks fall less than market; at 2.5% alloc the portfolio drawdown may be tolerable. Proves the strategy is not regime-gated.
+
+**Direction 2: Multi-basket + 1993 start date**
+Test EC-R24 survivors on S&P 500 + Sectors+DJI 46 + Russell Top 200. Start date: "1993-01-01" (Norgate stock data from 1990, SPY from 1993-01-29). Adds dot-com crash, Asian/Russian crisis.
+
+**Direction 3: Always-invested rotation**
+Include TLT in universe as safe-haven. When equity stocks in downtrend, TLT tends to rally — fills the cash-drag flat period without going to zero-activity cash.
+
+### EC-R25 Config Template
+
+```python
+# Run 1 — No gate, S&P 500, 1993 start
+"portfolios": {"S&P 500": "norgate:S&P 500 Current & Past"},
+"allocation_per_trade": 0.025,
+"start_date": "1993-01-01",
+"strategies": [
+    "EC-R25: MA Bounce + Low-Vol ATR (No SPY Gate) [S&P500 2.5%]",
+    "EC-R25: SMA200 Hold + Low-Vol ATR (No SPY Gate) [S&P500 2.5%]",
+]
+
+# Run 2 — Multi-basket, 1993 start
+"portfolios": {
+    "S&P 500": "norgate:S&P 500 Current & Past",
+    "Sectors+DJI 46": "sectors_dji_combined.json",
+    "Russell Top 200": "russell-top-200.json",
+},
+"start_date": "1993-01-01",
+"strategies": [
+    "EC-R24: MA Bounce + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+    "EC-R24: SMA200 Hold + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+]
+```
+
+---
+
+## SESSION 35 CONTINUED — EC-R25, EC-R26, EC-R27 Results
+
+**Date:** 2026-04-18
+
+### EC-R25: No SPY Gate on S&P 500 (1993 start) — EMA21/63 BREAKTHROUGH
+
+Removed the SPY macro gate. Per-stock SMA200 + ATR<2.5% only. No flat 2007-2010 period — real modest drawdown instead. **EMA21/63 standout**: P&L 814%, Calmar 0.30, MaxDD 22.78%, OOS +130%, WFA Pass, MC 5. Genuine gradual incline 2010-2020. Honest market participation confirmed.
+
+### EC-R26: Universal Basket Test — Edge Confirmed on All 3 Universes
+
+EMA21/63 no-gate tested on S&P 500 + Sectors+DJI 46 + Russell Top 200, 1993 start. ALL THREE: WFA Pass 3/3, MC 5.
+
+| Universe | P&L | Calmar | MaxDD | OOS |
+|---|---|---|---|---|
+| S&P 500 | 814% | 0.30 | 22.78% | +130% |
+| **Sectors+DJI 46** | **692%** | **0.41** | **15.82%** | **+287%** |
+| Russell Top 200 | 4317% | 0.42 | 28.44% | +2005% |
+
+Sectors+DJI 46: visual winner (ETF+DJI instruments smoother, MaxDD 15.82%). Russell Top 200: beats SPY by +1482% but more staircase steps.
+
+### EC-R27: Longer EMA on Sectors+DJI 46 — EMA40/120 and EMA50/150 Champions
+
+| Strategy | P&L | Calmar | MaxDD | OOS |
+|---|---|---|---|---|
+| EMA21/63 | 692% | 0.41 | 15.82% | +287% |
+| EMA30/90 | 990% | 0.45 | 16.54% | +426% |
+| **EMA40/120** | **1110%** | **0.46** | **16.88%** | **+492%** |
+| **EMA50/150** | **1099%** | **0.47** | **16.38%** | **+502%** |
+
+All WFA Pass 3/3, MC 5. Longer EMA consistently better. EMA50/150 best overall. Visual: best "steady incline" achieved — 2010-2020 section is genuinely gradual. No flat 2007-2010. Real drawdowns in 2000-2004 and 2008. Some visible steps remain in 2017-2020.
+
+### Config State at Session End
+
+```python
+"portfolios": {"Sectors+DJI 46": "sectors_dji_combined.json"},
+"allocation_per_trade": 0.025,
+"start_date": "1993-01-01",
+"strategies": ["EC-R27: EMA50/150 + Low-Vol ATR (No Gate) [DJI46]"],
+"data_provider": "norgate", "timeframe": "D", "wfa_folds": 3,
+```
+
+### Directions for EC-R28
+
+If EMA40/120 or EMA50/150 accepted by human visual review:
+- Sensitivity sweep on EMA parameters
+- Test at 3.5% allocation for more CAGR
+- Consider production
+
+If still too jagged:
+- Test EMA50/150 on Russell Top 200 (4317% P&L, OOS +2005%)
+- Tighten ATR to 2.0%
+- Accept as best achievable and present for production decision
+
 _[Next agent: append your session below this line]_

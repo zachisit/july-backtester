@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2004-01-01",  # EC-R4: modern era (post dot-com crash)
+    "start_date": "1993-01-01",  # EC-R25: full Norgate history (SPY from 1993-01-29)
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -173,7 +173,7 @@ CONFIG = {
     "min_bars_required": 250,  # Daily bars: 250 ≈ ~1 year (needed for SMA200 warmup)
 
     "portfolios": {
-        "S&P 500": "norgate:S&P 500 Current & Past",  # EC-R24: proven signal on large universe
+        "Sectors+DJI 46": "sectors_dji_combined.json",  # EC-R27: longer EMA on proven universe
     },
 
     # ============================================================
@@ -287,9 +287,10 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R24: MA Bounce + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
-        "EC-R24: SMA200 Hold + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
-        "EC-R24: EMA21/63 + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+        "EC-R25: EMA21/63 + Low-Vol ATR (No SPY Gate) [S&P500 2.5%]",
+        "EC-R27: EMA30/90 + Low-Vol ATR (No Gate) [DJI46]",
+        "EC-R27: EMA40/120 + Low-Vol ATR (No Gate) [DJI46]",
+        "EC-R27: EMA50/150 + Low-Vol ATR (No Gate) [DJI46]",
     ],
 
     # ============================================================
