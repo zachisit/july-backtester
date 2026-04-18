@@ -3208,3 +3208,73 @@ Three new architecture directions (run simultaneously for comparison):
 - Hypothesis: medium-term trend holding → smooth exits. No SPY gate → no prolonged exclusion periods.
 
 _[Next agent: append your session below this line]_
+
+---
+
+## SESSION 31 CONTINUED — EC-R20 + EC-R21 Results
+
+### EC-R20: Cash Drag Confirmed — All Three Variants Fail SPY Beat Requirement
+
+Three strategies on S&P 500 (1273 symbols), 5% alloc, 2004-2026. SPY B&H: 861.83%.
+
+| Strategy | P&L | Calmar | OOS | WFA | MaxRcvry |
+|---|---|---|---|---|---|
+| MA Bounce + SMA200 (no ATR, no SPY gate) | 262.76% | 0.14 | -1.85% | Overfitted | 1972d |
+| SMA200 Hold + SPY SMA50 Gate | 435.72% | 0.40 | +135% | Pass | 953d |
+| EMA21/63 + SMA200 (no SPY gate) | 94.69% | 0.07 | -7.32% | Overfitted | 3317d |
+
+Root cause: strategies hold ~60-70% of stocks at any time → 30-40% cash drag in bull market. Mathematically impossible to close 861% gap without being almost always invested.
+
+PDF: `custom_strategies/private/research_results/pdfs/ec_daily/EC-R20_SMA200_Hold_+_SPY_SMA50_Gate.pdf`
+
+### EC-R21: Absolute Momentum — FIRST STRATEGY TO BEAT SPY — But Staircase Curve
+
+`EC-R21: Absolute Momentum (ROC 6m 15pct) + SMA200 + SPY SMA50`
+Universe: S&P 500, 5% allocation.
+
+| Metric | Value |
+|---|---|
+| CAGR | **14.1%** (SPY ~11%) |
+| Total Return | **1613.9%** vs SPY 861.83% |
+| MaxDD | 18.9% |
+| Calmar | 0.75 |
+| Sharpe (Rf=0%) | 0.57 |
+| OOS P&L | +296.03% |
+| WFA | Pass (3/3) |
+| MC Score | 5 |
+| MaxRcvry | 837 days (2.3 years) |
+| Alpha vs SPY | +14.02%/yr |
+
+**BEATS SPY** for the first time. BUT equity curve (PDF page 3) is a pronounced **staircase**, not gradual slope. 2022-2024 drawdown = 594 days (>12-month limit). Top single trade: APP +224%, AAMRQ +431% — outlier exits create visible steps.
+
+PDF: `custom_strategies/private/research_results/pdfs/ec_daily/EC-R21_Absolute_Momentum_ROC_6m_15pct_+_SMA200_+_SPY_SMA50.pdf`
+
+### THE FUNDAMENTAL DILEMMA
+
+There is no known systematic daily strategy that simultaneously:
+1. Beats SPY CAGR over a 22-year bull market
+2. Has a visually gradual, smooth equity curve
+3. Has no prolonged drawdowns (>12 months)
+
+SPY CAGR is driven by high-ATR mega-cap stocks (AAPL, MSFT, NVDA). Any system excluding high-ATR stocks = CAGR < SPY. Any system holding high-return stocks = concentrated exits = staircase curve.
+
+**Resolution paths for next agent:**
+1. Accept EC-R21 as "beats SPY" candidate — overall upward trend, just with steps
+2. Blend EC-R19 (smooth) + EC-R21 (beats SPY) simultaneously
+3. Lower threshold (ROC 10%) + lower allocation (2%) → 50 positions → smaller steps
+4. Re-scope "beats SPY" to OOS period only (EC-R21 OOS +296% vs SPY OOS ~35%)
+
+### Config State at Session End
+
+```python
+"portfolios": {"S&P 500": "norgate:S&P 500 Current & Past"},
+"allocation_per_trade": 0.05,
+"strategies": ["EC-R21: Absolute Momentum (ROC 6m 15pct) + SMA200 + SPY SMA50"],
+"stop_loss_configs": [{"type": "none"}],
+"start_date": "2004-01-01",
+"data_provider": "norgate",
+"timeframe": "D",
+"wfa_folds": 3,
+```
+
+_[Next agent: append your session below this line]_

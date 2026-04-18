@@ -965,7 +965,7 @@ def ec_r21_rel_momentum_spy50(df, spy_df=None, **kwargs):
 
 
 @register_strategy(
-    name="EC-R21: Absolute Momentum (ROC 6m >15%) + SMA200 + SPY SMA50",
+    name="EC-R21: Absolute Momentum (ROC 6m 15pct) + SMA200 + SPY SMA50",
     dependencies=["spy"],
     params={
         "roc_period":      get_bars_for_period("126d", _TF, _MUL),

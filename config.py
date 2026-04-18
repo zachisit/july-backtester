@@ -287,9 +287,7 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R21: Relative Momentum (6m+5%) + SMA200 + SPY SMA50",
-        "EC-R21: Absolute Momentum (ROC 6m >15%) + SMA200 + SPY SMA50",
-        "EC-R21: Relative Momentum (6m+5%) + SMA200 Only (No SPY Gate)",
+        "EC-R21: Absolute Momentum (ROC 6m 15pct) + SMA200 + SPY SMA50",
     ],
 
     # ============================================================
