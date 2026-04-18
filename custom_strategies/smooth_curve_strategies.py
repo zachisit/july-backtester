@@ -891,6 +891,184 @@ def ec_r20_ema_trend_no_spy(df, spy_df=None, **kwargs):
     return df
 
 
+# ===========================================================================
+# EC-R21 STRATEGIES — Momentum Selection to Beat SPY
+#
+# EC-R20 finding: Cash drag is the structural barrier. SMA200-hold strategies
+# are out of the market 30-40% of the time → cannot beat always-in SPY.
+#
+# Solution: Select only the MARKET'S LEADERS (top-performing stocks) so that
+# the subset we hold actually beats SPY average. Academic momentum premium:
+# stocks that outperform the market over 3-12 months continue to outperform.
+#
+# Three variants:
+#   A: Relative Momentum (6m, +5% vs SPY) + SMA200 + SPY SMA50 (fast gate)
+#   B: Absolute Momentum (ROC 6m > 15%) + SMA200 + SPY SMA50 (fast gate)
+#   C: Relative Momentum (6m, +5% vs SPY) + SMA200 only (no SPY macro gate)
+# ===========================================================================
+
+@register_strategy(
+    name="EC-R21: Relative Momentum (6m+5%) + SMA200 + SPY SMA50",
+    dependencies=["spy"],
+    params={
+        "roc_bars":        get_bars_for_period("126d", _TF, _MUL),  # 6-month lookback
+        "rel_thresh":      1.05,                                      # stock beats SPY by 5%+
+        "sma_slow":        get_bars_for_period("200d", _TF, _MUL),  # per-stock uptrend gate
+        "spy_gate_length": get_bars_for_period("50d",  _TF, _MUL),  # fast SPY gate
+    },
+)
+def ec_r21_rel_momentum_spy50(df, spy_df=None, **kwargs):
+    """Hold stocks that have beaten SPY by 5%+ over past 6 months AND above SMA200.
+    Concentrates in market leaders → captures momentum premium → expected to beat SPY.
+    Fast SPY SMA50 gate avoids prolonged bear market exposure."""
+    roc_bars   = kwargs["roc_bars"]
+    rel_thresh = kwargs["rel_thresh"]
+    sma_slow   = kwargs["sma_slow"]
+
+    spy_close = spy_df["Close"].reindex(df.index, method="ffill")
+    stock_roc = df["Close"] / df["Close"].shift(roc_bars) - 1
+    spy_roc   = spy_close / spy_close.shift(roc_bars) - 1
+    relative  = (1 + stock_roc) / (1 + spy_roc.replace(0, np.nan))
+
+    df         = calculate_sma(df, sma_slow)
+    sma_col    = f"SMA_{sma_slow}"
+    is_uptrend = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    is_leader   = relative > rel_thresh
+    cross_up    = is_leader & ~is_leader.shift(1).fillna(False)
+    is_entry    = cross_up & is_uptrend & spy_ok
+    is_exit     = (relative <= 1.0) | (~is_uptrend) | (~spy_ok)
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(relative.iloc[i]) or pd.isna(df[sma_col].iloc[i]):
+            signals.append(-1)
+            continue
+        if not in_position:
+            if is_entry.iloc[i]:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if is_exit.iloc[i]:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R21: Absolute Momentum (ROC 6m >15%) + SMA200 + SPY SMA50",
+    dependencies=["spy"],
+    params={
+        "roc_period":      get_bars_for_period("126d", _TF, _MUL),
+        "roc_threshold":   15.0,
+        "sma_slow":        get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("50d",  _TF, _MUL),
+    },
+)
+def ec_r21_abs_momentum_spy50(df, spy_df=None, **kwargs):
+    """Hold stocks that have risen 15%+ in the past 6 months AND above SMA200.
+    Fast SPY SMA50 gate. Absolute momentum selects bull market leaders naturally."""
+    roc_period    = kwargs["roc_period"]
+    roc_threshold = kwargs["roc_threshold"]
+    sma_slow      = kwargs["sma_slow"]
+
+    df["_roc"]  = df["Close"].pct_change(periods=roc_period) * 100.0
+    df          = calculate_sma(df, sma_slow)
+    sma_col     = f"SMA_{sma_slow}"
+    is_uptrend  = df["Close"] > df[sma_col]
+    spy_ok      = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    is_entry = (df["_roc"] > roc_threshold) & is_uptrend & spy_ok
+    is_exit  = (df["_roc"] < 0.0) | (~is_uptrend) | (~spy_ok)
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(df["_roc"].iloc[i]) or pd.isna(df[sma_col].iloc[i]):
+            signals.append(-1)
+            continue
+        if not in_position:
+            if is_entry.iloc[i]:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if is_exit.iloc[i]:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=["_roc", sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R21: Relative Momentum (6m+5%) + SMA200 Only (No SPY Gate)",
+    dependencies=["spy"],
+    params={
+        "roc_bars":  get_bars_for_period("126d", _TF, _MUL),
+        "rel_thresh": 1.05,
+        "sma_slow":   get_bars_for_period("200d", _TF, _MUL),
+    },
+)
+def ec_r21_rel_momentum_no_spy(df, spy_df=None, **kwargs):
+    """Relative momentum (stock beats SPY 6m by 5%+) with only per-stock SMA200 gate.
+    No SPY macro gate → faster recovery after bear markets. Relies on individual
+    stock SMA200 filter to avoid the worst drawdowns."""
+    roc_bars   = kwargs["roc_bars"]
+    rel_thresh = kwargs["rel_thresh"]
+    sma_slow   = kwargs["sma_slow"]
+
+    spy_close = spy_df["Close"].reindex(df.index, method="ffill")
+    stock_roc = df["Close"] / df["Close"].shift(roc_bars) - 1
+    spy_roc   = spy_close / spy_close.shift(roc_bars) - 1
+    relative  = (1 + stock_roc) / (1 + spy_roc.replace(0, np.nan))
+
+    df         = calculate_sma(df, sma_slow)
+    sma_col    = f"SMA_{sma_slow}"
+    is_uptrend = df["Close"] > df[sma_col]
+
+    is_leader   = relative > rel_thresh
+    cross_up    = is_leader & ~is_leader.shift(1).fillna(False)
+    is_entry    = cross_up & is_uptrend
+    is_exit     = (relative <= 1.0) | (~is_uptrend)
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(relative.iloc[i]) or pd.isna(df[sma_col].iloc[i]):
+            signals.append(-1)
+            continue
+        if not in_position:
+            if is_entry.iloc[i]:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if is_exit.iloc[i]:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
 @register_strategy(
     name="EC2: Price Momentum (6m/15%) + SPY SMA50 Gate",
     dependencies=["spy"],
