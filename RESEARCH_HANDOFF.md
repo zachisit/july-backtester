@@ -3277,4 +3277,53 @@ SPY CAGR is driven by high-ATR mega-cap stocks (AAPL, MSFT, NVDA). Any system ex
 "wfa_folds": 3,
 ```
 
+---
+
+## SESSION 32 — Human Visual Review of EC-R20 & EC-R21 PDFs
+
+**Date:** 2026-04-18
+
+### Verdict: Both EC-R20 and EC-R21 REJECTED — Jagged Curves, Signs of Overfit
+
+The human operator reviewed both PDFs directly and rejected both:
+
+- **EC-R20 (SMA200 Hold + SPY SMA50 Gate):** Jagged equity curve, not smooth. Rejected.
+- **EC-R21 (Absolute Momentum ROC 6m 15pct + SMA200 + SPY SMA50):** Jagged equity curve despite beating SPY CAGR. Shows signs of overfitting. Rejected.
+
+The "staircase + jagged upthrusts" visual pattern is the failure criterion — metrics alone (Calmar, OOS, WFA) are insufficient to validate a strategy. **PDF visual inspection is mandatory.**
+
+### Revised Understanding of the Problem
+
+The root issue is deeper than the fundamental dilemma identified in Session 31. The challenge is not just "smooth vs. beats SPY" — it is that **no strategy found so far is both visually smooth AND has acceptable metrics**. Specifically:
+
+- EC-R19 champion: smooth-ish in 2017-2021, but 1055-day plateau in 2014-2017 and visible outlier steps (BA +145%, CAT +75%).
+- EC-R20/R21: metrics improve but visual quality degrades further.
+
+**The working hypothesis — that higher CAGR strategies would also produce smoother curves — is falsified.** Higher return = more concentrated exits = more jaggedness.
+
+### Constraints for Future Rounds (Hard Requirements from Human)
+
+Any strategy presented as a candidate MUST satisfy ALL of the following before the human is asked to review the PDF:
+
+1. **Visually smooth equity curve** — gradual upward slope with no visible "staircase steps" or large individual-trade upthrusts. This is the primary filter. If you cannot confirm smoothness by reading the PDF yourself, do not present it.
+2. **No prolonged flat periods** — a plateau lasting more than ~2 years is a disqualifier.
+3. **WFA Pass (≥ 2/3 folds)** and **MC Score ≥ 4** — minimum robustness bar.
+4. **MaxDD < 30%** — hard cap.
+5. Beating SPY CAGR is a **soft goal**, not a hard requirement. A smooth CAGR of 8-10% over 20 years is acceptable.
+
+### Hypotheses to Explore in EC-R22+
+
+The core tension is: *concentrated positions → visible steps; diversified positions → cash drag*.
+
+Approaches that have NOT been tested and may resolve this:
+
+1. **Many small positions with a position cap** — e.g., 50-100 simultaneous positions at 1-2% allocation each. Each individual exit is too small to create a visible step. Universe: S&P 500 (enough names to fill slots). Entry filter: ATR < 2.5% AND ROC positive AND above SMA200.
+2. **Equal-weight always-invested with rotation** — hold exactly N positions always, rotate out losers weekly. No cash drag; no single exit dominates. Risk: turnover cost.
+3. **Sector-level momentum (not stock-level)** — hold 3-5 sector ETFs ranked by 6-month ROC. Only 16 ETFs → position size ~6-20%, but sectors move more uniformly. Fewer outlier events.
+4. **Blended portfolio** — EC-R19 (smooth, lower CAGR) + a momentum strategy at very low allocation (1-2%) to lift CAGR without adding visible steps. The smooth strategy damps the jags.
+
+### Next Recommended Action (EC-R22)
+
+**Test hypothesis 1 first:** S&P 500 universe, 1.5% allocation (→ ~66 simultaneous positions at full deployment), ATR < 2.5% filter, ROC 6m > 10% threshold, SMA200 gate, SPY SMA50 macro gate. Expected: smoother curve from position diversification. If P&L still below SPY, that confirms the cash-drag thesis and we move to hypothesis 3 (sector ETFs).
+
 _[Next agent: append your session below this line]_
