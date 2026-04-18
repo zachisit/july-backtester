@@ -173,7 +173,7 @@ CONFIG = {
     "min_bars_required": 250,  # Daily bars: 250 ≈ ~1 year (needed for SMA200 warmup)
 
     "portfolios": {
-        "S&P 500": "norgate:S&P 500 Current & Past",  # EC-R20: large universe for breadth
+        "S&P 500": "norgate:S&P 500 Current & Past",  # EC-R24: proven signal on large universe
     },
 
     # ============================================================
@@ -182,7 +182,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.05,  # 5% equity per position — EC-R20
+    "allocation_per_trade": 0.025,  # 2.5% equity per position — EC-R24 (S&P 500, medium allocation)
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -287,7 +287,9 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R21: Absolute Momentum (ROC 6m 15pct) + SMA200 + SPY SMA50",
+        "EC-R24: MA Bounce + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+        "EC-R24: SMA200 Hold + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+        "EC-R24: EMA21/63 + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
     ],
 
     # ============================================================

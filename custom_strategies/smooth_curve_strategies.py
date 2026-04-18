@@ -1069,6 +1069,404 @@ def ec_r21_rel_momentum_no_spy(df, spy_df=None, **kwargs):
     return df
 
 
+# ===========================================================================
+# EC-R22 STRATEGIES — Many Small Positions on S&P 500 at 1.5% Allocation
+#
+# EC-R21 finding: concentrated positions (5% each) → visible staircase steps.
+# EC-R22 hypothesis: 1.5% allocation → ~66 simultaneous positions → each
+# individual exit contributes only 0.225% to portfolio (vs 0.75% at 5%).
+# Steps become invisible at that scale.
+#
+# All three variants use:
+#   - S&P 500 universe (1200+ names, ~400-600 pass ATR filter)
+#   - ATR < 2.5% filter (no explosive single-stock moves)
+#   - SPY SMA50 macro gate (fast exit in bear markets)
+# ===========================================================================
+
+@register_strategy(
+    name="EC-R22: MA Bounce + Low-Vol ATR + SPY SMA50 [S&P500 SmallAlloc]",
+    dependencies=["spy"],
+    params={
+        "ma_length":       get_bars_for_period("50d",  _TF, _MUL),
+        "filter_bars":     3,
+        "gate_length":     get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("50d",  _TF, _MUL),
+        "atr_period":      14,
+        "max_atr_pct":     0.025,
+    },
+)
+def ec_r22_ma_bounce_small_alloc(df, spy_df=None, **kwargs):
+    """MA Bounce + ATR<2.5% filter + SPY SMA50 gate on S&P 500.
+    At 1.5% allocation: ~66 positions → each exit is <0.25% portfolio impact."""
+    df = ma_bounce_logic(df, ma_length=kwargs["ma_length"], filter_bars=kwargs["filter_bars"])
+    bounce_signal = df["Signal"].copy()
+
+    df = calculate_sma(df, length=kwargs["gate_length"])
+    sma_col    = f'SMA_{kwargs["gate_length"]}'
+    is_uptrend = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    df["Signal"] = np.where(
+        bounce_signal == 1,
+        np.where(is_uptrend & spy_ok & low_vol, 1, -1),
+        -1,
+    )
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R22: SMA200 Hold + Low-Vol ATR + SPY SMA50 [S&P500 SmallAlloc]",
+    dependencies=["spy"],
+    params={
+        "sma_length":      get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("50d",  _TF, _MUL),
+        "atr_period":      14,
+        "max_atr_pct":     0.025,
+    },
+)
+def ec_r22_sma200_hold_small_alloc(df, spy_df=None, **kwargs):
+    """Hold whenever stock above SMA200, ATR<2.5%, SPY>SMA50.
+    S&P 500 + low-vol filter → 200-300 concurrent holdings at 1.5% each → smooth."""
+    sma_length = kwargs["sma_length"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    above_sma  = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    df["Signal"] = np.where(above_sma & spy_ok & low_vol, 1, -1)
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R22: EMA21/63 + Low-Vol ATR + SMA200 + SPY SMA50 [S&P500 SmallAlloc]",
+    dependencies=["spy"],
+    params={
+        "ema_fast":        21,
+        "ema_slow":        63,
+        "sma_trend":       get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("50d",  _TF, _MUL),
+        "atr_period":      14,
+        "max_atr_pct":     0.025,
+    },
+)
+def ec_r22_ema_trend_small_alloc(df, spy_df=None, **kwargs):
+    """EMA21>EMA63 medium-term trend + ATR<2.5% filter + SPY SMA50 gate on S&P 500.
+    Many smooth concurrent positions via low-vol screen at 1.5% allocation."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+    sma_length = kwargs["sma_trend"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    is_uptrend = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+    in_trend   = ema_fast > ema_slow
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]) or pd.isna(atr.iloc[i]):
+            signals.append(-1)
+            continue
+        trend_ok = in_trend.iloc[i] and is_uptrend.iloc[i] and spy_ok.iloc[i] and low_vol.iloc[i]
+        if not in_position:
+            if trend_ok:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if not (in_trend.iloc[i] and is_uptrend.iloc[i] and spy_ok.iloc[i]):
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+# ===========================================================================
+# EC-R23 STRATEGIES — Sector ETF Universe (16 symbols) at 6.5% Allocation
+#
+# EC-R22 tests position-count smoothing on stocks. EC-R23 tests instrument-
+# level smoothing: ETFs are internally diversified → no single-company event
+# risk (earnings, FDA decisions, etc.) → inherently smoother price action.
+#
+# With 16 ETFs at 6.5% each: up to 15 concurrent positions (97.5% invested).
+# In a bull market with SPY SMA50 gate ON: holds 8-14 sectors simultaneously.
+# In bear market (SPY gate OFF): exits all → flat curve during crashes.
+#
+# All variants use sectors_etf_only.json universe.
+# ===========================================================================
+
+@register_strategy(
+    name="EC-R23: MA Bounce + SMA200 + SPY SMA50 [Sectors ETF]",
+    dependencies=["spy"],
+    params={
+        "ma_length":       get_bars_for_period("50d",  _TF, _MUL),
+        "filter_bars":     3,
+        "gate_length":     get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("50d",  _TF, _MUL),
+    },
+)
+def ec_r23_ma_bounce_etf(df, spy_df=None, **kwargs):
+    """MA Bounce on sector ETFs with SMA200 + SPY SMA50 gate.
+    No ATR filter — ETFs are inherently low-vol vs individual stocks."""
+    df = ma_bounce_logic(df, ma_length=kwargs["ma_length"], filter_bars=kwargs["filter_bars"])
+    bounce_signal = df["Signal"].copy()
+
+    df = calculate_sma(df, length=kwargs["gate_length"])
+    sma_col    = f'SMA_{kwargs["gate_length"]}'
+    is_uptrend = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    df["Signal"] = np.where(
+        bounce_signal == 1,
+        np.where(is_uptrend & spy_ok, 1, -1),
+        -1,
+    )
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R23: EMA21/63 Trend + SMA200 + SPY SMA50 [Sectors ETF]",
+    dependencies=["spy"],
+    params={
+        "ema_fast":        21,
+        "ema_slow":        63,
+        "sma_trend":       get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("50d",  _TF, _MUL),
+    },
+)
+def ec_r23_ema_trend_etf(df, spy_df=None, **kwargs):
+    """EMA21>EMA63 medium-term trend on sector ETFs.
+    ETF universe → smoother trend signals, no gap-risk from single-stock events."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+    sma_length = kwargs["sma_trend"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    is_uptrend = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+    in_trend   = ema_fast > ema_slow
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]):
+            signals.append(-1)
+            continue
+        trend_ok = in_trend.iloc[i] and is_uptrend.iloc[i] and spy_ok.iloc[i]
+        if not in_position:
+            if trend_ok:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if not trend_ok:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R23: SMA200 Hold + SPY SMA50 [Sectors ETF]",
+    dependencies=["spy"],
+    params={
+        "sma_length":      get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("50d",  _TF, _MUL),
+    },
+)
+def ec_r23_sma200_hold_etf(df, spy_df=None, **kwargs):
+    """Hold sector ETF whenever above SMA200 and SPY > SMA50.
+    Maximises invested time in sectors trending up → minimal cash drag on 16 ETFs."""
+    sma_length = kwargs["sma_length"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    above_sma  = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+    df["Signal"] = np.where(above_sma & spy_ok, 1, -1)
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+# ===========================================================================
+# EC-R24 STRATEGIES — Proven EC-R19 Signal on S&P 500 at Reduced Allocation
+#
+# EC-R22 and EC-R23 findings:
+#  - Small-allocation on S&P 500: SMA200 Hold was smoother than MA Bounce
+#  - Sector ETFs: too few symbols → more correlated exits → worse curve
+#  - Root SPY-gate problem: mass coordinated exits cause the biggest steps
+#
+# EC-R24 hypothesis: Apply EC-R19's proven architecture (MA Bounce + Low-Vol
+# ATR 2.5% + SPY SMA96 gate) to the S&P 500 universe at 2.5% allocation.
+#   - 2.5% alloc → ~40 concurrent positions → each step = 2.5% × gain (small)
+#   - S&P 500 → more qualifying stocks in choppy 2014-2017 → fills plateau gap
+#   - SPY SMA96 gate preserved (proven bear-market protection from EC-R19)
+#
+# Also test SMA200 Hold on same universe — EC-R22 showed SMA200 Hold smoother
+# than MA Bounce at small allocations.
+# ===========================================================================
+
+@register_strategy(
+    name="EC-R24: MA Bounce + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+    dependencies=["spy"],
+    params={
+        "ma_length":       get_bars_for_period("50d",  _TF, _MUL),
+        "filter_bars":     3,
+        "gate_length":     get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("96d",  _TF, _MUL),
+        "atr_period":      14,
+        "max_atr_pct":     0.025,
+    },
+)
+def ec_r24_ma_bounce_sp500_medium_alloc(df, spy_df=None, **kwargs):
+    """EC-R19's proven signal (MA Bounce + ATR<2.5% + SPY SMA96) on S&P 500 at 2.5%.
+    More qualifying stocks than Sectors+DJI 46 → fills 2014-2017 plateau.
+    Smaller allocation → steps are smaller in absolute portfolio impact."""
+    df = ma_bounce_logic(df, ma_length=kwargs["ma_length"], filter_bars=kwargs["filter_bars"])
+    bounce_signal = df["Signal"].copy()
+
+    df = calculate_sma(df, length=kwargs["gate_length"])
+    sma_col    = f'SMA_{kwargs["gate_length"]}'
+    is_uptrend = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    df["Signal"] = np.where(
+        bounce_signal == 1,
+        np.where(is_uptrend & spy_ok & low_vol, 1, -1),
+        -1,
+    )
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R24: SMA200 Hold + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+    dependencies=["spy"],
+    params={
+        "sma_length":      get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("96d",  _TF, _MUL),
+        "atr_period":      14,
+        "max_atr_pct":     0.025,
+    },
+)
+def ec_r24_sma200_hold_sp500_medium_alloc(df, spy_df=None, **kwargs):
+    """SMA200 Hold + ATR<2.5% + SPY SMA96 on S&P 500 at 2.5%.
+    Always-in when above SMA200 → no bounce-timing correlation → more distributed exits.
+    EC-R22 showed SMA200 Hold smoother than MA Bounce at small allocations."""
+    sma_length = kwargs["sma_length"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    above_sma  = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    df["Signal"] = np.where(above_sma & spy_ok & low_vol, 1, -1)
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
+@register_strategy(
+    name="EC-R24: EMA21/63 + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+    dependencies=["spy"],
+    params={
+        "ema_fast":        21,
+        "ema_slow":        63,
+        "sma_trend":       get_bars_for_period("200d", _TF, _MUL),
+        "spy_gate_length": get_bars_for_period("96d",  _TF, _MUL),
+        "atr_period":      14,
+        "max_atr_pct":     0.025,
+    },
+)
+def ec_r24_ema_trend_sp500_medium_alloc(df, spy_df=None, **kwargs):
+    """EMA21>EMA63 trend + ATR<2.5% + SMA200 + SPY SMA96 on S&P 500 at 2.5%.
+    Medium-term trend signal avoids short-duration spike trades that cause visible steps."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+    sma_length = kwargs["sma_trend"]
+    df         = calculate_sma(df, sma_length)
+    sma_col    = f"SMA_{sma_length}"
+    is_uptrend = df["Close"] > df[sma_col]
+    spy_ok     = _spy_regime_ok(spy_df, df.index, kwargs["spy_gate_length"])
+    in_trend   = ema_fast > ema_slow
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(df[sma_col].iloc[i]) or pd.isna(atr.iloc[i]):
+            signals.append(-1)
+            continue
+        trend_ok = in_trend.iloc[i] and is_uptrend.iloc[i] and spy_ok.iloc[i] and low_vol.iloc[i]
+        if not in_position:
+            if trend_ok:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if not (in_trend.iloc[i] and is_uptrend.iloc[i] and spy_ok.iloc[i]):
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[sma_col], errors="ignore", inplace=True)
+    return df
+
+
 @register_strategy(
     name="EC2: Price Momentum (6m/15%) + SPY SMA50 Gate",
     dependencies=["spy"],

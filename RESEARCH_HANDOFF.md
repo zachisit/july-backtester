@@ -3326,4 +3326,88 @@ Approaches that have NOT been tested and may resolve this:
 
 **Test hypothesis 1 first:** S&P 500 universe, 1.5% allocation (→ ~66 simultaneous positions at full deployment), ATR < 2.5% filter, ROC 6m > 10% threshold, SMA200 gate, SPY SMA50 macro gate. Expected: smoother curve from position diversification. If P&L still below SPY, that confirms the cash-drag thesis and we move to hypothesis 3 (sector ETFs).
 
+---
+
+## SESSION 33 — EC-R22, EC-R23, EC-R24 Results
+
+**Date:** 2026-04-18
+
+### EC-R22: 1.5% Allocation on S&P 500 — Hypothesis FAILED
+
+**Hypothesis:** Many small positions (66 concurrent at 1.5% each) → each individual exit too small to create a visible step.
+
+**Result:** All three variants still show staircase curves. Root cause: the SPY SMA50 macro gate causes **all** qualifying positions to exit simultaneously during bear markets → portfolio-level step regardless of individual position size. The systemic correlation cannot be fixed by shrinking position sizes alone.
+
+Best metric: EMA21/63 — P&L 169%, Calmar 0.31, MaxDD 14.75%, MC 5, WFA Pass.
+Visual: Still jagged staircase. Rejected.
+
+### EC-R23: 16 Sector ETFs at 6.5% — Failed Worse
+
+Only 16 symbols → extreme correlation → even more jagged curve. MA Bounce and EMA variants returned "Likely Overfitted" WFA verdicts. OOS returns only 1-2% for most. All rejected.
+
+### EC-R24: Proven EC-R19 Signal on S&P 500 at 2.5% — BREAKTHROUGH
+
+**Approach:** Apply EC-R19's proven architecture (MA Bounce + Low-Vol ATR 2.5% + SPY SMA96 gate) to S&P 500 universe at 2.5% allocation instead of 5%.
+
+**Why this works:**
+1. More qualifying stocks in S&P 500 → fills 2014-2017 plateau gap (FIXED vs EC-R19)
+2. Smaller allocation (2.5% vs 5%) → individual steps 50% smaller
+3. SPY SMA96 gate (slower than SMA50) → fewer false exits in corrections → lower MaxDD
+
+**Key Results:**
+
+| Strategy | P&L | Calmar | MaxDD | OOS | WFA | MC |
+|---|---|---|---|---|---|---|
+| MA Bounce + Low-Vol ATR + SPY SMA96 | 286.02% | 0.64 | **9.76%** | +63.91% | Pass (3/3) | 5 |
+| SMA200 Hold + Low-Vol ATR + SPY SMA96 | 333.83% | 0.62 | 10.96% | **+89.06%** | Pass (3/3) | 5 |
+| EMA21/63 + Low-Vol ATR + SPY SMA96 | 303.70% | 0.55 | 11.79% | +40.74% | Pass (3/3) | 5 |
+
+**Visual assessment (by agent from equity curve images):**
+- MA Bounce: Best visual yet. Gradual upward slope with small steps. 2014-2017 plateau RESOLVED. MaxDD only -10% visible on chart.
+- SMA200 Hold: Slightly more staircase-y in 2010-2016, smooth in 2016-2022.
+- EMA21/63: More distinct step-up moves, third place.
+
+**vs EC-R19 champion (Sectors+DJI 46, 5% alloc):**
+- MaxDD: 9.76% vs 19.49% (50% improvement)
+- Calmar: 0.64 vs 0.47 (36% improvement)
+- P&L: 286% vs 565% (50% lower — expected from half the allocation)
+- 2014-2017 plateau: RESOLVED vs EC-R19's 1055-day gap
+
+**Status: Awaiting human visual review of PDFs.**
+
+### PDFs for Human Review
+
+Copies in `custom_strategies/private/research_results/pdfs/ec_daily/`:
+- `EC-R24_MA_Bounce_+_Low-Vol_ATR_+_SPY_SMA96_[S&P500_2.5%].pdf` — **PRIMARY**
+- `EC-R24_SMA200_Hold_+_Low-Vol_ATR_+_SPY_SMA96_[S&P500_2.5%].pdf`
+- `EC-R24_EMA21_63_+_Low-Vol_ATR_+_SPY_SMA96_[S&P500_2.5%].pdf`
+
+### Directions for EC-R25 (pending human review outcome)
+
+**If EC-R24 MA Bounce is accepted as improved:**
+1. **EC-R25A**: Increase allocation to 3.5% — trades off some visual smoothness for more CAGR. Predict P&L ~400% with slightly larger steps.
+2. **EC-R25B**: Lower ATR threshold to 2.0% — selects even calmer stocks → potentially smoother exits.
+3. **EC-R25C**: Combined: run MA Bounce (2.5%) + SMA200 Hold (2.5%) simultaneously on S&P 500 → diversified signal types → smoother combined equity curve.
+
+**If EC-R24 MA Bounce is still too jagged:**
+1. Reduce allocation to 1.0% → even smaller steps, CAGR ~3-4%.
+2. Accept EC-R19 as visual champion and EC-R24 as MaxDD champion — present both as production candidates with different risk profiles.
+
+### Config State at Session End
+
+```python
+"portfolios": {"S&P 500": "norgate:S&P 500 Current & Past"},
+"allocation_per_trade": 0.025,
+"strategies": [
+    "EC-R24: MA Bounce + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+    "EC-R24: SMA200 Hold + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+    "EC-R24: EMA21/63 + Low-Vol ATR + SPY SMA96 [S&P500 2.5%]",
+],
+"stop_loss_configs": [{"type": "none"}],
+"start_date": "2004-01-01",
+"data_provider": "norgate",
+"timeframe": "D",
+"wfa_folds": 3,
+```
+
 _[Next agent: append your session below this line]_
