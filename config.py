@@ -66,7 +66,8 @@ CONFIG = {
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
     #"timeframe": "D",              # Daily bars
-    "timeframe": "W",              # EC-R33: Weekly bars — fewer exits, smoother curve
+    "timeframe": "W",              # EC-R38: Weekly bars with multi-asset universe
+    #"timeframe": "M",              # Monthly bars
     #"timeframe": "H",              # 4-hour bars via Polygon
     #"timeframe_multiplier": 4,     # H + multiplier=4 → 4-hour bars
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
@@ -174,8 +175,7 @@ CONFIG = {
     "min_bars_required": 104,  # Weekly bars: 104 ≈ 2 years (needed for EMA warmup)
 
     "portfolios": {
-        "Russell Top 200": "russell-top-200.json",  # EC-R33: weekly bars
-        "Sectors+DJI 46":  "sectors_dji_combined.json",
+        "Multi-Asset":    "multi_asset.json",  # EC-R38: DJI 30 + bonds + gold
     },
 
     # ============================================================
@@ -184,7 +184,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.025,  # 2.5% — EC-R33 weekly bars
+    "allocation_per_trade": 0.025,  # 2.5% — EC-R35 (DJI46 gets ~18 positions at 2.5%)
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -289,8 +289,8 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R33: EMA12w/26w + ATR 8% (No Gate) [Russell200 weekly]",
-        "EC-R33: EMA21w/52w + ATR 8% (No Gate) [Russell200 weekly]",
+        "EC-R34: EMA16w/36w + ATR 8% (No Gate) [Weekly]",
+        "EC-R36: EMA16w/36w + ATR 6% (No Gate) [Weekly Tight]",
     ],
 
     # ============================================================
