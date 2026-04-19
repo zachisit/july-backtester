@@ -3646,4 +3646,97 @@ If still too jagged: EMA12w/26w on S&P 500 weekly at 1% alloc (more diversificat
 "data_provider": "norgate", "wfa_folds": 3,
 ```
 
+---
+
+## SESSION 37 — CRITICAL REFRAMING: Jagged = Overfit (ALL Candidates Rejected)
+
+**Date:** 2026-04-18
+
+### Human Verdict After EC-R34 through EC-R38 PDF Review
+
+**Every PDF has equity curve with jagged portions = sign of overfit OR strategy dependent on a few lucky trades.**
+
+Human's exact words: "every pdf has equity curve that is not incremental but includes jagged portions that show overfit or just bad strategy based on a few lucky trades."
+
+This applies to ALL candidates:
+- EC-R35 EMA16w/36w DJI46 weekly (Sharpe 1.73)
+- EC-R36 DJI30 weekly (Sharpe 1.81)
+- EC-R37 DJI30 monthly (Sharpe 4.19)
+- EC-R38 Multi-Asset weekly (Sharpe 1.84)
+
+**ALL REJECTED.**
+
+### The Critical Insight (New Understanding)
+
+**Jagged equity curves are a DIAGNOSTIC SIGNAL of overfitting, not just a visual preference.**
+
+Reasoning: A truly robust strategy should have P&L distributed relatively evenly across many trades. If the equity curve has large step-up moves, it means a few outlier trades dominate the total return. Remove those 3-5 trades and the strategy's performance would collapse. This is overfitting by definition, even if WFA Pass 3/3 and MC Score 5.
+
+**WFA Pass and MC Score 5 are NECESSARY but NOT SUFFICIENT.**
+
+The missing criterion: **trade P&L distribution must be approximately uniform**. Specifically:
+- Top 5 trades should NOT contribute more than ~10-15% of total P&L
+- No single trade should contribute more than ~3% of total P&L
+- The 80th-percentile trade should not be 10× the median trade
+
+### New Diagnostic Approach Required
+
+Before presenting any future candidate, the agent MUST check:
+1. The trade log P&L distribution — is it approximately uniform or long-tailed?
+2. What % of total P&L comes from the top 5 trades?
+3. Are there specific stocks dominating the returns?
+4. Does the equity curve have smooth daily gains (good) or large step-ups (overfit)?
+
+The trade ml_features.parquet file or the trade_log CSV can be analyzed for this.
+
+### What This Means for Strategy Design
+
+Trend-following strategies with "let winners run" inherently create long-tailed P&L distributions
+→ a few huge winners, many small losers → jagged equity curve → the human considers this overfit.
+
+**Fundamentally new strategy types needed:**
+
+1. **Mean reversion strategies** — many small wins, capped upside per trade → uniform distribution
+2. **Risk parity / volatility-targeted position sizing** — equal risk contribution from each trade
+3. **Max-hold-period exits** — force exit after N days regardless of signal → prevents one trade growing huge
+4. **Fixed target exits** — exit at +X% gain (e.g., +8%) regardless of trend → caps upside per trade
+5. **Market-neutral / pairs trading** — uncorrelated to market direction → smooth returns
+6. **Buy-and-rebalance** — hold N stocks, rebalance monthly to equal weight → no momentum compounding
+
+### Directions for EC-R39+ (Fundamentally New Approaches)
+
+The trend-following architecture has been exhausted. Need to pivot entirely.
+
+**EC-R39: Fixed-target mean reversion**
+- Entry: stock drops N% below 20-day mean (mean reversion signal)
+- Exit: price hits +X% target OR stop loss -Y%
+- Capped upside per trade → uniform P&L distribution
+- Many small trades → each trade contributes proportionally
+
+**EC-R40: Time-capped trend following**
+- Entry: EMA cross (current architecture)
+- Exit: WHICHEVER COMES FIRST: EMA reverse OR held >N days (e.g., 60 days max)
+- Prevents single trade from becoming disproportionately large
+- Still captures trends but caps compounding
+
+**EC-R41: Equal-weight monthly rebalance**
+- No entry/exit signals — pure buy-and-hold with rebalancing
+- Hold N stocks equal-weight (no signal filter)
+- Rebalance to equal weights monthly
+- Should produce smoothest possible long-only curve
+- Compare to SPY buy-and-hold as baseline
+
+### Verify Diagnostic Before Future Presentations
+
+Agent MUST add this check before presenting ANY new candidate to the human:
+```
+Analyze trade log:
+- Top 5 trades as % of total P&L: should be < 15%
+- Top single trade as % of total P&L: should be < 3%
+- Ratio of top decile trade P&L to median trade P&L: should be < 5x
+- Return distribution skew: should be close to zero (symmetric)
+```
+
+If these fail, the strategy is too reliant on outliers → reject before human review.
+
 _[Next agent: append your session below this line]_
