@@ -35,7 +35,23 @@ def get_cached_data(symbol: str, start: str, end: str, timeframe: str, multiplie
         if datetime.now() - file_mod_time < timedelta(hours=CACHE_TTL_HOURS):
             logger.debug(f"  -> Cache HIT for '{symbol}'. Loading from '{filepath}'.")
             try:
-                return pd.read_parquet(filepath)
+                df = pd.read_parquet(filepath)
+                # Validate that cached data actually covers the requested start date.
+                # A provider may have returned plan-capped data (e.g. only 5 years) for
+                # a longer request, storing truncated rows under the full-range cache key.
+                # After a plan upgrade the cache would silently serve the old capped data.
+                requested_start = pd.Timestamp(start).tz_localize("UTC")
+                cache_start = df.index.min()
+                if hasattr(cache_start, "tzinfo") and cache_start.tzinfo is None:
+                    cache_start = cache_start.tz_localize("UTC")
+                lag_days = (cache_start - requested_start).days
+                if lag_days > 30:
+                    logger.warning(
+                        f"  -> Cache STALE for '{symbol}': cached start {cache_start.date()} "
+                        f"lags requested {start} by {lag_days} days — discarding and re-fetching."
+                    )
+                    return None
+                return df
             except Exception as e:
                 logger.warning(f"Could not read cache file '{filepath}'. Will re-fetch. Error: {e}")
                 return None
