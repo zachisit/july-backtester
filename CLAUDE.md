@@ -225,11 +225,11 @@ Called inside `get_price_data` before constructing `yf.Ticker(yahoo_symbol)`. Te
 
 The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces that every log line containing "Period" also contains "Selected" (no bare `Period :` label remains).
 
-### Polygon API Plan Limitation — Root Cause of 71% vs 814% Discrepancy
+### Polygon API Plan Limitation & Cache Validation Bug
 
-**Diagnostic (`debug_data.py`)**: Polygon returns 1,254 bars starting 2021-03-12. Yahoo returns 5,581 bars starting 2004-01-02. The SPY return difference (+742 pp) is 100% explained by the ~17-year start-date gap — Polygon's API plan (starter tier) limits history to roughly the last 5 years. There is NO pagination bug in `polygon_service.py` — the single page with 50,000-bar limit returns all available bars correctly. This is a hard server-side constraint; upgrading the Polygon plan is the only fix.
+**Plan history caps**: Polygon limits available history based on plan tier. A starter plan capped at ~2021; a paid plan extends that (confirmed: ~2016 on current plan). The `Actual Data Period` line in the run summary shows the true start Polygon returned — if it lags the configured `start_date`, the plan tier is the constraint. There is no pagination bug in `polygon_service.py` — the single page with 50,000-bar limit returns all available bars correctly.
 
-**Key implication**: When using Polygon, `Actual Data Period` in the run summary will show the true start, making it visible that the configured `start_date` of 2004 is not honoured.
+**Cache validation bug (issue #123)**: The local Parquet cache keys data by *requested* date range, not actual returned range. If Polygon returns plan-capped data (e.g. 2016–now) for a 2004 request, the cache stores that truncated result under a key named `SPY_2004-01-01_..._day_1.parquet`. After a plan upgrade, subsequent runs still serve the old capped data from cache — silently — until the cache entry is manually deleted or expires. **Fix**: add start-date validation in the `helpers/caching.py` read path; if `df.index.min()` lags the requested start by >30 days, treat as a cache miss and re-fetch. See issue #123 for the full implementation spec.
 
 ### S1/S2 Test Robustness
 
