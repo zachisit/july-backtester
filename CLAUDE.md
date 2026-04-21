@@ -10,8 +10,15 @@ Python backtesting engine for US equities. Tests 20+ technical strategies across
 - `main.py --name "run-name"` — optional prefix for report folder and S3 path
 - `main.py --verbose` — print two additional tables beneath the default Core Performance table: Extended Metrics (RS(avg/min/last), MaxRcvry, AvgRcvry, Calmar, PF, WinRate, Trades, Expct(R), SQN) and Robustness (OOS P&L, WFA Verdict, RollWFA, Corr, MC, MC Score). Default output shows Core Performance only.
 
+## Versioning
+
+The app version lives in **`version.py`** at the project root (`__version__ = "x.y.z"`). This is the single source of truth — update it whenever a release goes out. It surfaces via `python main.py --version`.
+
+**On every release:** bump `version.py` to the new version string before merging to `main`.
+
 ## Key Files
 ```
+version.py                         # Single source of truth for the app version — bump on every release
 config.py                          # All settings — edit this before running
 main.py                            # Single entry point (--name, --verbose, --dry-run, --init)
 helpers/indicators.py              # All strategy signal logic — do not touch
