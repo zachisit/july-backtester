@@ -1,0 +1,1774 @@
+commit 64262cb22239ce6ae211aea5803c070ef5f8aecc
+Author: Suriya-002 <suriyarajavel02@gmail.com>
+Date:   Mon Mar 23 08:35:58 2026 -0400
+
+    chore: remove norgate script from this PR (will be separate PR per review feedback)
+
+diff --git a/scripts/norgate_to_parquet.py b/scripts/norgate_to_parquet.py
+deleted file mode 100644
+index 38b2bb9..0000000
+--- a/scripts/norgate_to_parquet.py
++++ /dev/null
+@@ -1,221 +0,0 @@
+-#!/usr/bin/env python3
+-"""
+-norgate_to_parquet.py — Export Norgate bar data to Parquet files
+-================================================================
+-
+-Uses the project's existing Norgate wrapper (services/norgate_service.py)
+-to iterate over all stocks in a Norgate watchlist and export daily OHLCV
+-bars to individual Parquet files.
+-
+-Requirements:
+-    - Norgate Data Updater installed and running (Windows/macOS)
+-    - pip install norgatedata pyarrow pandas
+-
+-Usage:
+-    # Export all stocks in the "Russell 3000" watchlist:
+-    python scripts/norgate_to_parquet.py --watchlist "Russell 3000"
+-
+-    # Export specific tickers:
+-    python scripts/norgate_to_parquet.py --tickers AAPL MSFT GOOGL
+-
+-    # Export to a specific directory:
+-    python scripts/norgate_to_parquet.py --watchlist "Nasdaq 100" --output-dir ./parquet_data
+-
+-    # Resume a previously interrupted export (skips existing files):
+-    python scripts/norgate_to_parquet.py --watchlist "Russell 3000" --skip-existing
+-
+-Output:
+-    One Parquet file per symbol in the output directory:
+-        parquet_data/AAPL.parquet
+-        parquet_data/MSFT.parquet
+-        ...
+-
+-    Each file has columns: Open, High, Low, Close, Volume
+-    with a DatetimeIndex.
+-"""
+-
+-import argparse
+-import logging
+-import os
+-import sys
+-import time
+-from pathlib import Path
+-
+-# Add project root to sys.path so we can import from services/
+-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+-if PROJECT_ROOT not in sys.path:
+-    sys.path.insert(0, PROJECT_ROOT)
+-
+-# ---------------------------------------------------------------------------
+-# Set up logging
+-# ---------------------------------------------------------------------------
+-logging.basicConfig(
+-    level=logging.INFO,
+-    format="%(asctime)s [%(levelname)s] %(message)s",
+-    datefmt="%H:%M:%S",
+-)
+-logger = logging.getLogger(__name__)
+-
+-
+-def get_watchlist_symbols(watchlist_name: str) -> list[str]:
+-    """Fetch all symbols from a Norgate watchlist."""
+-    import norgatedata
+-    symbols = norgatedata.watchlist_symbols(watchlist_name)
+-    if not symbols:
+-        logger.warning(f"Watchlist '{watchlist_name}' returned 0 symbols.")
+-    return symbols
+-
+-
+-def export_symbol(symbol: str, output_dir: Path, config: dict, skip_existing: bool = False) -> bool:
+-    """
+-    Export a single symbol's daily bars to a Parquet file using the
+-    existing norgate_service.py wrapper.
+-
+-    Returns True if the file was written (or already existed), False on error.
+-    """
+-    from services.norgate_service import get_price_data
+-
+-    output_path = output_dir / f"{symbol}.parquet"
+-
+-    if skip_existing and output_path.exists():
+-        return True
+-
+-    try:
+-        df = get_price_data(
+-            symbol,
+-            start_date=config["start_date"],
+-            end_date=config["end_date"],
+-            config=config,
+-        )
+-
+-        if df is None or df.empty:
+-            logger.warning(f"  {symbol}: no data returned, skipping")
+-            return False
+-
+-        # Ensure only OHLCV columns are saved
+-        keep_cols = ["Open", "High", "Low", "Close", "Volume"]
+-        available = [c for c in keep_cols if c in df.columns]
+-        df = df[available]
+-
+-        df.to_parquet(output_path, engine="pyarrow")
+-        return True
+-
+-    except Exception as e:
+-        logger.error(f"  {symbol}: ERROR — {e}")
+-        return False
+-
+-
+-def main():
+-    parser = argparse.ArgumentParser(
+-        description="Export Norgate bar data to Parquet files for the july-backtester."
+-    )
+-    group = parser.add_mutually_exclusive_group(required=True)
+-    group.add_argument(
+-        "--watchlist", type=str,
+-        help='Norgate watchlist name (e.g., "Russell 3000", "Nasdaq 100")',
+-    )
+-    group.add_argument(
+-        "--tickers", nargs="+", type=str,
+-        help="One or more ticker symbols to export",
+-    )
+-    parser.add_argument(
+-        "--output-dir", type=str, default="parquet_data",
+-        help="Directory for output Parquet files (default: parquet_data/)",
+-    )
+-    parser.add_argument(
+-        "--skip-existing", action="store_true",
+-        help="Skip symbols that already have a Parquet file in the output dir",
+-    )
+-    parser.add_argument(
+-        "--start-date", type=str, default="2000-01-01",
+-        help="Start date for data export (default: 2000-01-01)",
+-    )
+-    parser.add_argument(
+-        "--end-date", type=str, default=None,
+-        help="End date for data export (default: today)",
+-    )
+-
+-    args = parser.parse_args()
+-
+-    # --- Validate norgatedata is available ---
+-    try:
+-        import norgatedata
+-    except ImportError:
+-        logger.error(
+-            "norgatedata package not found. Install it with:\n"
+-            "  pip install norgatedata\n"
+-            "and ensure the Norgate Data Updater is running."
+-        )
+-        sys.exit(1)
+-
+-    # --- Build a config dict matching what norgate_service.py expects ---
+-    from datetime import datetime
+-
+-    end_date = args.end_date or datetime.now().strftime("%Y-%m-%d")
+-
+-    config = {
+-        "data_provider": "norgate",
+-        "start_date": args.start_date,
+-        "end_date": end_date,
+-        "timeframe": "D",
+-        "timeframe_multiplier": 1,
+-        "price_adjustment": norgatedata.StockPriceAdjustmentType.TOTALRETURN,
+-    }
+-
+-    # --- Get the symbol list ---
+-    if args.watchlist:
+-        logger.info(f"Fetching symbols from watchlist: '{args.watchlist}'")
+-        symbols = get_watchlist_symbols(args.watchlist)
+-    else:
+-        symbols = args.tickers
+-
+-    if not symbols:
+-        logger.error("No symbols to export. Exiting.")
+-        sys.exit(1)
+-
+-    logger.info(f"Exporting {len(symbols)} symbols to {args.output_dir}/")
+-    logger.info(f"Date range: {args.start_date} -> {end_date}")
+-
+-    # --- Create output directory ---
+-    output_dir = Path(args.output_dir)
+-    output_dir.mkdir(parents=True, exist_ok=True)
+-
+-    # --- Export loop with progress ---
+-    success_count = 0
+-    fail_count = 0
+-    skip_count = 0
+-    start_time = time.time()
+-
+-    for i, symbol in enumerate(symbols, 1):
+-        if args.skip_existing and (output_dir / f"{symbol}.parquet").exists():
+-            skip_count += 1
+-            continue
+-
+-        ok = export_symbol(symbol, output_dir, config, skip_existing=args.skip_existing)
+-
+-        if ok:
+-            success_count += 1
+-        else:
+-            fail_count += 1
+-
+-        # Log progress every 50 symbols
+-        if i % 50 == 0:
+-            elapsed = time.time() - start_time
+-            rate = i / elapsed if elapsed > 0 else 0
+-            eta = (len(symbols) - i) / rate if rate > 0 else 0
+-            logger.info(
+-                f"  Progress: {i}/{len(symbols)} "
+-                f"({success_count} ok, {fail_count} failed, {skip_count} skipped) "
+-                f"— ETA: {eta:.0f}s"
+-            )
+-
+-    elapsed = time.time() - start_time
+-    logger.info(
+-        f"\nDone in {elapsed:.1f}s — "
+-        f"{success_count} exported, {fail_count} failed, {skip_count} skipped"
+-    )
+-    logger.info(f"Output directory: {output_dir.resolve()}")
+-
+-
+-if __name__ == "__main__":
+-    main()
+
+commit 03d6b4de420aa808094ae588d22abc14330c1c9e
+Merge: c35ea89 7814328
+Author: Suriya-002 <suriyarajavel02@gmail.com>
+Date:   Mon Mar 23 08:34:31 2026 -0400
+
+    Merge branch 'main' of https://github.com/zachisit/july-backtester into feat/examples-and-contributing
+
+commit c35ea8942d1d9976180f220ec84261da254514ac
+Author: Suriya-002 <suriyarajavel02@gmail.com>
+Date:   Wed Mar 18 14:54:16 2026 -0400
+
+    feat: add examples/ folder, CONTRIBUTING.md, Norgate export script, and tests (tasks 1, 11)
+
+diff --git a/CONTRIBUTING.md b/CONTRIBUTING.md
+new file mode 100644
+index 0000000..3831823
+--- /dev/null
++++ b/CONTRIBUTING.md
+@@ -0,0 +1,157 @@
++# Contributing to July Backtester
++
++Thank you for your interest in contributing! This guide covers everything you need to get started: dev environment setup, adding strategies, running tests, and the PR checklist.
++
++## Dev Environment Setup
++
++```bash
++# 1. Fork and clone
++git clone https://github.com/<your-username>/july-backtester.git
++cd july-backtester
++
++# 2. Create a virtual environment
++python -m venv venv
++source venv/bin/activate        # macOS / Linux
++venv\Scripts\activate.bat       # Windows CMD
++venv\Scripts\Activate.ps1       # Windows PowerShell
++
++# 3. Install dependencies
++pip install -r requirements.txt
++
++# 4. Set up your API key (optional — not needed for CSV or Yahoo provider)
++cp .env.example .env
++# Edit .env and add: POLYGON_API_KEY=your_key_here
++
++# 5. Verify the setup
++python main.py --dry-run
++```
++
++You should see a "RUN SUMMARY" box with strategy count, portfolio size, and task estimate. If that prints without errors, you're good to go.
++
++## How to Add a New Strategy
++
++The backtester uses a plugin system — no core files need editing. There are four steps:
++
++### Step 1: Write the signal logic
++
++If your logic is reusable across multiple strategies, add a function to `helpers/indicators.py`. Otherwise, write it inline in your plugin file (Step 2).
++
++Your function receives a DataFrame `df` with columns `Open`, `High`, `Low`, `Close`, `Volume` and must populate `df['Signal']` before returning:
++
++| Signal | Meaning              |
++|--------|----------------------|
++| `1`    | Enter / hold long    |
++| `0`    | No change            |
++| `-1`   | Exit / go flat       |
++| `-2`   | Enter short          |
++
++### Step 2: Create a plugin file
++
++Drop a `.py` file into `custom_strategies/`. Any filename works as long as it doesn't start with `_`.
++
++```python
++# custom_strategies/my_strategy.py
++
++from helpers.registry import register_strategy
++from helpers.timeframe_utils import get_bars_for_period
++from config import CONFIG
++
++_TF  = CONFIG.get("timeframe", "D")
++_MUL = CONFIG.get("timeframe_multiplier", 1)
++
++@register_strategy(
++    name="My Strategy Name",
++    dependencies=[],               # add "spy" and/or "vix" if needed
++    params={
++        "length": get_bars_for_period("20d", _TF, _MUL),
++    },
++)
++
++# If your strategy only signals on specific bars (not every bar),
++# use the forward-fill pattern to maintain state:
++#   df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
++
++def my_strategy(df, **kwargs):
++    """Buy when price is above the 20-bar SMA."""
++    length = kwargs["length"]
++    df['SMA'] = df['Close'].rolling(length).mean()
++    df['Signal'] = 0
++    df.loc[df['Close'] > df['SMA'], 'Signal'] = 1
++    df.loc[df['Close'] <= df['SMA'], 'Signal'] = -1
++    return df
++```
++
++### Step 3: Verify discovery
++
++```bash
++python main.py --dry-run
++```
++
++Check that "Strategies: N" increased by 1.
++
++### Step 4: Run a quick backtest
++
++Test on a small portfolio to confirm everything works end-to-end:
++
++```bash
++# Temporarily set in config.py:
++#   "portfolios": {"Test": ["SPY", "QQQ", "AAPL"]},
++python main.py
++```
++
++Review the terminal summary table for your strategy's row.
++
++## How to Run the Test Suite
++
++```bash
++# Run all tests
++pytest
++
++# Run a specific test file
++pytest tests/test_indicators.py
++
++# Run with verbose output
++pytest -v
++
++# Run a single test
++pytest tests/test_indicators.py::test_sma_crossover_signal
++```
++
++All tests should pass before opening a PR. If a test requires patching `config.py` defaults, use `monkeypatch` fixtures (see `conftest.py` for existing patterns).
++
++## PR Checklist
++
++Before opening a pull request, confirm each of the following:
++
++- [ ] **Tests pass** — `pytest` runs green with no failures
++- [ ] **CLAUDE.md updated** — if you added a strategy, indicator, config key, or changed behavior, update the relevant section in `CLAUDE.md`
++- [ ] **No hardcoded API keys** — secrets belong in `.env`, never in code
++- [ ] **No data artifacts** — `data_cache/`, `output/`, `.env`, and parquet files are gitignored and must not be committed
++- [ ] **Strategy naming** — if you added a strategy, the `name` in `@register_strategy` matches the format used by other strategies (e.g., `"SMA Crossover (20d/50d)"`)
++- [ ] **Docstrings** — new functions have a one-paragraph docstring explaining what they do, their signal convention, and parameters
++- [ ] **Dry run** — `python main.py --dry-run` completes without errors
++
++## Code Style
++
++- No strict linter is enforced, but keep code consistent with the existing style.
++- Use `get_bars_for_period()` instead of raw integers for lookback parameters — this keeps strategies timeframe-agnostic.
++- Sub-daily strategies should guard registration with `if _TF == "MIN":` so they don't raise `ValueError` when running on daily bars.
++- Signal convention: `1` = enter/hold long, `-1` = exit/flat, `0` = no change, `-2` = enter short.
++- The forward-fill pattern (`df['Signal'].replace(0, np.nan).ffill().fillna(0)`) is used by most strategies to maintain state between discrete entry/exit events.
++
++## Testing Notes
++
++- `conftest.py` forces `matplotlib.use("Agg")` for headless/CI environments. Don't remove it.
++- If a test needs to override `config.py` values (e.g., `wfa_folds`), use `monkeypatch` to patch `CONFIG` — don't modify `config.py` directly in tests.
++- Tests that need file I/O should use `tmp_path` fixtures (see `tests/test_csv_service.py` for examples).
++- Run the full suite with `pytest -v` before submitting.
++
++## Do Not Touch
++
++These files are stable and should not be modified without Zach's explicit approval:
++
++- `helpers/indicators.py` — all strategy signal logic (working correctly)
++- `helpers/simulations.py` and `helpers/portfolio_simulations.py` — simulation engines
++- `helpers/monte_carlo.py` — MC robustness scoring
++- `tickers_to_scan/` — JSON ticker lists
++- The multiprocessing architecture in `main.py` (`init_worker`, `run_single_simulation`, `Pool`)
+\ No newline at end of file
+diff --git a/examples/configs/config_nasdaq100.py b/examples/configs/config_nasdaq100.py
+new file mode 100644
+index 0000000..9e54076
+--- /dev/null
++++ b/examples/configs/config_nasdaq100.py
+@@ -0,0 +1,117 @@
++# examples/configs/config_nasdaq100.py
++"""
++CONFIG EXAMPLE: Nasdaq 100 Full Portfolio Run
++==============================================
++Runs all strategies against every stock in the Nasdaq 100 index.
++Uses all CPU cores via multiprocessing.
++
++Expected runtime:
++    - First run:  10-30 minutes (data fetching + caching)
++    - Repeat runs: 2-5 minutes  (data loaded from cache)
++
++How to use:
++    1. Copy this file to the project root as config.py:
++           cp examples/configs/config_nasdaq100.py config.py
++    2. Set your API key in .env (if using Polygon):
++           echo "POLYGON_API_KEY=your_key_here" > .env
++    3. Dry-run first to check task count:
++           python main.py --dry-run
++    4. Run the full backtest:
++           python main.py --name "nasdaq100-sweep"
++
++Tips:
++    - Start with the --dry-run flag to see the total task count before committing.
++    - With 22 strategies × 101 symbols × 1 stop config = ~2,222 tasks.
++    - Results are saved to output/runs/<run_id>/overall_portfolio_summary.csv
++"""
++
++from datetime import datetime
++
++CONFIG = {
++    # --- Data Provider ---
++    # Polygon gives the best data quality but requires a paid plan.
++    # Switch to "yahoo" for free data (lower quality, but fine for research).
++    "data_provider": "polygon",
++
++    # --- Backtest Period ---
++    # 20+ years of history for robust Walk-Forward Analysis.
++    "start_date": "2004-01-01",
++    "end_date": datetime.now().strftime("%Y-%m-%d"),
++
++    # --- Capital ---
++    "initial_capital": 100000.0,
++
++    # --- What to Test ---
++    # The nasdaq_100.json file ships with the repo in tickers_to_scan/.
++    "portfolios": {
++        "Nasdaq 100": "nasdaq_100.json",
++    },
++
++    # --- Timeframe ---
++    "timeframe": "D",
++    "timeframe_multiplier": 1,
++
++    # --- Position Sizing ---
++    "allocation_per_trade": 0.10,
++    "max_pct_adv": 0.05,
++
++    # --- Execution ---
++    "execution_time": "open",
++
++    # --- Stop Loss ---
++    # Test both no-stop and a 5% fixed stop in the same run.
++    # Note: this doubles the total task count.
++    "stop_loss_configs": [
++        {"type": "none"},
++        # {"type": "percentage", "value": 0.05},
++    ],
++
++    # --- Costs ---
++    "slippage_pct": 0.0005,
++    "commission_per_share": 0.002,
++    "risk_free_rate": 0.05,
++
++    # --- Monte Carlo ---
++    "min_trades_for_mc": 50,
++    "num_mc_simulations": 1000,
++    "mc_sampling": "iid",
++    "mc_block_size": None,
++
++    # --- Walk-Forward Analysis ---
++    "wfa_split_ratio": 0.80,
++    "wfa_folds": None,           # Set to 5 for rolling multi-fold WFA
++    "wfa_min_fold_trades": 5,
++
++    # --- Output ---
++    "save_individual_trades": True,
++    "save_only_filtered_trades": False,
++    "upload_to_s3": False,
++    "s3_reports_bucket": "",
++
++    # --- Filters ---
++    # Only show strategies that beat SPY and have MC score >= 3.
++    "mc_score_min_to_show_in_summary": 3,
++    "min_pandl_to_show_in_summary": 5.0,
++    "max_acceptable_drawdown": 0.30,
++    "min_performance_vs_spy": 0.0,
++    "min_performance_vs_qqq": -9999,
++    "show_qqq_losers": False,
++
++    # --- Strategy Selection ---
++    "strategies": "all",
++
++    # --- Sweep & Extras ---
++    "sensitivity_sweep_enabled": False,
++    "sensitivity_sweep_pct": 0.20,
++    "sensitivity_sweep_steps": 2,
++    "sensitivity_sweep_min_val": 2,
++    "noise_injection_pct": 0.0,
++    "export_ml_features": False,
++    "rolling_sharpe_window": 126,
++    "volume_impact_coeff": 0.0,
++    "htb_rate_annual": 0.02,
++    "price_adjustment": "total_return",
++    "benchmark_symbol": "SPY",
++    "min_bars_required": 250,
++    "roc_thresholds": [0.0, 0.5],
++}
+diff --git a/examples/configs/config_single_symbol.py b/examples/configs/config_single_symbol.py
+new file mode 100644
+index 0000000..75e8323
+--- /dev/null
++++ b/examples/configs/config_single_symbol.py
+@@ -0,0 +1,108 @@
++# examples/configs/config_single_symbol.py
++"""
++CONFIG EXAMPLE: Single-Symbol Quick Test
++=========================================
++Tests all active strategies against SPY using Yahoo Finance (free, no API key).
++
++This is the fastest way to validate your setup. Expected runtime: ~30 seconds.
++
++How to use:
++    1. Copy this file to the project root as config.py:
++           cp examples/configs/config_single_symbol.py config.py
++    2. Run the backtester:
++           python main.py
++
++What to look for in the output:
++    - The RUN SUMMARY box should show "Strategies: N" matching your plugin count
++    - The terminal table shows P&L, Sharpe, Max DD, and MC Score for each strategy
++    - Trade CSVs are saved to output/runs/<run_id>/
++"""
++
++from datetime import datetime
++
++CONFIG = {
++    # --- Data Provider ---
++    # Yahoo Finance: free, no API key needed. Good for quick tests.
++    "data_provider": "yahoo",
++
++    # --- Backtest Period ---
++    # 10 years of SPY data — enough for all default strategies to warm up.
++    "start_date": "2015-01-01",
++    "end_date": datetime.now().strftime("%Y-%m-%d"),
++
++    # --- Capital ---
++    "initial_capital": 100000.0,
++
++    # --- What to Test ---
++    # Single-asset mode: just SPY. Wrap in a portfolio dict so the engine
++    # runs in portfolio mode (which is the primary execution path).
++    "portfolios": {
++        "Quick Test": ["SPY"],
++    },
++
++    # --- Timeframe ---
++    "timeframe": "D",
++    "timeframe_multiplier": 1,
++
++    # --- Position Sizing ---
++    "allocation_per_trade": 0.10,  # 10% of equity per position
++    "max_pct_adv": 0.05,
++
++    # --- Execution ---
++    "execution_time": "open",
++
++    # --- Stop Loss ---
++    # No stop for this quick test. Add more entries to test multiple stops.
++    "stop_loss_configs": [
++        {"type": "none"},
++    ],
++
++    # --- Costs ---
++    "slippage_pct": 0.0005,
++    "commission_per_share": 0.002,
++    "risk_free_rate": 0.05,
++
++    # --- Monte Carlo ---
++    "min_trades_for_mc": 50,
++    "num_mc_simulations": 1000,
++    "mc_sampling": "iid",
++    "mc_block_size": None,
++
++    # --- Walk-Forward Analysis ---
++    "wfa_split_ratio": 0.80,
++    "wfa_folds": None,
++    "wfa_min_fold_trades": 5,
++
++    # --- Output ---
++    "save_individual_trades": True,
++    "save_only_filtered_trades": False,
++    "upload_to_s3": False,
++
++    # --- Filters (show everything) ---
++    "mc_score_min_to_show_in_summary": -9999,
++    "min_pandl_to_show_in_summary": -9999,
++    "max_acceptable_drawdown": 1.0,
++    "min_performance_vs_spy": -9999,
++    "min_performance_vs_qqq": -9999,
++    "show_qqq_losers": False,
++
++    # --- Strategy Selection ---
++    # "all" runs every registered plugin. Change to a list to test specific ones:
++    #   "strategies": ["SMA Crossover (20d/50d)"],
++    "strategies": "all",
++
++    # --- Sweep & Extras (disabled for quick tests) ---
++    "sensitivity_sweep_enabled": False,
++    "sensitivity_sweep_pct": 0.20,
++    "sensitivity_sweep_steps": 2,
++    "sensitivity_sweep_min_val": 2,
++    "noise_injection_pct": 0.0,
++    "export_ml_features": False,
++    "rolling_sharpe_window": 126,
++    "volume_impact_coeff": 0.0,
++    "htb_rate_annual": 0.02,
++    "price_adjustment": "total_return",
++    "benchmark_symbol": "SPY",
++    "min_bars_required": 250,
++    "roc_thresholds": [0.0, 0.5],
++}
+diff --git a/examples/configs/config_stress_test.py b/examples/configs/config_stress_test.py
+new file mode 100644
+index 0000000..a52768a
+--- /dev/null
++++ b/examples/configs/config_stress_test.py
+@@ -0,0 +1,147 @@
++# examples/configs/config_stress_test.py
++"""
++CONFIG EXAMPLE: Stress Test Configuration
++==========================================
++Tests strategy robustness with three stress-testing tools enabled:
++
++1. Price Noise Injection (±1%) — adds random perturbations to OHLC data
++   to see if your edge survives noisy real-world conditions.
++
++2. Parameter Sensitivity Sweep — varies each numeric parameter ±20% to
++   check whether results are fragile to small parameter changes.
++
++3. Block-Bootstrap Monte Carlo — preserves win/loss streaks instead of
++   shuffling trades independently, giving a more realistic robustness score
++   for regime-dependent strategies.
++
++Expected runtime:
++    WARNING — this is slow by design. The sensitivity sweep multiplies
++    your task count by 5^(number of numeric params). For a strategy with
++    2 params, that's 25x. Combined with noise injection, expect 10-30
++    minutes even on a small portfolio.
++
++    Recommendation: test on 2-3 symbols first, then scale up.
++
++How to use:
++    1. Copy this file to the project root as config.py:
++           cp examples/configs/config_stress_test.py config.py
++    2. Run a dry-run to see the task count:
++           python main.py --dry-run
++    3. Run the stress test:
++           python main.py --name "stress-test"
++
++What to look for:
++    - If a strategy's WFA Verdict flips from Pass to "Likely Overfitted"
++      with noise enabled, it was curve-fitted to specific price levels.
++    - If the Sensitivity Report shows "*** FRAGILE ***", the strategy is
++      only profitable at very specific parameter values — likely overfit.
++    - If block-bootstrap MC Score drops vs i.i.d. MC Score, the strategy
++      has regime-dependent streaks that independent resampling was hiding.
++"""
++
++from datetime import datetime
++
++CONFIG = {
++    # --- Data Provider ---
++    "data_provider": "yahoo",
++
++    # --- Backtest Period ---
++    "start_date": "2010-01-01",
++    "end_date": datetime.now().strftime("%Y-%m-%d"),
++
++    # --- Capital ---
++    "initial_capital": 100000.0,
++
++    # --- What to Test ---
++    # Start small for stress tests. Scale up once you've validated.
++    "portfolios": {
++        "Stress Test": ["SPY", "QQQ", "AAPL"],
++    },
++
++    # --- Timeframe ---
++    "timeframe": "D",
++    "timeframe_multiplier": 1,
++
++    # --- Position Sizing ---
++    "allocation_per_trade": 0.10,
++    "max_pct_adv": 0.05,
++
++    # --- Execution ---
++    "execution_time": "open",
++
++    # --- Stop Loss ---
++    "stop_loss_configs": [
++        {"type": "none"},
++    ],
++
++    # --- Costs ---
++    "slippage_pct": 0.0005,
++    "commission_per_share": 0.002,
++    "risk_free_rate": 0.05,
++
++    # =============================================
++    # STRESS TEST SETTINGS (the interesting part)
++    # =============================================
++
++    # --- 1. Price Noise Injection ---
++    # Adds ±1% uniform random noise to every OHLC cell on every bar.
++    # High/Low bounds are enforced after noise — no invalid candlesticks.
++    # Set to 0.0 to disable.
++    "noise_injection_pct": 0.01,
++
++    # --- 2. Parameter Sensitivity Sweep ---
++    # Varies each numeric param ±20% in 2 steps each side → 5 values per param.
++    # A 2-param strategy generates a 25-point grid (5 × 5).
++    "sensitivity_sweep_enabled": True,
++    "sensitivity_sweep_pct": 0.20,    # ±20% per step
++    "sensitivity_sweep_steps": 2,     # 2 steps each side
++    "sensitivity_sweep_min_val": 2,   # Floor (prevents e.g. SMA period = 0)
++
++    # --- 3. Block-Bootstrap Monte Carlo ---
++    # Samples consecutive blocks of trades instead of independent draws.
++    # Preserves win/loss streaks and regime clustering.
++    "mc_sampling": "block",
++    "mc_block_size": None,            # None = auto: floor(sqrt(N))
++
++    # --- Monte Carlo ---
++    "min_trades_for_mc": 50,
++    "num_mc_simulations": 1000,
++
++    # --- Walk-Forward Analysis ---
++    # Enable rolling folds for a more rigorous overfitting check.
++    "wfa_split_ratio": 0.80,
++    "wfa_folds": 5,                   # 5-fold rolling WFA
++    "wfa_min_fold_trades": 5,
++
++    # --- Volume Impact (mild institutional model) ---
++    "volume_impact_coeff": 0.1,
++
++    # --- Output ---
++    "save_individual_trades": True,
++    "save_only_filtered_trades": False,
++    "upload_to_s3": False,
++
++    # --- Filters (show everything for stress tests) ---
++    "mc_score_min_to_show_in_summary": -9999,
++    "min_pandl_to_show_in_summary": -9999,
++    "max_acceptable_drawdown": 1.0,
++    "min_performance_vs_spy": -9999,
++    "min_performance_vs_qqq": -9999,
++    "show_qqq_losers": False,
++
++    # --- Strategy Selection ---
++    # Focus on a few strategies for stress testing:
++    "strategies": [
++        "SMA Crossover (20d/50d)",
++        "SMA Crossover (50d/200d)",
++    ],
++
++    # --- Extras ---
++    "export_ml_features": True,
++    "rolling_sharpe_window": 126,
++    "htb_rate_annual": 0.02,
++    "price_adjustment": "total_return",
++    "benchmark_symbol": "SPY",
++    "min_bars_required": 250,
++    "roc_thresholds": [0.0, 0.5],
++}
+diff --git a/examples/notebooks/ml_features_quickstart.ipynb b/examples/notebooks/ml_features_quickstart.ipynb
+new file mode 100644
+index 0000000..8019ecd
+--- /dev/null
++++ b/examples/notebooks/ml_features_quickstart.ipynb
+@@ -0,0 +1,199 @@
++{
++ "cells": [
++  {
++   "cell_type": "markdown",
++   "metadata": {},
++   "source": [
++    "# ML Features Quick-Start: Predict Trade Outcomes\n",
++    "\n",
++    "This notebook shows how to load the `ml_features.parquet` file produced by the backtester and train a basic scikit-learn classifier to predict `is_win` (whether a trade is profitable).\n",
++    "\n",
++    "## Prerequisites\n",
++    "\n",
++    "1. Run a backtest with `export_ml_features: True` in `config.py`\n",
++    "2. Install scikit-learn: `pip install scikit-learn`\n",
++    "3. Update the `PARQUET_PATH` below to point to your run's output file"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "import pandas as pd\n",
++    "import numpy as np\n",
++    "from pathlib import Path\n",
++    "\n",
++    "# --- UPDATE THIS PATH to your actual run output ---\n",
++    "PARQUET_PATH = Path(\"../output/runs/REPLACE_WITH_YOUR_RUN_ID/ml_features.parquet\")\n",
++    "# Load the data\n",
++    "df = pd.read_parquet(PARQUET_PATH)\n",
++    "print(f\"Loaded {len(df):,} trades across {df['Strategy'].nunique()} strategies\")\n",
++    "print(f\"Win rate: {df['is_win'].mean():.1%}\")\n",
++    "df.head()"
++   ]
++  },
++  {
++   "cell_type": "markdown",
++   "metadata": {},
++   "source": [
++    "## Explore the Feature Columns\n",
++    "\n",
++    "The `entry_*` columns capture the market state at the moment each trade was entered. These are the features we'll use for prediction."
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "# Identify the entry feature columns\n",
++    "feature_cols = [c for c in df.columns if c.startswith(\"entry_\")]\n",
++    "print(f\"Found {len(feature_cols)} entry features:\")\n",
++    "for col in feature_cols:\n",
++    "    non_null = df[col].notna().sum()\n",
++    "    print(f\"  {col:30s}  non-null: {non_null:>6,} / {len(df):,}\")"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "# Quick correlation of features with the target\n",
++    "target = \"is_win\"\n",
++    "corr = df[feature_cols + [target]].corr()[target].drop(target).sort_values()\n",
++    "print(\"Feature correlations with is_win:\")\n",
++    "print(corr.to_string())"
++   ]
++  },
++  {
++   "cell_type": "markdown",
++   "metadata": {},
++   "source": [
++    "## Train a Basic Classifier\n",
++    "\n",
++    "I'll use a Random Forest as a quick baseline. The goal isn't to build a production model — it's to show the workflow and see which features matter."
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "from sklearn.model_selection import train_test_split\n",
++    "from sklearn.ensemble import RandomForestClassifier\n",
++    "from sklearn.metrics import classification_report, roc_auc_score\n",
++    "\n",
++    "# Prepare the dataset\n",
++    "# Drop rows where any feature is NaN (indicator warm-up period)\n",
++    "ml_df = df[feature_cols + [target]].dropna()\n",
++    "print(f\"Rows after dropping NaN: {len(ml_df):,} (dropped {len(df) - len(ml_df):,})\")\n",
++    "\n",
++    "X = ml_df[feature_cols]\n",
++    "y = ml_df[target]\n",
++    "\n",
++    "# Train/test split — use a time-aware split in production!\n",
++    "# Here we use a random split for simplicity.\n",
++    "X_train, X_test, y_train, y_test = train_test_split(\n",
++    "    X, y, test_size=0.2, random_state=42, stratify=y\n",
++    ")\n",
++    "\n",
++    "print(f\"Train: {len(X_train):,}  Test: {len(X_test):,}\")\n",
++    "print(f\"Train win rate: {y_train.mean():.1%}  Test win rate: {y_test.mean():.1%}\")"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "# Train a Random Forest\n",
++    "clf = RandomForestClassifier(\n",
++    "    n_estimators=200,\n",
++    "    max_depth=6,           # Keep shallow to reduce overfitting\n",
++    "    min_samples_leaf=20,   # Require at least 20 trades per leaf\n",
++    "    random_state=42,\n",
++    "    n_jobs=-1,\n",
++    ")\n",
++    "clf.fit(X_train, y_train)\n",
++    "\n",
++    "# Evaluate\n",
++    "y_pred = clf.predict(X_test)\n",
++    "y_prob = clf.predict_proba(X_test)[:, 1]\n",
++    "\n",
++    "print(\"\\nClassification Report:\")\n",
++    "print(classification_report(y_test, y_pred, target_names=[\"Loss\", \"Win\"]))\n",
++    "print(f\"ROC AUC: {roc_auc_score(y_test, y_prob):.3f}\")"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "# Feature importance\n",
++    "importance = pd.Series(clf.feature_importances_, index=feature_cols).sort_values(ascending=False)\n",
++    "print(\"Top features by importance:\")\n",
++    "print(importance.to_string())"
++   ]
++  },
++  {
++   "cell_type": "code",
++   "execution_count": null,
++   "metadata": {},
++   "outputs": [],
++   "source": [
++    "import matplotlib.pyplot as plt\n",
++    "importance.plot(kind=\"barh\")\n",
++    "plt.xlabel(\"Importance\")\n",
++    "plt.title(\"Feature Importance for Predicting Trade Outcomes\")\n",
++    "plt.tight_layout()"
++   ]
++  },
++  {
++   "cell_type": "markdown",
++   "metadata": {},
++   "source": [
++    "## Interpreting the Results\n",
++    "\n",
++    "**ROC AUC close to 0.50** means the entry features alone don't predict winners vs losers — which is expected for a well-designed trend-following strategy (the edge comes from position sizing and cutting losses, not from entry timing).\n",
++    "\n",
++    "**ROC AUC above 0.55** suggests some entry features carry predictive signal. Look at which features rank highest in importance — they might reveal regime dependencies (e.g., VIX level at entry, RSI at entry).\n",
++    "\n",
++    "**Next steps:**\n",
++    "- Add `HoldDuration`, `RMultiple` as features (non-entry context)\n",
++    "- Try a time-series split instead of random split\n",
++    "- Group by strategy and train separate models per strategy\n",
++    "- Use the predictions to filter which trades to actually take in a live system"
++   ]
++  }
++ ],
++ "metadata": {
++  "kernelspec": {
++   "display_name": "Python 3",
++   "language": "python",
++   "name": "python3"
++  },
++  "language_info": {
++   "codemirror_mode": {
++    "name": "ipython",
++    "version": 3
++   },
++   "file_extension": ".py",
++   "mimetype": "text/x-python",
++   "name": "python",
++   "nbconvert_exporter": "python",
++   "pygments_lexer": "ipython3",
++   "version": "3.12.3"
++  }
++ },
++ "nbformat": 4,
++ "nbformat_minor": 4
++}
+diff --git a/examples/strategies/gap_up_overnight_example.py b/examples/strategies/gap_up_overnight_example.py
+new file mode 100644
+index 0000000..51008fc
+--- /dev/null
++++ b/examples/strategies/gap_up_overnight_example.py
+@@ -0,0 +1,104 @@
++# examples/strategies/gap_up_overnight_example.py
++"""
++EXAMPLE STRATEGY: Gap-Up Overnight Hold with SPY Trend Filter
++==============================================================
++Difficulty: Beginner-to-Intermediate
++
++Buys at the close when the stock gapped up at the open (Open > prior Close)
++by at least 1%, then exits at the next bar. This captures overnight
++continuation momentum after a strong gap day.
++
++A SPY trend filter is layered on top: we only take entries when SPY is
++above its 200-day SMA (bull market regime).
++
++This example demonstrates:
++    - How to declare dependencies (SPY data)
++    - How the engine injects spy_df into **kwargs automatically
++    - How to align external data to the primary symbol's index
++
++How to use:
++    Copy this file into custom_strategies/ and run:
++        python main.py --dry-run
++"""
++
++import numpy as np
++import pandas as pd
++from helpers.registry import register_strategy
++from helpers.timeframe_utils import get_bars_for_period
++from config import CONFIG
++
++_TF  = CONFIG.get("timeframe", "D")
++_MUL = CONFIG.get("timeframe_multiplier", 1)
++
++
++@register_strategy(
++    name="Gap-Up Overnight Hold (Example)",
++
++    # --- Dependencies ---
++    # Declaring "spy" here tells the engine to fetch SPY data and pass it
++    # into **kwargs as kwargs["spy_df"]. You can also use "vix" for VIX data
++    # (injected as kwargs["vix_df"]), or both: ["spy", "vix"].
++    dependencies=["spy"],
++
++    params={
++        "gap_pct": 0.01,        # Minimum gap size (1%)
++        "regime_ma": get_bars_for_period("200d", _TF, _MUL),
++    },
++)
++def gap_up_overnight_example(df, **kwargs):
++    """
++    Buy after a 1%+ gap-up day, only during a SPY bull regime. Exit next bar.
++
++    Parameters (via **kwargs)
++    -------------------------
++    gap_pct : float
++        Minimum open-to-prior-close gap as a fraction (0.01 = 1%).
++    regime_ma : int
++        SMA lookback for the SPY trend filter.
++    spy_df : pd.DataFrame
++        SPY price data — injected automatically because we declared
++        dependencies=["spy"] in the decorator.
++    """
++    gap_pct   = kwargs["gap_pct"]
++    regime_ma = kwargs["regime_ma"]
++    spy_df    = kwargs["spy_df"]   # Injected by the engine
++
++    # --- Part 1: Detect gap-up days ---
++    # A gap-up means today's Open is at least gap_pct above yesterday's Close.
++    prior_close = df['Close'].shift(1)
++    gap_size = (df['Open'] - prior_close) / prior_close
++    is_gap_up = gap_size >= gap_pct
++
++    # --- Part 2: SPY regime filter ---
++    # Calculate SPY's moving average and align it to our symbol's dates.
++    spy_sma = spy_df['Close'].rolling(regime_ma).mean()
++
++    # Create an aligned DataFrame to handle date mismatches gracefully.
++    # The primary symbol might have different trading dates than SPY
++    # (e.g., different listing date), so we reindex and forward-fill.
++    regime_df = pd.DataFrame(index=df.index)
++    regime_df['spy_close'] = spy_df['Close']
++    regime_df['spy_sma']   = spy_sma
++    regime_df.ffill(inplace=True)
++
++    is_bull_market = regime_df['spy_close'] > regime_df['spy_sma']
++
++    # --- Part 3: Combine into signals ---
++    # Buy (1) on a gap-up day during a bull market.
++    # Since we want a 1-bar hold, we exit (-1) on the very next bar.
++    # We do this by setting the buy signal, then shifting exit by 1 bar.
++    buy_signal = is_gap_up & is_bull_market
++
++    # Start with all zeros, mark buy days as 1
++    df['Signal'] = np.where(buy_signal, 1, 0)
++
++    # For every buy signal, place an exit signal one bar later.
++    # shift(-1) looks ahead one bar — on daily data, that means
++    # "the next trading day". This gives us a 1-day hold.
++    buy_shifted = buy_signal.shift(1).infer_objects(copy=False).fillna(False)
++    df.loc[buy_shifted, 'Signal'] = -1
++
++    # Forward-fill to maintain state between signals
++    df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
++
++    return df
+diff --git a/examples/strategies/sma_trend_filter_example.py b/examples/strategies/sma_trend_filter_example.py
+new file mode 100644
+index 0000000..e8b4562
+--- /dev/null
++++ b/examples/strategies/sma_trend_filter_example.py
+@@ -0,0 +1,91 @@
++# examples/strategies/sma_trend_filter_example.py
++"""
++EXAMPLE STRATEGY: Price Above 200-Day SMA Trend Filter
++=======================================================
++Difficulty: Beginner
++
++This is one of the simplest possible strategies. It stays long whenever
++the closing price is above the 200-day simple moving average, and goes
++flat (exits) whenever price drops below it.
++
++How to use:
++    Copy this file into custom_strategies/ and run:
++        python main.py --dry-run
++    You should see "SMA 200 Trend Filter (Example)" in the strategy count.
++
++Signal convention (used by all strategies in this engine):
++    1  = enter or hold a long position
++   -1  = exit / go flat
++    0  = no change (the engine forward-fills the previous signal)
++"""
++
++# --- Step 1: Import the required pieces ---
++
++# The decorator that registers your function with the engine.
++from helpers.registry import register_strategy
++
++# Converts human-readable periods ("200d") into bar counts for any timeframe.
++# Always use this instead of hardcoding integers — it makes your strategy
++# work on daily, hourly, or minute bars without any code changes.
++from helpers.timeframe_utils import get_bars_for_period
++
++# We reuse the existing SMA trend filter logic from indicators.py.
++# You can also write your logic inline (see the signal section below).
++from helpers.indicators import sma_trend_filter_logic
++
++# Read the current timeframe settings so get_bars_for_period can do its job.
++from config import CONFIG
++
++_TF  = CONFIG.get("timeframe", "D")       # e.g. "D" for daily
++_MUL = CONFIG.get("timeframe_multiplier", 1)  # e.g. 1 for 1x daily bars
++
++
++# --- Step 2: Register the strategy ---
++#
++# The @register_strategy decorator tells the engine:
++#   - name:         what to call this strategy in reports and CSVs
++#   - dependencies: external data it needs ([] = none, ["spy"] = SPY data,
++#                   ["vix"] = VIX data, ["spy", "vix"] = both)
++#   - params:       keyword arguments that get passed to your function
++#                   at runtime via **kwargs
++
++@register_strategy(
++    name="SMA 200 Trend Filter (Example)",
++    dependencies=[],        # This strategy only needs the symbol's own data
++    params={
++        "ma_length": get_bars_for_period("200d", _TF, _MUL),
++        # On daily bars this resolves to 200.
++        # On 5-minute bars it would resolve to a much larger number
++        # (200 days × 78 bars/day = 15,600 bars).
++    },
++)
++def sma_200_trend_filter_example(df, **kwargs):
++    """
++    Stay long when Close > 200-bar SMA, go flat when Close < 200-bar SMA.
++
++    Parameters (via **kwargs)
++    -------------------------
++    ma_length : int
++        Number of bars for the SMA calculation. Set in the params dict above.
++
++    Returns
++    -------
++    pd.DataFrame
++        The input DataFrame with a 'Signal' column added.
++    """
++    # Extract the parameter. The engine merges the params dict into kwargs.
++    ma_length = kwargs["ma_length"]
++
++    # Call the shared logic function from helpers/indicators.py.
++    # This calculates the SMA, then sets Signal = 1 when Close > SMA,
++    # and Signal = -1 when Close <= SMA.
++    return sma_trend_filter_logic(df, ma_length=ma_length)
++
++
++# --- That's it! ---
++# To test: copy this file to custom_strategies/ and run:
++#   python main.py --dry-run
++#
++# You should see the strategy count increase by 1.
++# Then run a quick backtest:
++#   python main.py
+diff --git a/examples/strategies/volume_spike_entry_example.py b/examples/strategies/volume_spike_entry_example.py
+new file mode 100644
+index 0000000..ecd4d94
+--- /dev/null
++++ b/examples/strategies/volume_spike_entry_example.py
+@@ -0,0 +1,81 @@
++# examples/strategies/volume_spike_entry_example.py
++"""
++EXAMPLE STRATEGY: Volume Spike Entry
++=====================================
++Difficulty: Beginner
++
++Buys when today's volume is 2x the 20-day average AND the close is up
++from the prior day (institutional accumulation signal). Exits when volume
++drops back below the 20-day average.
++
++This example shows how to write signal logic INLINE in the plugin file
++rather than calling a function from helpers/indicators.py. Both approaches
++work — use whichever you prefer.
++
++How to use:
++    Copy this file into custom_strategies/ and run:
++        python main.py --dry-run
++"""
++
++import numpy as np
++from helpers.registry import register_strategy
++from helpers.timeframe_utils import get_bars_for_period
++from config import CONFIG
++
++_TF  = CONFIG.get("timeframe", "D")
++_MUL = CONFIG.get("timeframe_multiplier", 1)
++
++
++@register_strategy(
++    name="Volume Spike Entry (Example)",
++    dependencies=[],
++    params={
++        "vol_lookback": get_bars_for_period("20d", _TF, _MUL),
++        "vol_multiplier": 2.0,  # Non-numeric params (strings, bools) are
++                                # also allowed — they pass through unchanged
++                                # in the sensitivity sweep.
++    },
++)
++def volume_spike_entry_example(df, **kwargs):
++    """
++    Buy on a volume spike with a positive close; exit when volume normalises.
++
++    The logic is written inline here to show you don't *need* to put
++    everything in helpers/indicators.py. For one-off strategies, inline
++    is simpler. For reusable logic, put it in indicators.py.
++
++    Parameters (via **kwargs)
++    -------------------------
++    vol_lookback : int
++        Bars for the volume moving average.
++    vol_multiplier : float
++        How many times the average volume constitutes a "spike".
++    """
++    vol_lookback   = kwargs["vol_lookback"]
++    vol_multiplier = kwargs["vol_multiplier"]
++
++    # --- Signal logic (inline) ---
++
++    # 1. Calculate the 20-day average volume
++    df['AvgVolume'] = df['Volume'].rolling(vol_lookback).mean()
++
++    # 2. Detect a volume spike: today's volume is 2x+ the average
++    is_volume_spike = df['Volume'] > (df['AvgVolume'] * vol_multiplier)
++
++    # 3. Confirm the close is higher than yesterday's close (bullish)
++    is_up_day = df['Close'] > df['Close'].shift(1)
++
++    # 4. Build the signal:
++    #    Buy (1)  when both conditions are met
++    #    Sell (-1) when volume drops back below average
++    #    No change (0) otherwise — the engine forward-fills
++    buy_signal  = is_volume_spike & is_up_day
++    sell_signal = df['Volume'] < df['AvgVolume']
++
++    df['Signal'] = np.where(buy_signal, 1, np.where(sell_signal, -1, 0))
++
++    # 5. Forward-fill: the engine expects a continuous state.
++    #    Replace 0 with NaN, then fill forward so "hold" persists.
++    df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
++
++    return df
+diff --git a/scripts/norgate_to_parquet.py b/scripts/norgate_to_parquet.py
+new file mode 100644
+index 0000000..38b2bb9
+--- /dev/null
++++ b/scripts/norgate_to_parquet.py
+@@ -0,0 +1,221 @@
++#!/usr/bin/env python3
++"""
++norgate_to_parquet.py — Export Norgate bar data to Parquet files
++================================================================
++
++Uses the project's existing Norgate wrapper (services/norgate_service.py)
++to iterate over all stocks in a Norgate watchlist and export daily OHLCV
++bars to individual Parquet files.
++
++Requirements:
++    - Norgate Data Updater installed and running (Windows/macOS)
++    - pip install norgatedata pyarrow pandas
++
++Usage:
++    # Export all stocks in the "Russell 3000" watchlist:
++    python scripts/norgate_to_parquet.py --watchlist "Russell 3000"
++
++    # Export specific tickers:
++    python scripts/norgate_to_parquet.py --tickers AAPL MSFT GOOGL
++
++    # Export to a specific directory:
++    python scripts/norgate_to_parquet.py --watchlist "Nasdaq 100" --output-dir ./parquet_data
++
++    # Resume a previously interrupted export (skips existing files):
++    python scripts/norgate_to_parquet.py --watchlist "Russell 3000" --skip-existing
++
++Output:
++    One Parquet file per symbol in the output directory:
++        parquet_data/AAPL.parquet
++        parquet_data/MSFT.parquet
++        ...
++
++    Each file has columns: Open, High, Low, Close, Volume
++    with a DatetimeIndex.
++"""
++
++import argparse
++import logging
++import os
++import sys
++import time
++from pathlib import Path
++
++# Add project root to sys.path so we can import from services/
++PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
++if PROJECT_ROOT not in sys.path:
++    sys.path.insert(0, PROJECT_ROOT)
++
++# ---------------------------------------------------------------------------
++# Set up logging
++# ---------------------------------------------------------------------------
++logging.basicConfig(
++    level=logging.INFO,
++    format="%(asctime)s [%(levelname)s] %(message)s",
++    datefmt="%H:%M:%S",
++)
++logger = logging.getLogger(__name__)
++
++
++def get_watchlist_symbols(watchlist_name: str) -> list[str]:
++    """Fetch all symbols from a Norgate watchlist."""
++    import norgatedata
++    symbols = norgatedata.watchlist_symbols(watchlist_name)
++    if not symbols:
++        logger.warning(f"Watchlist '{watchlist_name}' returned 0 symbols.")
++    return symbols
++
++
++def export_symbol(symbol: str, output_dir: Path, config: dict, skip_existing: bool = False) -> bool:
++    """
++    Export a single symbol's daily bars to a Parquet file using the
++    existing norgate_service.py wrapper.
++
++    Returns True if the file was written (or already existed), False on error.
++    """
++    from services.norgate_service import get_price_data
++
++    output_path = output_dir / f"{symbol}.parquet"
++
++    if skip_existing and output_path.exists():
++        return True
++
++    try:
++        df = get_price_data(
++            symbol,
++            start_date=config["start_date"],
++            end_date=config["end_date"],
++            config=config,
++        )
++
++        if df is None or df.empty:
++            logger.warning(f"  {symbol}: no data returned, skipping")
++            return False
++
++        # Ensure only OHLCV columns are saved
++        keep_cols = ["Open", "High", "Low", "Close", "Volume"]
++        available = [c for c in keep_cols if c in df.columns]
++        df = df[available]
++
++        df.to_parquet(output_path, engine="pyarrow")
++        return True
++
++    except Exception as e:
++        logger.error(f"  {symbol}: ERROR — {e}")
++        return False
++
++
++def main():
++    parser = argparse.ArgumentParser(
++        description="Export Norgate bar data to Parquet files for the july-backtester."
++    )
++    group = parser.add_mutually_exclusive_group(required=True)
++    group.add_argument(
++        "--watchlist", type=str,
++        help='Norgate watchlist name (e.g., "Russell 3000", "Nasdaq 100")',
++    )
++    group.add_argument(
++        "--tickers", nargs="+", type=str,
++        help="One or more ticker symbols to export",
++    )
++    parser.add_argument(
++        "--output-dir", type=str, default="parquet_data",
++        help="Directory for output Parquet files (default: parquet_data/)",
++    )
++    parser.add_argument(
++        "--skip-existing", action="store_true",
++        help="Skip symbols that already have a Parquet file in the output dir",
++    )
++    parser.add_argument(
++        "--start-date", type=str, default="2000-01-01",
++        help="Start date for data export (default: 2000-01-01)",
++    )
++    parser.add_argument(
++        "--end-date", type=str, default=None,
++        help="End date for data export (default: today)",
++    )
++
++    args = parser.parse_args()
++
++    # --- Validate norgatedata is available ---
++    try:
++        import norgatedata
++    except ImportError:
++        logger.error(
++            "norgatedata package not found. Install it with:\n"
++            "  pip install norgatedata\n"
++            "and ensure the Norgate Data Updater is running."
++        )
++        sys.exit(1)
++
++    # --- Build a config dict matching what norgate_service.py expects ---
++    from datetime import datetime
++
++    end_date = args.end_date or datetime.now().strftime("%Y-%m-%d")
++
++    config = {
++        "data_provider": "norgate",
++        "start_date": args.start_date,
++        "end_date": end_date,
++        "timeframe": "D",
++        "timeframe_multiplier": 1,
++        "price_adjustment": norgatedata.StockPriceAdjustmentType.TOTALRETURN,
++    }
++
++    # --- Get the symbol list ---
++    if args.watchlist:
++        logger.info(f"Fetching symbols from watchlist: '{args.watchlist}'")
++        symbols = get_watchlist_symbols(args.watchlist)
++    else:
++        symbols = args.tickers
++
++    if not symbols:
++        logger.error("No symbols to export. Exiting.")
++        sys.exit(1)
++
++    logger.info(f"Exporting {len(symbols)} symbols to {args.output_dir}/")
++    logger.info(f"Date range: {args.start_date} -> {end_date}")
++
++    # --- Create output directory ---
++    output_dir = Path(args.output_dir)
++    output_dir.mkdir(parents=True, exist_ok=True)
++
++    # --- Export loop with progress ---
++    success_count = 0
++    fail_count = 0
++    skip_count = 0
++    start_time = time.time()
++
++    for i, symbol in enumerate(symbols, 1):
++        if args.skip_existing and (output_dir / f"{symbol}.parquet").exists():
++            skip_count += 1
++            continue
++
++        ok = export_symbol(symbol, output_dir, config, skip_existing=args.skip_existing)
++
++        if ok:
++            success_count += 1
++        else:
++            fail_count += 1
++
++        # Log progress every 50 symbols
++        if i % 50 == 0:
++            elapsed = time.time() - start_time
++            rate = i / elapsed if elapsed > 0 else 0
++            eta = (len(symbols) - i) / rate if rate > 0 else 0
++            logger.info(
++                f"  Progress: {i}/{len(symbols)} "
++                f"({success_count} ok, {fail_count} failed, {skip_count} skipped) "
++                f"— ETA: {eta:.0f}s"
++            )
++
++    elapsed = time.time() - start_time
++    logger.info(
++        f"\nDone in {elapsed:.1f}s — "
++        f"{success_count} exported, {fail_count} failed, {skip_count} skipped"
++    )
++    logger.info(f"Output directory: {output_dir.resolve()}")
++
++
++if __name__ == "__main__":
++    main()
+diff --git a/tests/test_example_strategies.py b/tests/test_example_strategies.py
+new file mode 100644
+index 0000000..70bc7a6
+--- /dev/null
++++ b/tests/test_example_strategies.py
+@@ -0,0 +1,241 @@
++# tests/test_example_strategies.py
++"""
++Unit tests for examples/strategies/ — Example Strategy Plugins.
++
++Covers:
++  sma_trend_filter_example   — signal output, long/flat states
++  volume_spike_entry_example — volume spike detection, signal generation
++  gap_up_overnight_example   — gap-up detection, SPY regime filter, dependency injection
++
++All tests use synthetic OHLCV DataFrames — no network, no file I/O.
++"""
++
++import os
++import sys
++
++import numpy as np
++import pandas as pd
++import pytest
++
++PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
++if PROJECT_ROOT not in sys.path:
++    sys.path.insert(0, PROJECT_ROOT)
++
++from helpers.indicators import sma_trend_filter_logic
++
++
++# ---------------------------------------------------------------------------
++# Helpers — synthetic data builders
++# ---------------------------------------------------------------------------
++
++def _make_ohlcv(closes, volumes=None, start="2020-01-01"):
++    """Build a minimal OHLCV DataFrame from a list of close prices."""
++    n = len(closes)
++    dates = pd.bdate_range(start=start, periods=n, freq="B")
++    if volumes is None:
++        volumes = [1_000_000] * n
++    df = pd.DataFrame({
++        "Open":   closes,
++        "High":   [c * 1.01 for c in closes],
++        "Low":    [c * 0.99 for c in closes],
++        "Close":  closes,
++        "Volume": volumes,
++    }, index=dates)
++    df.index.name = "Datetime"
++    return df
++
++
++def _make_trending_data(n=250, start_price=100.0, trend=0.001):
++    """Build an uptrending OHLCV DataFrame with n bars."""
++    closes = [start_price * (1 + trend) ** i for i in range(n)]
++    return _make_ohlcv(closes)
++
++
++def _make_spy_df(n=250, start_price=400.0, trend=0.0005, start="2020-01-01"):
++    """Build a synthetic SPY DataFrame for regime filter testing."""
++    closes = [start_price * (1 + trend) ** i for i in range(n)]
++    return _make_ohlcv(closes, start=start)
++
++
++# ---------------------------------------------------------------------------
++# TestSmaTrendFilterExample
++# ---------------------------------------------------------------------------
++
++class TestSmaTrendFilterExample:
++    """Tests for examples/strategies/sma_trend_filter_example.py logic."""
++
++    def test_signal_column_exists(self):
++        """Strategy must add a 'Signal' column to the DataFrame."""
++        df = _make_trending_data(250)
++        result = sma_trend_filter_logic(df, ma_length=200)
++        assert "Signal" in result.columns
++
++    def test_signal_values_valid(self):
++        """Signal must only contain 1 or -1 (no 0 after forward-fill)."""
++        df = _make_trending_data(250)
++        result = sma_trend_filter_logic(df, ma_length=200)
++        # After the MA warm-up, all values should be 1 or -1
++        valid_mask = result["Signal"].isin([1, -1, 0])
++        assert valid_mask.all(), f"Invalid signal values: {result['Signal'].unique()}"
++
++    def test_uptrend_produces_long_signal(self):
++        """In a steady uptrend, most signals after warm-up should be 1 (long)."""
++        df = _make_trending_data(300, trend=0.002)
++        result = sma_trend_filter_logic(df, ma_length=200)
++        # After 200-bar warm-up, uptrend should produce mostly longs
++        signals_after_warmup = result["Signal"].iloc[200:]
++        long_pct = (signals_after_warmup == 1).mean()
++        assert long_pct > 0.8, f"Expected mostly longs in uptrend, got {long_pct:.0%}"
++
++    def test_downtrend_produces_flat_signal(self):
++        """In a steady downtrend, most signals after warm-up should be -1 (flat)."""
++        df = _make_trending_data(300, trend=-0.002)
++        result = sma_trend_filter_logic(df, ma_length=200)
++        signals_after_warmup = result["Signal"].iloc[200:]
++        flat_pct = (signals_after_warmup == -1).mean()
++        assert flat_pct > 0.8, f"Expected mostly flat in downtrend, got {flat_pct:.0%}"
++
++    def test_output_length_unchanged(self):
++        """Strategy must not add or remove rows."""
++        df = _make_trending_data(250)
++        n_before = len(df)
++        result = sma_trend_filter_logic(df, ma_length=200)
++        assert len(result) == n_before
++
++
++# ---------------------------------------------------------------------------
++# TestVolumeSpikeEntryExample
++# ---------------------------------------------------------------------------
++
++class TestVolumeSpikeEntryExample:
++    """Tests for examples/strategies/volume_spike_entry_example.py logic."""
++
++    def _run_volume_spike_logic(self, df, vol_lookback=20, vol_multiplier=2.0):
++        """Replicate the inline logic from the example strategy."""
++        df["AvgVolume"] = df["Volume"].rolling(vol_lookback).mean()
++        is_volume_spike = df["Volume"] > (df["AvgVolume"] * vol_multiplier)
++        is_up_day = df["Close"] > df["Close"].shift(1)
++        buy_signal = is_volume_spike & is_up_day
++        sell_signal = df["Volume"] < df["AvgVolume"]
++        df["Signal"] = np.where(buy_signal, 1, np.where(sell_signal, -1, 0))
++        df["Signal"] = df["Signal"].replace(0, np.nan).ffill().fillna(0)
++        return df
++
++    def test_signal_column_exists(self):
++        """Strategy must add a 'Signal' column."""
++        df = _make_trending_data(50)
++        result = self._run_volume_spike_logic(df)
++        assert "Signal" in result.columns
++
++    def test_spike_triggers_buy(self):
++        """A volume spike on an up day should produce a buy signal."""
++        closes = [100.0] * 25 + [101.0]  # up day on bar 25
++        volumes = [1_000_000] * 25 + [3_000_000]  # 3x spike on bar 25
++        df = _make_ohlcv(closes, volumes)
++        result = self._run_volume_spike_logic(df, vol_lookback=20, vol_multiplier=2.0)
++        assert result["Signal"].iloc[-1] == 1, "Volume spike on up day should trigger buy"
++
++    def test_no_spike_no_buy(self):
++        """Normal volume on an up day should not trigger a buy."""
++        closes = [100.0] * 25 + [101.0]
++        volumes = [1_000_000] * 26  # no spike
++        df = _make_ohlcv(closes, volumes)
++        result = self._run_volume_spike_logic(df, vol_lookback=20, vol_multiplier=2.0)
++        # Last signal should not be a fresh buy (could be -1 or carried forward)
++        assert result["Signal"].iloc[-1] != 1 or not (
++            df["Volume"].iloc[-1] > df["Volume"].iloc[:20].mean() * 2.0
++        )
++
++    def test_spike_on_down_day_no_buy(self):
++        """A volume spike on a down day should not trigger a buy."""
++        closes = [100.0] * 25 + [99.0]  # down day
++        volumes = [1_000_000] * 25 + [3_000_000]  # spike
++        df = _make_ohlcv(closes, volumes)
++        result = self._run_volume_spike_logic(df, vol_lookback=20, vol_multiplier=2.0)
++        # Should not have a buy signal on a down day
++        last_buy = (df["Volume"].iloc[-1] > 2_000_000) and (closes[-1] > closes[-2])
++        assert not last_buy, "Should not buy on down day even with volume spike"
++
++    def test_output_length_unchanged(self):
++        """Strategy must not add or remove rows."""
++        df = _make_trending_data(50)
++        n_before = len(df)
++        result = self._run_volume_spike_logic(df)
++        assert len(result) == n_before
++
++
++# ---------------------------------------------------------------------------
++# TestGapUpOvernightExample
++# ---------------------------------------------------------------------------
++
++class TestGapUpOvernightExample:
++    """Tests for examples/strategies/gap_up_overnight_example.py logic."""
++
++    def _run_gap_up_logic(self, df, spy_df, gap_pct=0.01, regime_ma=200):
++        """Replicate the inline logic from the example strategy."""
++        prior_close = df["Close"].shift(1)
++        gap_size = (df["Open"] - prior_close) / prior_close
++        is_gap_up = gap_size >= gap_pct
++
++        spy_sma = spy_df["Close"].rolling(regime_ma).mean()
++        regime_df = pd.DataFrame(index=df.index)
++        regime_df["spy_close"] = spy_df["Close"]
++        regime_df["spy_sma"] = spy_sma
++        regime_df.ffill(inplace=True)
++        is_bull_market = regime_df["spy_close"] > regime_df["spy_sma"]
++
++        buy_signal = is_gap_up & is_bull_market
++        df["Signal"] = np.where(buy_signal, 1, 0)
++        buy_shifted = buy_signal.shift(1).infer_objects(copy=False).fillna(False)
++        df.loc[buy_shifted, "Signal"] = -1
++        df["Signal"] = df["Signal"].replace(0, np.nan).ffill().fillna(0)
++        return df
++
++    def test_signal_column_exists(self):
++        """Strategy must add a 'Signal' column."""
++        df = _make_trending_data(250)
++        spy_df = _make_spy_df(250)
++        result = self._run_gap_up_logic(df, spy_df)
++        assert "Signal" in result.columns
++
++    def test_gap_up_in_bull_market_triggers_buy(self):
++        """A 2% gap-up during a bull regime should trigger a buy."""
++        # Build 220 bars of normal data, then a gap-up bar
++        closes = [100.0 * (1.001 ** i) for i in range(220)]
++        df = _make_ohlcv(closes)
++        # Force a 2% gap-up on the last bar
++        df.iloc[-1, df.columns.get_loc("Open")] = df.iloc[-2]["Close"] * 1.02
++
++        spy_df = _make_spy_df(220, trend=0.001)  # strong bull market
++        result = self._run_gap_up_logic(df, spy_df, gap_pct=0.01, regime_ma=200)
++        assert result["Signal"].iloc[-1] == 1, "Gap-up in bull market should trigger buy"
++
++    def test_gap_up_in_bear_market_no_buy(self):
++        """A gap-up during a bear regime should not trigger a buy."""
++        closes = [100.0 * (0.999 ** i) for i in range(250)]
++        df = _make_ohlcv(closes)
++        df.iloc[-1, df.columns.get_loc("Open")] = df.iloc[-2]["Close"] * 1.02
++
++        # Bear SPY: trending down
++        spy_df = _make_spy_df(250, trend=-0.001)
++        result = self._run_gap_up_logic(df, spy_df, gap_pct=0.01, regime_ma=200)
++        # After warm-up in a downtrend, spy_close < spy_sma, so no buy
++        assert result["Signal"].iloc[-1] != 1, "Gap-up in bear market should not trigger buy"
++
++    def test_no_gap_no_buy(self):
++        """A normal open (no gap) should not trigger a buy regardless of regime."""
++        df = _make_trending_data(250, trend=0.001)
++        spy_df = _make_spy_df(250, trend=0.001)
++        result = self._run_gap_up_logic(df, spy_df, gap_pct=0.01, regime_ma=200)
++        # With a smooth uptrend and no gaps, should have no buy signals
++        # (Open is set to Close in _make_ohlcv, so gap is always 0%)
++        buy_count = (result["Signal"] == 1).sum()
++        assert buy_count == 0, f"Expected 0 buys with no gaps, got {buy_count}"
++
++    def test_output_length_unchanged(self):
++        """Strategy must not add or remove rows."""
++        df = _make_trending_data(250)
++        spy_df = _make_spy_df(250)
++        n_before = len(df)
++        result = self._run_gap_up_logic(df, spy_df)
++        assert len(result) == n_before

@@ -1,0 +1,165 @@
+krist@junebug MINGW64 ~/Desktop/github/july-backtester (feat/norgate-export-clean)
+$ python main.py --name "parity-parquet"
+2026-04-07 07:19:57,901 [INFO] ============================================================
+2026-04-07 07:19:57,902 [INFO]   RUN SUMMARY
+2026-04-07 07:19:57,902 [INFO] ============================================================
+2026-04-07 07:19:57,902 [INFO]   Run ID        : parity-parquet_2026-04-07_07-19-57
+2026-04-07 07:19:57,902 [INFO]   Data provider : parquet
+2026-04-07 07:19:57,902 [INFO]   Period Selected : 2020-01-01 -> 2024-12-31
+2026-04-07 07:19:57,902 [INFO]   Timeframe     : D x 1
+2026-04-07 07:19:57,902 [INFO]   Strategies    : 1
+2026-04-07 07:19:57,902 [INFO]   Stop configs  : 1
+2026-04-07 07:19:57,903 [INFO] ------------------------------------------------------------
+2026-04-07 07:19:57,903 [INFO]   Portfolio     : Parity Test (5 symbols)
+2026-04-07 07:19:57,903 [INFO] ------------------------------------------------------------
+2026-04-07 07:19:57,903 [INFO]   Total symbols : 5
+2026-04-07 07:19:57,903 [INFO]   Total tasks   : 5  (symbols x strategies x stop configs)
+2026-04-07 07:19:57,904 [INFO] ============================================================
+2026-04-07 07:19:57,907 [WARNING]   -> STALE CACHE: 108 file(s) in 'data_cache' are older than 7 days. Delete data_cache/ to force a fresh fetch.
+2026-04-07 07:19:57,907 [INFO] Using local Parquet data service.
+2026-04-07 07:19:57,911 [INFO] PORTFOLIO STRATEGY ANALYZER
+2026-04-07 07:19:57,913 [INFO] ------------------------------------------------------------
+2026-04-07 07:19:57,913 [INFO]   Data Period (config): 2020-01-01 -> 2024-12-31  (no comparison tickers)
+2026-04-07 07:19:57,913 [INFO] ------------------------------------------------------------
+2026-04-07 07:19:57,915 [INFO]   WFA split date   : 2023-12-31  (IS: 2020-01-01 -> 2023-12-31 | OOS: 2023-12-31 -> 2024-12-31)
+2026-04-07 07:19:57,915 [INFO] ========================= PROCESSING PORTFOLIOS =========================
+2026-04-07 07:19:57,915 [INFO] --> Preparing and running portfolio: Parity Test
+  -> Fetching & Preparing Data: 100%|██████████████████████████████████████████████| 5/5 [00:00<00:00, 23.19 symbols/s]
+2026-04-07 07:19:58,138 [INFO] =============== RUNNING SIMULATIONS FOR 'Parity Test' ===============
+2026-04-07 07:19:58,139 [INFO] Found 1 tasks. Using up to 8 CPU cores.
+  -> Running sims:   0%|                                                                         | 0/1 [00:00<?, ?it/s]2026-04-07 07:20:07,881 [INFO]   -> Progress: 1/1 tasks done | Elapsed: 1s | ETA: 0s remaining
+  -> Running sims: 100%|█████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  1.74it/s]
+2026-04-07 07:20:07,913 [WARNING] NOTE: Correlation is computed on exit-date P&L only, not daily mark-to-market. Two strategies holding the same stock simultaneously will appear uncorrelated if they exit on different days. Treat this matrix as a lower bound on true correlation.
+2026-04-07 07:20:07,939 [INFO]   Correlation matrix saved: output\runs\parity-parquet_2026-04-07_07-19-57\Parity_Test_strategy_correlation.csv
+
+
+================================================================================
+            Strategy Performance Summary for Portfolio: Parity Test
+================================================================================
+================================================================================
+
+--- Core Performance: Parity Test ---
+----------------------------------------------------------------------------
+Strategy                  P&L (%)   Sharpe   Max DD   MC Score   WFA Verdict
+----------------------------------------------------------------------------
+SMA Crossover (20d/50d)   79.02%    0.76     15.86%   5          Pass
+----------------------------------------------------------------------------
+
+  Run with --verbose for extended metrics and robustness scores.
+  Exported 1 analyzer-compatible CSVs to output\runs\parity-parquet_2026-04-07_07-19-57\analyzer_csvs\Parity_Test
+
+--------------------------------------------------------------------------------
+Saving all valid trade logs for portfolio: Parity Test...
+Saved 1 trade logs.
+--------------------------------------------------------------------------------
+
+
+================================================================================
+                        Overall Top Portfolio Strategies
+================================================================================
+                Total Backtest Runtime: 0 minutes, 10.08 seconds
+================================================================================
+
+--- Core Performance: All Portfolios ---
+------------------------------------------------------------------------------------------
+Portfolio     Strategy                  P&L (%)   Sharpe   Max DD   MC Score   WFA Verdict
+------------------------------------------------------------------------------------------
+Parity Test   SMA Crossover (20d/50d)   79.02%    0.76     15.86%   5          Pass
+------------------------------------------------------------------------------------------
+
+  Run with --verbose for extended metrics and robustness scores.
+
+Successfully saved overall portfolio summary to 'output\runs\parity-parquet_2026-04-07_07-19-57\overall_portfolio_summary.csv'
+2026-04-07 07:20:08,000 [INFO] All portfolio simulations complete in 0m 10.08s.
+2026-04-07 07:20:08,000 [INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-04-07 07:20:08,001 [INFO]   Run report:  python report.py --all output/runs/parity-parquet_2026-04-07_07-19-57
+2026-04-07 07:20:08,001 [INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+krist@junebug MINGW64 ~/Desktop/github/july-backtester (feat/norgate-export-clean)
+$ nano config.py
+
+krist@junebug MINGW64 ~/Desktop/github/july-backtester (feat/norgate-export-clean)
+$ python main.py --name "parity-norgate"
+[2026-04-07 11:20:56.009866] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+2026-04-07 07:20:56,300 [INFO] ============================================================
+2026-04-07 07:20:56,301 [INFO]   RUN SUMMARY
+2026-04-07 07:20:56,301 [INFO] ============================================================
+2026-04-07 07:20:56,301 [INFO]   Run ID        : parity-norgate_2026-04-07_07-20-56
+2026-04-07 07:20:56,301 [INFO]   Data provider : norgate
+2026-04-07 07:20:56,301 [INFO]   Period Selected : 2020-01-01 -> 2024-12-31
+2026-04-07 07:20:56,301 [INFO]   Timeframe     : D x 1
+2026-04-07 07:20:56,301 [INFO]   Strategies    : 1
+2026-04-07 07:20:56,301 [INFO]   Stop configs  : 1
+2026-04-07 07:20:56,303 [INFO] ------------------------------------------------------------
+2026-04-07 07:20:56,303 [INFO]   Portfolio     : Parity Test (5 symbols)
+2026-04-07 07:20:56,303 [INFO] ------------------------------------------------------------
+2026-04-07 07:20:56,304 [INFO]   Total symbols : 5
+2026-04-07 07:20:56,304 [INFO]   Total tasks   : 5  (symbols x strategies x stop configs)
+2026-04-07 07:20:56,304 [INFO] ============================================================
+2026-04-07 07:20:56,306 [WARNING]   -> STALE CACHE: 108 file(s) in 'data_cache' are older than 7 days. Delete data_cache/ to force a fresh fetch.
+2026-04-07 07:20:56,307 [INFO] Using Norgate data service.
+2026-04-07 07:20:56,308 [INFO] PORTFOLIO STRATEGY ANALYZER
+2026-04-07 07:20:56,309 [INFO] ------------------------------------------------------------
+2026-04-07 07:20:56,309 [INFO]   Data Period (config): 2020-01-01 -> 2024-12-31  (no comparison tickers)
+2026-04-07 07:20:56,309 [INFO] ------------------------------------------------------------
+2026-04-07 07:20:56,310 [INFO]   WFA split date   : 2023-12-31  (IS: 2020-01-01 -> 2023-12-31 | OOS: 2023-12-31 -> 2024-12-31)
+2026-04-07 07:20:56,310 [INFO] ========================= PROCESSING PORTFOLIOS =========================
+2026-04-07 07:20:56,310 [INFO] --> Preparing and running portfolio: Parity Test
+  -> Fetching & Preparing Data: 100%|██████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 5/5 [00:00<00:00, 78.64 symbols/s]
+2026-04-07 07:20:56,380 [INFO] =============== RUNNING SIMULATIONS FOR 'Parity Test' ===============
+2026-04-07 07:20:56,380 [INFO] Found 1 tasks. Using up to 8 CPU cores.
+[2026-04-07 11:20:57.270953] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-07 11:20:58.400914] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-07 11:20:59.520990] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-07 11:21:00.656955] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-07 11:21:01.822611] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-07 11:21:03.002458] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-07 11:21:04.149010] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+[2026-04-07 11:21:05.332908] INFO: Norgate Data: NorgateData package v1.0.74: Init complete
+  -> Running sims:   0%|                                                                                                                                             | 0/1 [00:00<?, ?it/s]2026-04-07 07:21:06,303 [INFO]   -> Progress: 1/1 tasks done | Elapsed: 1s | ETA: 0s remaining
+  -> Running sims: 100%|█████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████████| 1/1 [00:00<00:00,  1.51it/s]
+2026-04-07 07:21:06,336 [WARNING] NOTE: Correlation is computed on exit-date P&L only, not daily mark-to-market. Two strategies holding the same stock simultaneously will appear uncorrelated if they exit on different days. Treat this matrix as a lower bound on true correlation.
+2026-04-07 07:21:06,340 [INFO]   Correlation matrix saved: output\runs\parity-norgate_2026-04-07_07-20-56\Parity_Test_strategy_correlation.csv
+
+
+================================================================================
+            Strategy Performance Summary for Portfolio: Parity Test
+================================================================================
+================================================================================
+
+--- Core Performance: Parity Test ---
+----------------------------------------------------------------------------
+Strategy                  P&L (%)   Sharpe   Max DD   MC Score   WFA Verdict
+----------------------------------------------------------------------------
+SMA Crossover (20d/50d)   79.02%    0.76     15.86%   5          Pass
+----------------------------------------------------------------------------
+
+  Run with --verbose for extended metrics and robustness scores.
+  Exported 1 analyzer-compatible CSVs to output\runs\parity-norgate_2026-04-07_07-20-56\analyzer_csvs\Parity_Test
+
+--------------------------------------------------------------------------------
+Saving all valid trade logs for portfolio: Parity Test...
+Saved 1 trade logs.
+--------------------------------------------------------------------------------
+
+
+================================================================================
+                        Overall Top Portfolio Strategies
+================================================================================
+                Total Backtest Runtime: 0 minutes, 10.07 seconds
+================================================================================
+
+--- Core Performance: All Portfolios ---
+------------------------------------------------------------------------------------------
+Portfolio     Strategy                  P&L (%)   Sharpe   Max DD   MC Score   WFA Verdict
+------------------------------------------------------------------------------------------
+Parity Test   SMA Crossover (20d/50d)   79.02%    0.76     15.86%   5          Pass
+------------------------------------------------------------------------------------------
+
+  Run with --verbose for extended metrics and robustness scores.
+
+Successfully saved overall portfolio summary to 'output\runs\parity-norgate_2026-04-07_07-20-56\overall_portfolio_summary.csv'
+2026-04-07 07:21:06,381 [INFO] All portfolio simulations complete in 0m 10.07s.
+2026-04-07 07:21:06,382 [INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2026-04-07 07:21:06,382 [INFO]   Run report:  python report.py --all output/runs/parity-norgate_2026-04-07_07-20-56
+2026-04-07 07:21:06,382 [INFO] ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
