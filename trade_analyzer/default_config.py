@@ -25,6 +25,32 @@ TRADING_DAYS_PER_YEAR = 252
 A4_LANDSCAPE = (11.69, 8.27)
 MAX_XTICKS_BEFORE_RESIZE = 25
 
+# --- Visual Theme (PDF tearsheet) ---
+THEME = {
+    'primary':    '#1f4e79',   # deep navy — equity curve, headings
+    'accent':     '#d99a00',   # gold — benchmark, highlights
+    'positive':   '#2e7d32',   # forest green — profits, wins
+    'negative':   '#c62828',   # brick red — losses, drawdown
+    'neutral':    '#424242',   # dark gray — axes, grid text
+    'grid':       '#e0e0e0',   # light gray — gridlines
+    'bg':         '#ffffff',
+    'text':       '#212121',
+    'text_muted': '#757575',
+    'dd_fill':    '#ffcdd2',   # soft red — drawdown fill
+    'mc_fill':    '#bbdefb',   # soft blue — MC fan fill
+    'kpi_bg':     '#f5f5f5',   # tile background
+    'kpi_border': '#bdbdbd',
+}
+FONT_FAMILY     = 'DejaVu Sans'   # ships with matplotlib; no new dep
+FONT_SIZE_BASE  = 9
+FONT_SIZE_TITLE = 14
+FONT_SIZE_H2    = 11
+FONT_SIZE_KPI_VALUE = 20
+FONT_SIZE_KPI_LABEL = 8
+
+FIG_FULL    = (11.69, 8.27)   # A4 landscape
+FIG_HALF_H  = (11.69, 4.14)   # half-height banner
+
 # --- Debugging ---
 VERBOSE_DEBUG = False # Set to True for more detailed console output
 
