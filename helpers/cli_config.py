@@ -13,6 +13,8 @@ import argparse
 import sys
 from typing import Any
 
+from version import __version__
+
 
 # ---------------------------------------------------------------------------
 # Stop token parser
@@ -86,6 +88,11 @@ def build_parser() -> argparse.ArgumentParser:
             "Categories: data, period, portfolio, strategies, costs, stop, "
             "filtering, mc, wfa, output\n"
         ),
+    )
+
+    parser.add_argument(
+        "--version", action="version",
+        version=f"july-backtester {__version__}",
     )
 
     # ---- Existing flags (unchanged behaviour) ----
