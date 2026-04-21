@@ -16,7 +16,7 @@ CONFIG = {
     # SECTION 1: DATA PROVIDER
     # ============================================================
     # Options: "polygon", "norgate", "yahoo", "csv", "parquet"
-    "data_provider": "norgate",
+    "data_provider": "parquet",
 
     # --- CSV Data Directory (only used when data_provider = "csv") ---
     # Path to the folder containing per-symbol CSV files.
@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "1993-01-01",  # EC-R25: full Norgate history (SPY from 1993-01-29)
+    "start_date": "2004-01-01",
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -65,15 +65,10 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    #"timeframe": "D",              # Daily bars
-    "timeframe": "W",              # EC-R38: Weekly bars with multi-asset universe
-    #"timeframe": "M",              # Monthly bars
-    #"timeframe": "H",              # 4-hour bars via Polygon
-    #"timeframe_multiplier": 4,     # H + multiplier=4 → 4-hour bars
+    "timeframe": "D",  # Daily
+    #"timeframe": "H",  # Hourly
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
     #"timeframe_multiplier": 5,       # e.g., 1, 5, 15, 30 for minutes
-    #"timeframe": "W",  # Weekly
-    #"timeframe": "M",  # Monthly
 
     # ============================================================
     # SECTION 4: PRICE ADJUSTMENT & BENCHMARKS
@@ -93,7 +88,7 @@ CONFIG = {
     # have no SPY/VIX files). The engine falls back to config start_date/end_date for
     # the period. Strategies declaring dependencies=["spy"] etc. will be skipped.
     "comparison_tickers": [
-       {"symbol": "SPY",   "role": "both",       "label": "SPY"},
+      #  {"symbol": "SPY",   "role": "both",       "label": "SPY"},
       #  {"symbol": "I:VIX", "role": "both", "label": "VIX"},
       #  {"symbol": "I:TNX", "role": "both", "label": "TNX"},
     ],
@@ -172,10 +167,13 @@ CONFIG = {
     # Symbols with fewer bars than this are skipped entirely.
     # 250 ≈ one year of daily data. Increase if your strategies need
     #   longer lookback periods (e.g. 200d SMA needs at least 200 bars).
-    "min_bars_required": 104,  # Weekly bars: 104 ≈ 2 years (needed for EMA warmup)
+    "min_bars_required": 250,
 
     "portfolios": {
-        "Multi-Asset":    "multi_asset.json",  # EC-R38: DJI 30 + bonds + gold
+        "My Symbols": ["AAPL"],
+        #"Nasdaq 100": "nasdaq_100.json",
+        #"Nasdaq Biotech": "nasdaq_biotech_tickers.json",
+        #"Russell 1000": "russell_1000.json",
     },
 
     # ============================================================
@@ -184,13 +182,13 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.025,  # 2.5% — EC-R35 (DJI46 gets ~18 positions at 2.5%)
+    "allocation_per_trade": 0.10,
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
     # order is allowed to consume.  0.05 = no position may exceed 5 % of ADV.
     # Set to None or 0 to disable the filter entirely.
-    "max_pct_adv": 0.05,  # 5% ADV cap — Norgate equity universe
+    "max_pct_adv": 0.05,
 
     # --- Allocation Per Trade Settings ---
     # At what time do you want the fill to occur.
@@ -229,7 +227,7 @@ CONFIG = {
     # ============================================================
     # SECTION 10: MONTE CARLO SETTINGS
     # ============================================================
-    "min_trades_for_mc": 50,  # EC-R1: multi-asset weekly
+    "min_trades_for_mc": 50,
     "num_mc_simulations": 1000,
 
     # ============================================================
@@ -247,7 +245,7 @@ CONFIG = {
     # Rolling multi-fold WFA (opt-in — keep None for normal runs).
     # wfa_folds: None or 0 → disabled; int >= 2 → number of equal-width OOS folds.
     # wfa_min_fold_trades: minimum OOS trades required to score a fold.
-    "wfa_folds": 3,
+    "wfa_folds": None,
     "wfa_min_fold_trades": 5,
 
     # ============================================================
@@ -288,10 +286,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": [
-        "EC-R34: EMA16w/36w + ATR 8% (No Gate) [Weekly]",
-        "EC-R36: EMA16w/36w + ATR 6% (No Gate) [Weekly Tight]",
-    ],
+    "strategies": ["SMA Crossover (20d/50d)"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
@@ -299,10 +294,10 @@ CONFIG = {
     # Automatically varies each numeric param in a strategy's @register_strategy
     # params dict by ±pct across ±steps steps, then prints a fragility verdict.
     # Opt-in only — keep disabled for normal runs (multiplies task count).
-    "sensitivity_sweep_enabled": False,    # disabled — EC research complete
+    "sensitivity_sweep_enabled": False,   # opt-in
     "sensitivity_sweep_pct": 0.20,        # ±20% per step
     "sensitivity_sweep_steps": 2,         # 2 steps each side → 5 values per param
-    "sensitivity_sweep_min_val": 2,       # floor for generated values (prevents SMA period = 0)
+    "sensitivity_sweep_min_val": 2,       # floor (prevents e.g. SMA period = 0)
 
     # ============================================================
     # SECTION 16: ROLLING METRICS
@@ -353,7 +348,7 @@ CONFIG = {
     # Max DD, MC Score, WFA Verdict.
     # When True, all 23 columns are displayed.
     # Override at runtime with: python main.py --verbose
-    "verbose_output": True,
+    "verbose_output": False,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
