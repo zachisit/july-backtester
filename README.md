@@ -107,6 +107,44 @@ See [examples/](examples/) for ready-to-use config files and annotated strategy 
 
 ---
 
+## Writing Strategies
+
+Drop a `.py` file in `custom_strategies/` and decorate your function with `@register_strategy`. The engine discovers and runs it automatically — no other files need editing.
+
+### Signal convention
+
+Your function must populate `df['Signal']` before returning. The engine interprets the values as:
+
+| Signal | Meaning |
+|---|---|
+| `1` | Enter long / hold long |
+| `0` | No change — hold whatever position is currently open |
+| `-1` | Exit long **or** cover short (go flat) |
+| `-2` | Enter short |
+
+A common pattern is to use `1` and `-1` on every bar (always in a position), or `1`/`-1`/`0` where `0` means "stay out until the next signal." Use `-2` only when your strategy has explicit short logic; all existing built-in strategies are long-only and never emit `-2`.
+
+### Minimal example
+
+```python
+from helpers.registry import register_strategy
+
+@register_strategy(name="My Strategy", dependencies=[], params={})
+def my_strategy(df, **kwargs):
+    df["Signal"] = 0
+    df.loc[df["Close"] > df["Close"].rolling(20).mean(), "Signal"] = 1   # above 20MA → long
+    df.loc[df["Close"] <= df["Close"].rolling(20).mean(), "Signal"] = -1  # below 20MA → flat
+    return df
+```
+
+### Dependencies (SPY, VIX)
+
+Declare `dependencies=["spy"]` or `dependencies=["vix"]` to have the engine inject `spy_df` / `vix_df` into `**kwargs` automatically. See [`examples/strategies/`](examples/strategies/) for annotated examples including dependency usage, parameter definitions, and the forward-fill pattern for discrete entry/exit signals.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full plugin reference including parameters, timeframe utilities, and the PR checklist.
+
+---
+
 ## Norgate Data
 
 If you have a Norgate license, you can either query Norgate live on every run **or** export the full database to local Parquet files once and share access with teammates who don't have a license.
