@@ -175,7 +175,7 @@ CONFIG = {
     "min_bars_required": 250,  # Daily bars: 250 ≈ 1 year
 
     "portfolios": {
-        "Sectors+DJI 46": "sectors_dji_combined.json",
+        "NDX Tech 44": "nasdaq_100_tech.json",
     },
 
     # ============================================================
@@ -289,9 +289,9 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
+        "Williams R Weekly Trend (above-20) + SMA200",
         "Relative Momentum (13w vs SPY) Weekly + SMA200",
         "BB Weekly Breakout (20w/2std) + SMA200",
-        "Williams R Weekly Trend (above-20) + SMA200",
     ],
 
     # ============================================================
