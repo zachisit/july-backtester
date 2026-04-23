@@ -3019,3 +3019,112 @@ def ec_r42b_mean_rev_sma50_shallow(df, **kwargs):
 
     df["Signal"] = signal
     return df
+
+
+# ===========================================================================
+# EC-R43 STRATEGIES — Mean Reversion on High-Momentum Stocks (52-week high filter)
+#
+# EC-R42 failure analysis (2026-04-23):
+# SMA50 gate too restrictive in bull markets (197% total vs SPY 859%).
+# Creates re-entry problem in choppy markets → 7 scattered loss years vs 2 concentrated.
+# Loss pattern WORSENED visually: 5-year flat plateau 2011-2016.
+#
+# Root cause of all failures: mean reversion without a STRONG uptrend signal
+# keeps entering declining stocks; any gate that prevents this also kills bull gains.
+#
+# EC-R43 solution: require stock to be NEAR ITS 52-WEEK HIGH before entering pullback.
+# - During bear markets: stocks crash 40-60% from 52-week highs → below threshold → no entries
+# - During bull markets: leading stocks stay near 52-week highs → regular entry opportunities
+# - Transition is GRADUAL (continuous percentage, not binary SMA gate) → no flat exclusion periods
+#
+# Thresholds justified by first principles:
+#   entry_drop_pct=0.03: 3% below SMA20 = normal daily noise correction in an uptrending stock
+#   high_entry_pct=0.85: within 15% of 52-week high = stock still in institutional accumulation zone
+#     (> 15% off annual high suggests distribution / downtrend beginning)
+#   high_stop_pct=0.80: fallen >20% from 52-week high = confirmed downtrend, exit regardless
+#     (20% drawdown from annual high = bear market territory for individual stock)
+#   target_pct=0.02: 2% above SMA20 = mean reversion complete
+# ===========================================================================
+
+
+@register_strategy(
+    name="EC-R43: Power Dip — MeanRev + 52wk High Filter [Daily]",
+    dependencies=[],
+    params={
+        "mean_period":      20,
+        "high_period":      252,       # 52-week high lookback (252 trading days)
+        "entry_drop_pct":   0.03,      # 3% below SMA20 = entry zone
+        "high_entry_pct":   0.85,      # must be within 15% of 52-week high to enter
+        "high_stop_pct":    0.80,      # exit if falls >20% from 52-week high
+        "target_pct":       0.02,      # exit when 2% above SMA20
+    },
+)
+def ec_r43_power_dip(df, **kwargs):
+    """Mean reversion on stocks near 52-week highs only.
+    During crashes, stocks fall far below 52-week highs — entries naturally stop.
+    No binary gate, no flat periods. Gradual self-limiting via proximity filter."""
+    mean_p      = kwargs["mean_period"]
+    high_p      = kwargs["high_period"]
+    entry_drop  = kwargs["entry_drop_pct"]
+    hi_entry    = kwargs["high_entry_pct"]
+    hi_stop     = kwargs["high_stop_pct"]
+    target      = kwargs["target_pct"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    high_52w = close.rolling(high_p).max()     # 52-week rolling high
+
+    in_pullback   = close < sma_mean * (1.0 - entry_drop)   # 3% below mean
+    near_high     = close > high_52w  * hi_entry             # within 15% of annual high
+    below_stop    = close < high_52w  * hi_stop              # >20% below annual high (stop)
+    hit_target    = close > sma_mean  * (1.0 + target)       # 2% above mean
+
+    # signal=1: in pullback AND near high (entry / hold in entry zone)
+    # signal=0: hold zone (between pullback recovery and target, still above hi_stop)
+    # signal=-1: hit target OR fell too far from annual high
+    signal = pd.Series(0, index=df.index)
+    signal[in_pullback & near_high]  = 1
+    signal[hit_target | below_stop]  = -1
+    signal[sma_mean.isna() | high_52w.isna()] = -1
+
+    df["Signal"] = signal
+    return df
+
+
+@register_strategy(
+    name="EC-R43b: Power Dip (wider 5%/3%) + 52wk High Filter [Daily]",
+    dependencies=[],
+    params={
+        "mean_period":      20,
+        "high_period":      252,
+        "entry_drop_pct":   0.05,      # deeper 5% entry for stronger setups
+        "high_entry_pct":   0.85,
+        "high_stop_pct":    0.80,
+        "target_pct":       0.03,      # 3% target to match deeper entry
+    },
+)
+def ec_r43b_power_dip_wide(df, **kwargs):
+    """Deeper 5%/3% variant of EC-R43. Fewer but stronger setups — compares to narrow variant."""
+    mean_p      = kwargs["mean_period"]
+    high_p      = kwargs["high_period"]
+    entry_drop  = kwargs["entry_drop_pct"]
+    hi_entry    = kwargs["high_entry_pct"]
+    hi_stop     = kwargs["high_stop_pct"]
+    target      = kwargs["target_pct"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    high_52w = close.rolling(high_p).max()
+
+    in_pullback = close < sma_mean  * (1.0 - entry_drop)
+    near_high   = close > high_52w  * hi_entry
+    below_stop  = close < high_52w  * hi_stop
+    hit_target  = close > sma_mean  * (1.0 + target)
+
+    signal = pd.Series(0, index=df.index)
+    signal[in_pullback & near_high] = 1
+    signal[hit_target | below_stop] = -1
+    signal[sma_mean.isna() | high_52w.isna()] = -1
+
+    df["Signal"] = signal
+    return df

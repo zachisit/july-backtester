@@ -3869,3 +3869,56 @@ Expected behavior vs EC-R39b:
 
 **Implement as EC-R42 in next round.**
 
+
+---
+
+## SESSION 38 CONTINUED — EC-R42 Results + EC-R43 Direction
+
+**Date:** 2026-04-23
+
+### EC-R42 Results: FAILED — SMA50 gate too restrictive
+
+Run ID: ec-r42-mean-rev-sma50-gate_2026-04-23_17-18-15
+Universe: S&P 500, 2004-2026, 2.5% allocation
+
+| Strategy | Total P&L | vs SPY (859%) | WFA | Loss Years |
+|---|---|---|---|---|
+| EC-R42 (5%/3% + SMA50) | 91% | -768pp | **Overfitted** | 8/22 |
+| EC-R42b (3%/2% + SMA50) | 197% | -662pp | Pass 3/3 | 7/22 |
+
+**Why SMA50 gate failed:**
+1. Too restrictive in BULL markets — normal pullbacks touch SMA50 frequently; gate blocks valid setups
+2. Creates RE-ENTRY problem in choppy markets — stock breaches SMA50, exits at loss, recovers above SMA50, re-enters → repeated small losses in choppy bear markets
+3. Loss years spread to 7-8 years (vs EC-R39b's concentrated 2008/2022) — equity curve is now CHOPPIER, not smoother
+4. Neither variant beats SPY → ELIMINATED
+
+**Annual P&L pattern for EC-R42b reveals the problem:**
+Multiple scattered loss years: 2008 (-$18k), 2011, 2014, 2015, 2018, 2022 (-$47k), 2023.
+From 2011-2016, cumulative equity barely moves ($145k → $192k in 5 years). This is still "rough" visually.
+
+### EC-R43 Direction: 52-Week High Proximity Filter
+
+**Root cause of all failures:** Mean reversion without a STRONG uptrend signal keeps entering declining stocks.
+
+**Key insight:** During bear markets, stocks fall far from their 52-week highs. If we require the stock to be near its 52-week high before entering a pullback, entries naturally stop during sustained crashes — without creating a binary flat exclusion period.
+
+**EC-R43 entry conditions:**
+- Close < SMA20 * (1 - 0.03): 3% pullback from short-term mean
+- Close > rolling_max_252 * 0.85: stock within 15% of 52-week high (strong long-term trend)
+- [Optional: SMA20 itself is rising over 5 days — confirms uptrend]
+
+**EC-R43 exit conditions:**
+- Target: Close > SMA20 * (1 + 0.02): return to mean
+- Stop: Close < rolling_max_252 * 0.80: fallen >20% from annual high
+
+**Why this produces smooth curves:**
+1. During 2008 GFC: most stocks fall 40-60% from 52-week highs → well below 85% threshold → no entries → no bear market losses
+2. During bull markets: leading stocks stay near 52-week highs → regular entry opportunities
+3. Transition is GRADUAL (continuous proximity, not binary) → no sharp flat-to-active switch
+4. Stop at 80% of 52-week high is tighter than SMA200 but less whippy than SMA50
+
+**Expected behavior in problem years:**
+- 2008: few stocks within 15% of 52-week high → strategy mostly idle → minimal losses
+- 2022: rate hike bear was faster and not as deep; many defensive stocks stayed near highs → fewer losses
+- Bull years: many opportunities → beats SPY
+

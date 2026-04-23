@@ -289,8 +289,8 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R42: Mean Rev SMA20 5pct + SMA50 Gate [Daily]",
-        "EC-R42b: Mean Rev SMA20 3pct + SMA50 Gate [Daily]",
+        "EC-R43: Power Dip — MeanRev + 52wk High Filter [Daily]",
+        "EC-R43b: Power Dip (wider 5%/3%) + 52wk High Filter [Daily]",
     ],
 
     # ============================================================
