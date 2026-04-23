@@ -4417,6 +4417,58 @@ Commit the SESSION 44 write-up first, then run EC-R49 in the next session.
 
 ---
 
+## SESSION 45 — EC-R49 Weekly Champions Test on Sectors+DJI: ALL FAIL (2026-04-23)
+
+**Date:** 2026-04-23
+**Run ID:** ec-r49-weekly-champions_2026-04-23_19-53-46
+Detailed: `research_results/ec_round_49.md`
+
+### EC-R49 Results: 0/3 champions — universe shift destroyed the strategies
+
+| Strategy | P&L | vs SPY | MaxRcvry | Top5% | Verdict |
+|---|---|---|---|---|---|
+| Relative Momentum 13w | 62% | -798pp | 2520d | 35.48% | 4/4 fail |
+| BB Breakout 20w | 151% | -708pp | 1190d | 19.45% | 4/4 fail R1-R3 |
+| Williams R Weekly | 388% | -471pp | 833d | 15.95% | 4/4 fail R1-R3 |
+
+The Chapter 2 weekly champions produced 156,992%/152,197%/166,502% P&L on NDX Tech 44.
+On Sectors+DJI 46 they produce 62-388%. **Universe mismatch destroys the edge** —
+these strategies depend on explosive tech rallies (NVDA/META-class). Sector ETFs +
+industrials have no such outliers → few trades dominate (Top5 15-35%) → jagged curves.
+
+### Progress summary: 0/49 rounds have produced a 4-gate EC champion
+
+| Round | Approach | Result |
+|---|---|---|
+| EC-R39b | Mean rev + SMA200 | Beat SPY (then), 5.4y recovery — fails R3 |
+| EC-R43 | Mean rev + 52wk | Fails R1, R3 |
+| EC-R45/R46 | Mean rev + slope/SMA100 | Fails R1, R3 (but lowest MaxDD%) |
+| EC-R48 | Mean rev + stops | Stops destroy strategy |
+| EC-R49 | Weekly trend on Sectors | Fails R1, R2, R3 |
+
+The 4 EC requirements push in opposite directions on current architectures.
+
+### EC-R50 Direction: Williams R Weekly on NDX Tech 44 (native universe)
+
+Williams R Weekly was CLOSEST to passing on Sectors+DJI (R2 failed by only 0.95pp,
+R3 by 468 days). On NDX Tech 44 where it scored 156,992% P&L, R1 passes massively.
+Key question: does NDX Tech's deeper 2008/2022 drawdowns extend R3 further, or does
+the higher base P&L compress R3 via faster equity-dollar recovery?
+
+**EC-R50 plan:**
+- `"strategies": ["Williams R Weekly Trend (above-20) + SMA200"]`
+- `"timeframe": "W"`, weekly bars
+- Universe: `"NDX Tech 44": "nasdaq_100_tech.json"`
+- Allocation: 2.5% (forces broader concurrent holdings = smoother than native 5% alloc)
+- `"stop_loss_configs": [{"type": "none"}]`
+
+**Fallback if EC-R50 fails:** EC-R51 tests sector-ETF rotation (Option C in round-49
+writeup) — fundamentally different: only 11-13 ETFs, monthly rebalance to top-3
+momentum, natural smoothness from ETF composition. EC-R52 would add short-side
+overlay (VIX>35 → short SPY) as the architectural last resort.
+
+---
+
 ## BLIND-SESSION BOOTSTRAP
 
 A future Claude Code session starting with NO conversation history can resume work by running:
