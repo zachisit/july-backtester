@@ -94,7 +94,7 @@ CONFIG = {
     # the period. Strategies declaring dependencies=["spy"] etc. will be skipped.
     "comparison_tickers": [
        {"symbol": "SPY",   "role": "both",       "label": "SPY"},
-      #  {"symbol": "I:VIX", "role": "both", "label": "VIX"},
+       {"symbol": "I:VIX", "role": "dependency", "label": "VIX"},
       #  {"symbol": "I:TNX", "role": "both", "label": "TNX"},
     ],
 
@@ -289,8 +289,8 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R43: Power Dip — MeanRev + 52wk High Filter [Daily]",
-        "EC-R43b: Power Dip (wider 5%/3%) + 52wk High Filter [Daily]",
+        "EC-R44: Power Dip + VIX Gate (VIX<25) [Daily]",
+        "EC-R44b: Power Dip + VIX Gate (5%/3%) [Daily]",
     ],
 
     # ============================================================

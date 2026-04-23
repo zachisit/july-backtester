@@ -3128,3 +3128,138 @@ def ec_r43b_power_dip_wide(df, **kwargs):
 
     df["Signal"] = signal
     return df
+
+
+# ===========================================================================
+# EC-R44 STRATEGIES — Power Dip + VIX Volatility Regime Gate
+#
+# EC-R43 failure analysis (2026-04-23):
+# 52-week high filter reduced 2008 losses (62k→38k) and cut loss years from 7 to 3.
+# But 2022 still -70k and total 498% doesn't beat SPY 859%.
+# Root cause: mean reversion still enters during the BEGINNING of bear markets
+# when stocks are near their recent highs and "dipping" before the big crash.
+#
+# EC-R44 fix: VIX entry guard. VIX spikes early in EVERY real crash.
+#   VIX < 25: normal market — allow new entries (signal = 1)
+#   VIX 25-35: elevated fear — block new entries (signal = 0, existing trades continue)
+#   VIX > 35: crisis — force exit all positions (signal = -1)
+#
+# VIX 25 threshold justified by first principles:
+#   < 15 = complacency; 15-25 = normal; 25-30 = elevated; > 30 = fear; > 40 = panic
+#   VIX 25 is the CBOE's own "elevated" threshold and the standard institutional cutoff.
+#   Not tuned — this is the boundary taught in every derivatives course.
+#
+# Why this doesn't create flat periods (unlike SPY SMA gate):
+#   SPY SMA gate: triggers once, stays ON for months → long flat line
+#   VIX gate: dynamic — blocks new entries but existing positions run to natural exits.
+#   VIX returns below 25 within weeks/months after most corrections.
+#   Equity curve: slower during high-VIX periods, not completely flat.
+# ===========================================================================
+
+
+@register_strategy(
+    name="EC-R44: Power Dip + VIX Gate (VIX<25) [Daily]",
+    dependencies=["vix"],
+    params={
+        "mean_period":      20,
+        "high_period":      252,
+        "entry_drop_pct":   0.03,
+        "high_entry_pct":   0.85,
+        "high_stop_pct":    0.80,
+        "target_pct":       0.02,
+        "vix_entry_max":    25.0,      # block new entries when VIX >= 25
+        "vix_exit_min":     35.0,      # force exit all when VIX >= 35 (crisis)
+    },
+)
+def ec_r44_power_dip_vix(df, vix_df=None, **kwargs):
+    """Mean reversion on stocks near 52wk highs, blocked when VIX is elevated.
+    VIX < 25: normal entries. VIX 25-35: no new entries but hold existing.
+    VIX > 35: force exit (crisis). Existing positions unaffected by VIX<35 spike."""
+    mean_p     = kwargs["mean_period"]
+    high_p     = kwargs["high_period"]
+    entry_drop = kwargs["entry_drop_pct"]
+    hi_entry   = kwargs["high_entry_pct"]
+    hi_stop    = kwargs["high_stop_pct"]
+    target     = kwargs["target_pct"]
+    vix_entry  = kwargs["vix_entry_max"]
+    vix_exit   = kwargs["vix_exit_min"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    high_52w = close.rolling(high_p).max()
+
+    # VIX regime
+    if vix_df is not None and not vix_df.empty:
+        vix_close = vix_df["Close"].reindex(df.index, method="ffill")
+    else:
+        vix_close = pd.Series(15.0, index=df.index)  # fallback: always normal
+
+    vix_normal = vix_close < vix_entry    # allow new entries
+    vix_crisis = vix_close >= vix_exit    # force exit everything
+
+    in_pullback = close < sma_mean  * (1.0 - entry_drop)
+    near_high   = close > high_52w  * hi_entry
+    below_stop  = close < high_52w  * hi_stop
+    hit_target  = close > sma_mean  * (1.0 + target)
+
+    # signal=1: in pullback zone AND near high AND VIX normal → enter/hold
+    # signal=0: hold zone (between pullback and target, not in crisis)
+    # signal=-1: target OR stopped out by 52wk drop OR VIX crisis
+    signal = pd.Series(0, index=df.index)
+    signal[in_pullback & near_high & vix_normal] = 1   # enter only in normal VIX
+    signal[hit_target | below_stop | vix_crisis] = -1  # exit conditions
+    signal[sma_mean.isna() | high_52w.isna()]    = -1  # warmup
+
+    df["Signal"] = signal
+    return df
+
+
+@register_strategy(
+    name="EC-R44b: Power Dip + VIX Gate (5%/3%) [Daily]",
+    dependencies=["vix"],
+    params={
+        "mean_period":      20,
+        "high_period":      252,
+        "entry_drop_pct":   0.05,
+        "high_entry_pct":   0.85,
+        "high_stop_pct":    0.80,
+        "target_pct":       0.03,
+        "vix_entry_max":    25.0,
+        "vix_exit_min":     35.0,
+    },
+)
+def ec_r44b_power_dip_vix_wide(df, vix_df=None, **kwargs):
+    """Deeper 5%/3% variant of EC-R44. Tests if wider entry captures better setups."""
+    mean_p     = kwargs["mean_period"]
+    high_p     = kwargs["high_period"]
+    entry_drop = kwargs["entry_drop_pct"]
+    hi_entry   = kwargs["high_entry_pct"]
+    hi_stop    = kwargs["high_stop_pct"]
+    target     = kwargs["target_pct"]
+    vix_entry  = kwargs["vix_entry_max"]
+    vix_exit   = kwargs["vix_exit_min"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    high_52w = close.rolling(high_p).max()
+
+    if vix_df is not None and not vix_df.empty:
+        vix_close = vix_df["Close"].reindex(df.index, method="ffill")
+    else:
+        vix_close = pd.Series(15.0, index=df.index)
+
+    vix_normal = vix_close < vix_entry
+    vix_crisis = vix_close >= vix_exit
+
+    in_pullback = close < sma_mean  * (1.0 - entry_drop)
+    near_high   = close > high_52w  * hi_entry
+    below_stop  = close < high_52w  * hi_stop
+    hit_target  = close > sma_mean  * (1.0 + target)
+
+    signal = pd.Series(0, index=df.index)
+    signal[in_pullback & near_high & vix_normal] = 1
+    signal[hit_target | below_stop | vix_crisis] = -1
+    signal[sma_mean.isna() | high_52w.isna()]    = -1
+
+    df["Signal"] = signal
+    return df
