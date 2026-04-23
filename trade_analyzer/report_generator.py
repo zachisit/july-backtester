@@ -87,12 +87,14 @@ def generate_overall_metrics_summary(
         annualized_sortino = calculations.calculate_sortino_ratio(daily_returns, risk_free_rate, trading_days_per_year)
 
         # --- Historical Backtest Drawdown (from Equity Curve) ---
+        # Prefer daily_equity when provided — it is set by the caller to the
+        # daily MTM portfolio_timeline so it matches the terminal's max_drawdown.
         equity_curve_for_hist_dd = pd.Series(dtype=float)
-        if 'Equity' in trades_df.columns and pd.api.types.is_numeric_dtype(trades_df['Equity']) and trades_df['Equity'].notna().all():
-            equity_curve_for_hist_dd = trades_df['Equity']
-        elif not daily_equity.empty:
+        if not daily_equity.empty:
             equity_curve_for_hist_dd = daily_equity
-            
+        elif 'Equity' in trades_df.columns and pd.api.types.is_numeric_dtype(trades_df['Equity']) and trades_df['Equity'].notna().all():
+            equity_curve_for_hist_dd = trades_df['Equity']
+
         _, _, _, max_equity_dd_percent = calculations.calculate_equity_drawdown(equity_curve_for_hist_dd)
 
         # --- Calmar Ratio ---

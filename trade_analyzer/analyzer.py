@@ -164,9 +164,20 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
         else:
             benchmark_returns = pd.Series(dtype=float)
 
+        # Resolve equity series for drawdown — prefer the backtester's daily MTM
+        # portfolio_timeline (passed via PORTFOLIO_TIMELINE) so that all drawdown
+        # figures in the PDF match the terminal's max_drawdown exactly.
+        _portfolio_timeline = config_params.get('PORTFOLIO_TIMELINE')
+        if _portfolio_timeline is not None and not _portfolio_timeline.empty:
+            equity_for_dd_calc = _portfolio_timeline
+        elif not daily_equity.empty:
+            equity_for_dd_calc = daily_equity
+        else:
+            equity_for_dd_calc = pd.Series(dtype=float)
+
         print("\n--- Generating Report Sections ---")
         title, summary = report_generator.generate_overall_metrics_summary(
-            trades_df, daily_returns, benchmark_returns, benchmark_df, daily_equity,
+            trades_df, daily_returns, benchmark_returns, benchmark_df, equity_for_dd_calc,
             benchmark_ticker, initial_equity, risk_free_rate, trading_days
         )
         report_sections.append({'type': 'text', 'title': title, 'data': summary})
@@ -214,14 +225,6 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
                 })
 
         equity_for_dd_plot = trades_df.get('Equity')
-        if not daily_equity.empty:
-            if 'Equity' in trades_df.columns and trades_df['Equity'].notna().all():
-                equity_for_dd_calc = trades_df['Equity']
-            else:
-                equity_for_dd_calc = daily_equity
-        else:
-            equity_for_dd_calc = pd.Series(dtype=float)
-
         equity_dd_amount, equity_dd_percent, max_equity_dd_amt, max_equity_dd_pct = calculations.calculate_equity_drawdown(equity_for_dd_calc)
 
         dd_cum_profit = trades_df.get('Cumulative_Profit')
@@ -453,7 +456,7 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
                 'run_date':            timestamp_str,
                 'trades_df':           _trades_df_rolling,
                 'initial_equity':      initial_equity,
-                'daily_equity':        daily_equity,
+                'daily_equity':        equity_for_dd_calc,
                 'daily_returns':       daily_returns,
                 'benchmark_df':        benchmark_df,
                 'benchmark_returns':   benchmark_returns,
