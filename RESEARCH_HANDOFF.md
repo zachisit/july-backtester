@@ -4469,6 +4469,43 @@ overlay (VIX>35 → short SPY) as the architectural last resort.
 
 ---
 
+## SESSION 46 — EC-R50 BREAKTHROUGH: first R1 pass in 50 rounds (2026-04-23)
+
+**Date:** 2026-04-23
+**Run ID:** ec-r50-weekly-on-ndx-tech_2026-04-23_19-56-22
+Detailed: `research_results/ec_round_50.md`
+
+### EC-R50 Results: Williams R Weekly PASSES R1 (first time in 50 rounds)
+
+| Strategy | R1 Beats SPY | R2 Smooth | R3 <365d | R4 Val | Gates pass |
+|---|---|---|---|---|---|
+| **Williams R Weekly** | **PASS (+213pp)** | FAIL (top5=23.85%) | FAIL (931d) | PASS | 2/4 |
+| Relative Momentum 13w | FAIL (-420pp) | FAIL (top5=29.38%) | FAIL (1015d) | PASS | 1/4 |
+| BB Breakout 20w | FAIL (-445pp) | FAIL (top5=24.21%) | FAIL (938d) | PASS | 1/4 |
+
+**Williams R Weekly on NDX Tech 44: 1072% P&L vs SPY 859%. OOS +731.91%. WFA Pass.**
+
+First time in the EC chapter that any strategy passes R1. Two gates remain:
+- **R2:** top-5 trades = 23.85% of P&L (need <15%). Structural NDX Tech concentration problem.
+- **R3:** 931-day recovery (need <365). Tech sector hit hardest in 2008/2022.
+
+### EC-R51 Direction: dilute concentration via broader universe
+
+Hypothesis: Williams R Weekly on Nasdaq 100 (101 symbols) at 2.5% allocation should
+smooth distribution (R2) by increasing dispersion without sacrificing R1. Non-tech
+NDX 100 members (consumer, healthcare, industrial) add diversification while
+preserving enough momentum quality to keep beating SPY.
+
+**EC-R51 plan:**
+- `"strategies": ["Williams R Weekly Trend (above-20) + SMA200"]`
+- Universe: `"Nasdaq 100": "nasdaq_100.json"` (101 symbols)
+- `"timeframe": "W"`, allocation 2.5%, no stops
+
+If R51 fixes R2 but R3 still fails → EC-R52 tries a faster regime gate (SMA100 or SPY-crossover).
+If R51 also fails R1, alloc needs to stay at 2.5% but universe must be more tech-concentrated.
+
+---
+
 ## BLIND-SESSION BOOTSTRAP
 
 A future Claude Code session starting with NO conversation history can resume work by running:
