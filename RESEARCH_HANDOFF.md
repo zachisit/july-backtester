@@ -3,6 +3,43 @@
 
 ---
 
+## ⚠️ EC CHAMPION HARD REQUIREMENTS — ALL FOUR MUST HOLD SIMULTANEOUSLY ⚠️
+
+**DO NOT declare any EC candidate a champion unless it passes ALL FOUR below. Run
+`rtk python scripts/score_ec_candidate.py <run_dir>` on every run — the exit code
+is 0 only if every strategy in the run passes all four gates. Meeting 3/4 = REJECT.**
+
+1. **BEATS SPY** — strategy total P&L% > SPY B&H P&L% over the same backtest period.
+   Not "better risk-adjusted than SPY"; ABSOLUTE return must exceed SPY B&H return.
+   No exceptions. A strategy that lags SPY is a dud regardless of other metrics.
+
+2. **SMOOTH EQUITY CURVE** — no jagged upthrusts from outlier trades. Programmatic
+   proxy: top-1 trade < 3% of total P&L, top-5 trades < 15% of total P&L. Visual
+   review (PDF) is the final arbiter — distribution-test pass is necessary but
+   NOT sufficient.
+
+3. **NO PROLONGED DRAWDOWN** — Max Recovery Duration < 365 calendar days. Multi-year
+   underwater periods are disqualifiers. Ignore MaxDD% alone — a small DD that
+   takes 3 years to recover is still a reject.
+
+4. **STANDARD VALIDATION** — WFA Pass, Rolling WFA 3/3, MC Score ≥ 4, OOS P&L > 0.
+
+**Historical failures to learn from:**
+- EC-R19 (MA Bounce + Low-Vol ATR) — rejected: lags SPY + 2022-2024 plateau (fails 1, 3).
+- EC-R39/R39b — rejected: BEATS SPY but 5.4-year MaxRecovery from 2008 (fails 3).
+- EC-R45/R46/R47 (Sessions 40-42) — rejected: best DD% ever seen (8-23%) but ALL
+  universes lag SPY 373-775pp AND MaxRecovery 812-1534 days. Mean reversion + gate
+  architecture STRUCTURALLY cannot beat SPY AND recover fast.
+
+**The intersection of all four is narrow.** Fixing DD with tighter entry filters
+always costs bull-market P&L — exactly what's needed to beat SPY. Explore:
+- Per-stock stop-losses on strategies that already beat SPY (cap individual trade
+  loss, don't filter entries)
+- Volatility-scaled position sizing (keep participating; just shrink during crises)
+- Long/short books (short SPY during high VIX to eliminate bear-market beta)
+
+---
+
 ## FOR THE HUMAN OPERATOR
 
 **One prompt to start a session:**
@@ -4234,6 +4271,85 @@ Multi-universe deployment could achieve MaxDD <15% system-wide.
 2. **RS(min) metric artifact** on tight gates — ignore for EC-R46 family (Session 41 established).
 3. **Low absolute P&L on small universes** — Sectors+DJI 85% total vs SPY 859%. Tradeoff is
    dramatically lower drawdown (8.32% vs ~55% SPY B&H in 2008-2009).
+
+---
+
+## SESSION 43 — CHAMPION CLAIM RETRACTED + scoring helper added (2026-04-23)
+
+**Date:** 2026-04-23
+
+### Retraction of Session 42 "EC-R46 CHAMPION" declaration
+
+Session 42 declared EC-R46 the champion based on WFA/MC/Calmar/MaxDD criteria. That
+declaration was WRONG. Human operator correctly pointed out two ignored requirements:
+
+1. **Beats SPY (HARD req #1 from Session 31, line 3186 of this file)** — EC-R46
+   lagged SPY on all 4 universes (373-775pp gap). Fails.
+2. **No prolonged drawdown (HARD req #3 from Session 31, line 3185)** — EC-R46
+   MaxRecovery was 812-1534 days (2-4 years). Fails.
+
+Running the new scoring helper (`scripts/score_ec_candidate.py`) against every
+EC-R46 result produces 0/7 champions:
+
+```
+Run: ec-r46-two-layer-gate_2026-04-23_18-15-20
+  S&P 500 / EC-R46:    REJECTED (R1 fail: lags SPY 505pp; R3 fail: 1103d recovery)
+  S&P 500 / EC-R46b:   REJECTED (R1, R3, R4 all fail)
+
+Run: ec-r47-universality_2026-04-23_18-24-29
+  Sectors+DJI 46:  REJECTED (R1 fail: lags SPY 775pp; R3 fail: 840d recovery)
+  Nasdaq 100:      REJECTED (R1 fail: lags SPY 655pp; R3 fail: 812d recovery)
+  Russell 1000:    REJECTED (R1 fail: lags SPY 373pp; R3 fail: 1066d recovery)
+```
+
+**The entire EC-R42 → EC-R47 arc (sessions 38-42) took a wrong architectural turn.**
+Adding tighter filters (VIX, 52wk, slope, SMA100) reduced 2022 losses but sacrificed
+bull-market P&L that was needed to beat SPY. The tradeoff is irreconcilable within
+the "mean-reversion + entry gate" architecture.
+
+### What the scoring helper adds
+
+`scripts/score_ec_candidate.py <run_dir>` — prints a per-strategy scorecard for all
+four hard requirements and exits 1 if any strategy in the run fails any gate. Must
+be run BEFORE any champion declaration going forward. Memory updated to reinforce
+this workflow.
+
+### EC-R48 Direction: Per-Stock Stop-Loss on EC-R39b (the strategy that DID beat SPY)
+
+EC-R39b beat SPY (700% vs 534% at that point) but failed R3 because of a 1958-day
+(5.4 year) recovery out of 2008. The fix should NOT be another entry filter — it
+should be a per-stock stop-loss that caps individual trade losses without reducing
+trade frequency:
+
+**Hypothesis:** 10% per-stock stop caps any single trade loss at 10% × 2.5% alloc
+= 0.25% of portfolio equity. In 2008 with 40-50 open positions, a worst-case
+coordinated stop-out produces 10-12% portfolio loss instead of the ~40% EC-R39b
+suffered → recovery window compresses from 5.4 years to ~1 year.
+
+**EC-R48 candidates:**
+- **EC-R48a:** EC-R39b + 10% hard stop-loss per trade
+- **EC-R48b:** EC-R39b + 7% hard stop-loss per trade (tighter, more trades)
+- **EC-R48c:** EC-R39b + ATR 2.0× trailing stop (adaptive to stock volatility)
+
+The stop-loss mechanism is already implemented in `helpers/simulations.py` — set
+`stop_loss_configs` in config.py to `{"type": "percentage", "value": 0.10}` etc.
+No new strategy code needed — just config-level sweep on the proven EC-R39b.
+
+**Expected outcomes:**
+- Absolute P&L likely drops ~20-30% from EC-R39b baseline (stops exit at bad prices)
+- 2008 recovery shortens from 1958 days → <365 days (hopefully)
+- Distribution should remain smooth (stops produce many small losses, not one big cliff)
+- Must still beat SPY after the stop-loss drag — this is the key question
+
+**Run config:**
+- `"strategies": ["EC-R39b: Mean Rev SMA20 (5%/3%) [Daily]"]` (the confirmed beats-SPY strategy)
+- `"stop_loss_configs": [{"type": "none"}, {"type": "percentage", "value": 0.07}, {"type": "percentage", "value": 0.10}]`
+- Universe: S&P 500 (broad diversification + 1273 symbols needed)
+- Allocation: 2.5%
+
+If EC-R48a/b/c all fail to preserve beat-SPY while reducing recovery to <365 days,
+the mean-reversion direction is dead and the loop must pivot to trend-following
+architectures (EC-R49: trend-following on Sectors+DJI with stop-loss).
 
 ---
 
