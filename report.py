@@ -42,6 +42,19 @@ from trade_analyzer.default_config import (
 from trade_analyzer.analyzer import generate_trade_report
 
 
+def _load_equity_file(path: Path) -> "pd.Series | None":
+    """Load a companion _equity.csv as a date-indexed Series, or return None."""
+    if not path.is_file():
+        return None
+    try:
+        df = pd.read_csv(path, index_col=0, parse_dates=True)
+        if df.empty:
+            return None
+        return df.iloc[:, 0].rename("Equity")
+    except Exception:
+        return None
+
+
 def _load_wfa_split_ratio(run_dir: Path) -> float | None:
     """Read wfa_split_ratio from config_snapshot.json in a run directory.
 
@@ -156,7 +169,11 @@ def main():
             report_name = csv_file.stem
             print(f"Processing: {csv_file}")
             trades_df = pd.read_csv(csv_file)
-            generate_trade_report(trades_df, output_dir, report_name, config_params)
+            portfolio_timeline = _load_equity_file(csv_file.parent / f"{csv_file.stem}_equity.csv")
+            this_config = {**config_params}
+            if portfolio_timeline is not None:
+                this_config['PORTFOLIO_TIMELINE'] = portfolio_timeline
+            generate_trade_report(trades_df, output_dir, report_name, this_config)
             count += 1
 
         print(f"Generated {count} reports in {output_dir}")
@@ -207,12 +224,15 @@ def main():
             _candidate = Path(*csv_parts_check[:idx_check]) / "noise_sample_data.csv"
             if _candidate.is_file():
                 _noise_csv_single = str(_candidate)
+        portfolio_timeline = _load_equity_file(Path(csv_path).parent / f"{report_name}_equity.csv")
         config_params = {
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
             'WFA_SPLIT_RATIO': wfa_ratio,
             'NOISE_CSV_PATH': _noise_csv_single,
         }
+        if portfolio_timeline is not None:
+            config_params['PORTFOLIO_TIMELINE'] = portfolio_timeline
         generate_trade_report(trades_df, output_dir, report_name, config_params)
 
 
