@@ -289,8 +289,8 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R44: Power Dip + VIX Gate (VIX<25) [Daily]",
-        "EC-R44b: Power Dip + VIX Gate (5%/3%) [Daily]",
+        "EC-R44: Power Dip + VIX Gate (VIXlt25) [Daily]",
+        "EC-R44b: Power Dip + VIX Gate 5pct3pct [Daily]",
     ],
 
     # ============================================================

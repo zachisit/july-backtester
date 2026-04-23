@@ -3158,7 +3158,7 @@ def ec_r43b_power_dip_wide(df, **kwargs):
 
 
 @register_strategy(
-    name="EC-R44: Power Dip + VIX Gate (VIX<25) [Daily]",
+    name="EC-R44: Power Dip + VIX Gate (VIXlt25) [Daily]",
     dependencies=["vix"],
     params={
         "mean_period":      20,
@@ -3215,7 +3215,7 @@ def ec_r44_power_dip_vix(df, vix_df=None, **kwargs):
 
 
 @register_strategy(
-    name="EC-R44b: Power Dip + VIX Gate (5%/3%) [Daily]",
+    name="EC-R44b: Power Dip + VIX Gate 5pct3pct [Daily]",
     dependencies=["vix"],
     params={
         "mean_period":      20,
