@@ -3263,3 +3263,125 @@ def ec_r44b_power_dip_vix_wide(df, vix_df=None, **kwargs):
 
     df["Signal"] = signal
     return df
+
+
+# ===========================================================================
+# EC-R45 STRATEGIES — Power Dip + SPY 20-day SMA Slope Gate
+#
+# EC-R44 failure analysis (2026-04-23):
+# VIX gate on top of 52-week filter destroyed alpha: blocked recovery entries
+# when VIX was elevated post-correction (precisely when opportunities were best).
+# 2020 COVID: VIX gate turned +$26k into -$9.7k. RS(min) worsened from -4.49 to -111.85.
+#
+# Root cause of remaining EC-R43 losses: early bear markets have stocks near 52wk highs
+# from the prior bull peak. The 52wk filter passes fine, but the market trend is already
+# turning negative. A FAST SLOPE CHECK on the market itself catches this.
+#
+# EC-R45 solution: require SPY's 20-day SMA to be RISING (or flat) before entering.
+# - 2008 bear: SPY SMA20 turned negative by Feb 2008 → blocks entries during crash
+# - 2022 bear: SPY SMA20 negative throughout H1 2022 → protects during steady decline
+# - 2020 COVID: SPY SMA20 dips 3-4 weeks then recovers → gate reopens for V-recovery entries
+# - Bull market: SPY SMA20 rising → gate always open → full bull-market participation
+#
+# DIFFERS FROM SPY SMA200 GATE:
+# - SMA200 gate: binary; stays closed for months in extended downtrends → flat equity periods
+# - SMA20 slope gate: responds in days to weeks; reopens quickly in V-shaped recoveries
+# ===========================================================================
+
+
+@register_strategy(
+    name="EC-R45: Power Dip + SPY Slope Gate [Daily]",
+    dependencies=["spy"],
+    params={
+        "mean_period":      20,
+        "high_period":      252,
+        "entry_drop_pct":   0.03,
+        "high_entry_pct":   0.85,
+        "high_stop_pct":    0.80,
+        "target_pct":       0.02,
+        "spy_slope_window": 20,    # SPY SMA period
+        "spy_slope_lag":    15,    # compare today's SPY SMA to N days ago
+    },
+)
+def ec_r45_power_dip_spy_slope(df, spy_df=None, **kwargs):
+    """EC-R43 + SPY short-term slope gate.
+    Only enters pullbacks when SPY 20-day SMA is flat or rising over the past 15 days.
+    Prevents entries in nascent bear markets without creating month-long flat exclusion periods."""
+    mean_p       = kwargs["mean_period"]
+    high_p       = kwargs["high_period"]
+    entry_drop   = kwargs["entry_drop_pct"]
+    hi_entry     = kwargs["high_entry_pct"]
+    hi_stop      = kwargs["high_stop_pct"]
+    target       = kwargs["target_pct"]
+    slope_win    = kwargs["spy_slope_window"]
+    slope_lag    = kwargs["spy_slope_lag"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    high_52w = close.rolling(high_p).max()
+
+    if spy_df is not None and not spy_df.empty:
+        spy_sma = spy_df["Close"].reindex(df.index, method="ffill").rolling(slope_win).mean()
+        spy_sma_prev = spy_sma.shift(slope_lag)
+        spy_uptrend = spy_sma >= spy_sma_prev
+    else:
+        spy_uptrend = pd.Series(True, index=df.index)
+
+    in_pullback = close < sma_mean * (1.0 - entry_drop)
+    near_high   = close > high_52w  * hi_entry
+    below_stop  = close < high_52w  * hi_stop
+    hit_target  = close > sma_mean  * (1.0 + target)
+
+    signal = pd.Series(0, index=df.index)
+    signal[in_pullback & near_high & spy_uptrend] = 1
+    signal[hit_target | below_stop]               = -1
+    signal[sma_mean.isna() | high_52w.isna()]     = -1
+
+    df["Signal"] = signal
+    return df
+
+
+@register_strategy(
+    name="EC-R45b: Power Dip + Stock Slope Gate [Daily]",
+    dependencies=[],
+    params={
+        "mean_period":      20,
+        "high_period":      252,
+        "entry_drop_pct":   0.03,
+        "high_entry_pct":   0.85,
+        "high_stop_pct":    0.80,
+        "target_pct":       0.02,
+        "slope_lag":        10,    # compare stock SMA20 today vs N days ago
+    },
+)
+def ec_r45b_power_dip_stock_slope(df, **kwargs):
+    """EC-R43 + stock-level SMA20 slope gate. No SPY dependency.
+    Only enters when the stock's own short-term mean is flat or rising.
+    Catches sector-level declines without requiring market index data."""
+    mean_p      = kwargs["mean_period"]
+    high_p      = kwargs["high_period"]
+    entry_drop  = kwargs["entry_drop_pct"]
+    hi_entry    = kwargs["high_entry_pct"]
+    hi_stop     = kwargs["high_stop_pct"]
+    target      = kwargs["target_pct"]
+    slope_lag   = kwargs["slope_lag"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    high_52w = close.rolling(high_p).max()
+
+    sma_prev    = sma_mean.shift(slope_lag)
+    mean_rising = sma_mean >= sma_prev   # stock's own short-term trend is flat or rising
+
+    in_pullback = close < sma_mean * (1.0 - entry_drop)
+    near_high   = close > high_52w  * hi_entry
+    below_stop  = close < high_52w  * hi_stop
+    hit_target  = close > sma_mean  * (1.0 + target)
+
+    signal = pd.Series(0, index=df.index)
+    signal[in_pullback & near_high & mean_rising] = 1
+    signal[hit_target | below_stop]               = -1
+    signal[sma_mean.isna() | high_52w.isna()]     = -1
+
+    df["Signal"] = signal
+    return df

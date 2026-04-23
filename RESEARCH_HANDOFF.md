@@ -3922,3 +3922,96 @@ From 2011-2016, cumulative equity barely moves ($145k → $192k in 5 years). Thi
 - 2022: rate hike bear was faster and not as deep; many defensive stocks stayed near highs → fewer losses
 - Bull years: many opportunities → beats SPY
 
+---
+
+## SESSION 39 — EC-R43 Results + EC-R44 FAILED (2026-04-23)
+
+**Date:** 2026-04-23
+
+### EC-R43 Results: STEP FORWARD but still lags SPY
+
+Run ID: ec-r43-power-dip-52wk_2026-04-23_17-30-03
+Universe: S&P 500, 2004-2026, 2.5% allocation
+
+| Strategy | P&L | vs SPY | MaxDD | Calmar | RS(min) | OOS | WFA | RollWFA | MC |
+|---|---|---|---|---|---|---|---|---|---|
+| EC-R43 (3%/2% + 52wk) | 498% | -361pp | 33.85% | 0.25 | -4.49 | +90.62% | **Pass** | **3/3** | 5 |
+| EC-R43b (5%/3% + 52wk) | 352% | -507pp | 36.35% | 0.19 | -9.81 | +43.08% | **Pass** | **3/3** | 5 |
+
+SPY B&H over period: ~859%
+
+**Key findings:**
+1. **Distribution PASSES** — Top5 trades = 4.1% of total P&L. No dominant trades. 52wk filter solves the jagged-upthrust problem structurally.
+2. **RS(min) dramatically improved** — -4.49 vs EC-R39b's -9.81 and EC-R42b's catastrophic values.
+3. **2020 COVID gains preserved** — +$26k in 2020. V-shaped recovery captured because strong stocks near 52wk highs recover fastest.
+4. **Bear market losses NOT prevented** — 2008: -$38k, 2018: -$31k, 2022: -$69k. Early bear markets have stocks still near 52wk highs from prior bull peak.
+5. **Lags SPY by 361pp** — Mean reversion only captures the bounce, not the full uptrend move.
+
+**EC-R43 annual pattern:**
+- 2005-2007: gradual growth ($100k → $135k)
+- 2008: -$38k cliff
+- 2009-2012: slow recovery ($119k → $174k)
+- 2013-2021: steady growth with 2021 acceleration ($239k → $516k)
+- 2022: -$69k cliff
+- 2023-2026: recovery to $598k
+
+**EC-R43 is the best mean-reversion architecture found — but bear market entry prevention needs one more layer.**
+
+---
+
+### EC-R44 Results: FAILED — VIX gate destroys alpha
+
+Run ID: ec-r44-power-dip-vix_2026-04-23_17-46-57
+
+| Strategy | P&L | vs SPY | MaxDD | RS(min) | OOS | WFA | RollWFA |
+|---|---|---|---|---|---|---|---|
+| EC-R44 (VIXlt25) | 286% | -573pp | 23.37% | **-111.85** | **-2.01%** | **Likely Overfitted** | 3/3 |
+| EC-R44b (5%/3% VIX) | 234% | -625pp | 30.39% | **-91.90** | **+8.17%** | **Likely Overfitted** | 3/3 |
+
+**Why VIX gate failed:**
+1. **WFA Overfitted** — VIX<25 threshold fits IS period (avg VIX ~17). OOS 2021-2026 had higher avg VIX → gate blocked too many valid entries → OOS P&L = -2.01%.
+2. **RS(min) catastrophically worsened** — -111.85 vs EC-R43's -4.49. Gate blocks recovery entries when VIX is still elevated → 126-day rolling Sharpe during gaps is deeply negative.
+3. **VIX gate INVERTS alpha** — Best opportunities are AFTER corrections when VIX is elevated. Gate systematically blocks exactly these entries. 2020 COVID: EC-R43 made +$26k; EC-R44 lost -$9.7k.
+4. **Does NOT prevent bear losses** — 2022 losses WORSE with gate (-$72k) than without (-$69k). VIX stayed <25 during much of early 2022 bear; gate offered no protection.
+
+**EC-R44: ELIMINATED.** Anti-pattern confirmed: VIX gate on top of 52-week high filter destroys alpha by blocking recovery entries while not preventing actual bear losses.
+
+**Anti-pattern added to permanent list:**
+- VIX gate on 52-week-high mean reversion = blocks recovery alpha without preventing bear losses. The 52wk filter already handles structural bear avoidance. Do not retry VIX gating on this architecture.
+
+---
+
+### EC-R45 Direction: SPY 20-day SMA Slope Gate
+
+**Hypothesis:** 2008/2022 losses occur because the market's SHORT-TERM TREND is negative while the 52wk proximity filter still passes (early bear markets). A fast slope check on SPY would catch nascent bears.
+
+**EC-R45 entry conditions (all must pass):**
+1. Close < SMA20 * 0.97 (3% pullback from short-term mean)
+2. Close > rolling_max_252 * 0.85 (within 15% of 52-week high)
+3. SPY SMA20 today ≥ SPY SMA20 15 days ago (market 20-day trend is flat or rising)
+
+**Why this differs from the discredited SPY SMA200 gate:**
+- SMA200 gate: binary on/off for months based on long-term average crossing → flat exclusion periods
+- SMA20 slope gate: responds in days-weeks; slope turns positive quickly in V-recoveries
+- 2020 COVID: SPY SMA20 dips briefly, recovers in 3-4 weeks → gate opens again
+- 2008: SPY SMA20 slope stays negative for months → extended protection
+- 2022: SPY SMA20 slope negative most of H1 2022 → protects during steady bear phase
+
+**Also test EC-R45b:** stock-level SMA20 slope (no extra dependency):
+- Entry requires stock's own SMA20 today > SMA20 10 days ago
+- Catches sector-level declines without needing SPY data
+
+**Implementation:**
+- EC-R45 requires `dependencies=["spy"]`
+- Compute `spy_sma20 = spy_df['Close'].rolling(20).mean()`
+- Slope check: `spy_sma20 >= spy_sma20.shift(15)` at each entry bar
+
+**Expected improvements:**
+- 2008: SPY SMA20 negative slope by Feb 2008 → blocks entries for most of crash
+- 2022: SPY SMA20 negative H1 2022 → prevents bulk of -$69k losses
+- 2020: SPY SMA20 recovers within 3 weeks of COVID bottom → entries resume
+
+**Run config:**
+- `"strategies": ["EC-R45: Power Dip + SPY Slope Gate [Daily]", "EC-R45b: Power Dip + Stock Slope Gate [Daily]"]`
+- Same universe (S&P 500, 2004-2026), same allocation (2.5%), same WFA settings
+
