@@ -4015,3 +4015,110 @@ Run ID: ec-r44-power-dip-vix_2026-04-23_17-46-57
 - `"strategies": ["EC-R45: Power Dip + SPY Slope Gate [Daily]", "EC-R45b: Power Dip + Stock Slope Gate [Daily]"]`
 - Same universe (S&P 500, 2004-2026), same allocation (2.5%), same WFA settings
 
+---
+
+## SESSION 40 — EC-R45 Results + EC-R46 Direction (2026-04-23)
+
+**Date:** 2026-04-23
+
+### EC-R45 Results: PARTIAL SUCCESS — new MaxDD floor, but too costly in absolute terms
+
+Run ID: ec-r45-spy-slope-gate_2026-04-23_18-00-09
+Universe: S&P 500, 2004-2026, 2.5% allocation
+Detailed report: `research_results/ec_round_45.md`
+
+| Strategy | P&L | vs SPY | MaxDD | Calmar | RS(min) | OOS | WFA | RollWFA | MC | Trades |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **EC-R45 (SPY slope)** | 317% | -542pp | **23.50%** | **0.28** | -4.49 | +13.67% | **Pass** | **3/3** | **5** | 9,531 |
+| EC-R45b (Stock slope) | 329% | -530pp | 32.80% | 0.21 | -10.96 | +50.08% | Pass | 3/3 | 5 | 11,138 |
+| *EC-R43 baseline* | *498%* | *-361pp* | *33.85%* | *0.25* | *-4.49* | *+90.62%* | *Pass* | *3/3* | *5* | *12,498* |
+
+SPY B&H over period: ~859%
+
+### Key findings
+
+1. **MaxDD 23.50% is a NEW RECORD** for any mean-reversion variant tested. Calmar 0.28 is also
+   the highest of the mean-reversion family. The gate genuinely reduces equity curve volatility.
+
+2. **SPY slope gate works for 2008 and 2018** — dramatic effect:
+   - 2008: EC-R43 -$38k → EC-R45 -$8k (79% loss reduction)
+   - 2018: EC-R43 -$31k → EC-R45 +$5k (fully solved, loss → gain)
+   - 2020 COVID: preserved and improved (+$26k → +$41k)
+
+3. **2022 is the remaining failure** — EC-R45 -$73k vs EC-R43 -$69k (slightly WORSE).
+   2022 was a choppy stair-step bear with multiple bear rallies. SPY 20d-slope turned positive
+   briefly Mar-Apr and Jul-Aug 2022, opening the gate during bear rallies. Strategy entered
+   pullbacks that continued down.
+
+4. **Bull-market cost is $142k** — the gate also filters SHORT-TERM pullbacks during uptrends.
+   2013 (-$19k), 2014 (-$21k), 2019 (-$31k), 2021 (-$34k), 2024 (-$38k). Net: $67k saved in
+   bears minus ~$148k missed in bulls = **-$181k vs EC-R43 baseline**.
+
+5. **OOS degradation is concerning** — EC-R45 OOS +13.67% vs EC-R43 +90.62%. The 2022 failure
+   mode dominates the 2021-2026 OOS period. Rolling WFA still passes 3/3 so not strictly overfit.
+
+6. **EC-R45b (stock-level slope) is strictly worse** — MaxDD 32.80%, RS(min) -10.96. ELIMINATED.
+
+### Decision: EC-R45 IS NOT A CHAMPION — keep hunting for the bear-rally filter
+
+Architecture direction is right (DD is dropping consistently across rounds). But $181k absolute
+gap vs EC-R43 is too large. The remaining 2022 cliff must be solved without adding bull-market
+cost proportional to what the slope gate already introduced.
+
+### EC-R46 Direction: Two-Layer Gate (SPY SMA20 slope + SPY > SMA100)
+
+**Hypothesis:** Add a MEDIUM-TERM regime layer on top of the slope check. In 2022, SPY was below
+SMA100 almost continuously — combined gate would stay closed even during bear rallies. In 2020
+COVID, SPY briefly dropped below SMA100 but the 20d-slope recovered within weeks — combined gate
+reopens only when BOTH layers confirm recovery.
+
+SMA100 (not SMA200) — avoids the "dead SMA200 gate" pattern that caused flat exclusion periods.
+
+**EC-R46 entry conditions:**
+1. Close < SMA20 * 0.97 (pullback)
+2. Close > rolling_max_252 * 0.85 (52wk proximity)
+3. SPY SMA20(today) ≥ SPY SMA20(15 days ago) (short-term slope rising)
+4. **NEW:** SPY Close > SPY SMA100 (medium-term regime positive)
+
+**Expected behavior:**
+- 2008: SPY below SMA100 by Mar 2008 → protection until Jun 2009
+- 2018: SPY below SMA100 Q4 2018 → protection
+- 2020: SPY below SMA100 briefly Mar 2020 → reopens fast when BOTH layers flip
+- 2022: SPY below SMA100 almost continuously → protection throughout including bear rallies
+- Bull markets: both gates open → minimal additional filtering vs EC-R45
+
+**Anti-pattern risk:** If SMA100 adds too much filtering, we regress to the failed SPY SMA200
+approach. SMA100 is a compromise — shorter than 200 (less lag) but long enough to smooth 1-month
+choppiness. Must check actual SMA100 gate time-closure during 2004-2026 period.
+
+**EC-R46b variant:** 3-day hysteresis on the slope gate (require 3 consecutive days of positive
+slope before reopening). Orthogonal to the SMA100 layer; test if EC-R46 underperforms.
+
+---
+
+## BLIND-SESSION BOOTSTRAP
+
+A future Claude Code session starting with NO conversation history can resume work by running:
+
+```bash
+# 1. Ensure creds are loaded (authenticates GitHub + Polygon)
+source .env                                    # loads POLYGON_API_KEY, GITHUB_TOKEN
+rtk gh auth login --with-token <<< "$GITHUB_TOKEN"   # re-auths gh CLI if keyring not persisted
+git config --global credential.helper 'store'        # persist for future pushes
+
+# 2. Verify submodules are initialised
+rtk git submodule update --init --recursive
+
+# 3. Read the handoff
+rtk read RESEARCH_HANDOFF.md
+
+# 4. Continue the loop as documented at top of this file
+```
+
+The .env file is gitignored and must be present locally. If it's missing:
+- Polygon key: retrieve from the human operator's secret store (password manager, 1Password, etc.)
+- GitHub token: run `gh auth login` interactively, then capture with `gh auth token` and write it
+  into .env as `GITHUB_TOKEN=...`
+
+.env.example ships a template with every required key (placeholder values only, safe to commit).
+
