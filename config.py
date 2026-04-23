@@ -65,8 +65,8 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    "timeframe": "D",              # Daily bars
-    #"timeframe": "W",              # Weekly bars
+    #"timeframe": "D",              # Daily bars
+    "timeframe": "W",              # Weekly bars
     #"timeframe": "M",              # Monthly bars
     #"timeframe": "H",              # 4-hour bars via Polygon
     #"timeframe_multiplier": 4,     # H + multiplier=4 → 4-hour bars
@@ -175,7 +175,7 @@ CONFIG = {
     "min_bars_required": 250,  # Daily bars: 250 ≈ 1 year
 
     "portfolios": {
-        "S&P 500": "norgate:S&P 500 Current & Past",
+        "Sectors+DJI 46": "sectors_dji_combined.json",
     },
 
     # ============================================================
@@ -224,9 +224,6 @@ CONFIG = {
     #   {"type": "atr", "period": 14, "multiplier": 3.0}
     "stop_loss_configs": [
         {"type": "none"},
-        {"type": "percentage", "value": 0.07},
-        {"type": "percentage", "value": 0.10},
-        {"type": "atr", "multiplier": 2.0, "period": 14},
     ],
 
     # ============================================================
@@ -292,7 +289,9 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R39b: Mean Rev to SMA20 (5%/3% wide) + SMA200 Gate [Daily]",
+        "Relative Momentum (13w vs SPY) Weekly + SMA200",
+        "BB Weekly Breakout (20w/2std) + SMA200",
+        "Williams R Weekly Trend (above-20) + SMA200",
     ],
 
     # ============================================================
