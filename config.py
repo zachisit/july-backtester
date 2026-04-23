@@ -175,7 +175,9 @@ CONFIG = {
     "min_bars_required": 250,  # Daily bars: 250 ≈ 1 year
 
     "portfolios": {
-        "S&P 500": "norgate:S&P 500 Current & Past",
+        "Sectors+DJI 46": "sectors_dji_combined.json",
+        "Nasdaq 100":     "nasdaq_100.json",
+        "Russell 1000":   "russell_1000.json",
     },
 
     # ============================================================
@@ -290,7 +292,6 @@ CONFIG = {
     # skipped — a typo will not cause a crash.
     "strategies": [
         "EC-R46: Power Dip + SPY Slope + SMA100 [Daily]",
-        "EC-R46b: Power Dip + SPY Slope w/ 3-day Hysteresis [Daily]",
     ],
 
     # ============================================================
