@@ -2731,3 +2731,188 @@ def ec2_price_momentum_spy_sma50(df, spy_df=None, **kwargs):
     df["Signal"] = signals
     df.drop(columns=["_roc", sma_col], errors="ignore", inplace=True)
     return df
+
+
+# ===========================================================================
+# EC-R39 STRATEGIES — Fundamentally New Architecture: Mean Reversion
+#
+# Session 37 finding: ALL trend-following candidates rejected by human because
+# jagged equity curves = a few outlier trades dominate total P&L = overfit signal.
+# Even WFA Pass + MC Score 5 are NOT sufficient — trade P&L distribution must be
+# approximately uniform (top 5 trades < 15% of total P&L, no single trade > 3%).
+#
+# Root cause: "let winners run" → fat-tailed P&L distribution → one +145% trade
+# creates a visible step regardless of position size.
+#
+# EC-R39: Mean reversion to 20-day SMA — caps each trade at ~5% upside
+# EC-R40: Short EMA 8/21d cycling — many small trades, bounded hold duration
+# EC-R41: SMA50 + ROC20 rotation on S&P 500 at 1% alloc — 100-200 positions
+# ===========================================================================
+
+
+@register_strategy(
+    name="EC-R39: Mean Rev to SMA20 + SMA200 Gate [Daily]",
+    dependencies=[],
+    params={
+        "mean_period":      20,
+        "gate_period":      200,
+        "entry_drop_pct":   0.03,
+        "target_pct":       0.02,
+    },
+)
+def ec_r39_mean_rev_sma20(df, **kwargs):
+    """Mean reversion to 20-day SMA. Enter on 3% pullback, exit when price returns 2% above mean.
+    signal=0 is the hold zone: engine holds if already in trade, stays flat otherwise."""
+    mean_p     = kwargs["mean_period"]
+    gate_p     = kwargs["gate_period"]
+    entry_drop = kwargs["entry_drop_pct"]
+    target     = kwargs["target_pct"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    sma_gate = close.rolling(gate_p).mean()
+
+    in_pullback = close < sma_mean * (1.0 - entry_drop)
+    above_gate  = close > sma_gate
+    hit_target  = close > sma_mean * (1.0 + target)
+    below_gate  = close < sma_gate
+
+    signal = pd.Series(0, index=df.index)
+    signal[in_pullback & above_gate] = 1
+    signal[hit_target | below_gate]  = -1
+    signal[sma_mean.isna() | sma_gate.isna()] = -1
+
+    df["Signal"] = signal
+    return df
+
+
+@register_strategy(
+    name="EC-R39b: Mean Rev to SMA20 (5%/3% wide) + SMA200 Gate [Daily]",
+    dependencies=[],
+    params={
+        "mean_period":      20,
+        "gate_period":      200,
+        "entry_drop_pct":   0.05,
+        "target_pct":       0.03,
+    },
+)
+def ec_r39b_mean_rev_sma20_wide(df, **kwargs):
+    """Wider mean reversion: 5% pullback entry, 3% target. Fewer but stronger setups."""
+    mean_p     = kwargs["mean_period"]
+    gate_p     = kwargs["gate_period"]
+    entry_drop = kwargs["entry_drop_pct"]
+    target     = kwargs["target_pct"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    sma_gate = close.rolling(gate_p).mean()
+
+    signal = pd.Series(0, index=df.index)
+    in_pullback = (close < sma_mean * (1.0 - entry_drop)) & (close > sma_gate)
+    exit_cond   = (close > sma_mean * (1.0 + target)) | (close < sma_gate)
+    signal[in_pullback] = 1
+    signal[exit_cond]   = -1
+    signal[sma_mean.isna() | sma_gate.isna()] = -1
+
+    df["Signal"] = signal
+    return df
+
+
+@register_strategy(
+    name="EC-R40: Short EMA 8/21d + SMA200 Gate (No SPY Gate) [Daily]",
+    dependencies=[],
+    params={
+        "ema_fast":    8,
+        "ema_slow":    21,
+        "sma_gate":    200,
+        "atr_period":  14,
+        "max_atr_pct": 0.03,
+    },
+)
+def ec_r40_short_ema_daily(df, **kwargs):
+    """EMA(8) > EMA(21) daily — crosses every few weeks, many small trades.
+    ATR < 3% filter prevents high-vol spike stocks. No SPY gate."""
+    ema_fast   = df["Close"].ewm(span=kwargs["ema_fast"],  adjust=False).mean()
+    ema_slow   = df["Close"].ewm(span=kwargs["ema_slow"],  adjust=False).mean()
+    sma_gate   = df["Close"].rolling(kwargs["sma_gate"]).mean()
+
+    hl  = df["High"] - df["Low"]
+    hpc = (df["High"] - df["Close"].shift(1)).abs()
+    lpc = (df["Low"]  - df["Close"].shift(1)).abs()
+    tr  = pd.concat([hl, hpc, lpc], axis=1).max(axis=1)
+    atr = tr.rolling(kwargs["atr_period"]).mean()
+    low_vol = (atr / df["Close"]) < kwargs["max_atr_pct"]
+
+    in_trend   = ema_fast > ema_slow
+    above_gate = df["Close"] > sma_gate
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if pd.isna(ema_fast.iloc[i]) or pd.isna(sma_gate.iloc[i]) or pd.isna(atr.iloc[i]):
+            signals.append(-1)
+            continue
+        trend_ok = bool(in_trend.iloc[i]) and bool(above_gate.iloc[i]) and bool(low_vol.iloc[i])
+        if not in_position:
+            if trend_ok:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if not (bool(in_trend.iloc[i]) and bool(above_gate.iloc[i])):
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    return df
+
+
+@register_strategy(
+    name="EC-R41: SMA50 Rotation + ROC20p2pct + SMA200 Gate [Daily]",
+    dependencies=[],
+    params={
+        "sma_fast":    50,
+        "sma_slow":    200,
+        "roc_period":  20,
+        "roc_thresh":  2.0,
+    },
+)
+def ec_r41_sma50_rotation(df, **kwargs):
+    """High-frequency rotation: hold any stock in SMA50 uptrend with positive 1-month ROC.
+    At 1% allocation on S&P 500, 100-200 positions simultaneously — no single trade visible."""
+    close    = df["Close"]
+    sma_fast = close.rolling(kwargs["sma_fast"]).mean()
+    sma_slow = close.rolling(kwargs["sma_slow"]).mean()
+    roc      = close.pct_change(kwargs["roc_period"]) * 100.0
+
+    nan_mask = sma_fast.isna() | sma_slow.isna() | roc.isna()
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        if nan_mask.iloc[i]:
+            signals.append(-1)
+            continue
+        above_fast = bool(close.iloc[i] > sma_fast.iloc[i])
+        above_slow = bool(close.iloc[i] > sma_slow.iloc[i])
+        mom_ok     = bool(roc.iloc[i] > kwargs["roc_thresh"])
+        entry_ok   = above_fast and above_slow and mom_ok
+        exit_ok    = not above_fast or not above_slow or roc.iloc[i] <= 0
+        if not in_position:
+            if entry_ok:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if exit_ok:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    return df

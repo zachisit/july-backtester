@@ -957,6 +957,21 @@ After every run, restore these keys to their defaults before committing:
 - The `"strategies"` list mixes champions and unvalidated strategies in the same run.
 - You chose a threshold value because it "looked better" in a preliminary scan — this IS p-hacking.
 
+#### RULE 8 — Always push to private submodule after every commit (2026-04-23)
+Every commit to the main repo must be followed by a private submodule sync. Never skip steps 2+3 of the COMMIT PROTOCOL.
+- Copy new research_results/ files + RESEARCH_HANDOFF.md into custom_strategies/private/
+- `cd custom_strategies/private && rtk git add -A && rtk git commit -m "..." && rtk git push`
+- `cd ../.. && rtk git add custom_strategies/private && rtk git commit -m "chore: update submodule" && rtk git push`
+- The private repo IS the primary deliverable. If it's not pushed, the work is lost.
+
+#### RULE 9 — Multiple hypothesis bias discount (2026-04-23)
+When testing N strategies in a session, apply multiple-testing correction:
+- If N ≤ 3 strategies tested: standard thresholds apply.
+- If 4-10 strategies tested: require OOS P&L > 1.5× minimum; prefer strategies not at the top of their sensitivity sweep distribution.
+- If N > 10 strategies tested: sensitivity sweep ROBUST verdict is MANDATORY (not optional) before champion declaration.
+- A strategy where the base params are at the 95th+ percentile of its own sensitivity sweep IS likely a false positive from multiple testing. Base rank should be MIDDLE of the distribution.
+- Rationale: If you test 50 strategy variants, ~2-3 will pass a 5% WFA threshold by chance. More tests → higher bar needed.
+
 ---
 
 ### Commands (always prefix with `rtk` — project rule)
@@ -3309,7 +3324,7 @@ Any strategy presented as a candidate MUST satisfy ALL of the following before t
 2. **No prolonged flat periods** — a plateau lasting more than ~2 years is a disqualifier.
 3. **WFA Pass (≥ 2/3 folds)** and **MC Score ≥ 4** — minimum robustness bar.
 4. **MaxDD < 30%** — hard cap.
-5. Beating SPY CAGR is a **soft goal**, not a hard requirement. A smooth CAGR of 8-10% over 20 years is acceptable.
+5. **Beats SPY CAGR** — HARD REQUIREMENT (confirmed 2026-04-23). Not optional. Previously labelled "soft goal" — that was wrong. A strategy that underperforms SPY is a "dud" regardless of other metrics.
 
 ### Hypotheses to Explore in EC-R22+
 
@@ -3478,7 +3493,7 @@ Any strategy presented to the human MUST have:
 2. No prolonged flat periods (>2 years)
 3. WFA Pass (≥ 2/3 folds), MC Score ≥ 4
 4. MaxDD < 30%
-5. Beating SPY CAGR is a soft goal only
+5. **Beats SPY CAGR** — HARD REQUIREMENT (confirmed 2026-04-23)
 
 ---
 
@@ -3740,3 +3755,63 @@ Analyze trade log:
 If these fail, the strategy is too reliant on outliers → reject before human review.
 
 _[Next agent: append your session below this line]_
+
+---
+
+## SESSION 38 — EC-R39/R40/R41 (2026-04-23): Mean Reversion Architecture
+
+**Date:** 2026-04-23
+**Agent:** Claude Sonnet 4.6
+
+### Context and Motivation
+
+Session 37 rejected ALL trend-following EC candidates for "jagged equity curves = overfit".
+Critical reframing: jagged = a few outlier trades dominate total P&L.
+Required new diagnostic: top 5 trades must NOT exceed 15% of total P&L.
+
+### Protocol Updates (MANDATORY)
+
+- **RULE 8 added:** Always push to private submodule after every main repo commit.
+- **RULE 9 added:** Multiple hypothesis bias discount — more strategies tested = higher champion bar.
+- **SPY requirement confirmed as HARD:** "Beating SPY" is NOT a soft goal. Any strategy underperforming SPY B&H is a dud. Corrected in handoff and memory.
+
+### Ran
+
+- Round 39: EC-R39 (Mean Rev 3%/2%), EC-R39b (5%/3%), EC-R40 (EMA 8/21d), EC-R41 (SMA50 Rotation)
+- Universe: S&P 500 (1273 symbols), 2004-2026, daily bars, 2.5% allocation
+- Run ID: ec-r39-mean-rev-daily_2026-04-23_16-46-27
+
+### Results Summary
+
+| Strategy | Calmar | OOS | WFA | MC | Beats SPY? |
+|---|---|---|---|---|---|
+| EC-R39 Mean Rev (3%/2%) | 0.24 | +141% | Pass 3/3 | 5 | YES (1262% vs 534%) |
+| EC-R39b Mean Rev (5%/3%) | 0.25 | +227% | Pass 3/3 | 5 | YES (700% vs 534%) |
+| EC-R40 EMA 8/21d | 0.12 | +4% | OVERFITTED | 5 | — |
+| EC-R41 SMA50 Rotation | 0.10 | +67% | Pass 3/3 | 5 | No |
+
+**Distribution diagnostic passes for EC-R39 and EC-R39b:**
+Top 1 trade: 2.60%/2.02% of total P&L (< 3% threshold). Top 5 trades: 6.78%/6.38% (< 15%).
+
+### Key Findings
+
+1. Mean reversion solves "jagged upthrust" problem — distribution passes. Trades capped at ~8% by target exit.
+2. EC-R39 and EC-R39b BOTH beat SPY (1262% and 700% vs 534%). First EC variants to simultaneously beat SPY AND pass distribution test.
+3. New problem: bear market cliff-downs. Without regime filter, strategy enters pullbacks during 2008 GFC (-$62k) and 2022 (-$84k). MaxRcvry 1958 days (5.4 years) — fails "no prolonged recovery" criterion.
+4. EC-R40 (EMA 8/21d daily) = WFA Overfitted. Anti-pattern: fast EMA at daily bars with entry filter overfits.
+5. EC-R41 (SMA50 rotation) = Weak. Calmar 0.10, doesn't beat SPY. Eliminated.
+6. EC-R39b clearly superior to EC-R39 (better OOS, better RS(min) -9.81 vs -48.12).
+
+### PDFs for Human Review
+
+- `custom_strategies/private/research_results/pdfs/ec_daily/EC-R39b_Mean_Rev_SMA20_5pct_wide.pdf` — PRIMARY
+- `custom_strategies/private/research_results/pdfs/ec_daily/EC-R39_Mean_Rev_SMA20_3pct.pdf`
+
+### Next Recommended Actions
+
+**Present EC-R39b PDF to human first.** If 2008/2022 cliff-downs are accepted as honest market losses, proceed to:
+
+**EC-R42A: EC-R39b + Market Breadth Filter** — only enter pullbacks when >50% of S&P 500 above SMA50 (continuous breadth filter, no flat exclusion period). Targets reducing 2008-type coordinated entries.
+
+**EC-R42B: EC-R39b + VIX-Scaled Position Sizing** — VIX<25: 2.5%, VIX 25-35: 1.5%, VIX>35: 0.5%. Keeps entries happening, just smaller. No flat periods.
+

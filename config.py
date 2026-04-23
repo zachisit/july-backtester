@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "1993-01-01",  # EC-R25: full Norgate history (SPY from 1993-01-29)
+    "start_date": "2004-01-01",
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -65,8 +65,8 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    #"timeframe": "D",              # Daily bars
-    "timeframe": "W",              # EC-R38: Weekly bars with multi-asset universe
+    "timeframe": "D",              # Daily bars
+    #"timeframe": "W",              # Weekly bars
     #"timeframe": "M",              # Monthly bars
     #"timeframe": "H",              # 4-hour bars via Polygon
     #"timeframe_multiplier": 4,     # H + multiplier=4 → 4-hour bars
@@ -172,10 +172,10 @@ CONFIG = {
     # Symbols with fewer bars than this are skipped entirely.
     # 250 ≈ one year of daily data. Increase if your strategies need
     #   longer lookback periods (e.g. 200d SMA needs at least 200 bars).
-    "min_bars_required": 104,  # Weekly bars: 104 ≈ 2 years (needed for EMA warmup)
+    "min_bars_required": 250,  # Daily bars: 250 ≈ 1 year
 
     "portfolios": {
-        "Multi-Asset":    "multi_asset.json",  # EC-R38: DJI 30 + bonds + gold
+        "Sectors+DJI 46": "sectors_dji_combined.json",
     },
 
     # ============================================================
@@ -184,7 +184,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.025,  # 2.5% — EC-R35 (DJI46 gets ~18 positions at 2.5%)
+    "allocation_per_trade": 0.10,   # default 10%
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -288,10 +288,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": [
-        "EC-R34: EMA16w/36w + ATR 8% (No Gate) [Weekly]",
-        "EC-R36: EMA16w/36w + ATR 6% (No Gate) [Weekly Tight]",
-    ],
+    "strategies": "all",
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
