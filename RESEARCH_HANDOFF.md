@@ -4096,6 +4096,72 @@ slope before reopening). Orthogonal to the SMA100 layer; test if EC-R46 underper
 
 ---
 
+---
+
+## SESSION 41 — EC-R46 Results: BREAKTHROUGH on DD, universality test next (2026-04-23)
+
+**Date:** 2026-04-23
+
+### EC-R46 Results: STRONGEST CANDIDATE YET — new MaxDD floor of 19.10%
+
+Run ID: ec-r46-two-layer-gate_2026-04-23_18-15-20
+Universe: S&P 500, 2004-2026, 2.5% allocation
+Detailed report: `research_results/ec_round_46.md`
+
+| Strategy | P&L | vs SPY | MaxDD | Calmar | RS(min) | OOS | WFA | RollWFA | MC | Trades |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **EC-R46 (slope + SMA100)** | 355% | -505pp | **19.10%** | **0.37** | -70.99* | +40.46% | **Pass** | **3/3** | **5** | 8,995 |
+| EC-R46b (3d hysteresis) | 320% | -539pp | 24.26% | 0.27 | -4.49 | +1.89% | **Overfitted** | 3/3 | 5 | 9,357 |
+
+*RS(min) -70.99 is a metric artifact (tight gate → near-zero rolling variance). Actual
+2022 drawdown is 14% equity, well within the 19.10% MaxDD.
+
+### Key findings
+
+1. **MaxDD 19.10% is a NEW RECORD** — progression: EC-R43 33.85% → EC-R45 23.50% → **EC-R46 19.10%**.
+   Calmar 0.37 also a new record. The SMA100 regime layer filters choppy bear rallies that
+   destroyed EC-R45's 2022 performance.
+
+2. **2008 essentially flat (-$2k)** vs EC-R43's -$38k cliff. The two-layer gate was closed
+   for ~90% of 2008 trading days (135 trades vs 308 in R45). Strategy is nearly bear-proof.
+
+3. **2018 essentially flat (+$0.5k)** vs EC-R43's -$31k.
+
+4. **2022 cliff cut 27%** ($73k → $53k). Remaining loss from positions already open in
+   January 2022 plus brief regime crossovers. No further reduction possible with this architecture.
+
+5. **EC-R46b (hysteresis) ELIMINATED** — fails WFA verdict, OOS only +1.89%. Confirms regime
+   overlay (SMA100) is the right lever, not consecutive-day confirmation.
+
+6. **Final equity $454k** — up $38k vs EC-R45 ($416k) despite tighter gating, because the
+   smaller 2022/2008/2018 losses compound better.
+
+### Decision: EC-R46 is NOT YET a champion — universality test required
+
+46 rounds of parameter/structure testing → multiple-testing correction requires a higher
+champion bar. EC-R46 passes all statistical robustness checks (WFA, Rolling WFA, MC) and
+achieves the "smooth equity curve" goal, but it has been validated only on S&P 500.
+
+### EC-R47 Direction: Universality Test
+
+**Run EC-R46 (unchanged) on three universes:**
+- **EC-R47a:** Sectors+DJI 46 (`sectors_dji_combined.json`) — diversified sector exposure
+- **EC-R47b:** Nasdaq 100 (`nasdaq_100.json`) — tech-heavy universe
+- **EC-R47c:** Russell 1000 (if available) — broader small/mid cap
+
+**Accept as champion IF:** MaxDD < 25%, Calmar > 0.30, WFA Pass, Rolling 3/3, MC 5 on ALL
+three universes, and no universe shows >70% performance degradation vs S&P 500.
+
+**Reject IF:** any universe shows WFA Overfitted, MC Score < 3, or MaxDD > 30%.
+
+### EC-R48 queued: PDF visual review
+
+Generate PDF tearsheet for EC-R46 on S&P 500. Visual inspection of the equity curve is the
+ultimate arbiter — if the 2022 dip looks like a cliff in the chart, further work needed.
+If it looks like a gradual dip (14% drawdown over ~10 months), EC-R46 is likely the champion.
+
+---
+
 ## BLIND-SESSION BOOTSTRAP
 
 A future Claude Code session starting with NO conversation history can resume work by running:

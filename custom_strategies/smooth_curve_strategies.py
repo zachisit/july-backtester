@@ -3385,3 +3385,144 @@ def ec_r45b_power_dip_stock_slope(df, **kwargs):
 
     df["Signal"] = signal
     return df
+
+
+# ===========================================================================
+# EC-R46 STRATEGIES — Two-Layer Gate: SPY 20d-SMA slope + SPY > SMA100
+#
+# EC-R45 finding (2026-04-23): SPY 20-day SMA slope gate cut MaxDD from 33.85%
+# to 23.50%, eliminated 2018 losses, and reduced 2008 losses 79%. BUT:
+#   - 2022 still broke through (-$73k) because choppy stair-step bears produce
+#     multiple 1-day bounces that falsely reopen the slope gate.
+#   - Net cost $181k vs EC-R43 baseline — the gate filtered too many bull-market
+#     pullbacks (the setups that actually make mean reversion profitable).
+#
+# EC-R46 hypothesis: add a MEDIUM-TERM REGIME LAYER on top of the slope check.
+# In 2022, SPY was below SMA100 almost continuously — the combined gate would
+# stay closed even during bear rallies. In 2020 COVID, SPY briefly dropped
+# below SMA100 but the 20d-slope recovered within weeks — combined gate
+# reopens only when BOTH layers flip positive.
+#
+# SMA100 (not SMA200) — avoids the "dead SMA200 gate" pattern that caused
+# flat exclusion periods in earlier rounds. Shorter than 200 (less lag) but
+# long enough to smooth 1-month choppiness.
+#
+# EC-R46b variant: 3-day HYSTERESIS on slope gate alone (no SMA100 layer).
+# Tests whether the choppy-bear problem can be fixed with a consecutive-day
+# confirmation rather than a regime overlay. Orthogonal to EC-R46.
+# ===========================================================================
+
+
+@register_strategy(
+    name="EC-R46: Power Dip + SPY Slope + SMA100 [Daily]",
+    dependencies=["spy"],
+    params={
+        "mean_period":      20,
+        "high_period":      252,
+        "entry_drop_pct":   0.03,
+        "high_entry_pct":   0.85,
+        "high_stop_pct":    0.80,
+        "target_pct":       0.02,
+        "spy_slope_window": 20,
+        "spy_slope_lag":    15,
+        "spy_regime_sma":   100,
+    },
+)
+def ec_r46_power_dip_two_layer(df, spy_df=None, **kwargs):
+    """EC-R45 + SPY SMA100 regime gate.
+    Both SPY 20d-slope rising AND SPY above SMA100 required. Filters choppy bear
+    rallies that falsely opened the slope-only gate in 2022."""
+    mean_p       = kwargs["mean_period"]
+    high_p       = kwargs["high_period"]
+    entry_drop   = kwargs["entry_drop_pct"]
+    hi_entry     = kwargs["high_entry_pct"]
+    hi_stop      = kwargs["high_stop_pct"]
+    target       = kwargs["target_pct"]
+    slope_win    = kwargs["spy_slope_window"]
+    slope_lag    = kwargs["spy_slope_lag"]
+    regime_sma   = kwargs["spy_regime_sma"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    high_52w = close.rolling(high_p).max()
+
+    if spy_df is not None and not spy_df.empty:
+        spy_close = spy_df["Close"].reindex(df.index, method="ffill")
+        spy_sma = spy_close.rolling(slope_win).mean()
+        spy_sma_prev = spy_sma.shift(slope_lag)
+        spy_uptrend = spy_sma >= spy_sma_prev
+        spy_sma_regime = spy_close.rolling(regime_sma).mean()
+        spy_above_regime = spy_close > spy_sma_regime
+        gate_open = spy_uptrend & spy_above_regime
+    else:
+        gate_open = pd.Series(True, index=df.index)
+
+    in_pullback = close < sma_mean * (1.0 - entry_drop)
+    near_high   = close > high_52w  * hi_entry
+    below_stop  = close < high_52w  * hi_stop
+    hit_target  = close > sma_mean  * (1.0 + target)
+
+    signal = pd.Series(0, index=df.index)
+    signal[in_pullback & near_high & gate_open] = 1
+    signal[hit_target | below_stop]             = -1
+    signal[sma_mean.isna() | high_52w.isna()]   = -1
+
+    df["Signal"] = signal
+    return df
+
+
+@register_strategy(
+    name="EC-R46b: Power Dip + SPY Slope w/ 3-day Hysteresis [Daily]",
+    dependencies=["spy"],
+    params={
+        "mean_period":      20,
+        "high_period":      252,
+        "entry_drop_pct":   0.03,
+        "high_entry_pct":   0.85,
+        "high_stop_pct":    0.80,
+        "target_pct":       0.02,
+        "spy_slope_window": 20,
+        "spy_slope_lag":    15,
+        "hysteresis_days":  3,
+    },
+)
+def ec_r46b_power_dip_hysteresis(df, spy_df=None, **kwargs):
+    """EC-R45 + 3-day slope-gate hysteresis.
+    Require 3 consecutive days of positive SPY slope before re-opening the gate.
+    Filters 1-2 day bear rallies that falsely reopened the slope-only gate in 2022."""
+    mean_p       = kwargs["mean_period"]
+    high_p       = kwargs["high_period"]
+    entry_drop   = kwargs["entry_drop_pct"]
+    hi_entry     = kwargs["high_entry_pct"]
+    hi_stop      = kwargs["high_stop_pct"]
+    target       = kwargs["target_pct"]
+    slope_win    = kwargs["spy_slope_window"]
+    slope_lag    = kwargs["spy_slope_lag"]
+    hyst_days    = kwargs["hysteresis_days"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    high_52w = close.rolling(high_p).max()
+
+    if spy_df is not None and not spy_df.empty:
+        spy_close = spy_df["Close"].reindex(df.index, method="ffill")
+        spy_sma = spy_close.rolling(slope_win).mean()
+        spy_sma_prev = spy_sma.shift(slope_lag)
+        spy_uptrend_raw = spy_sma >= spy_sma_prev
+        # Require N consecutive days of positive slope (sum of N indicators == N)
+        gate_open = spy_uptrend_raw.astype(int).rolling(hyst_days).sum() >= hyst_days
+    else:
+        gate_open = pd.Series(True, index=df.index)
+
+    in_pullback = close < sma_mean * (1.0 - entry_drop)
+    near_high   = close > high_52w  * hi_entry
+    below_stop  = close < high_52w  * hi_stop
+    hit_target  = close > sma_mean  * (1.0 + target)
+
+    signal = pd.Series(0, index=df.index)
+    signal[in_pullback & near_high & gate_open] = 1
+    signal[hit_target | below_stop]             = -1
+    signal[sma_mean.isna() | high_52w.isna()]   = -1
+
+    df["Signal"] = signal
+    return df

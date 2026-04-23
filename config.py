@@ -289,8 +289,8 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R45: Power Dip + SPY Slope Gate [Daily]",
-        "EC-R45b: Power Dip + Stock Slope Gate [Daily]",
+        "EC-R46: Power Dip + SPY Slope + SMA100 [Daily]",
+        "EC-R46b: Power Dip + SPY Slope w/ 3-day Hysteresis [Daily]",
     ],
 
     # ============================================================
