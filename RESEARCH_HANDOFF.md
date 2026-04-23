@@ -3815,3 +3815,57 @@ Top 1 trade: 2.60%/2.02% of total P&L (< 3% threshold). Top 5 trades: 6.78%/6.38
 
 **EC-R42B: EC-R39b + VIX-Scaled Position Sizing** — VIX<25: 2.5%, VIX 25-35: 1.5%, VIX>35: 0.5%. Keeps entries happening, just smaller. No flat periods.
 
+
+### Human Review Verdict — EC-R39b PDF (2026-04-23)
+
+**REJECTED — reason: drawdown periods too jagged and rough**
+
+The human reviewed both PDFs directly and provided this exact feedback:
+> "the equity curve does raise up over time, and does beat SPY, but the drawdown periods are
+> too jagged and rough. we're looking for consistently smooth upwards equity curve with
+> slight drawdowns but not like these multimonth gap downs"
+
+**What passed:**
+- Equity curve does rise over time ✓
+- Does beat SPY ✓
+- No jagged upthrusts (distribution passes) ✓
+
+**What failed:**
+- Multi-month gap-down periods during 2008 GFC and 2022 bear market ✗
+- Drawdowns too large in magnitude — "rough" visual
+- Not "consistently smooth" — big cliffs followed by multi-year recovery
+
+**Updated target definition (2026-04-23, from human):**
+The ideal curve must be "consistently smooth upwards" with SLIGHT drawdowns only.
+"Slight" means: small magnitude (estimated < 10-15% max) AND short duration (weeks,
+not months-to-years). Multi-month sustained loss periods = REJECTED regardless of recovery.
+
+**Root cause of EC-R39b failure:**
+Mean reversion WITHOUT a fast exit gate enters every stock that pulls back 5% from SMA20.
+During crashes (2008, 2022), stocks fall 30-50%+ continuously. Each entry catches a falling
+knife; SMA200 gate is too slow (takes months to breach). Result: many small entries + sustained
+losses over many months = the "multi-month gap down" the human rejected.
+
+**Fix for EC-R42: Mean Reversion + SMA50 Fast Gate**
+
+Change the uptrend gate from SMA200 → SMA50:
+- Entry: Close < SMA20 * (1 - 0.05) AND Close > SMA50 (stock in pullback but above 50-day trend)
+- Exit target: Close > SMA20 * (1 + 0.03)
+- Exit stop: Close < SMA50 (fires within WEEKS of a crash, not months)
+
+Why this produces smaller drawdowns:
+1. Entry gate (Close > SMA50) prevents entering stocks already in significant downtrends
+   — during 2008, most stocks breach SMA50 within 4-6 weeks, stopping new entries
+2. Exit stop (Close < SMA50) fires quickly during crashes — maximum loss per position
+   is the gap between current price and SMA50 (typically 3-8%), not the gap to SMA200 (10-25%)
+3. Self-limiting: in broad crashes, all stocks breach SMA50 → strategy stops opening new trades
+   → limits cumulative portfolio exposure to crash
+
+Expected behavior vs EC-R39b:
+- Fewer entries during bear markets (self-limiting via SMA50 gate)
+- Smaller loss per entered trade (SMA50 exit vs SMA200 exit)
+- Shorter recovery periods (losses limited to weeks, not sustained for months)
+- Potentially lower CAGR (fewer trades), but much smoother curve
+
+**Implement as EC-R42 in next round.**
+

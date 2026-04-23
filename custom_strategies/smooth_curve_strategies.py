@@ -2916,3 +2916,106 @@ def ec_r41_sma50_rotation(df, **kwargs):
 
     df["Signal"] = signals
     return df
+
+
+# ===========================================================================
+# EC-R42 STRATEGIES — Mean Reversion with SMA50 Fast Gate
+#
+# EC-R39b human verdict (2026-04-23): REJECTED — drawdown periods too rough.
+# Multi-month gap-downs during 2008 GFC and 2022 are unacceptable.
+# "We're looking for consistently smooth upwards equity curve with slight
+# drawdowns but not like these multi-month gap downs."
+#
+# Root cause: SMA200 exit gate is too slow. Stocks fall 30-50%+ before breaching
+# SMA200. Result: many small entries catching falling knives over many months.
+#
+# Fix: Replace SMA200 gate with SMA50 as BOTH entry guard AND exit stop.
+#   Entry guard (Close > SMA50): prevents entering stocks already in downtrends.
+#     During 2008/2022, most stocks breach SMA50 within 4-6 weeks → self-limiting.
+#   Exit stop (Close < SMA50): fires within weeks of a crash entry.
+#     Max loss per position: gap from entry to SMA50 = ~3-8% (vs 10-25% to SMA200).
+#
+# EC-R42: Mean Rev to SMA20 (5%/3%) + SMA50 gate (replaces SMA200)
+#   Justification for thresholds:
+#     entry_drop_pct=0.05: same as EC-R39b (confirmed: 5% below mean = strongest setups)
+#     target_pct=0.03: same as EC-R39b (return 3% above mean = natural bounce complete)
+#     gate=SMA50: standard trend filter faster than SMA200. Fires weeks sooner in downtrends.
+#     SMA50 is the institutional "medium-term trend" boundary — stocks below it are in
+#     confirmed pullbacks, not just minor dips. Using it as gate and stop self-limits
+#     exposure during broad market corrections.
+#
+# EC-R42b: Mean Rev to SMA20 (5%/3%) + SMA50 gate + wider universe (S&P 500 2.5% alloc)
+#   Same logic but wider universe for more concurrent trades and smoother distribution.
+# ===========================================================================
+
+
+@register_strategy(
+    name="EC-R42: Mean Rev SMA20 5pct + SMA50 Gate [Daily]",
+    dependencies=[],
+    params={
+        "mean_period":      20,
+        "gate_period":      50,     # SMA50 — fires within weeks in downtrends
+        "entry_drop_pct":   0.05,
+        "target_pct":       0.03,
+    },
+)
+def ec_r42_mean_rev_sma50_gate(df, **kwargs):
+    """Mean reversion to SMA20 with SMA50 as both entry guard and exit stop.
+    Prevents entering stocks in downtrends; exits quickly when they continue down.
+    Self-limiting in bear markets: most stocks breach SMA50 within weeks, stopping entries."""
+    mean_p     = kwargs["mean_period"]
+    gate_p     = kwargs["gate_period"]
+    entry_drop = kwargs["entry_drop_pct"]
+    target     = kwargs["target_pct"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()   # 20-day mean (reversion target)
+    sma_gate = close.rolling(gate_p).mean()   # SMA50 (fast gate + stop)
+
+    # Entry: 5% below SMA20 AND above SMA50 (shallow pullback in medium-term uptrend)
+    in_pullback = close < sma_mean * (1.0 - entry_drop)
+    above_gate  = close > sma_gate
+    # Exit: 3% above SMA20 (target) OR below SMA50 (fast stop)
+    hit_target  = close > sma_mean * (1.0 + target)
+    below_gate  = close < sma_gate
+
+    signal = pd.Series(0, index=df.index)
+    signal[in_pullback & above_gate] = 1
+    signal[hit_target | below_gate]  = -1
+    signal[sma_mean.isna() | sma_gate.isna()] = -1
+
+    df["Signal"] = signal
+    return df
+
+
+@register_strategy(
+    name="EC-R42b: Mean Rev SMA20 3pct + SMA50 Gate [Daily]",
+    dependencies=[],
+    params={
+        "mean_period":      20,
+        "gate_period":      50,
+        "entry_drop_pct":   0.03,   # shallower 3% entry for more frequent trades
+        "target_pct":       0.02,
+    },
+)
+def ec_r42b_mean_rev_sma50_shallow(df, **kwargs):
+    """Shallower 3%/2% variant with SMA50 gate. More trades, smaller gains per trade.
+    Tests whether higher frequency compensates for lower per-trade target."""
+    mean_p     = kwargs["mean_period"]
+    gate_p     = kwargs["gate_period"]
+    entry_drop = kwargs["entry_drop_pct"]
+    target     = kwargs["target_pct"]
+
+    close    = df["Close"]
+    sma_mean = close.rolling(mean_p).mean()
+    sma_gate = close.rolling(gate_p).mean()
+
+    signal = pd.Series(0, index=df.index)
+    in_pullback = (close < sma_mean * (1.0 - entry_drop)) & (close > sma_gate)
+    exit_cond   = (close > sma_mean * (1.0 + target)) | (close < sma_gate)
+    signal[in_pullback] = 1
+    signal[exit_cond]   = -1
+    signal[sma_mean.isna() | sma_gate.isna()] = -1
+
+    df["Signal"] = signal
+    return df

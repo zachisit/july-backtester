@@ -175,7 +175,7 @@ CONFIG = {
     "min_bars_required": 250,  # Daily bars: 250 ≈ 1 year
 
     "portfolios": {
-        "Sectors+DJI 46": "sectors_dji_combined.json",
+        "S&P 500": "norgate:S&P 500 Current & Past",
     },
 
     # ============================================================
@@ -184,7 +184,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.10,   # default 10%
+    "allocation_per_trade": 0.025,  # 2.5% — EC-R42 S&P500 broad universe
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -288,7 +288,10 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": "all",
+    "strategies": [
+        "EC-R42: Mean Rev SMA20 5pct + SMA50 Gate [Daily]",
+        "EC-R42b: Mean Rev SMA20 3pct + SMA50 Gate [Daily]",
+    ],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
