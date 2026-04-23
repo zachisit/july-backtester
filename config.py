@@ -175,9 +175,7 @@ CONFIG = {
     "min_bars_required": 250,  # Daily bars: 250 ≈ 1 year
 
     "portfolios": {
-        "Sectors+DJI 46": "sectors_dji_combined.json",
-        "Nasdaq 100":     "nasdaq_100.json",
-        "Russell 1000":   "russell_1000.json",
+        "S&P 500": "norgate:S&P 500 Current & Past",
     },
 
     # ============================================================
@@ -226,6 +224,9 @@ CONFIG = {
     #   {"type": "atr", "period": 14, "multiplier": 3.0}
     "stop_loss_configs": [
         {"type": "none"},
+        {"type": "percentage", "value": 0.07},
+        {"type": "percentage", "value": 0.10},
+        {"type": "atr", "multiplier": 2.0, "period": 14},
     ],
 
     # ============================================================
@@ -291,7 +292,7 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-R46: Power Dip + SPY Slope + SMA100 [Daily]",
+        "EC-R39b: Mean Rev to SMA20 (5%/3% wide) + SMA200 Gate [Daily]",
     ],
 
     # ============================================================
