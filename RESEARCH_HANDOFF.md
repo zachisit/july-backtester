@@ -4353,6 +4353,70 @@ architectures (EC-R49: trend-following on Sectors+DJI with stop-loss).
 
 ---
 
+## SESSION 44 — EC-R48 Stop-Loss Sweep FAIL + pivot to EC-R49 (2026-04-23)
+
+**Date:** 2026-04-23
+**Run ID:** ec-r48-stop-loss-sweep_2026-04-23_19-42-00
+Detailed: `research_results/ec_round_48.md`
+
+### EC-R48 Results: 0/4 champions — mean reversion + stop-loss is incompatible
+
+Scoring helper output against all 4 stop variants on EC-R39b:
+
+| Variant | Beat SPY | Smooth | <365d | Validation | Champion? |
+|---|---|---|---|---|---|
+| No stop | FAIL (-183pp) | PASS | FAIL (1886d) | PASS | NO |
+| 10% SL | FAIL (-705pp) | FAIL (top1 47%) | FAIL (6048d!) | PASS | NO |
+| 7% SL | FAIL (-20% P&L) | undefined | FAIL (391d) | FAIL (MC2) | NO |
+| 2.0× ATR SL | FAIL (+5% P&L) | FAIL (dominant outlier) | **PASS (198d)** | FAIL (MC2) | NO |
+
+### Key findings
+
+1. **Stop-losses DESTROY mean reversion.** 10% hard stop EXTENDED max recovery to 6048 days
+   (17 years) — worse than no stop at all. The mechanism: stops exit at bad prices during
+   coordinated declines, locking in ~10% losses on each stock that would have bounced back.
+
+2. **EC-R39b baseline no longer beats SPY.** Session 38's "EC-R39b beats SPY 700% vs 534%"
+   used a shorter data snapshot; on current 2004-2026 data EC-R39b is 677% vs SPY 859%
+   (lags 183pp). The mean-reversion-to-SMA20 architecture cannot keep up with 2024-2025
+   bull runs where SPY rarely pulls back 5%.
+
+3. **2.0× ATR trailing is the ONLY variant that achieves <365d recovery** — but reduces P&L
+   to 5.44% (noise). Tight trailing stops + mean-reversion + 2.5% allocation = dead strategy.
+
+### Anti-patterns added (DO NOT RETRY)
+
+- Hard percentage stop-loss on SMA-target mean reversion → exits before bounce, catastrophic
+  during coordinated declines.
+- Tight ATR trailing stop on mean reversion → reduces P&L to transaction noise.
+
+### EC-R49 Direction — Test Chapter 2 Weekly Champions against EC Criteria
+
+Chapter 2 (R1-R51 complete) identified WEEKLY TREND-FOLLOWING champions that WILDLY beat
+SPY (166,502% vs 859%) on NDX Tech 44. Unknown whether they pass EC R2 (smooth distribution)
+and R3 (<365d recovery). This is NOT new strategy hypothesis testing — it's applying the
+four EC gates to already-validated strategies.
+
+**EC-R49 plan:**
+- `"strategies": ["Relative Momentum (13w vs SPY) Weekly + SMA200", "BB Weekly Breakout (20w/2std) + SMA200", "Williams R Weekly Trend (above-20) + SMA200"]`
+- `"timeframe": "W"`, `"timeframe_multiplier": 1`
+- Universe: Sectors+DJI 46 (diversified, broad — not the specific NDX Tech 44 where they
+  were originally validated. Forces a new universality check simultaneously.)
+- Allocation: 2.5%
+- `"stop_loss_configs": [{"type": "none"}]`
+
+Score with `scripts/score_ec_candidate.py` after the run. If any strategy passes all 4
+hard EC requirements → champion found. If all three fail R2 (dominant winners) or R3
+(>365d recovery), the EC chapter's 4-gate intersection within tested architectures is
+empty. At that point the realistic options are:
+- Long/short book (short SPY during bear markets to eliminate directional beta)
+- Options overlay (buy puts during high VIX for DD protection)
+- Fundamentally different universe (ETF rotation across 8-12 sector ETFs)
+
+Commit the SESSION 44 write-up first, then run EC-R49 in the next session.
+
+---
+
 ## BLIND-SESSION BOOTSTRAP
 
 A future Claude Code session starting with NO conversation history can resume work by running:

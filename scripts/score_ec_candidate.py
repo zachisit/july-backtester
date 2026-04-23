@@ -124,28 +124,43 @@ def check_validation_gates(wfa, rolling_wfa, mc_score, oos_pnl_pct):
     return passes, ", ".join(reasons)
 
 
+def _normalize(s):
+    """Lowercase, collapse spaces/underscores/punctuation to aid filename matching."""
+    import re
+    return re.sub(r'[^a-z0-9]', '', s.lower())
+
+
 def _find_trade_log(run_dir, portfolio, strategy_name):
-    """Find the raw trades CSV for (portfolio, strategy). Matches by substring."""
+    """Find the raw trades CSV for (portfolio, strategy). Exact normalized match
+    on the FULL strategy name (which includes any stop-loss suffix)."""
     raw_trades_root = os.path.join(run_dir, 'raw_trades')
     if not os.path.isdir(raw_trades_root):
         return None
-    # Match portfolio subdir by allowing any combination of space/underscore differences
-    norm_target = portfolio.replace(' ', '').replace('_', '').lower()
+    norm_portfolio = _normalize(portfolio)
     portfolio_dir = None
     for d in os.listdir(raw_trades_root):
-        if d.replace(' ', '').replace('_', '').lower() == norm_target:
+        if _normalize(d) == norm_portfolio:
             portfolio_dir = os.path.join(raw_trades_root, d)
             break
     if portfolio_dir is None:
         return None
-    # Match trade log by looking for a unique fragment of the strategy name
-    # (strip any filename-invalid chars). Use the first ~25 chars of strategy
-    # name up to a space as a unique fragment.
-    fragment = strategy_name.split(':')[0].strip()  # "EC-R46" etc.
+    # Pick the trade log whose normalized filename CONTAINS the full normalized
+    # strategy name AND has the SHORTEST extra content (fewest chars beyond the
+    # strategy name). This correctly disambiguates: baseline matches the plain
+    # file (no stop suffix), and "w/ 10% SL" matches only the 10% SL file.
+    norm_strategy = _normalize(strategy_name)
+    best = None
+    best_extra = None
     for fname in os.listdir(portfolio_dir):
-        if fragment in fname and fname.endswith('.csv'):
-            return os.path.join(portfolio_dir, fname)
-    return None
+        if not fname.endswith('.csv'):
+            continue
+        norm_file = _normalize(fname)
+        if norm_strategy in norm_file:
+            extra = len(norm_file) - len(norm_strategy)
+            if best_extra is None or extra < best_extra:
+                best = fname
+                best_extra = extra
+    return os.path.join(portfolio_dir, best) if best else None
 
 
 def score_run(run_dir):
