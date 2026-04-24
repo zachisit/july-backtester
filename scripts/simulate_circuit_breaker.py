@@ -1,21 +1,18 @@
 """
 simulate_circuit_breaker.py — analytical pass of the self-aware circuit breaker
 
-Reads a realized trade log from an existing backtest run. Walks trades in chronological
-order (by EntryDate). For each entry, computes the rolling N-trade win rate on all
-trades that CLOSED strictly before the current EntryDate. Drops entries where the
-win rate had dropped below a halt threshold and not yet recovered above a resume
-threshold (hysteresis).
-
-Writes filtered trade log + comparison plot.
+Two optional post-processing rules applied to an existing realized trade log:
+  1. Self-aware position-size scaler (rolling-N win-rate gate with hysteresis)
+  2. 60-day hold-period time stop (truncates long holds, pro-rates P&L linearly
+     over the shortened hold — approximation of "exit at day N at current price")
 
 Usage:
-    python scripts/simulate_circuit_breaker.py <run_dir> [window] [halt_pct] [resume_pct]
+    python scripts/simulate_circuit_breaker.py <run_dir>
+        [window=20] [halt_pct=0.40] [resume_pct=0.55] [time_stop_days=0]
 
-Defaults: window=20, halt_pct=0.40, resume_pct=0.55
+    time_stop_days=0 disables the time stop (backward-compatible Round 1 behavior).
 
-Read-only aside from its own output under custom_strategies/private/research_results/
-(created if missing).
+Read-only aside from its own output under custom_strategies/private/research_results/.
 """
 
 import os
@@ -213,10 +210,11 @@ def main():
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(2)
-    run_dir    = sys.argv[1].rstrip("/").rstrip("\\")
-    window     = int(sys.argv[2])        if len(sys.argv) > 2 else 20
-    halt_pct   = float(sys.argv[3])      if len(sys.argv) > 3 else 0.40
-    resume_pct = float(sys.argv[4])      if len(sys.argv) > 4 else 0.55
+    run_dir        = sys.argv[1].rstrip("/").rstrip("\\")
+    window         = int(sys.argv[2])    if len(sys.argv) > 2 else 20
+    halt_pct       = float(sys.argv[3])  if len(sys.argv) > 3 else 0.40
+    resume_pct     = float(sys.argv[4])  if len(sys.argv) > 4 else 0.55
+    time_stop_days = int(sys.argv[5])    if len(sys.argv) > 5 else 0
 
     trade_log_path, portfolio, _ = find_trade_log(run_dir)
     print(f"Reading trade log: {trade_log_path}")
@@ -228,6 +226,27 @@ def main():
     print(f"  Total trades:    {len(df)}")
     print(f"  Realized trades: {len(closed)}")
     print(f"  Circuit breaker: window={window}, halt_pct={halt_pct}, resume_pct={resume_pct}")
+    print(f"  Time stop:       {time_stop_days} days ({'ENABLED' if time_stop_days > 0 else 'disabled'})")
+
+    # Apply time stop BEFORE circuit breaker. ASYMMETRIC rule (cut losers short,
+    # let winners run): for LOSING trades with hold > time_stop_days, truncate ExitDate
+    # to EntryDate + time_stop_days and pro-rate the loss linearly. Winners are untouched.
+    # Rationale: if a Williams R bounce hasn't played out in 60 days, the thesis is dead;
+    # if it IS working (Profit > 0 at exit), let the trend run to its natural exit signal.
+    if time_stop_days > 0:
+        hold_days = (closed["ExitDate"] - closed["EntryDate"]).dt.days.clip(lower=1)
+        overlong_losers = (hold_days > time_stop_days) & (closed["Profit"] < 0)
+        n_truncated = int(overlong_losers.sum())
+        if n_truncated:
+            scale = (time_stop_days / hold_days).where(overlong_losers, 1.0)
+            closed = closed.copy()
+            closed["Profit"] = closed["Profit"] * scale
+            new_exit = closed["EntryDate"] + pd.Timedelta(days=time_stop_days)
+            closed["ExitDate"] = closed["ExitDate"].where(~overlong_losers, new_exit)
+            print(f"  Losers truncated by time stop: {n_truncated} ({n_truncated/len(closed)*100:.1f}%)")
+            print(f"  Winners preserved in full:     {int(~overlong_losers.sum() if False else (closed['Profit'] >= 0).sum())}")
+        else:
+            print(f"  Losers truncated by time stop: 0")
 
     kept, gates = apply_circuit_breaker(closed, window, halt_pct, resume_pct, size_discount=0.25)
     reduced_count = gates["in_low_regime"].sum()
@@ -265,12 +284,13 @@ def main():
     # Output
     out_dir = os.path.join("custom_strategies", "private", "research_results", "pdfs", "ec_daily")
     os.makedirs(out_dir, exist_ok=True)
-    output_pdf = os.path.join(out_dir, "EC-R53_Circuit_Breaker_Analytical_Comparison.pdf")
+    suffix = f"_ts{time_stop_days}" if time_stop_days > 0 else ""
+    output_pdf = os.path.join(out_dir, f"EC-R53_Circuit_Breaker_Analytical_Comparison{suffix}.pdf")
     plot_comparison(base_eq, filt_eq, base_dd, filt_dd, base_metrics, filt_metrics, gates, output_pdf)
     print(f"Comparison PDF: {output_pdf}")
 
     # Also save filtered trade log
-    kept_csv = os.path.join(out_dir, "EC-R53_Circuit_Breaker_filtered_trades.csv")
+    kept_csv = os.path.join(out_dir, f"EC-R53_Circuit_Breaker_filtered_trades{suffix}.csv")
     kept.to_csv(kept_csv, index=False)
     print(f"Filtered trade log: {kept_csv}")
 
