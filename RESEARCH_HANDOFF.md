@@ -40,6 +40,22 @@ always costs bull-market P&L — exactly what's needed to beat SPY. Explore:
 
 ---
 
+## ⚠️ STANDING RULE: ALWAYS PRESENT PDFs FOR HUMAN DECISIONS ⚠️
+
+When asking the user to decide anything about a strategy, run, or candidate, you MUST
+generate the relevant PDF tearsheet(s) FIRST and include `file://` URL(s) in the same
+message. Never ask "which path?" or "keep going?" based on metrics alone — visual
+inspection of the equity curve is the user's canonical test. Established Session 49
+(2026-04-23).
+
+- `rtk python report.py --all <run_dir>` for runs with 1 strategy × 1 portfolio
+- `rtk python report.py <analyzer_csv> --output-dir <unique> --report-name <unique>`
+  per-strategy when a run has multiple strategies or portfolios (prevents directory
+  collision from shared strategy names)
+- Exception: purely procedural questions (commit now? rename this file?) don't need PDFs.
+
+---
+
 ## FOR THE HUMAN OPERATOR
 
 **One prompt to start a session:**
