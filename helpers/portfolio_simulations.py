@@ -345,17 +345,20 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     }
                     cash -= total_cost
     
+    exclude_open = CONFIG.get('exclude_open_positions', False)
+
     # --- START: MARK-TO-MARKET LOGIC ---
     # After the main loop, check for any positions that are still open.
+    # Skipped when exclude_open_positions=True (realized-only reporting mode).
     last_date = all_dates[-1]
-    if positions:
+    if positions and not exclude_open:
         for symbol, pos in list(positions.items()):
             # Get the closing price on the very last day of the backtest
             last_price = portfolio_data[symbol]['Close'].get(last_date)
             if pd.notna(last_price):
                 exit_date = last_date
                 exit_reason = "End of Backtest"
-                
+
                 # --- This is the same logging logic from the main loop ---
                 trade_df = portfolio_data[symbol].loc[pos['entry_date']:exit_date]
                 mae_pct = (trade_df['Low'].min() - pos['entry_price']) / pos['entry_price'] if not trade_df.empty else 0.0
@@ -381,9 +384,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
     pnl_list = [t['Profit'] for t in trade_log]
     if not pnl_list: return None
-    
+
     duration_list = [t['HoldDuration'] for t in trade_log]
-    final_pnl_percent = (portfolio_timeline.dropna().iloc[-1] / initial_capital) - 1
+    if exclude_open:
+        # Realized-only: headline P&L is the sum of closed trade profits only.
+        final_pnl_percent = sum(pnl_list) / initial_capital
+    else:
+        final_pnl_percent = (portfolio_timeline.dropna().iloc[-1] / initial_capital) - 1
     metrics = calculate_advanced_metrics(pnl_list, portfolio_timeline.dropna(), duration_list)
 
     return {**metrics, "pnl_percent": final_pnl_percent, "Trades": len(pnl_list),
