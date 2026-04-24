@@ -4549,6 +4549,64 @@ Ample room to dilute concentration and add a reactive gate.
 
 ---
 
+## SESSION 48 — EC-R52 FAILED both variants, decision point reached (2026-04-23)
+
+**Date:** 2026-04-23
+**Run ID:** ec-r52-williams-r-diluted_2026-04-23_20-01-34
+Detailed: `research_results/ec_round_52.md`
+
+### EC-R52 Results: 1% allocation destroyed R1, SMA100 didn't fix R3
+
+| Variant | R1 | R2 | R3 | R4 |
+|---|---|---|---|---|
+| Williams R + SMA200 @ 1% | FAIL (-185pp) | FAIL (top1=3.32%) | FAIL (784d) | PASS |
+| Williams R + SMA100 @ 1% | FAIL (-217pp) | FAIL (top1=3.38%) | FAIL (798d) | PASS |
+
+**Two critical findings:**
+1. Halving allocation (2.5% → 1%) dropped P&L from 2977% to 675% — 78% reduction due to
+   cash drag. Nasdaq 100 weekly at 1% alloc → max 40-50% capital deployed.
+2. SMA100 gate WORSENED recovery (798d vs 784d). Faster re-entry catches more 2022 whipsaws.
+
+### Decision point: 52 rounds, 0 champions — human input needed
+
+**Best candidate after 52 rounds:** Williams R Weekly Trend (above-20) + SMA200 on Nasdaq 100
+at 2.5% allocation (EC-R51):
+
+```
+R1 Beats SPY:      PASS MASSIVELY (+2118pp, 3.5× SPY, OOS +1770%)
+R2 Smooth curve:   FAIL  top1=6.93%, top5=23.37% (NVDA-class winners dominate)
+R3 <365d recovery: FAIL  784 days (encompasses 2008 + 2022 deep bears)
+R4 Validation:     PASS  WFA Pass, Rolling 3/3, MC 5, OOS +1770.24%
+```
+
+### User decision required — 4 paths forward:
+
+1. **Relax R2 threshold** (e.g., top1 <5%, top5 <20%) — recognize that the user's original
+   spec was "top5 <15%"; my helper's top1 <3% is a stricter interpretation. Visual PDF
+   review should be the arbiter.
+
+2. **Relax R3 threshold** (e.g., <730 days for strategies beating SPY by 2×+) — in 2008,
+   SPY itself took 5 years to recover. A strategy recovering in 2.1 years is FASTER than
+   market itself.
+
+3. **Build short-side overlay (EC-R53)** — add short SPY during VIX>35 to EC-R51 baseline.
+   Engine supports short-side (signal=-2, tested in `tests/test_short_selling.py` at small
+   scale) but not validated on full backtest. Likely 2-3 hours of dev work to integrate.
+
+4. **Accept "no champion within pure-long architectures"** — present EC-R51 as best-effort
+   candidate with honest failure caveats and let the user decide based on visual review.
+
+### Present EC-R51 PDF to user before next round
+
+The scoring helper confirms EC-R51 fails 2 strict gates. But the distribution thresholds are
+proxy metrics; the user's canonical test is visual. EC-R51 PDF should be generated and
+presented with honest labelling: "closest candidate found in 52 rounds — FAILS strict R2
+(top1=6.93%) and R3 (784d recovery)".
+
+**No further strategy spawning until user responds to the decision.**
+
+---
+
 ## BLIND-SESSION BOOTSTRAP
 
 A future Claude Code session starting with NO conversation history can resume work by running:
