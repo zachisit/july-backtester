@@ -40,6 +40,54 @@ always costs bull-market P&L — exactly what's needed to beat SPY. Explore:
 
 ---
 
+## ⚠️ INTERPRETING BACKTEST RESULTS: "End of Backtest" = UNREALIZED ⚠️
+
+The backtester closes all open positions at the final bar's close and records them as
+trades with `ExitReason == "End of Backtest"`. These are UNREALIZED mark-to-market —
+the strategy is still holding the bet; the P&L is just current market value minus entry
+cost. They will change when actually exited.
+
+**Why this matters:** On any run that captures an ongoing rally, the final 1-2 years of
+the equity curve can appear to go "straight up" entirely because of unrealized P&L on
+winning open positions. This misleads smoothness, R3 recovery, and R1 beat-SPY margin.
+
+**Case study (EC-R51, Session 49):** Equity curve went vertical in 2026, adding $962k
+in 4 months. Investigation showed **$925k (96%) was unrealized** on 13 open positions,
+9 of which were AI-semiconductor names (MU +354%, LRCX +215%, INTC +179%, etc.).
+Williams R Weekly had entered them all in a tight May-Oct 2025 window and none had
+triggered the exit signal yet.
+
+Realized-only picture for EC-R51:
+- Total realized P&L: $2,056k (vs reported $2,981k including unrealized)
+- Realized equity: $2,156k vs SPY $859k — still 2.5× SPY (not 3.5× as reported)
+- 2026 realized: $38k (vs reported $962k — 96% of 2026 "spike" was unrealized)
+
+**How to apply:**
+1. Before interpreting the final 1-2 years of any equity curve, check the trade log
+   for `ExitReason == "End of Backtest"`. If their combined P&L is >20% of the final
+   year's total gain, the "straight up" is largely unrealized.
+2. Check sector/theme concentration in those open positions. Thematic cohorts (semis,
+   cloud, biotech) move together on entry AND exit — a coordinated exit cascade can
+   produce a realized drawdown that inverts the unrealized rally.
+3. The scorer's top1/top5 distribution metric uses the marked values, so a still-open
+   NVDA-class position at +350% will LOOK dominant even though the realized exit might
+   be +150% and change the R2 pass/fail.
+4. R3 (max recovery) is measured from equity high to recovery. If the equity HIGH is a
+   last-bar mark-to-market rally, the "recovery" hasn't happened yet — the strategy's
+   real R3 can only be assessed AFTER those positions close.
+
+**Diagnostic one-liner** (adapt path):
+```python
+import pandas as pd
+df = pd.read_csv('<trade_log>.csv')
+open_trades = df[df['ExitReason'] == 'End of Backtest']
+print(f"Open: {len(open_trades)}/{len(df)}  Unrealized ${open_trades['Profit'].sum():,.0f} = {open_trades['Profit'].sum()/df['Profit'].sum()*100:.1f}% of total")
+```
+
+When in doubt, compare the headline numbers against realized-only numbers and report BOTH.
+
+---
+
 ## ⚠️ STANDING RULE: ALWAYS PRESENT PDFs FOR HUMAN DECISIONS ⚠️
 
 When asking the user to decide anything about a strategy, run, or candidate, you MUST
