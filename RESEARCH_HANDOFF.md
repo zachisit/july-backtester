@@ -4506,6 +4506,49 @@ If R51 also fails R1, alloc needs to stay at 2.5% but universe must be more tech
 
 ---
 
+## SESSION 47 — EC-R51 Williams R Weekly on Nasdaq 100 (2/4 pass, R1 massive) (2026-04-23)
+
+**Date:** 2026-04-23
+**Run ID:** ec-r51-williams-r-ndx100_2026-04-23_19-58-51
+Detailed: `research_results/ec_round_51.md`
+
+### EC-R51 Results
+
+```
+Williams R Weekly Trend (above-20) + SMA200 on Nasdaq 100:
+  R1 Beats SPY:      PASS   2977% vs SPY 859% (+2118pp, 3.5× SPY)
+  R2 Smooth curve:   FAIL   top1=6.93%, top5=23.37%
+  R3 <365d recovery: FAIL   784 days (improved from NDX Tech's 931)
+  R4 Validation:     PASS   WFA Pass, Rolling 3/3, MC 5, OOS +1770.24%
+```
+
+**Total P&L $2.97M on $100k initial, OOS +1770%. R1 margin is ENORMOUS.**
+
+### Key findings
+
+1. Universe expansion (NDX Tech 44 → Nasdaq 100 = 2.3× symbols) → 3× total P&L, OOS
+   scaled from +731% to +1770%.
+2. **R2 did NOT improve.** top1 stays at ~6.93% on both universes. Concentration is
+   SYMBOL-level (NVDA/AAPL/MSFT mega-rallies dominate), not universe-level.
+3. **R3 improved 16%** (931d → 784d) from more post-bear entry options, but still 2.1 yr.
+
+### EC-R52 Direction — dilute allocation + test SMA100 gate
+
+Need a new Williams R Weekly variant with SMA100 gate (current hard-codes SMA200). Then
+run 4 variants in a single run:
+- A: SMA200 + 1% alloc  (R2 target; R3 same as R51)
+- B: SMA100 + 1% alloc  (R2 + R3 target — if validation holds)
+- C: SMA200 + 2.5% alloc  = EC-R51 baseline
+- D: SMA100 + 2.5% alloc  (R3 test at existing alloc)
+
+If any variant passes all 4 gates → generate PDF, send file:// URL for human review, do
+NOT declare champion without visual review per user directive.
+
+The R1 margin (2118pp buffer) means we can sacrifice 1500pp of P&L while still beating SPY.
+Ample room to dilute concentration and add a reactive gate.
+
+---
+
 ## BLIND-SESSION BOOTSTRAP
 
 A future Claude Code session starting with NO conversation history can resume work by running:
