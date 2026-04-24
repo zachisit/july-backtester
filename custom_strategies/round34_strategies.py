@@ -287,6 +287,70 @@ def williams_r_weekly_trend_sma200(df, **kwargs):
 
 
 # ===========================================================================
+# STRATEGY 3b — Williams R Weekly Trend + SMA100 gate (faster re-entry variant)
+# Created in EC-R52 (2026-04-23) to target EC R3 requirement (<365d recovery)
+# ===========================================================================
+
+@register_strategy(
+    name="Williams R Weekly Trend (above-20) + SMA100",
+    dependencies=[],
+    params={
+        "wr_length":   get_bars_for_period("70d", _TF, _MUL),   # 14w lookback
+        "entry_level": -20.0,
+        "exit_level":  -80.0,
+        "sma_slow":    get_bars_for_period("100d", _TF, _MUL),  # 20w gate (faster)
+    },
+)
+def williams_r_weekly_trend_sma100(df, **kwargs):
+    """Same Williams %R weekly trend logic as Strategy 3, but with SMA100 (20-week)
+    uptrend gate instead of SMA200 (40-week). Re-enters bull regimes 3-8 weeks
+    earlier after bear markets, compressing equity-curve recovery duration."""
+    wr_length    = kwargs["wr_length"]
+    entry_level  = kwargs["entry_level"]
+    exit_level   = kwargs["exit_level"]
+    sma_slow     = kwargs["sma_slow"]
+
+    df = calculate_williams_r(df, wr_length)
+    wr_col = f"WilliamsR_{wr_length}"
+
+    df = calculate_sma(df, sma_slow)
+    sma_col   = f"SMA_{sma_slow}"
+    is_uptrend = df["Close"] > df[sma_col]
+
+    above_entry  = df[wr_col] > entry_level
+    wr_cross_up  = above_entry & ~above_entry.shift(1).fillna(False)
+    wr_below_exit = df[wr_col] < exit_level
+
+    is_entry = wr_cross_up & is_uptrend
+    is_exit  = wr_below_exit | ~is_uptrend
+
+    signals = []
+    in_position = False
+    for i in range(len(df)):
+        wr_val  = df[wr_col].iloc[i]
+        sma_val = df[sma_col].iloc[i]
+        if pd.isna(wr_val) or pd.isna(sma_val):
+            signals.append(-1)
+            continue
+        if not in_position:
+            if is_entry.iloc[i]:
+                in_position = True
+                signals.append(1)
+            else:
+                signals.append(-1)
+        else:
+            if is_exit.iloc[i]:
+                in_position = False
+                signals.append(-1)
+            else:
+                signals.append(1)
+
+    df["Signal"] = signals
+    df.drop(columns=[wr_col, sma_col], errors="ignore", inplace=True)
+    return df
+
+
+# ===========================================================================
 # STRATEGY 4 — Volume-Weighted RSI (VWRSI) Weekly Trend (>55) + SMA200
 # Entry: VWRSI(14w) crosses above 55 AND price > SMA(40w)
 # ===========================================================================
