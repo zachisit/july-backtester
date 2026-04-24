@@ -184,7 +184,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.01,  # 1% — EC-R52 dilution test (Nasdaq 100 weekly)
+    "allocation_per_trade": 0.025,  # 2.5% — EC-R51 baseline (restored from R52's 1% dilution test)
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -290,7 +290,6 @@ CONFIG = {
     # skipped — a typo will not cause a crash.
     "strategies": [
         "Williams R Weekly Trend (above-20) + SMA200",
-        "Williams R Weekly Trend (above-20) + SMA100",
     ],
 
     # ============================================================
