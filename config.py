@@ -170,7 +170,8 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "My Symbols": ["AAPL"],
+        "AutoResearch": ["SPY", "QQQ", "AAPL"],
+        #"My Symbols": ["AAPL"],
         #"Nasdaq 100": "nasdaq_100.json",
         #"Nasdaq Biotech": "nasdaq_biotech_tickers.json",
         #"Russell 1000": "russell_1000.json",
@@ -286,7 +287,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["SMA Crossover (20d/50d)"],
+    "strategies": ["AutoResearch SMA"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
