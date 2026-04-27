@@ -349,6 +349,23 @@ CONFIG = {
     # When True, all 23 columns are displayed.
     # Override at runtime with: python main.py --verbose
     "verbose_output": False,
+
+    # ============================================================
+    # SECTION 22: REALIZED-ONLY REPORTING
+    # ============================================================
+    # When True, positions that are still open at the final bar are
+    # excluded from the trade log entirely. The headline P&L (%) and
+    # trade count will reflect only closed (realized) trades.
+    # The equity curve and risk metrics (Sharpe, drawdown) are still
+    # computed from the full mark-to-market portfolio timeline.
+    #
+    # Use this to strip end-of-backtest mark-to-market inflation from
+    # summary metrics — e.g. when a large concentrated cohort of open
+    # positions is driving reported equity unrealistically higher.
+    #
+    # False (default) = include EoB mark-to-market closes (original behaviour)
+    # True            = realized trades only; EoB positions are dropped
+    "exclude_open_positions": False,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

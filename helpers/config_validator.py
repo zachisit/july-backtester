@@ -89,6 +89,8 @@ KNOWN_KEYS: set[str] = {
     "export_ml_features",
     # SECTION 21: Verbose Summary Table
     "verbose_output",
+    # SECTION 22: Realized-Only Reporting
+    "exclude_open_positions",
     # S3
     "s3_reports_bucket",
     "upload_to_s3",
