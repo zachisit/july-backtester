@@ -18,11 +18,13 @@ def calculate_advanced_metrics(pnl_list, portfolio_timeline, duration_list):
         metrics["avg_trade_duration"] = np.mean(duration_list)
 
     if not portfolio_timeline.empty and len(portfolio_timeline) > 1:
-        daily_returns = portfolio_timeline.pct_change().dropna()
-        if len(daily_returns) > 1:
-            rf_daily = (1 + CONFIG.get("risk_free_rate", 0.05)) ** (1 / 252) - 1
-            excess_returns = daily_returns - rf_daily
-            metrics["sharpe_ratio"] = (excess_returns.mean() / excess_returns.std()) * np.sqrt(252) if excess_returns.std() > 0 else 0
+        bar_returns = portfolio_timeline.pct_change().dropna()
+        if len(bar_returns) > 1:
+            from helpers.timeframe_utils import get_bars_per_year
+            bars_per_year = get_bars_per_year(CONFIG)
+            rf_per_bar = (1 + CONFIG.get("risk_free_rate", 0.05)) ** (1 / bars_per_year) - 1
+            excess_returns = bar_returns - rf_per_bar
+            metrics["sharpe_ratio"] = (excess_returns.mean() / excess_returns.std()) * np.sqrt(bars_per_year) if excess_returns.std() > 0 else 0
         
         running_peak = portfolio_timeline.expanding(min_periods=1).max()
         drawdown = (portfolio_timeline - running_peak) / running_peak
@@ -89,9 +91,11 @@ def calculate_rolling_sharpe(portfolio_timeline, window=126, risk_free_rate=None
     """
     if risk_free_rate is None:
         risk_free_rate = float(CONFIG.get("risk_free_rate", 0.05))
-    rf_daily = (1.0 + risk_free_rate) ** (1.0 / 252) - 1.0
-    daily_returns = portfolio_timeline.pct_change()
-    excess = daily_returns - rf_daily
+    from helpers.timeframe_utils import get_bars_per_year
+    bars_per_year = get_bars_per_year(CONFIG)
+    rf_per_bar = (1.0 + risk_free_rate) ** (1.0 / bars_per_year) - 1.0
+    bar_returns = portfolio_timeline.pct_change()
+    excess = bar_returns - rf_per_bar
     roll_mean = excess.rolling(window=window, min_periods=window).mean()
     roll_std  = excess.rolling(window=window, min_periods=window).std()
-    return roll_mean / roll_std.replace(0, float("nan")) * (252 ** 0.5)
+    return roll_mean / roll_std.replace(0, float("nan")) * (bars_per_year ** 0.5)
