@@ -68,17 +68,27 @@ def generate_overall_metrics_summary(
         total_trades = core_metrics.get('total_trades', 0)
 
         # --- Duration & CAGR ---
-        start_date = trades_df['Date'].min()
-        end_date = trades_df['Ex. date'].max()
+        # Prefer the equity-curve index span so the duration matches the terminal's
+        # full configured period (including warmup).  Fall back to first-trade /
+        # last-trade dates when no equity curve is available.
         total_duration_years = 0.0
         trades_per_year = 0.0
         duration_text = "N/A"
-        if pd.notna(start_date) and pd.notna(end_date) and end_date > start_date:
-            duration_delta = end_date - start_date
+        if not daily_equity.empty and isinstance(daily_equity.index, pd.DatetimeIndex) and len(daily_equity) > 1:
+            duration_delta = daily_equity.index[-1] - daily_equity.index[0]
             total_duration_years = duration_delta.days / 365.25
             duration_text = f"{total_duration_years:.2f} years ({duration_delta.days} days)"
             if total_duration_years > 1e-6:
-                 trades_per_year = total_trades / total_duration_years
+                trades_per_year = total_trades / total_duration_years
+        else:
+            start_date = trades_df['Date'].min()
+            end_date = trades_df['Ex. date'].max()
+            if pd.notna(start_date) and pd.notna(end_date) and end_date > start_date:
+                duration_delta = end_date - start_date
+                total_duration_years = duration_delta.days / 365.25
+                duration_text = f"{total_duration_years:.2f} years ({duration_delta.days} days)"
+                if total_duration_years > 1e-6:
+                    trades_per_year = total_trades / total_duration_years
 
         cagr = calculations.calculate_cagr(initial_equity, final_equity, total_duration_years)
 

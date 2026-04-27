@@ -280,9 +280,6 @@ def build_executive_summary_page(
     total_return = (final_equity / initial_equity - 1) if initial_equity > 0 else None
     total_dur = core_metrics.get('duration_years', 0) or 0
     cagr = calculations.calculate_cagr(initial_equity, final_equity, total_dur) if total_dur > 0 else None
-    sharpe = calculations.calculate_sharpe_ratio(
-        core_metrics.get('daily_returns', pd.Series(dtype=float)),
-        risk_free_rate, 252) if not isinstance(core_metrics.get('daily_returns'), type(None)) else None
 
     _, _, _, max_dd = calculations.calculate_equity_drawdown(daily_equity)
 

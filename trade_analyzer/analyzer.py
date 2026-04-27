@@ -164,12 +164,21 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
         else:
             benchmark_returns = pd.Series(dtype=float)
 
-        # Resolve equity series for drawdown — prefer the backtester's daily MTM
-        # portfolio_timeline (passed via PORTFOLIO_TIMELINE) so that all drawdown
-        # figures in the PDF match the terminal's max_drawdown exactly.
+        # Resolve equity series — prefer the backtester's daily MTM portfolio_timeline
+        # (passed via PORTFOLIO_TIMELINE) so that CAGR duration, Sharpe, Sortino, and
+        # drawdown all derive from the same data as the terminal.
+        #
+        # Without this, CAGR duration is measured from first-trade-entry to last-trade-exit
+        # (excluding the warmup period), Sharpe/Sortino start from the first trade rather
+        # than the configured start_date, and drawdown misses intra-trade mark-to-market.
         _portfolio_timeline = config_params.get('PORTFOLIO_TIMELINE')
         if _portfolio_timeline is not None and not _portfolio_timeline.empty:
             equity_for_dd_calc = _portfolio_timeline
+            daily_equity = _portfolio_timeline
+            daily_returns = _portfolio_timeline.pct_change().dropna()
+            total_duration_years = (
+                (_portfolio_timeline.index[-1] - _portfolio_timeline.index[0]).days / 365.25
+            )
         elif not daily_equity.empty:
             equity_for_dd_calc = daily_equity
         else:
