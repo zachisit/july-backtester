@@ -201,8 +201,11 @@ def plot_equity_and_drawdown(
         if isinstance(equity_dd_percent, pd.Series) and not equity_dd_percent.empty \
                 and pd.api.types.is_numeric_dtype(equity_dd_percent):
             neg_dd = -equity_dd_percent
-            axes[1].fill_between(x, neg_dd, 0, color=T['dd_fill'], alpha=0.8)
-            axes[1].plot(x, neg_dd, color=T['negative'], linewidth=0.8)
+            # Use the series' own DatetimeIndex to avoid a shape mismatch when the
+            # portfolio timeline has more bars than the number of trades.
+            dd_x = equity_dd_percent.index if isinstance(equity_dd_percent.index, pd.DatetimeIndex) else x
+            axes[1].fill_between(dd_x, neg_dd, 0, color=T['dd_fill'], alpha=0.8)
+            axes[1].plot(dd_x, neg_dd, color=T['negative'], linewidth=0.8)
             axes[1].yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=0))
             bottom = min(-equity_dd_percent.max() * 1.05, -1)
             axes[1].set_ylim(bottom=bottom, top=0.5)
@@ -251,10 +254,13 @@ def plot_underwater(
         use_dates = 'Ex. date' in trades_df.columns and pd.api.types.is_datetime64_any_dtype(trades_df['Ex. date'])
         x = trades_df['Ex. date'] if use_dates else trades_df.index
         underwater = -equity_dd_percent
+        # Use the series' own DatetimeIndex to avoid a shape mismatch when the
+        # portfolio timeline has more bars than the number of trades.
+        dd_x = equity_dd_percent.index if isinstance(equity_dd_percent.index, pd.DatetimeIndex) else x
 
         fig, ax = plt.subplots(figsize=config.FIG_HALF_H)
-        ax.fill_between(x, underwater, 0, color=T['dd_fill'], alpha=0.85)
-        ax.plot(x, underwater, color=T['negative'], linewidth=0.8)
+        ax.fill_between(dd_x, underwater, 0, color=T['dd_fill'], alpha=0.85)
+        ax.plot(dd_x, underwater, color=T['negative'], linewidth=0.8)
         ax.axhline(0, color=T['neutral'], linestyle='-', linewidth=0.8)
         ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=100.0, decimals=0))
         bottom = min(underwater.min() * 1.05, -1)
