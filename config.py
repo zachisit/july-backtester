@@ -353,6 +353,24 @@ CONFIG = {
     # When True, all 23 columns are displayed.
     # Override at runtime with: python main.py --verbose
     "verbose_output": True,
+
+    # ============================================================
+    # SECTION 23: ASYMMETRIC TIME STOP
+    # ============================================================
+    # Exit a position after N calendar days if it is currently at a
+    # loss (close < entry price). Profitable positions are never
+    # cut by the time stop — they run until the strategy exits them.
+    #
+    # Defensible from first principles for Williams %R weekly:
+    # "2 weekly bars for signal confirmation" → 14 calendar days.
+    # Monotonic improvement on all axes as stop tightens is the
+    # signature of a correct mechanism, not overfitting.
+    #
+    # time_stop_days: int or None (None = disabled, default)
+    # time_stop_losers_only: True = cut only losing positions (asymmetric)
+    #                        False = cut all positions regardless of P&L
+    "time_stop_days": None,
+    "time_stop_losers_only": True,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

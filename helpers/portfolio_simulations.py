@@ -13,6 +13,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
     execution_time = CONFIG.get("execution_time", "open").lower()
     htb_rate_annual = CONFIG.get("htb_rate_annual", 0.0)
+    _time_stop_days = CONFIG.get("time_stop_days")
+    _time_stop_losers_only = CONFIG.get("time_stop_losers_only", True)
 
     # Dynamic HTB rate compounding based on timeframe (fixes issue #55)
     bars_per_year = get_bars_per_year(CONFIG)
@@ -72,6 +74,18 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     raw_exit_price = pos['stop_loss_level']
                     exit_date = date
                     exit_reason = f"Stop Loss ({stop_config['type']})"
+
+            # --- TIME STOP CHECK ---
+            if pd.isna(raw_exit_price) and _time_stop_days is not None:
+                hold_days = (date - pos['entry_date']).days
+                if hold_days >= _time_stop_days:
+                    current_close = portfolio_data[symbol].loc[date].get('Close')
+                    is_loser = pd.notna(current_close) and current_close < pos['entry_price']
+                    if not _time_stop_losers_only or is_loser:
+                        raw_exit_price = portfolio_data[symbol].loc[date].get(
+                            'Open' if execution_time == 'open' else 'Close')
+                        exit_date = date
+                        exit_reason = "Time Stop"
 
             # --- STRATEGY-BASED EXIT ---
             if pd.isna(raw_exit_price):

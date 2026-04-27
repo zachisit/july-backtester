@@ -89,6 +89,9 @@ KNOWN_KEYS: set[str] = {
     "export_ml_features",
     # SECTION 21: Verbose Summary Table
     "verbose_output",
+    # SECTION 23: Asymmetric Time Stop
+    "time_stop_days",
+    "time_stop_losers_only",
     # S3
     "s3_reports_bucket",
     "upload_to_s3",
