@@ -1,18 +1,21 @@
 # report_generator.py
 import math
-import os 
-import re 
+import os
+import re
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mtick
+import matplotlib.gridspec as mgridspec
 from matplotlib.backends.backend_pdf import PdfPages
 import pandas as pd
 import numpy as np
 import traceback
+from datetime import datetime
 from pandas.core.dtypes.dtypes import PeriodDtype
 
 from . import default_config as config
 from . import calculations
 from . import utils
+from . import plotting as _plotting
 
 def create_text_figure(lines_to_draw, page_title=""):
     """Creates a matplotlib figure containing the provided lines of text."""
@@ -65,17 +68,27 @@ def generate_overall_metrics_summary(
         total_trades = core_metrics.get('total_trades', 0)
 
         # --- Duration & CAGR ---
-        start_date = trades_df['Date'].min()
-        end_date = trades_df['Ex. date'].max()
+        # Prefer the equity-curve index span so the duration matches the terminal's
+        # full configured period (including warmup).  Fall back to first-trade /
+        # last-trade dates when no equity curve is available.
         total_duration_years = 0.0
         trades_per_year = 0.0
         duration_text = "N/A"
-        if pd.notna(start_date) and pd.notna(end_date) and end_date > start_date:
-            duration_delta = end_date - start_date
+        if not daily_equity.empty and isinstance(daily_equity.index, pd.DatetimeIndex) and len(daily_equity) > 1:
+            duration_delta = daily_equity.index[-1] - daily_equity.index[0]
             total_duration_years = duration_delta.days / 365.25
             duration_text = f"{total_duration_years:.2f} years ({duration_delta.days} days)"
             if total_duration_years > 1e-6:
-                 trades_per_year = total_trades / total_duration_years
+                trades_per_year = total_trades / total_duration_years
+        else:
+            start_date = trades_df['Date'].min()
+            end_date = trades_df['Ex. date'].max()
+            if pd.notna(start_date) and pd.notna(end_date) and end_date > start_date:
+                duration_delta = end_date - start_date
+                total_duration_years = duration_delta.days / 365.25
+                duration_text = f"{total_duration_years:.2f} years ({duration_delta.days} days)"
+                if total_duration_years > 1e-6:
+                    trades_per_year = total_trades / total_duration_years
 
         cagr = calculations.calculate_cagr(initial_equity, final_equity, total_duration_years)
 
@@ -84,12 +97,14 @@ def generate_overall_metrics_summary(
         annualized_sortino = calculations.calculate_sortino_ratio(daily_returns, risk_free_rate, trading_days_per_year)
 
         # --- Historical Backtest Drawdown (from Equity Curve) ---
+        # Prefer daily_equity when provided — it is set by the caller to the
+        # daily MTM portfolio_timeline so it matches the terminal's max_drawdown.
         equity_curve_for_hist_dd = pd.Series(dtype=float)
-        if 'Equity' in trades_df.columns and pd.api.types.is_numeric_dtype(trades_df['Equity']) and trades_df['Equity'].notna().all():
-            equity_curve_for_hist_dd = trades_df['Equity']
-        elif not daily_equity.empty:
+        if not daily_equity.empty:
             equity_curve_for_hist_dd = daily_equity
-            
+        elif 'Equity' in trades_df.columns and pd.api.types.is_numeric_dtype(trades_df['Equity']) and trades_df['Equity'].notna().all():
+            equity_curve_for_hist_dd = trades_df['Equity']
+
         _, _, _, max_equity_dd_percent = calculations.calculate_equity_drawdown(equity_curve_for_hist_dd)
 
         # --- Calmar Ratio ---
@@ -790,16 +805,11 @@ def generate_mc_percentile_table(mc_results: dict, drawdown_as_negative: bool) -
         table_string = f"Error generating MC percentile table: {e}\n{traceback.format_exc()}"
     return title, table_string
 
-# --- generate_pdf_report ---
+# --- generate_pdf_report (legacy — used only as fallback, kept for compat) ---
 def generate_pdf_report(report_sections, output_path, report_title_suffix=""):
     """
-    Generates the PDF report from a list of sections, handling pagination for text.
-
-    Args:
-        report_sections (list): List of dictionaries defining report content.
-                                Each dict: {'type': 'text'|'plot', 'title': str, 'data': str|Figure}
-        output_path (str): Path to save the output PDF file.
-        report_title_suffix (str, optional): Suffix to add to the main report title. Defaults to "".
+    Legacy PDF report generator — produces the old monospace-text layout.
+    Called when the new report_data dict is not available.
     """
     print(f"\n--- Generating PDF Report: {output_path} ---")
     pdf_pages = None

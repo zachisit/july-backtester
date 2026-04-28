@@ -89,7 +89,9 @@ KNOWN_KEYS: set[str] = {
     "export_ml_features",
     # SECTION 21: Verbose Summary Table
     "verbose_output",
-    # SECTION 22: Survivorship Bias
+    # SECTION 22: Realized-Only Reporting
+    "exclude_open_positions",
+    # SECTION 23: Survivorship Bias
     "include_delisted",
     "delisting_price_assumption",
     # S3
