@@ -486,6 +486,26 @@ def main():
             logger.warning(f"No symbols found for '{portfolio_name}'. Skipping.")
             continue
 
+        # --- SURVIVORSHIP: merge delisted symbols into universe ---
+        if CONFIG.get("include_delisted", False):
+            delisted_file = CONFIG.get("delisted_symbols_file")
+            if delisted_file:
+                delisted_path = os.path.join("tickers_to_scan", delisted_file) if not os.path.isabs(delisted_file) else delisted_file
+                if os.path.exists(delisted_path):
+                    with open(delisted_path, "rb") as _f:
+                        extra_symbols = orjson.loads(_f.read())
+                    before = len(symbols)
+                    symbols = list(dict.fromkeys(symbols + extra_symbols))
+                    logger.info(f"  -> Merged {len(symbols) - before} delisted symbols from '{delisted_file}' (universe: {len(symbols)} total)")
+                else:
+                    logger.warning(f"  -> [WARNING] delisted_symbols_file '{delisted_file}' not found — universe contains survivors only")
+            else:
+                logger.warning(
+                    "  -> [WARNING] include_delisted=True but no delisted_symbols_file configured. "
+                    "Universe contains survivors only. Set 'delisted_symbols_file' to a JSON ticker list "
+                    "(e.g. tickers_to_scan/nasdaq_100_delisted.json) to include historically delisted stocks."
+                )
+
         MIN_BARS = CONFIG.get("min_bars_required", 250)
         skipped_symbols = []
         portfolio_data = {}

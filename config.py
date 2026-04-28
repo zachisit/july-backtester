@@ -137,4 +137,13 @@ CONFIG = {
     # "last_close" — use the last known Close price (default, realistic)
     # "zero" — assume total loss (conservative, stress-test scenario)
     "delisting_price_assumption": "last_close",
+
+    # Optional path to a JSON file of historically delisted symbols to merge
+    # into the universe when include_delisted=True. Same format as nasdaq_100.json.
+    # Relative paths resolve from tickers_to_scan/. Set to None to disable.
+    # Without this, the universe still only contains surviving stocks even when
+    # include_delisted=True — setting this is required for true survivorship
+    # bias correction.
+    # Example: "delisted_symbols_file": "nasdaq_100_delisted.json"
+    "delisted_symbols_file": None,
 }
