@@ -94,6 +94,7 @@ KNOWN_KEYS: set[str] = {
     # SECTION 23: Survivorship Bias
     "include_delisted",
     "delisting_price_assumption",
+    "delisted_symbols_file",
     # S3
     "s3_reports_bucket",
     "upload_to_s3",
