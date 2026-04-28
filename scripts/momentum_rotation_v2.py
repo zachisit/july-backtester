@@ -44,7 +44,8 @@ MAX_POSITION_SIZE  = 50_000.0      # hard dollar cap per position; None = no cap
 MAX_POSITIONS      = 5
 SELL_BUFFER_RANK   = 15            # sell if rank drops below this
 MOMENTUM_LOOKBACK  = 60            # trading days for RS_60d
-REGIME_MA_PERIOD   = 200           # QQQ SMA period
+REGIME_MA_PERIOD   = 200           # QQQ SMA period — change to 50 for faster filter
+VIX_REGIME_THRESH  = None          # float (e.g. 30.0) = regime OFF above this VIX; None = disabled
 SLIPPAGE_BUY       = 0.0010        # 10 bps added to buy price
 SLIPPAGE_SELL      = 0.0010        # 10 bps subtracted from sell price
 COMMISSION_PER_SHR = 0.002         # $0.002 per share each way
@@ -99,7 +100,20 @@ def load_all_data() -> dict:
             print(f"    {i+1}/{len(tickers)} loaded", flush=True)
 
     print(f"  Loaded {len(all_data)} symbols OK\n")
-    return all_data
+
+    vix_df = None
+    if VIX_REGIME_THRESH is not None:
+        vix_path = os.path.join("parquet_data", "data", "$VIX.parquet")
+        if os.path.exists(vix_path):
+            vix_df = pd.read_parquet(vix_path)
+            if vix_df.index.tz is not None:
+                vix_df.index = vix_df.index.tz_localize(None)
+            vix_df.index = vix_df.index.normalize()
+            print(f"  VIX loaded: {vix_df.index.min().date()} → {vix_df.index.max().date()}\n")
+        else:
+            print(f"  [WARN] VIX parquet not found at {vix_path} — VIX overlay disabled\n")
+
+    return all_data, vix_df
 
 
 # ── Price helpers ─────────────────────────────────────────────────────────────
@@ -143,8 +157,8 @@ def build_rebalance_pairs(all_data: dict) -> list:
 
 # ── Regime filter ─────────────────────────────────────────────────────────────
 
-def is_regime_on(qqq_df: pd.DataFrame, signal_date) -> bool:
-    """True if QQQ close > 200-day SMA on signal_date."""
+def is_regime_on(qqq_df: pd.DataFrame, signal_date, vix_df=None) -> bool:
+    """True if QQQ close > REGIME_MA_PERIOD SMA AND (VIX <= VIX_REGIME_THRESH or overlay disabled)."""
     target = pd.Timestamp(signal_date).normalize()
     if target not in qqq_df.index:
         return False
@@ -154,8 +168,18 @@ def is_regime_on(qqq_df: pd.DataFrame, signal_date) -> bool:
         return False
 
     close_now = float(qqq_df["Close"].iloc[iloc_pos])
-    ma_200    = float(qqq_df["Close"].iloc[iloc_pos - REGIME_MA_PERIOD + 1: iloc_pos + 1].mean())
-    return close_now > ma_200
+    ma        = float(qqq_df["Close"].iloc[iloc_pos - REGIME_MA_PERIOD + 1: iloc_pos + 1].mean())
+    if close_now <= ma:
+        return False
+
+    if VIX_REGIME_THRESH is not None and vix_df is not None:
+        prior = vix_df[vix_df.index <= target]
+        if not prior.empty:
+            vix_close = float(prior["Close"].iloc[-1])
+            if vix_close > VIX_REGIME_THRESH:
+                return False
+
+    return True
 
 
 # ── RS_60d ───────────────────────────────────────────────────────────────────
@@ -189,7 +213,7 @@ def compute_rs60_all(all_data: dict, qqq_df: pd.DataFrame, signal_date) -> dict:
 
 # ── Simulation ────────────────────────────────────────────────────────────────
 
-def run_backtest(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list):
+def run_backtest(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list, vix_df=None):
     cash      = INITIAL_CAPITAL
     positions = {}   # {sym: {shares, entry_price, entry_date, cost_basis}}
     trade_log = []
@@ -264,7 +288,7 @@ def run_backtest(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list):
 
         equity_log.append((signal_date, mtm_equity(signal_date)))
 
-        regime_on = is_regime_on(qqq_df, signal_date)
+        regime_on = is_regime_on(qqq_df, signal_date, vix_df=vix_df)
         if not regime_on:
             for sym in list(positions.keys()):
                 do_sell(sym, exec_date, "Regime OFF")
@@ -407,7 +431,7 @@ def print_results(trade_log: list, equity_log: list):
 
 # ── Signal file (for main.py integration) ────────────────────────────────────
 
-def generate_signal_file(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list):
+def generate_signal_file(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list, vix_df=None):
     """
     Generates a CSV of per-stock buy/sell signals so main.py can run the
     full pipeline (MC, WFA, PDF report) on this strategy.
@@ -421,7 +445,7 @@ def generate_signal_file(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: 
     positions = set()   # currently held symbols (for tracking only)
 
     for signal_date, _ in rebalance_pairs:
-        regime_on = is_regime_on(qqq_df, signal_date)
+        regime_on = is_regime_on(qqq_df, signal_date, vix_df=vix_df)
 
         if not regime_on:
             for sym in list(positions):
@@ -564,8 +588,12 @@ def main():
     print("  Momentum Rotation v2 — Standalone Backtest")
     print("=" * 62)
 
-    all_data = load_all_data()
-    qqq_df   = all_data.pop(REGIME_TICKER, None)
+    ma_label  = f"QQQ > {REGIME_MA_PERIOD}-day SMA"
+    vix_label = f" AND VIX ≤ {VIX_REGIME_THRESH}" if VIX_REGIME_THRESH else ""
+    print(f"  Regime Filter    : {ma_label}{vix_label}")
+
+    all_data, vix_df = load_all_data()
+    qqq_df           = all_data.pop(REGIME_TICKER, None)
 
     if qqq_df is None:
         print("ERROR: QQQ data unavailable. Check data_provider in config.py.")
@@ -578,7 +606,7 @@ def main():
     rebalance_pairs = build_rebalance_pairs({**all_data, REGIME_TICKER: qqq_df})
     print(f"  {len(rebalance_pairs)} rebalance weeks built\n")
 
-    trade_log, equity_log = run_backtest(all_data, qqq_df, rebalance_pairs)
+    trade_log, equity_log = run_backtest(all_data, qqq_df, rebalance_pairs, vix_df=vix_df)
     print_results(trade_log, equity_log)
 
     run_id  = datetime.now().strftime("momentum-rotation-v2_%Y-%m-%d_%H-%M-%S")
