@@ -88,14 +88,22 @@ class TestSharpeRiskFreeRate:
         )
 
     def test_calculate_advanced_metrics_uses_risk_free_rate(self):
-        """End-to-end: calculate_advanced_metrics must match the rf-adjusted formula."""
+        """End-to-end: calculate_advanced_metrics must match the rf-adjusted formula.
+
+        The timeline has 252 entries (daily resolution), so we must patch the
+        config to timeframe='D' so get_bars_per_year returns 252 and the
+        annualization factor matches the expected formula.
+        """
+        from unittest.mock import patch
         timeline = _make_portfolio_timeline()
         pnl_list = [100.0] * 10  # arbitrary; only Sharpe is under test
 
-        result = calculate_advanced_metrics(pnl_list, timeline, [3] * 10)
+        daily_cfg = {"risk_free_rate": 0.05, "timeframe": "D", "timeframe_multiplier": 1}
+        with patch.dict("config.CONFIG", daily_cfg):
+            result = calculate_advanced_metrics(pnl_list, timeline, [3] * 10)
 
         daily_returns = timeline.pct_change().dropna()
-        rf_daily = (1 + CONFIG["risk_free_rate"]) ** (1 / 252) - 1
+        rf_daily = (1 + 0.05) ** (1 / 252) - 1
         excess = daily_returns - rf_daily
         expected_sharpe = (excess.mean() / excess.std()) * math.sqrt(252)
 

@@ -84,6 +84,13 @@ def gap_up_overnight_example(df, **kwargs):
     is_bull_market = regime_df['spy_close'] > regime_df['spy_sma']
 
     # --- Part 3: Combine into signals ---
+    #
+    # Signal convention (applies to ALL strategies in this engine):
+    #   1   → enter long / hold long
+    #   0   → no change (hold whatever position is currently open)
+    #  -1   → exit long OR cover short (go flat)
+    #  -2   → enter short  (long-only strategies never emit this)
+    #
     # Buy (1) on a gap-up day during a bull market.
     # Since we want a 1-bar hold, we exit (-1) on the very next bar.
     # We do this by setting the buy signal, then shifting exit by 1 bar.

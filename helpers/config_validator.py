@@ -89,7 +89,9 @@ KNOWN_KEYS: set[str] = {
     "export_ml_features",
     # SECTION 21: Verbose Summary Table
     "verbose_output",
-    # SECTION 22: Position Sizing
+    # SECTION 22: Realized-Only Reporting
+    "exclude_open_positions",
+    # SECTION 23: Position Sizing
     "position_sizing_method",
     "kelly_fraction",
     "target_risk_per_trade",
