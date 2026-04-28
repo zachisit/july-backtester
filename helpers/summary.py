@@ -638,13 +638,19 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_
         if 'MFE' in mapped_df.columns:
             mapped_df['MFE'] = mapped_df['MFE'] * 100.0
         csv_filename = f"{strategy_name_safe}.csv"
-        pending_csvs.append((os.path.join(analyzer_csv_folder, csv_filename), mapped_df))
+        timeline = result.get('portfolio_timeline')
+        equity_filename = f"{strategy_name_safe}_equity.csv" if (timeline is not None and not timeline.empty) else None
+        pending_csvs.append((os.path.join(analyzer_csv_folder, csv_filename), mapped_df, timeline, equity_filename))
 
     analyzer_csvs_saved = len(pending_csvs)
     if analyzer_csvs_saved > 0:
         os.makedirs(analyzer_csv_folder, exist_ok=True)
-        for csv_path, mapped_df in pending_csvs:
+        for csv_path, mapped_df, timeline, equity_filename in pending_csvs:
             mapped_df.to_csv(csv_path, index=False)
+            if equity_filename is not None:
+                timeline.rename("Equity").rename_axis("Date").to_csv(
+                    os.path.join(analyzer_csv_folder, equity_filename)
+                )
         print(f"  Exported {analyzer_csvs_saved} analyzer-compatible CSVs to {analyzer_csv_folder}")
 
     # --- Step 4b: Use the ORIGINAL, UNFILTERED list to save ALL generated trade logs ---

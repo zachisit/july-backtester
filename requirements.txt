@@ -1,13 +1,16 @@
 # requirements.txt
+# All packages pinned to exact versions from a confirmed working environment.
+# Run `pip install -r requirements.txt` to reproduce the exact install.
+# When upgrading a package, update the pin here and re-run the full test suite.
 
-pandas
-numpy<2.0
-tqdm
-boto3  # used for S3 report uploads only, not auth
-requests
-python-dotenv
-pandas-ta
-orjson
-pyarrow
-yfinance  # required only when data_provider = "yahoo"
-matplotlib  # candlestick charts and PDF plot generation
+pandas==2.2.3
+numpy==2.3.0
+tqdm==4.67.1
+boto3==1.40.2          # used for S3 report uploads only, not auth
+requests==2.32.3
+python-dotenv==1.1.1
+pandas-ta==0.3.14b0
+orjson==3.11.1
+pyarrow==21.0.0
+yfinance==0.2.65       # required only when data_provider = "yahoo"
+matplotlib==3.10.1     # candlestick charts and PDF plot generation

@@ -164,9 +164,29 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
         else:
             benchmark_returns = pd.Series(dtype=float)
 
+        # Resolve equity series — prefer the backtester's daily MTM portfolio_timeline
+        # (passed via PORTFOLIO_TIMELINE) so that CAGR duration, Sharpe, Sortino, and
+        # drawdown all derive from the same data as the terminal.
+        #
+        # Without this, CAGR duration is measured from first-trade-entry to last-trade-exit
+        # (excluding the warmup period), Sharpe/Sortino start from the first trade rather
+        # than the configured start_date, and drawdown misses intra-trade mark-to-market.
+        _portfolio_timeline = config_params.get('PORTFOLIO_TIMELINE')
+        if _portfolio_timeline is not None and not _portfolio_timeline.empty:
+            equity_for_dd_calc = _portfolio_timeline
+            daily_equity = _portfolio_timeline
+            daily_returns = _portfolio_timeline.pct_change().dropna()
+            total_duration_years = (
+                (_portfolio_timeline.index[-1] - _portfolio_timeline.index[0]).days / 365.25
+            )
+        elif not daily_equity.empty:
+            equity_for_dd_calc = daily_equity
+        else:
+            equity_for_dd_calc = pd.Series(dtype=float)
+
         print("\n--- Generating Report Sections ---")
         title, summary = report_generator.generate_overall_metrics_summary(
-            trades_df, daily_returns, benchmark_returns, benchmark_df, daily_equity,
+            trades_df, daily_returns, benchmark_returns, benchmark_df, equity_for_dd_calc,
             benchmark_ticker, initial_equity, risk_free_rate, trading_days
         )
         report_sections.append({'type': 'text', 'title': title, 'data': summary})
@@ -214,14 +234,6 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
                 })
 
         equity_for_dd_plot = trades_df.get('Equity')
-        if not daily_equity.empty:
-            if 'Equity' in trades_df.columns and trades_df['Equity'].notna().all():
-                equity_for_dd_calc = trades_df['Equity']
-            else:
-                equity_for_dd_calc = daily_equity
-        else:
-            equity_for_dd_calc = pd.Series(dtype=float)
-
         equity_dd_amount, equity_dd_percent, max_equity_dd_amt, max_equity_dd_pct = calculations.calculate_equity_drawdown(equity_for_dd_calc)
 
         dd_cum_profit = trades_df.get('Cumulative_Profit')
@@ -421,9 +433,61 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
             traceback.print_exc()
             md_save_attempted = True
 
-        print("\n--- Generating PDF Report ---")
+        print("\n--- Generating PDF Report (Tearsheet) ---")
         try:
-            report_generator.generate_pdf_report(report_sections, output_pdf_path, f" - {report_name}")
+            # Build rolling metrics so page builders can use Rolling_PF / Rolling_Sharpe
+            trades_per_year_for_rolling = (len(trades_df) / total_duration_years
+                                           if total_duration_years > 1e-6 else 0)
+            _trades_df_rolling = calculations.calculate_rolling_metrics(
+                trades_df.copy(), rolling_window, trades_per_year_for_rolling, risk_free_rate
+            )
+
+            # Core scalars for KPI tiles
+            _core_raw = calculations.calculate_core_metrics(trades_df)
+            _sharpe_val = calculations.calculate_sharpe_ratio(
+                daily_returns, risk_free_rate, trading_days)
+            _sortino_val = calculations.calculate_sortino_ratio(
+                daily_returns, risk_free_rate, trading_days)
+            _core_for_pdf = dict(_core_raw)
+            _core_for_pdf['sharpe'] = _sharpe_val
+            _core_for_pdf['sortino'] = _sortino_val
+            _core_for_pdf['duration_years'] = total_duration_years
+
+            # Overall metrics text for appendix (re-use from report_sections)
+            _overall_text = next(
+                (s['data'] for s in report_sections if s.get('title') == 'Overall Performance Metrics'),
+                ''
+            )
+
+            from ._pdf_pages import generate_tearsheet_pdf
+            _report_data = {
+                'name':                report_name,
+                'run_date':            timestamp_str,
+                'trades_df':           _trades_df_rolling,
+                'initial_equity':      initial_equity,
+                'daily_equity':        equity_for_dd_calc,
+                'daily_returns':       daily_returns,
+                'benchmark_df':        benchmark_df,
+                'benchmark_returns':   benchmark_returns,
+                'benchmark_ticker':    benchmark_ticker,
+                'monthly_perf':        monthly_perf,
+                'symbol_perf':         symbol_perf,
+                'mc_results':          mc_results,
+                'mc_dd_neg':           mc_dd_neg,
+                'wfa_result':          wfa_result,
+                'wfa_split_date':      wfa_split_date,
+                'wfa_split_ratio':     wfa_split_ratio,
+                'equity_dd_percent':   equity_dd_percent,
+                'dd_periods_df':       dd_periods_df,
+                'max_equity_dd_pct':   max_equity_dd_pct,
+                'core_metrics':        _core_for_pdf,
+                'risk_free_rate':      risk_free_rate,
+                'rolling_window':      rolling_window,
+                'cleaning_summary':    cleaning_summary if isinstance(cleaning_summary, str) else str(cleaning_summary),
+                'overall_metrics_text': _overall_text,
+                'top_n_trades':        top_n_trades,
+            }
+            generate_tearsheet_pdf(_report_data, output_pdf_path)
             pdf_save_attempted = True
         except Exception as pdf_gen_err:
             print(f"ERROR during PDF report generation: {pdf_gen_err}")

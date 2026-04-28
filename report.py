@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from helpers.timeframe_utils import get_bars_per_year
 from trade_analyzer.default_config import (
     BASE_OUTPUT_DIRECTORY,
     INITIAL_EQUITY,
@@ -40,6 +41,38 @@ from trade_analyzer.default_config import (
     WFA_SPLIT_RATIO,
 )
 from trade_analyzer.analyzer import generate_trade_report
+
+
+def _load_equity_file(path: Path) -> "pd.Series | None":
+    """Load a companion _equity.csv as a date-indexed Series, or return None."""
+    if not path.is_file():
+        return None
+    try:
+        df = pd.read_csv(path, index_col=0, parse_dates=True)
+        if df.empty:
+            return None
+        return df.iloc[:, 0].rename("Equity")
+    except Exception:
+        return None
+
+
+def _load_bars_per_year(run_dir: Path) -> int | None:
+    """Read timeframe/timeframe_multiplier from config_snapshot.json and return bars_per_year.
+
+    Returns None if the snapshot is missing or the timeframe key is absent,
+    so callers can fall back to the default 252.
+    """
+    snapshot_path = run_dir / "config_snapshot.json"
+    if not snapshot_path.is_file():
+        return None
+    try:
+        with open(snapshot_path, "r", encoding="utf-8") as fh:
+            snapshot = json.load(fh)
+        if "timeframe" not in snapshot:
+            return None
+        return get_bars_per_year(snapshot)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        return None
 
 
 def _load_wfa_split_ratio(run_dir: Path) -> float | None:
@@ -138,6 +171,11 @@ def main():
             print(f"ERROR: No CSV files found under: {analyzer_csvs_dir}")
             sys.exit(1)
 
+        # Load timeframe-aware annualization factor from config_snapshot.json (if present)
+        bars_per_year = _load_bars_per_year(run_dir)
+        if bars_per_year is not None:
+            print(f"Bars per year loaded from config_snapshot.json: {bars_per_year}")
+
         # Load WFA split ratio from this run's config_snapshot.json (if present)
         wfa_ratio = _load_wfa_split_ratio(run_dir)
         if wfa_ratio is not None:
@@ -151,12 +189,18 @@ def main():
             'WFA_SPLIT_RATIO': wfa_ratio,
             'NOISE_CSV_PATH': str(_noise_csv) if _noise_csv.is_file() else None,
         }
+        if bars_per_year is not None:
+            config_params['TRADING_DAYS_PER_YEAR'] = bars_per_year
         count = 0
         for csv_file in csv_files:
             report_name = csv_file.stem
             print(f"Processing: {csv_file}")
             trades_df = pd.read_csv(csv_file)
-            generate_trade_report(trades_df, output_dir, report_name, config_params)
+            portfolio_timeline = _load_equity_file(csv_file.parent / f"{csv_file.stem}_equity.csv")
+            this_config = {**config_params}
+            if portfolio_timeline is not None:
+                this_config['PORTFOLIO_TIMELINE'] = portfolio_timeline
+            generate_trade_report(trades_df, output_dir, report_name, this_config)
             count += 1
 
         print(f"Generated {count} reports in {output_dir}")
@@ -182,12 +226,18 @@ def main():
             else:
                 output_dir = "detailed_reports"
 
-        # Load WFA split ratio from config_snapshot.json if the CSV is inside a run dir
+        # Load timeframe-aware annualization factor and WFA split ratio from
+        # config_snapshot.json if the CSV is inside a run dir
         wfa_ratio = None
+        bars_per_year = None
         csv_parts = Path(csv_path).parts
         if "analyzer_csvs" in csv_parts:
             idx = csv_parts.index("analyzer_csvs")
-            wfa_ratio = _load_wfa_split_ratio(Path(*csv_parts[:idx]))
+            _run_dir = Path(*csv_parts[:idx])
+            bars_per_year = _load_bars_per_year(_run_dir)
+            if bars_per_year is not None:
+                print(f"Bars per year loaded from config_snapshot.json: {bars_per_year}")
+            wfa_ratio = _load_wfa_split_ratio(_run_dir)
             if wfa_ratio is not None:
                 print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
 
@@ -207,12 +257,17 @@ def main():
             _candidate = Path(*csv_parts_check[:idx_check]) / "noise_sample_data.csv"
             if _candidate.is_file():
                 _noise_csv_single = str(_candidate)
+        portfolio_timeline = _load_equity_file(Path(csv_path).parent / f"{report_name}_equity.csv")
         config_params = {
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
             'WFA_SPLIT_RATIO': wfa_ratio,
             'NOISE_CSV_PATH': _noise_csv_single,
         }
+        if portfolio_timeline is not None:
+            config_params['PORTFOLIO_TIMELINE'] = portfolio_timeline
+        if bars_per_year is not None:
+            config_params['TRADING_DAYS_PER_YEAR'] = bars_per_year
         generate_trade_report(trades_df, output_dir, report_name, config_params)
 
 
