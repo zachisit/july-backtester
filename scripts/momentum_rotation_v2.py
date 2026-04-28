@@ -284,6 +284,42 @@ def run_backtest(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list):
             if r > SELL_BUFFER_RANK:
                 do_sell(sym, exec_date, f"Rank {r} > {SELL_BUFFER_RANK}")
 
+        # Trim positions that have drifted above target allocation
+        for sym, pos in list(positions.items()):
+            current_price = get_price(all_data[sym], exec_date, "Open")
+            if np.isnan(current_price) or current_price <= 0:
+                continue
+            current_value  = pos["shares"] * current_price
+            target_value   = alloc_equity * ALLOCATION_PCT
+            if MAX_POSITION_SIZE is not None:
+                target_value = min(target_value, MAX_POSITION_SIZE)
+            excess_value   = current_value - target_value
+            if excess_value <= 0:
+                continue
+            trim_shares = math.floor(excess_value / current_price)
+            if trim_shares <= 0:
+                continue
+            exit_price = current_price * (1 - SLIPPAGE_SELL)
+            commission = trim_shares * COMMISSION_PER_SHR
+            proceeds   = trim_shares * exit_price - commission
+            trim_cost  = pos["cost_basis"] * (trim_shares / pos["shares"])
+            pnl        = proceeds - trim_cost
+            trade_log.append({
+                "Symbol":     sym,
+                "EntryDate":  pos["entry_date"],
+                "ExitDate":   exec_date,
+                "EntryPrice": round(pos["entry_price"], 4),
+                "ExitPrice":  round(exit_price, 4),
+                "Shares":     trim_shares,
+                "PnL":        round(pnl, 2),
+                "PnLPct":     round(pnl / trim_cost * 100, 2) if trim_cost > 0 else 0.0,
+                "HoldDays":   (exec_date - pos["entry_date"]).days,
+                "ExitReason": "Trim",
+            })
+            cash += proceeds
+            pos["shares"]     -= trim_shares
+            pos["cost_basis"] -= trim_cost
+
         slots = MAX_POSITIONS - len(positions)
         for sym in ranked:
             if slots <= 0:
