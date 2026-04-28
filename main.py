@@ -41,17 +41,18 @@ def _pick_reference_df(comparison_dfs: dict) -> pd.DataFrame:
 # --------------------------------------------------------------------
 # --- WORKER INITIALIZER FOR MULTIPROCESSING ---
 # --------------------------------------------------------------------
-def init_worker(comparison_dfs_dict, benchmark_returns_dict, dependency_map_dict, portfolio_data_for_worker):
+def init_worker(comparison_dfs_dict, benchmark_returns_dict, dependency_map_dict, portfolio_data_for_worker, delisting_dates_for_worker):
     """
     Initializer for the multiprocessing pool.
     Makes comparison ticker DataFrames, benchmark returns, dependency symbol map,
-    and the current portfolio's data globally available to each worker process.
+    the current portfolio's data, and delisting dates globally available to each worker process.
     """
-    global comparison_dfs_global, benchmark_returns_global, dependency_map_global, portfolio_data_global
+    global comparison_dfs_global, benchmark_returns_global, dependency_map_global, portfolio_data_global, delisting_dates_global
     comparison_dfs_global = comparison_dfs_dict
     benchmark_returns_global = benchmark_returns_dict
     dependency_map_global = dependency_map_dict
     portfolio_data_global = portfolio_data_for_worker
+    delisting_dates_global = delisting_dates_for_worker
 
 # --------------------------------------------------------------------
 
@@ -61,7 +62,7 @@ def run_single_simulation(args):
     This version now uses globally initialized dataframes AND portfolio_data.
     """
     # Access ALL globally initialized data
-    global comparison_dfs_global, benchmark_returns_global, dependency_map_global, portfolio_data_global
+    global comparison_dfs_global, benchmark_returns_global, dependency_map_global, portfolio_data_global, delisting_dates_global
 
     # 1. Unpack the arguments. `portfolio_data` has been REMOVED from the tuple.
     portfolio_name, name, logic_func, dependencies, stop_config, \
@@ -112,7 +113,7 @@ def run_single_simulation(args):
         # Call the simulation, passing the stop_config and using the global dataframes.
         result = run_portfolio_simulation(
             portfolio_data, final_signals, CONFIG["initial_capital"], CONFIG["allocation_per_trade"],
-            spy_df_local, vix_df_local, tnx_df_local, stop_config
+            spy_df_local, vix_df_local, tnx_df_local, stop_config, delisting_dates_global
         )
         
         if result is None: return None
@@ -485,6 +486,26 @@ def main():
             logger.warning(f"No symbols found for '{portfolio_name}'. Skipping.")
             continue
 
+        # --- SURVIVORSHIP: merge delisted symbols into universe ---
+        if CONFIG.get("include_delisted", False):
+            delisted_file = CONFIG.get("delisted_symbols_file")
+            if delisted_file:
+                delisted_path = os.path.join("tickers_to_scan", delisted_file) if not os.path.isabs(delisted_file) else delisted_file
+                if os.path.exists(delisted_path):
+                    with open(delisted_path, "rb") as _f:
+                        extra_symbols = orjson.loads(_f.read())
+                    before = len(symbols)
+                    symbols = list(dict.fromkeys(symbols + extra_symbols))
+                    logger.info(f"  -> Merged {len(symbols) - before} delisted symbols from '{delisted_file}' (universe: {len(symbols)} total)")
+                else:
+                    logger.warning(f"  -> [WARNING] delisted_symbols_file '{delisted_file}' not found — universe contains survivors only")
+            else:
+                logger.warning(
+                    "  -> [WARNING] include_delisted=True but no delisted_symbols_file configured. "
+                    "Universe contains survivors only. Set 'delisted_symbols_file' to a JSON ticker list "
+                    "(e.g. tickers_to_scan/nasdaq_100_delisted.json) to include historically delisted stocks."
+                )
+
         MIN_BARS = CONFIG.get("min_bars_required", 250)
         skipped_symbols = []
         portfolio_data = {}
@@ -549,6 +570,17 @@ def main():
             logger.warning(f"Could not fetch data for any symbols in '{portfolio_name}'. Skipping.")
             continue
 
+        # --- FETCH DELISTING DATES (if survivorship bias handling is enabled) ---
+        delisting_dates = {}
+        if CONFIG.get("include_delisted", False):
+            from helpers.survivorship import get_delisting_dates
+            logger.info(f"  -> Fetching delisting dates for {len(symbols)} symbols...")
+            delisting_dates = get_delisting_dates(symbols, CONFIG["data_provider"], CONFIG)
+            if delisting_dates:
+                logger.info(f"  -> Found {len(delisting_dates)} delisted symbols: {', '.join(list(delisting_dates.keys())[:10])}{'...' if len(delisting_dates) > 10 else ''}")
+            else:
+                logger.info(f"  -> No delisted symbols found (or provider doesn't support delisting data).")
+
         # --- Generate tasks for THIS portfolio, WITHOUT the large `portfolio_data` ---
         tasks_for_this_portfolio = []
         for strat_name, strategy_config in get_active_strategies().items():
@@ -580,8 +612,8 @@ def main():
         logger.info("=" * 15 + f" RUNNING SIMULATIONS FOR '{portfolio_name}' " + "=" * 15)
         logger.info(f"Found {len(tasks_for_this_portfolio)} tasks. Using up to {cpu_count()} CPU cores.")
         
-        # Pass comparison data and portfolio data during initialization, not with each task
-        init_args = (comparison_dfs, benchmark_returns, comparison_config["dependencies"], portfolio_data)
+        # Pass comparison data, portfolio data, and delisting dates during initialization, not with each task
+        init_args = (comparison_dfs, benchmark_returns, comparison_config["dependencies"], portfolio_data, delisting_dates)
 
         with Pool(processes=cpu_count(), initializer=init_worker, initargs=init_args) as p:
             import time as _time
