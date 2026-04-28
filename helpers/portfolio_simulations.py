@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 from config import CONFIG
 from .simulations import calculate_advanced_metrics
+from helpers.position_sizing import calculate_position_size, check_portfolio_heat
 
 def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config):
     """
@@ -222,18 +223,67 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 entry_exec_date = date
 
             if pd.isna(raw_entry_price): continue
-            
+
             entry_price = raw_entry_price * (1 + CONFIG['slippage_pct'])
-            
-            # Determine max capital to allocate for this single trade
-            capital_to_allocate = total_equity * allocation_pct
-            
-            # You cannot allocate more for the principal than your available cash
-            capital_to_allocate = min(capital_to_allocate, cash)
-            
-            if entry_price > 0 and capital_to_allocate > 0:
-                # Calculate ideal shares based on the capital allocation
-                shares = capital_to_allocate / entry_price
+
+            if entry_price > 0 and cash > 0:
+                # --- POSITION SIZING ---
+                sizing_method = CONFIG.get('position_sizing_method', 'fixed')
+                sizing_kwargs = {}
+
+                # For risk_parity: derive stop_distance_pct from the configured stop so
+                # sizing uses the actual stop rather than always falling back to 3x ATR.
+                if sizing_method == "risk_parity":
+                    stop_type = stop_config.get("type", "none")
+                    if stop_type == "percentage":
+                        sizing_kwargs["stop_distance_pct"] = stop_config.get("value", 0.05)
+                    elif stop_type == "atr":
+                        _day_before = prev_trading_dates[symbol].get(entry_exec_date)
+                        if _day_before is not None and _day_before in df.index and "ATR_14" in df.columns:
+                            _atr = df.loc[_day_before, 'ATR_14']
+                            _close = df.loc[_day_before, 'Close']
+                            if pd.notna(_atr) and pd.notna(_close) and _close > 0:
+                                sizing_kwargs["stop_distance_pct"] = (
+                                    _atr * stop_config.get("multiplier", 3.0)
+                                ) / _close
+
+                # For kelly: compute rolling stats from completed trades so sizing
+                # actually adapts to the strategy's live performance.
+                if sizing_method == "kelly" and len(trade_log) >= 10:
+                    _wins = [t for t in trade_log if t.get("is_win") == 1 and t.get("ProfitPct") is not None]
+                    _losses = [t for t in trade_log if t.get("is_win") == 0 and t.get("ProfitPct") is not None]
+                    if _wins and _losses:
+                        sizing_kwargs["win_rate"] = len(_wins) / len(trade_log)
+                        sizing_kwargs["avg_win"] = sum(t["ProfitPct"] for t in _wins) / len(_wins)
+                        sizing_kwargs["avg_loss"] = sum(abs(t["ProfitPct"]) for t in _losses) / len(_losses)
+
+                # Slice to current date to prevent look-ahead bias: vol_parity and
+                # risk_parity use .iloc[-1] on the passed DataFrame, so passing the
+                # full history would use a future ATR value on early simulation dates.
+                shares = calculate_position_size(
+                    method=sizing_method,
+                    equity=total_equity,
+                    price=entry_price,
+                    symbol_data=df.loc[:date],
+                    config=CONFIG,
+                    **sizing_kwargs
+                )
+
+                # --- PORTFOLIO HEAT CHECK ---
+                # Compute the dollar risk this position adds. For methods with a
+                # known stop distance we use that; otherwise fall back to the
+                # target_risk_per_trade parameter (which is what vol/risk parity
+                # sized against anyway).
+                _stop_dist = sizing_kwargs.get("stop_distance_pct") or CONFIG.get("target_risk_per_trade", 0.02)
+                new_position_risk = shares * entry_price * _stop_dist
+                max_heat = CONFIG.get("max_portfolio_heat", 1.0)
+                if not check_portfolio_heat(positions, new_position_risk, total_equity, max_heat):
+                    continue
+
+                # Cash constraint
+                capital_needed = shares * entry_price
+                if capital_needed > cash:
+                    shares = cash / entry_price
 
                 # --- VOLUME-BASED LIQUIDITY FILTER ---
                 max_pct_adv = CONFIG.get('max_pct_adv') or 0
@@ -342,6 +392,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         'stop_loss_level': stop_loss_level,
                         'initial_stop_loss_level': stop_loss_level,
                         'entry_impact_bps': entry_impact_bps,
+                        'risk': new_position_risk,
                     }
                     cash -= total_cost
     

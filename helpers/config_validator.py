@@ -91,6 +91,11 @@ KNOWN_KEYS: set[str] = {
     "verbose_output",
     # SECTION 22: Realized-Only Reporting
     "exclude_open_positions",
+    # SECTION 23: Position Sizing
+    "position_sizing_method",
+    "kelly_fraction",
+    "target_risk_per_trade",
+    "max_portfolio_heat",
     # S3
     "s3_reports_bucket",
     "upload_to_s3",
