@@ -51,6 +51,11 @@ SLIPPAGE_SELL      = 0.0010        # 10 bps subtracted from sell price
 COMMISSION_PER_SHR = 0.002         # $0.002 per share each way
 MIN_PRICE          = 5.0           # skip stocks below $5
 
+# Short overlay constants
+MAX_SHORT_POSITIONS     = 3       # max simultaneous short positions during regime-OFF
+SHORT_COVER_BUFFER_RANK = 25      # cover short if rank improves to <= (N - 25) from bottom
+HTB_RATE_ANNUAL         = 0.02    # annual hard-to-borrow rate
+
 START_DATE         = "1990-01-01"
 END_DATE           = datetime.now().strftime("%Y-%m-%d")
 TICKER_FILE        = "tickers_to_scan/nasdaq_100.json"
@@ -214,9 +219,11 @@ def compute_rs60_all(all_data: dict, qqq_df: pd.DataFrame, signal_date) -> dict:
 # ── Simulation ────────────────────────────────────────────────────────────────
 
 def run_backtest(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list, vix_df=None):
-    cash      = INITIAL_CAPITAL
-    positions = {}   # {sym: {shares, entry_price, entry_date, cost_basis}}
-    trade_log = []
+    cash            = INITIAL_CAPITAL
+    positions       = {}   # {sym: {shares, entry_price, entry_date, cost_basis}}
+    short_positions = {}   # {sym: {shares, entry_price, entry_date, proceeds_received, total_borrow_cost}}
+    htb_rate_daily  = (1 + HTB_RATE_ANNUAL) ** (1 / 252) - 1
+    trade_log  = []
     equity_log = []
 
     def mtm_equity(price_date):
@@ -226,6 +233,11 @@ def run_backtest(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list, vi
             if np.isnan(p):
                 p = pos["entry_price"]
             total += pos["shares"] * p
+        for sym, spos in short_positions.items():
+            p = get_price(all_data[sym], price_date, "Close")
+            if np.isnan(p):
+                p = spos["entry_price"]
+            total += (spos["entry_price"] - p) * spos["shares"]
         return total
 
     def do_sell(sym, exec_date, reason):
@@ -282,17 +294,96 @@ def run_backtest(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list, vi
         }
         return True
 
+    def do_short_cover(sym, exec_date, reason):
+        nonlocal cash
+        spos        = short_positions[sym]
+        raw_open    = get_price(all_data[sym], exec_date, "Open")
+        if np.isnan(raw_open) or raw_open <= 0:
+            return
+        cover_price = raw_open * (1 + SLIPPAGE_BUY)
+        shares      = spos["shares"]
+        commission  = shares * COMMISSION_PER_SHR
+        borrow_cost = spos.get("total_borrow_cost", 0.0)
+        pnl         = spos["proceeds_received"] - (shares * cover_price + commission + borrow_cost)
+        trade_log.append({
+            "Symbol":     sym,
+            "EntryDate":  spos["entry_date"],
+            "ExitDate":   exec_date,
+            "EntryPrice": round(spos["entry_price"], 4),
+            "ExitPrice":  round(cover_price, 4),
+            "Shares":     -shares,
+            "PnL":        round(pnl, 2),
+            "PnLPct":     round(pnl / spos["proceeds_received"] * 100, 2) if spos["proceeds_received"] > 0 else 0.0,
+            "HoldDays":   (exec_date - spos["entry_date"]).days,
+            "ExitReason": reason,
+        })
+        cash += spos["proceeds_received"]
+        cash -= shares * cover_price + commission + borrow_cost
+        del short_positions[sym]
+
+    def do_short_enter(sym, exec_date, alloc_equity) -> bool:
+        nonlocal cash
+        df = all_data.get(sym)
+        if df is None:
+            return False
+        raw_open = get_price(df, exec_date, "Open")
+        if np.isnan(raw_open) or raw_open < MIN_PRICE:
+            return False
+        if sym in positions or sym in short_positions:
+            return False
+        entry_price    = raw_open * (1 - SLIPPAGE_SELL)
+        position_value = alloc_equity * ALLOCATION_PCT
+        shares         = math.floor(position_value / entry_price)
+        if shares <= 0:
+            return False
+        commission = shares * COMMISSION_PER_SHR
+        proceeds   = shares * entry_price - commission
+        if proceeds <= 0:
+            return False
+        cash += proceeds
+        short_positions[sym] = {
+            "shares":            shares,
+            "entry_price":       entry_price,
+            "entry_date":        exec_date,
+            "proceeds_received": proceeds,
+            "total_borrow_cost": 0.0,
+        }
+        return True
+
     print(f"  Simulating {len(rebalance_pairs)} rebalance weeks...")
 
     for signal_date, exec_date in rebalance_pairs:
 
         equity_log.append((signal_date, mtm_equity(signal_date)))
 
+        # Accrue weekly borrow cost on all open shorts (~5 trading days)
+        for sym, spos in short_positions.items():
+            p = get_price(all_data[sym], signal_date, "Close")
+            if not np.isnan(p):
+                spos["total_borrow_cost"] = spos.get("total_borrow_cost", 0.0) + (
+                    spos["shares"] * p * htb_rate_daily * 5
+                )
+
         regime_on = is_regime_on(qqq_df, signal_date, vix_df=vix_df)
         if not regime_on:
             for sym in list(positions.keys()):
                 do_sell(sym, exec_date, "Regime OFF")
+            if MAX_SHORT_POSITIONS > 0:
+                rs_scores = compute_rs60_all(all_data, qqq_df, signal_date)
+                if rs_scores:
+                    ranked_asc  = sorted(rs_scores, key=rs_scores.get)   # worst RS first
+                    alloc_eq    = mtm_equity(signal_date)
+                    short_slots = MAX_SHORT_POSITIONS - len(short_positions)
+                    for sym in ranked_asc:
+                        if short_slots <= 0:
+                            break
+                        if do_short_enter(sym, exec_date, alloc_eq):
+                            short_slots -= 1
             continue
+
+        # Regime turned ON — cover all open shorts
+        for sym in list(short_positions.keys()):
+            do_short_cover(sym, exec_date, "Regime ON")
 
         rs_scores = compute_rs60_all(all_data, qqq_df, signal_date)
         if not rs_scores:
@@ -300,6 +391,13 @@ def run_backtest(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list, vi
 
         ranked  = sorted(rs_scores, key=rs_scores.get, reverse=True)
         rank_of = {sym: i + 1 for i, sym in enumerate(ranked)}
+
+        # Cover any short whose rank improved above the buffer from the bottom
+        universe_size = len(rs_scores)
+        for sym in list(short_positions.keys()):
+            r = rank_of.get(sym, 0)
+            if r <= universe_size - SHORT_COVER_BUFFER_RANK:
+                do_short_cover(sym, exec_date, f"Rank improved to {r}")
 
         alloc_equity = mtm_equity(signal_date)
 
@@ -356,6 +454,8 @@ def run_backtest(all_data: dict, qqq_df: pd.DataFrame, rebalance_pairs: list, vi
         last_exec = rebalance_pairs[-1][1]
         for sym in list(positions.keys()):
             do_sell(sym, last_exec, "End of backtest")
+        for sym in list(short_positions.keys()):
+            do_short_cover(sym, last_exec, "End of backtest")
 
     equity_log.append((rebalance_pairs[-1][1], cash))
     return trade_log, equity_log
@@ -393,6 +493,9 @@ def print_results(trade_log: list, equity_log: list):
     excess    = daily_ret - (RISK_FREE_RATE / 252)
     sharpe    = excess.mean() / excess.std() * (252 ** 0.5) if excess.std() > 0 else 0.0
 
+    longs  = df_t[df_t["Shares"] > 0]
+    shorts = df_t[df_t["Shares"] < 0]
+
     wins       = (df_t["PnL"] > 0).sum()
     win_rate   = wins / len(df_t)
     gross_win  = df_t[df_t["PnL"] > 0]["PnL"].sum()
@@ -414,6 +517,11 @@ def print_results(trade_log: list, equity_log: list):
     print(f"  Profit Factor    : {pf:.2f}")
     print(f"  Avg Hold (days)  : {df_t['HoldDays'].mean():.0f}")
     print("=" * 62)
+
+    if len(longs) > 0:
+        print(f"\n  Long trades      : {len(longs)}  (avg PnL ${longs['PnL'].mean():+,.0f})")
+    if len(shorts) > 0:
+        print(f"  Short trades     : {len(shorts)}  (avg PnL ${shorts['PnL'].mean():+,.0f})")
 
     print("\n  Top 5 by total P&L:")
     by_sym = df_t.groupby("Symbol")["PnL"].sum().sort_values(ascending=False)
