@@ -5,7 +5,6 @@ import logging
 import os
 import sys
 import time
-import argparse
 import numpy as np
 import pandas as pd
 from config import CONFIG
@@ -204,18 +203,25 @@ def run_single_simulation(args):
         return None
 
 def main():
-    # --- INIT WIZARD ---
-    import argparse as _argparse
-    _parser = _argparse.ArgumentParser(add_help=False)
-    _parser.add_argument("--init", action="store_true")
-    _parser.add_argument("--dry-run", action="store_true")
-    _parser.add_argument("--all", action="store_true")
-    _known, _ = _parser.parse_known_args()
-    if _known.init:
+    # --- ARGUMENT PARSING (full parser, applied before any CONFIG reads) ---
+    from helpers.cli_config import build_parser, apply_overrides, print_help_config
+    parser = build_parser()
+    args = parser.parse_args()
+
+    # Init wizard (early exit, no CONFIG reads needed)
+    if args.init:
         from helpers.init_wizard import run_init_wizard
         run_init_wizard()
         return
-    # --- END INIT WIZARD ---
+
+    # Guided help (early exit; reads CONFIG for current-value display)
+    if args.help_config is not None:
+        print_help_config(CONFIG, args.help_config)
+        return
+
+    # Apply all CLI overrides to CONFIG before any downstream code reads it
+    apply_overrides(CONFIG, args)
+    # --- END ARGUMENT PARSING ---
 
     # --- S1: API KEY CHECK ---
     import os
@@ -264,12 +270,7 @@ def main():
         sys.exit(1)
     # --- END S2 ---
 
-    # --- ARGUMENT PARSING & FOLDER SETUP (No changes) ---
-    parser = argparse.ArgumentParser(description="Portfolio Backtester")
-    parser.add_argument("--name", type=str, help="An optional name for the backtest run, used as a prefix for the report folder.")
-    parser.add_argument("--dry-run", action="store_true", help="Validate config and print run summary without fetching data or running simulations.")
-    parser.add_argument("--verbose", action="store_true", help="Show all table columns in the summary (default: compact 7-column view).")
-    args = parser.parse_args()
+    # --- FOLDER SETUP ---
     CONFIG["verbose_output"] = args.verbose
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_folder_name = f"{args.name}_{timestamp}" if args.name else timestamp

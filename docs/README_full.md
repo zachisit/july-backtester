@@ -150,13 +150,14 @@ All settings live in one file: [config.py](../config.py). Open it in any text ed
 
 ### Data Provider Settings
 
-Four data providers are supported. Set `data_provider` in `config.py`:
+Five data providers are supported. Set `data_provider` in `config.py`:
 
 ```python
 "data_provider": "polygon",   # Polygon.io — API key via .env (default)
 # "data_provider": "norgate", # Norgate Data — requires local Norgate installation
 # "data_provider": "yahoo",   # Yahoo Finance via yfinance (free, no API key needed)
 # "data_provider": "csv",     # Local CSV files (see CSV Data Provider section below)
+# "data_provider": "parquet", # Pre-exported Norgate Parquet files (see Parquet Data Provider section below)
 ```
 
 #### Polygon.io (default)
@@ -243,6 +244,47 @@ Extra columns (e.g. `VWAP`, `Turnover`) are silently ignored. The date column ma
 - **Indicator warm-up.** Even if a CSV passes the 250-bar check, long-lookback strategies need additional bars just to calculate their first signal. The default 50d/200d SMA Crossover strategy, for example, cannot fire a single trade until at least 200 daily bars have accumulated. A CSV that covers only a few months will pass the minimum check but still produce zero trades because the moving average never finishes warming up.
 
 **Recommendation:** When downloading historical data from Nasdaq, Yahoo Finance, or any other source, always request **at least 3–5 years of daily bars**. This gives every default strategy enough runway to warm up its indicators and execute a meaningful number of simulated trades.
+
+#### Parquet Data Provider
+
+Reads pre-exported Norgate data from local `.parquet` files. This is the recommended provider for teams where only one member has a Norgate license — the license holder exports once, the files are shared via the `parquet_data/` git submodule, and teammates run backtests without any Norgate installation.
+
+```python
+"data_provider": "parquet",
+"parquet_data_dir": "parquet_data/data",   # folder containing .parquet files (relative to project root)
+```
+
+**No Norgate license or NDU process required** once the files are exported.
+
+**File naming:** one file per symbol, named `{SYMBOL}.parquet` (e.g. `parquet_data/data/AAPL.parquet`).
+
+**Exporting from Norgate:** Run the three export commands once on a machine with a Norgate license (full dump is ~36,000 symbols, ~2.5 GB):
+
+```bash
+python scripts/norgate_to_parquet.py --database "US Equities"          --output-dir parquet_data/data --start-date 1990-01-01
+python scripts/norgate_to_parquet.py --database "US Equities Delisted" --output-dir parquet_data/data --start-date 1990-01-01 --skip-existing
+python scripts/norgate_to_parquet.py --database "US Indices"           --output-dir parquet_data/data --start-date 1990-01-01 --skip-existing
+```
+
+Then validate the export:
+
+```bash
+python scripts/validate_norgate_export.py
+```
+
+See [scripts/NORGATE_EXPORT.md](../scripts/NORGATE_EXPORT.md) for the full export and validation guide.
+
+**Accessing via submodule (interns / no-license teammates):** The exported dataset lives in the `parquet_data/` git submodule. Clone with:
+
+```bash
+git clone --recurse-submodules https://github.com/zachisit/july-backtester.git
+```
+
+Or initialise the submodule in an existing clone:
+
+```bash
+git submodule update --init parquet_data
+```
 
 ### Backtest Period
 
@@ -979,7 +1021,7 @@ their `@register_strategy` decorator.
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `data_provider` | `"polygon"` | `"polygon"` or `"norgate"` |
+| `data_provider` | `"polygon"` | `"polygon"`, `"norgate"`, `"yahoo"`, `"csv"`, or `"parquet"` |
 | `upload_to_s3` | `False` | Enable S3 uploads of output files |
 | `s3_reports_bucket` | — | S3 bucket name. Requires `upload_to_s3: True`. |
 | `start_date` | `"2004-01-01"` | Backtest start date (YYYY-MM-DD) |
@@ -1229,7 +1271,8 @@ july-backtester/
 │   ├── polygon_service.py        # Polygon.io API integration
 │   ├── norgate_service.py        # Norgate Data integration
 │   ├── yahoo_service.py          # Yahoo Finance via yfinance
-│   └── csv_service.py            # Local CSV files
+│   ├── csv_service.py            # Local CSV files
+│   └── parquet_service.py        # Pre-exported Norgate Parquet files
 │
 ├── trade_analyzer/               # Standalone report generation module
 │   └── ...
