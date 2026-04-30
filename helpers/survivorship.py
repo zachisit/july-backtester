@@ -169,6 +169,7 @@ def adjust_for_survivorship(
     delisting_dates: dict[str, str],
     initial_capital: float,
     delisting_price_assumption: str = "last_close",
+    portfolio_data: "dict | None" = None,
 ) -> tuple[list[dict], dict[str, Any]]:
     """
     Force-close open positions when stocks are delisted.
@@ -187,8 +188,14 @@ def adjust_for_survivorship(
         Used to compute delisting loss as % of initial capital
     delisting_price_assumption : str
         How to determine exit price when delisted:
-        - "last_close": use last known Close price from trade (default)
+        - "last_close": use last available Close from portfolio_data on or before
+          delisting date. Falls back to entry price if portfolio_data is None or
+          the symbol has no prior data.
         - "zero": assume total loss (price = 0)
+    portfolio_data : dict | None
+        {symbol: pd.DataFrame} OHLCV data dict. Required for "last_close" to
+        look up the actual final trading price. If None, last_close falls back
+        to entry price.
 
     Returns
     -------
@@ -232,15 +239,22 @@ def adjust_for_survivorship(
 
             # Only force-close if delisting happened after entry
             if delisting_date >= entry_date:
+                shares = trade.get("Shares", 0)
+                entry_price = trade.get("EntryPrice", 0.0)
+
                 # Determine exit price
                 if delisting_price_assumption == "zero":
                     exit_price = 0.0
                 else:  # "last_close"
-                    exit_price = trade.get("EntryPrice", 0.0)  # Fallback to entry price
+                    exit_price = entry_price  # default fallback
+                    if portfolio_data is not None:
+                        df = portfolio_data.get(symbol)
+                        if df is not None and not df.empty:
+                            prior = df.loc[df.index <= delisting_date, "Close"].dropna()
+                            if not prior.empty:
+                                exit_price = float(prior.iloc[-1])
 
                 # Compute loss
-                shares = trade.get("Shares", 0)
-                entry_price = trade.get("EntryPrice", 0.0)
                 profit = shares * (exit_price - entry_price)
 
                 # Create delisting exit trade
@@ -270,3 +284,46 @@ def adjust_for_survivorship(
     }
 
     return adjusted_log, survivorship_stats
+
+
+def apply_delisting_to_timeline(
+    portfolio_timeline: "pd.Series",
+    adjusted_trade_log: list[dict],
+) -> "pd.Series":
+    """
+    Apply delisting P&L deltas to an existing equity-curve Series.
+
+    For each trade with ExitReason == "Delisting", shifts all equity values
+    on or after the delisting date by the trade's Profit. This ensures that
+    CAGR, Sharpe, drawdown, and every other metric derived from the equity
+    curve reflect the delisting loss from the correct point in time.
+
+    Parameters
+    ----------
+    portfolio_timeline : pd.Series
+        Daily equity curve produced by run_portfolio_simulation, indexed by date.
+    adjusted_trade_log : list[dict]
+        Trade log returned by adjust_for_survivorship (contains Delisting exits).
+
+    Returns
+    -------
+    pd.Series
+        A copy of portfolio_timeline with delisting losses applied by date.
+    """
+    delisting_trades = [
+        t for t in adjusted_trade_log if t.get("ExitReason") == "Delisting"
+    ]
+    if not delisting_trades:
+        return portfolio_timeline
+
+    timeline = portfolio_timeline.copy()
+    for trade in delisting_trades:
+        pnl_delta = trade.get("Profit", 0.0) or 0.0
+        if pnl_delta == 0.0:
+            continue
+        exit_ts = pd.Timestamp(trade["ExitDate"])
+        mask = timeline.index >= exit_ts
+        if mask.any():
+            timeline.loc[mask] += pnl_delta
+
+    return timeline
