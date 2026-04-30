@@ -13,6 +13,7 @@ from helpers.indicators import calculate_sma, calculate_rsi, calculate_atr
 from helpers.registry import get_active_strategies
 from helpers.portfolio_simulations import run_portfolio_simulation
 from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary, generate_sensitivity_report
+from helpers.llm_verdict import generate_llm_verdict
 from helpers.sensitivity import build_param_grid, is_sweep_enabled, label_for_params
 from helpers.correlation import run_correlation_analysis, DEFAULT_THRESHOLD
 from helpers.monte_carlo import run_monte_carlo_simulation, analyze_mc_results
@@ -392,6 +393,7 @@ def main():
         comparison_config = parse_comparison_tickers(CONFIG)
         comparison_dfs = {}
         benchmark_returns = {}
+        benchmark_dfs = {}
 
         # Fetch all comparison tickers (benchmarks + dependencies)
         for symbol in comparison_config["all_symbols"]:
@@ -427,6 +429,7 @@ def main():
                 df = comparison_dfs[symbol]
                 bnh_return = (df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0]
                 benchmark_returns[label] = bnh_return
+                benchmark_dfs[label] = df
                 logger.info(f"{label} B&H: {bnh_return:.2%}")
             else:
                 logger.warning(f"Benchmark '{label}' (symbol: {symbol}) not available — skipping")
@@ -649,6 +652,7 @@ def main():
 
     duration_seconds = time.monotonic() - start_time
     generate_portfolio_summary_report(all_portfolio_results, benchmark_returns, duration_seconds, run_folder_name)
+    generate_llm_verdict(all_portfolio_results, benchmark_returns, run_folder_name, benchmark_dfs=benchmark_dfs)
     generate_sensitivity_report(all_portfolio_results, run_folder_name)
 
     if CONFIG.get("export_ml_features", False):
