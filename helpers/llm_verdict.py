@@ -38,10 +38,11 @@ def generate_llm_verdict(all_results, benchmark_returns, run_id=None, output_dir
 
         benchmarks_detail = {}
         for label, bh_frac in benchmark_returns.items():
+            bh_frac = float(bh_frac)
             result_key = f'vs_{label.lower().replace(" ", "_")}_benchmark'
-            margin_frac = result.get(result_key, pnl_frac - bh_frac)
+            margin_frac = float(result.get(result_key, pnl_frac - bh_frac))
             margin_pp = round(margin_frac * 100, 4)
-            beats = margin_pp > 0
+            beats = bool(margin_pp > 0)
             direction = f"+{margin_pp:.2f}pp" if beats else f"{margin_pp:.2f}pp"
             benchmarks_detail[label] = {
                 "bh_return_pct": round(bh_frac * 100, 4),
@@ -98,7 +99,7 @@ def generate_llm_verdict(all_results, benchmark_returns, run_id=None, output_dir
             "start": CONFIG.get("start_date", ""),
             "end": CONFIG.get("end_date", "") or "today",
         },
-        "benchmarks": {k: round(v * 100, 4) for k, v in benchmark_returns.items()},
+        "benchmarks": {k: round(float(v) * 100, 4) for k, v in benchmark_returns.items()},
         "summary": {
             "total_strategies_with_trades": total,
             f"{primary_key}_count": beats_count,
@@ -193,7 +194,7 @@ def _build_equity_curve(timeline, benchmark_dfs, label_order):
                 try:
                     bm_yr = bm_df["Close"][bm_df.index.year == year]
                     if len(bm_yr) >= 2:
-                        entry[f"{label}_pct"] = round((bm_yr.iloc[-1] / bm_yr.iloc[0] - 1) * 100, 2)
+                        entry[f"{label}_pct"] = round(float(bm_yr.iloc[-1] / bm_yr.iloc[0] - 1) * 100, 2)
                 except Exception:
                     pass
             annual.append(entry)
