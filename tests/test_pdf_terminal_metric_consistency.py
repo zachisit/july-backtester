@@ -13,12 +13,17 @@ Bugs caught and fixed:
     at first-trade-minus-1-day); terminal uses the full portfolio_timeline
     (including warmup bars with 0% returns).
   - Calmar: derives from CAGR, so was also wrong.
+  - Risk-free rate: default_config.RISK_FREE_RATE was 0.0 while the backtester
+    defaults to 0.05.  report.py now reads risk_free_rate from config_snapshot.json
+    and default_config.RISK_FREE_RATE has been corrected to 0.05.
 
 Fix (analyzer.py): when PORTFOLIO_TIMELINE is available, override daily_equity,
 daily_returns, and total_duration_years so all downstream metrics use the same
 data as the terminal.
 Fix (report_generator.py): generate_overall_metrics_summary prefers
 daily_equity.index span for CAGR duration over first-trade/last-trade dates.
+Fix (report.py + default_config.py): risk_free_rate is now read from
+config_snapshot.json so the PDF Sharpe/Sortino use the same rate as the terminal.
 """
 
 import sys
@@ -259,3 +264,69 @@ class TestGenerateOverallMetricsSummaryDuration:
         assert match
         reported = float(match.group(1))
         assert abs(reported - trade_dur) < 0.05
+
+
+# ---------------------------------------------------------------------------
+# Risk-free rate consistency
+# ---------------------------------------------------------------------------
+
+class TestRiskFreeRateConsistency:
+    """PDF Sharpe must use the backtester's risk_free_rate, not the analyzer default."""
+
+    def test_default_config_risk_free_rate_matches_backtester(self):
+        """default_config.RISK_FREE_RATE must equal the backtester's default (0.05)."""
+        from trade_analyzer.default_config import RISK_FREE_RATE as ANALYZER_RF
+        from config import CONFIG
+        assert ANALYZER_RF == CONFIG["risk_free_rate"], (
+            f"default_config.RISK_FREE_RATE={ANALYZER_RF} must equal "
+            f"config.CONFIG['risk_free_rate']={CONFIG['risk_free_rate']}"
+        )
+
+    def test_sharpe_differs_between_rf_zero_and_rf_five_pct(self):
+        """Sharpe with rf=0.0 differs from rf=0.05 — confirms the rate is not ignored."""
+        tl = _make_timeline()
+        daily_returns = tl.pct_change().dropna()
+
+        sharpe_rf0 = calculations.calculate_sharpe_ratio(daily_returns, 0.0, TRADING_DAYS)
+        sharpe_rf5 = calculations.calculate_sharpe_ratio(daily_returns, 0.05, TRADING_DAYS)
+
+        assert sharpe_rf0 != pytest.approx(sharpe_rf5, abs=0.01), (
+            "Sharpe with rf=0.0 must differ from rf=0.05 to show the rate is applied"
+        )
+        assert sharpe_rf0 > sharpe_rf5, (
+            f"For a positive-drift strategy, rf=0 Sharpe ({sharpe_rf0:.4f}) "
+            f"must exceed rf=0.05 Sharpe ({sharpe_rf5:.4f})"
+        )
+
+    def test_pdf_sharpe_matches_terminal_with_correct_rf(self):
+        """With the same rf rate and timeline, PDF and terminal Sharpe must agree."""
+        np.random.seed(7)
+        tl = _make_timeline()
+        pnl_list = [float(tl.iloc[-1] - tl.iloc[0])]
+        from unittest.mock import patch
+        with patch.dict("config.CONFIG", {"risk_free_rate": RF, "timeframe": "D", "timeframe_multiplier": 1}):
+            terminal_metrics = calculate_advanced_metrics(pnl_list, tl, [len(tl)])
+        terminal_sharpe = terminal_metrics["sharpe_ratio"]
+
+        daily_returns = tl.pct_change().dropna()
+        pdf_sharpe = calculations.calculate_sharpe_ratio(daily_returns, RF, TRADING_DAYS)
+
+        assert abs(pdf_sharpe - terminal_sharpe) < 1e-6, (
+            f"PDF Sharpe {pdf_sharpe:.6f} must equal terminal Sharpe {terminal_sharpe:.6f}"
+        )
+
+    def test_load_risk_free_rate_reads_from_snapshot(self, tmp_path):
+        """_load_risk_free_rate must return the rate stored in config_snapshot.json."""
+        import json
+        import sys
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from report import _load_risk_free_rate
+
+        snapshot = {"risk_free_rate": 0.03, "timeframe": "D"}
+        (tmp_path / "config_snapshot.json").write_text(json.dumps(snapshot))
+        assert _load_risk_free_rate(tmp_path) == pytest.approx(0.03)
+
+    def test_load_risk_free_rate_returns_none_when_missing(self, tmp_path):
+        """_load_risk_free_rate returns None when config_snapshot.json is absent."""
+        from report import _load_risk_free_rate
+        assert _load_risk_free_rate(tmp_path) is None
