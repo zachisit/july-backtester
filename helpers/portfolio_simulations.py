@@ -395,14 +395,17 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # Force-close open positions when stocks are delisted
     survivorship_stats = {}
     if delisting_dates and CONFIG.get("include_delisted", False):
-        from helpers.survivorship import adjust_for_survivorship
+        from helpers.survivorship import adjust_for_survivorship, apply_delisting_to_timeline
         delisting_price_assumption = CONFIG.get("delisting_price_assumption", "last_close")
         trade_log, survivorship_stats = adjust_for_survivorship(
-            trade_log, delisting_dates, initial_capital, delisting_price_assumption
+            trade_log, delisting_dates, initial_capital, delisting_price_assumption,
+            portfolio_data=portfolio_data,
         )
-        # Recompute pnl_list after adjustment
+        # Recompute pnl_list and equity curve after adjustment so all risk
+        # metrics (Sharpe, drawdown, CAGR) reflect the delisting losses.
         pnl_list = [t['Profit'] for t in trade_log]
         if not pnl_list: return None
+        portfolio_timeline = apply_delisting_to_timeline(portfolio_timeline, trade_log)
 
 
     duration_list = [t['HoldDuration'] for t in trade_log]
