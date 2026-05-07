@@ -182,8 +182,8 @@ def parse_comparison_tickers(config: dict) -> dict[str, Any]:
             # For index symbols like I:VIX, use the bare name (VIX) as default label
             if symbol.upper().startswith("I:"):
                 label = symbol[2:]  # Strip "I:" prefix
-            elif symbol.startswith("^"):
-                label = symbol[1:]  # Strip "^" prefix
+            elif symbol.startswith("^") or symbol.startswith("$"):
+                label = symbol[1:]  # Strip "^" or "$" prefix
             else:
                 label = symbol
 
@@ -194,10 +194,10 @@ def parse_comparison_tickers(config: dict) -> dict[str, Any]:
         # Add to dependencies if role is "dependency" or "both"
         if role in ("dependency", "both"):
             # Dependency key is lowercase, stripped of prefixes
-            # I:VIX -> "vix", ^VIX -> "vix", SPY -> "spy"
+            # I:VIX -> "vix", ^VIX -> "vix", $VIX -> "vix", SPY -> "spy"
             if symbol.upper().startswith("I:"):
                 dep_key = symbol[2:].lower()
-            elif symbol.startswith("^"):
+            elif symbol.startswith("^") or symbol.startswith("$"):
                 dep_key = symbol[1:].lower()
             else:
                 dep_key = symbol.lower()
