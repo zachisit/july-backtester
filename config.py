@@ -282,7 +282,11 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["EC-VIX-8: WR70 SMA120 VIX-pct regime"],
+    "strategies": [
+        "EC-VIX-20: WR70 SMA120 minimal-entry tight-exit-40 VIX-pct",
+        "EC-VIX-21: WR70 SMA120 minimal-entry tight-exit-38 VIX-pct",
+        "EC-VIX-22: WR70 SMA120 minimal-entry-25 VIX-pct",
+    ],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
