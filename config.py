@@ -282,11 +282,9 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": [
-        "EC-VIX-26: WR70 SMA120 minimal-entry-25 vix-90th VIX-pct",
-        "EC-VIX-27: WR70 SMA120 minimal-entry-25 vix-95th VIX-pct",
-        "EC-VIX-28: WR70 SMA120 entry-22 vix-85th VIX-pct",
-    ],
+    # RESEARCH COMPLETE (Session 9): EC-VIX-27 is max P&L champion (4122.28%, ACCEPTABLE)
+    # EC-VIX-25 is the robust champion (4040.1%, worst_month=-9.61%, safer margin)
+    "strategies": ["EC-VIX-27: WR70 SMA120 minimal-entry-25 vix-95th VIX-pct"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
