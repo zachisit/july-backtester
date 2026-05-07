@@ -169,7 +169,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "NDX + Energy + Defense": "ndx_energy.json",
+        "NDX+Energy+Defense": "ndx_energy.json",
     },
 
     # ============================================================
@@ -282,7 +282,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["EC-R81: WR70 SMA200 pure (EC62 base)"],  # last tested champion
+    "strategies": ["EC-R81: WR70 SMA200 pure (EC62 base)"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
