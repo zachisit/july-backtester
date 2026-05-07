@@ -30,7 +30,7 @@ CONFIG = {
     # Relative paths are resolved from the project root.
     # Each file must be named {SYMBOL}.parquet (case-insensitive).
     # Required columns: Open, High, Low, Close, Volume with a DatetimeIndex.
-    "parquet_data_dir": "parquet_data",
+    "parquet_data_dir": "parquet_data/data",
 
     # ============================================================
     # SECTION 2: BACKTEST PERIOD & CAPITAL
@@ -65,7 +65,7 @@ CONFIG = {
     #   - Hourly (H): ~1,638 bars/year (252 × 6.5 hours)
     #   - 5-minute (MIN, multiplier=5): ~19,656 bars/year
     # HTB (short selling) fees are also compounded per bar instead of per day.
-    "timeframe": "D",  # Daily
+    "timeframe": "D",  # Daily — parquet returns daily bars regardless of "W"
     #"timeframe": "H",  # Hourly
     #"timeframe": "MIN",              # Use "D", "H", "MIN", "W", "M"
     #"timeframe_multiplier": 5,       # e.g., 1, 5, 15, 30 for minutes
@@ -88,9 +88,8 @@ CONFIG = {
     # have no SPY/VIX files). The engine falls back to config start_date/end_date for
     # the period. Strategies declaring dependencies=["spy"] etc. will be skipped.
     "comparison_tickers": [
-      #  {"symbol": "SPY",   "role": "both",       "label": "SPY"},
-      #  {"symbol": "I:VIX", "role": "both", "label": "VIX"},
-      #  {"symbol": "I:TNX", "role": "both", "label": "TNX"},
+         {"symbol": "SPY",  "role": "both",       "label": "SPY"},
+         {"symbol": "$VIX", "role": "dependency"},
     ],
 
     # ============================================================
@@ -170,10 +169,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "My Symbols": ["AAPL"],
-        #"Nasdaq 100": "nasdaq_100.json",
-        #"Nasdaq Biotech": "nasdaq_biotech_tickers.json",
-        #"Russell 1000": "russell_1000.json",
+        "NDX + Energy + Defense": "ndx_energy.json",
     },
 
     # ============================================================
@@ -182,7 +178,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.10,
+    "allocation_per_trade": 0.025,
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -245,7 +241,7 @@ CONFIG = {
     # Rolling multi-fold WFA (opt-in — keep None for normal runs).
     # wfa_folds: None or 0 → disabled; int >= 2 → number of equal-width OOS folds.
     # wfa_min_fold_trades: minimum OOS trades required to score a fold.
-    "wfa_folds": None,
+    "wfa_folds": 3,
     "wfa_min_fold_trades": 5,
 
     # ============================================================
@@ -286,7 +282,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["SMA Crossover (20d/50d)"],
+    "strategies": ["EC-R81: WR70 SMA200 pure (EC62 base)"],  # last tested champion
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
