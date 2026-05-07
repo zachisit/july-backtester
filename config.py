@@ -283,9 +283,9 @@ CONFIG = {
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
     "strategies": [
-        "EC-VIX-23: WR70 SMA120 minimal-entry-22 VIX-pct",
-        "EC-VIX-24: WR70 SMA120 minimal-entry-25 vix-75th VIX-pct",
-        "EC-VIX-25: WR70 SMA120 minimal-entry-25 vix-85th VIX-pct",
+        "EC-VIX-26: WR70 SMA120 minimal-entry-25 vix-90th VIX-pct",
+        "EC-VIX-27: WR70 SMA120 minimal-entry-25 vix-95th VIX-pct",
+        "EC-VIX-28: WR70 SMA120 entry-22 vix-85th VIX-pct",
     ],
 
     # ============================================================
