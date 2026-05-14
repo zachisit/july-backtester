@@ -1243,3 +1243,9 @@ def ema_crossover_vix_only_logic(df, vix_df, fast_ema, slow_ema, vix_threshold=3
     df['Signal'] = np.where((original_signal == 1) & is_market_calm, 1, original_signal)
     df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
     return df
+
+def calculate_williams_r(df, period=14):
+    highest_high = df['High'].rolling(window=period).max()
+    lowest_low = df['Low'].rolling(window=period).min()
+    df[f'WilliamsR_{period}'] = -100 * (highest_high - df['Close']) / (highest_high - lowest_low + 1e-10)
+    return df
