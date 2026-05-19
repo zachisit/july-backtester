@@ -551,6 +551,20 @@ The internal `Trade` counter column is always dropped.
 - Norgate portfolios use `"norgate:WatchlistName"` string prefix; JSON files use `"filename.json"`; inline lists use a Python list
 - `execution_time: "open"` means signals are generated on day N and filled at day N+1 open — the simulator handles the 1-day lag via `prev_trading_dates`
 
+## Fresh-Setup Notes (2026-05-19)
+
+The pinned `pandas-ta==0.3.14b0` in `requirements.txt` is **no longer installable from PyPI** — the upstream `twopirllc/pandas-ta` repo was deleted and the package name was taken over. Only `0.4.67b0` / `0.4.71b0` are available, and installing either forces `pandas` to 3.0.x (vs the pinned 2.2.3) and `numpy` to 2.2.x. Test suite under the new stack: 1146 passed / 7 failed (peripheral CSV/normalizer modules; core sim/WFA/MC unaffected).
+
+**Workaround for new clones:**
+```bash
+python3.12 -m venv .venv     # 3.13/3.14 won't resolve all pins
+.venv/bin/pip install pandas-ta==0.4.67b0       # forces pandas==3.0.3
+.venv/bin/pip install -r requirements.txt --ignore-installed pandas pandas-ta numpy
+.venv/bin/pip install seaborn pytest             # undeclared in requirements.txt
+```
+
+`requirements.txt` is intentionally NOT updated — machines that still have a cached 0.3.14b0 wheel keep reproducing original EC track results. **Do not assume EC champions reproduce on a freshly-installed stack** — pandas-ta 0.4 has subtly different indicator math.
+
 ## Known Issues Fixed
 
 ### ATR Column Name Mismatch (fixed 2026-03-13)
