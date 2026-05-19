@@ -173,7 +173,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "GoldDji": "gold_dji.json",
+        "NDXEnergy": "ndx_energy.json",
     },
 
     # ============================================================
@@ -182,7 +182,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.09,
+    "allocation_per_trade": 0.025,
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -288,7 +288,7 @@ CONFIG = {
     # skipped — a typo will not cause a crash.
     # RESEARCH COMPLETE (Session 9): EC-VIX-27 is max P&L champion (4122.28%, ACCEPTABLE)
     # EC-VIX-25 is the robust champion (4040.1%, worst_month=-9.61%, safer margin)
-    "strategies": ["GR-A-09: R16 + TNX rapid-rise emergency exit"],
+    "strategies": ["EC-VIX-27: WR70 SMA120 minimal-entry-25 vix-95th VIX-pct"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
