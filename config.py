@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2005-01-01",
+    "start_date": "1990-01-01",
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -171,7 +171,8 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "GoldDji": "gold_dji.json",
+        "DefensiveTLT": "defensive_tlt.json",
+        "DefensiveGLD": "defensive_gld.json",
     },
 
     # ============================================================
@@ -180,7 +181,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.09,
+    "allocation_per_trade": 1.0,
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -284,18 +285,12 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    # Robustness check: R21 (GR-A-09) + neighboring GR-A-* variants on
-    # 21-yr DJI+GLD. Tests whether R21 sits in a robust cluster or a
-    # fragile peak.
+    # Defensive sleeves: DEF-01 on TLT (defensive_tlt portfolio), DEF-02
+    # on GLD (defensive_gld portfolio). 100% allocation per trade since the
+    # sleeve holds the single defensive instrument when stress regime is on.
     "strategies": [
-        "GR-A-04: Twin-Pillar Regime Trend Follow",
-        "GR-A-05: Regime-Gated Entries, Trend Exits",
-        "GR-A-06b: Loose VIX-or-SPY Entry Gate (VIX<30)",
-        "GR-A-08: VIX-or-SPY-or-TNX Entry Gate",
-        "GR-A-09: R16 + TNX rapid-rise emergency exit",
-        "GR-A-10: GR-A-09 + RSI>50 momentum confirmation",
-        "GR-A-11: R21 + VIX velocity emergency exit (dual shock)",
-        "GR-A-12: R21 + VIX-spike entry block (asymmetric)",
+        "DEF-01: TLT defensive — long during VIX>35 or SPY<SMA200",
+        "DEF-02: GLD defensive — long during VIX>35 or SPY<SMA200",
     ],
 
     # ============================================================
