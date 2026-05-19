@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "1990-01-01",
+    "start_date": "2005-01-01",
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -90,7 +90,8 @@ CONFIG = {
     "comparison_tickers": [
          {"symbol": "SPY",  "role": "both",       "label": "SPY"},
          {"symbol": "$VIX", "role": "dependency"},
-         # EC-VIX-* variants only need VIX → floor is SPY parquet 1993-01-29.
+         {"symbol": "TLT",  "role": "dependency", "key": "tnx"},
+         {"symbol": "GLD",  "role": "dependency", "key": "gold"},
     ],
 
     # ============================================================
@@ -170,7 +171,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "NDXEnergy": "ndx_energy.json",
+        "GoldDji": "gold_dji.json",
     },
 
     # ============================================================
@@ -179,7 +180,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.025,
+    "allocation_per_trade": 0.09,
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -283,22 +284,18 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    # Extended-period Option 3: re-tune EC-VIX-27 over 1993+ data.
-    # Sweep across the EC-VIX-22..31 "minimal-entry" family + a few outliers
-    # (EC-VIX-8, EC-VIX-14) for breadth. ~14 variants × 121 syms = 1700 tasks.
+    # Robustness check: R21 (GR-A-09) + neighboring GR-A-* variants on
+    # 21-yr DJI+GLD. Tests whether R21 sits in a robust cluster or a
+    # fragile peak.
     "strategies": [
-        "EC-VIX-8: WR70 SMA120 VIX-pct regime",
-        "EC-VIX-14: WR50 SMA120 VIX-pct regime",
-        "EC-VIX-22: WR70 SMA120 minimal-entry-25 VIX-pct",
-        "EC-VIX-23: WR70 SMA120 minimal-entry-22 VIX-pct",
-        "EC-VIX-24: WR70 SMA120 minimal-entry-25 vix-75th VIX-pct",
-        "EC-VIX-25: WR70 SMA120 minimal-entry-25 vix-85th VIX-pct",
-        "EC-VIX-26: WR70 SMA120 minimal-entry-25 vix-90th VIX-pct",
-        "EC-VIX-27: WR70 SMA120 minimal-entry-25 vix-95th VIX-pct",
-        "EC-VIX-28: WR70 SMA120 entry-22 vix-85th VIX-pct",
-        "EC-VIX-29: WR70 SMA120 entry-22 vix-95th VIX-pct",
-        "EC-VIX-30: WR70 SMA120 minimal-entry-25 vix-92nd VIX-pct",
-        "EC-VIX-31: WR70 SMA120 minimal-entry-25 vix-97th VIX-pct",
+        "GR-A-04: Twin-Pillar Regime Trend Follow",
+        "GR-A-05: Regime-Gated Entries, Trend Exits",
+        "GR-A-06b: Loose VIX-or-SPY Entry Gate (VIX<30)",
+        "GR-A-08: VIX-or-SPY-or-TNX Entry Gate",
+        "GR-A-09: R16 + TNX rapid-rise emergency exit",
+        "GR-A-10: GR-A-09 + RSI>50 momentum confirmation",
+        "GR-A-11: R21 + VIX velocity emergency exit (dual shock)",
+        "GR-A-12: R21 + VIX-spike entry block (asymmetric)",
     ],
 
     # ============================================================
