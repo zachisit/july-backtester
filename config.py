@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "GoldNdx": "gold_ndx.json",
+        "GoldDji": "gold_dji.json",
     },
 
     # ============================================================
