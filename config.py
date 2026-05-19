@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2005-01-01",
+    "start_date": "1990-01-01",
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -90,10 +90,9 @@ CONFIG = {
     "comparison_tickers": [
          {"symbol": "SPY",  "role": "both",       "label": "SPY"},
          {"symbol": "$VIX", "role": "dependency"},
-         {"symbol": "GLD",  "role": "dependency", "key": "gold"},
-         {"symbol": "TLT",  "role": "dependency", "key": "tnx"},   # bond proxy; direction INVERSE to yield
-         {"symbol": "UUP",  "role": "dependency", "key": "dxy"},
-         {"symbol": "USO",  "role": "dependency", "key": "oil"},
+         # Extended-history run: dropped GLD/TLT/UUP/USO — EC-VIX-27 only depends
+         # on VIX (parquet $VIX goes back to 1990-01-02). SPY parquet starts
+         # 1993-01-29 — that's the binding floor for the run period (~33 yrs).
     ],
 
     # ============================================================
