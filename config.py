@@ -288,7 +288,7 @@ CONFIG = {
     # skipped — a typo will not cause a crash.
     # RESEARCH COMPLETE (Session 9): EC-VIX-27 is max P&L champion (4122.28%, ACCEPTABLE)
     # EC-VIX-25 is the robust champion (4040.1%, worst_month=-9.61%, safer margin)
-    "strategies": ["GR-A-09: R16 + TNX rapid-rise emergency exit"],
+    "strategies": ["GR-A-13: Williams R cross-up + R21 regime + TNX shock exit"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
