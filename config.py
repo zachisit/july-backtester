@@ -91,6 +91,9 @@ CONFIG = {
          {"symbol": "SPY",  "role": "both",       "label": "SPY"},
          {"symbol": "$VIX", "role": "dependency"},
          {"symbol": "GLD",  "role": "dependency", "key": "gold"},
+         {"symbol": "TLT",  "role": "dependency", "key": "tnx"},   # bond proxy; direction INVERSE to yield
+         {"symbol": "UUP",  "role": "dependency", "key": "dxy"},
+         {"symbol": "USO",  "role": "dependency", "key": "oil"},
     ],
 
     # ============================================================
