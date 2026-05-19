@@ -90,9 +90,7 @@ CONFIG = {
     "comparison_tickers": [
          {"symbol": "SPY",  "role": "both",       "label": "SPY"},
          {"symbol": "$VIX", "role": "dependency"},
-         # Extended-history run: dropped GLD/TLT/UUP/USO — EC-VIX-27 only depends
-         # on VIX (parquet $VIX goes back to 1990-01-02). SPY parquet starts
-         # 1993-01-29 — that's the binding floor for the run period (~33 yrs).
+         # EC-VIX-* variants only need VIX → floor is SPY parquet 1993-01-29.
     ],
 
     # ============================================================
@@ -285,9 +283,23 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    # RESEARCH COMPLETE (Session 9): EC-VIX-27 is max P&L champion (4122.28%, ACCEPTABLE)
-    # EC-VIX-25 is the robust champion (4040.1%, worst_month=-9.61%, safer margin)
-    "strategies": ["EC-VIX-27: WR70 SMA120 minimal-entry-25 vix-95th VIX-pct"],
+    # Extended-period Option 3: re-tune EC-VIX-27 over 1993+ data.
+    # Sweep across the EC-VIX-22..31 "minimal-entry" family + a few outliers
+    # (EC-VIX-8, EC-VIX-14) for breadth. ~14 variants × 121 syms = 1700 tasks.
+    "strategies": [
+        "EC-VIX-8: WR70 SMA120 VIX-pct regime",
+        "EC-VIX-14: WR50 SMA120 VIX-pct regime",
+        "EC-VIX-22: WR70 SMA120 minimal-entry-25 VIX-pct",
+        "EC-VIX-23: WR70 SMA120 minimal-entry-22 VIX-pct",
+        "EC-VIX-24: WR70 SMA120 minimal-entry-25 vix-75th VIX-pct",
+        "EC-VIX-25: WR70 SMA120 minimal-entry-25 vix-85th VIX-pct",
+        "EC-VIX-26: WR70 SMA120 minimal-entry-25 vix-90th VIX-pct",
+        "EC-VIX-27: WR70 SMA120 minimal-entry-25 vix-95th VIX-pct",
+        "EC-VIX-28: WR70 SMA120 entry-22 vix-85th VIX-pct",
+        "EC-VIX-29: WR70 SMA120 entry-22 vix-95th VIX-pct",
+        "EC-VIX-30: WR70 SMA120 minimal-entry-25 vix-92nd VIX-pct",
+        "EC-VIX-31: WR70 SMA120 minimal-entry-25 vix-97th VIX-pct",
+    ],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
