@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2004-01-01",
+    "start_date": "2005-01-01",
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -90,6 +90,7 @@ CONFIG = {
     "comparison_tickers": [
          {"symbol": "SPY",  "role": "both",       "label": "SPY"},
          {"symbol": "$VIX", "role": "dependency"},
+         {"symbol": "GLD",  "role": "dependency", "key": "gold"},
     ],
 
     # ============================================================
@@ -169,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "NDX+Energy+Defense": "ndx_energy.json",
+        "GoldNdx": "gold_ndx.json",
     },
 
     # ============================================================
@@ -178,7 +179,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.025,
+    "allocation_per_trade": 0.50,
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -284,7 +285,7 @@ CONFIG = {
     # skipped — a typo will not cause a crash.
     # RESEARCH COMPLETE (Session 9): EC-VIX-27 is max P&L champion (4122.28%, ACCEPTABLE)
     # EC-VIX-25 is the robust champion (4040.1%, worst_month=-9.61%, safer margin)
-    "strategies": ["EC-VIX-27: WR70 SMA120 minimal-entry-25 vix-95th VIX-pct"],
+    "strategies": ["GR-A-01: VIX-Gated Trend Follow"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
