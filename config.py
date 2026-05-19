@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "GoldDji": "gold_dji.json",
+        "GoldSpy": "gold_spy.json",
     },
 
     # ============================================================
