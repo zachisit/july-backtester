@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "GoldSectors": "gold_sectors.json",
+        "GoldDji": "gold_dji.json",
     },
 
     # ============================================================
@@ -285,7 +285,7 @@ CONFIG = {
     # skipped — a typo will not cause a crash.
     # RESEARCH COMPLETE (Session 9): EC-VIX-27 is max P&L champion (4122.28%, ACCEPTABLE)
     # EC-VIX-25 is the robust champion (4040.1%, worst_month=-9.61%, safer margin)
-    "strategies": ["GR-A-01: VIX-Gated Trend Follow"],
+    "strategies": ["GR-A-01 v2: Asymmetric VIX Safety"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
