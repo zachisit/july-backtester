@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "1990-01-01",
+    "start_date": "2004-01-01",
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -89,9 +89,8 @@ CONFIG = {
     # the period. Strategies declaring dependencies=["spy"] etc. will be skipped.
     "comparison_tickers": [
          {"symbol": "SPY",  "role": "both",       "label": "SPY"},
+         # Kalman β Gold only needs SPY as dep. VIX kept for regime heatmap.
          {"symbol": "$VIX", "role": "dependency"},
-         {"symbol": "TLT",  "role": "dependency", "key": "tnx"},
-         {"symbol": "GLD",  "role": "dependency", "key": "gold"},
     ],
 
     # ============================================================
@@ -171,8 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "DefensiveTLT": "defensive_tlt.json",
-        "DefensiveGLD": "defensive_gld.json",
+        "GoldKalmanTest": "defensive_gld.json",   # single-symbol ["GLD"]
     },
 
     # ============================================================
@@ -244,7 +242,7 @@ CONFIG = {
     # Rolling multi-fold WFA (opt-in — keep None for normal runs).
     # wfa_folds: None or 0 → disabled; int >= 2 → number of equal-width OOS folds.
     # wfa_min_fold_trades: minimum OOS trades required to score a fold.
-    "wfa_folds": 3,
+    "wfa_folds": 5,
     "wfa_min_fold_trades": 5,
 
     # ============================================================
@@ -285,12 +283,13 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    # Defensive sleeves: DEF-01 on TLT (defensive_tlt portfolio), DEF-02
-    # on GLD (defensive_gld portfolio). 100% allocation per trade since the
-    # sleeve holds the single defensive instrument when stress regime is on.
+    # Kalman β Gold-Rotation research candidate (handoff dated 2026-05-19).
+    # Q sweep — handoff explicitly notes Q is the critical smoothness knob.
     "strategies": [
-        "DEF-01: TLT defensive — long during VIX>35 or SPY<SMA200",
-        "DEF-02: GLD defensive — long during VIX>35 or SPY<SMA200",
+        "Kalman β Gold Rotation",
+        "Kalman β Gold Rotation Q1e-4",
+        "Kalman β Gold Rotation Q1e-3",
+        "Kalman β Gold Rotation Q1e-2",
     ],
 
     # ============================================================
@@ -325,7 +324,7 @@ CONFIG = {
     # "block" — block-bootstrap: samples consecutive blocks of trades, preserving
     #            win/loss autocorrelation and regime clustering.
     # mc_block_size: number of consecutive trades per block. None = auto (sqrt of trade count).
-    "mc_sampling": "iid",
+    "mc_sampling": "block",
     "mc_block_size": None,
 
     # ============================================================
