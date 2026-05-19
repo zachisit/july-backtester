@@ -179,7 +179,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.10,
+    "allocation_per_trade": 0.09,
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -285,7 +285,7 @@ CONFIG = {
     # skipped — a typo will not cause a crash.
     # RESEARCH COMPLETE (Session 9): EC-VIX-27 is max P&L champion (4122.28%, ACCEPTABLE)
     # EC-VIX-25 is the robust champion (4040.1%, worst_month=-9.61%, safer margin)
-    "strategies": ["GR-A-07: VIX Velocity + SPY Entry Gate"],
+    "strategies": ["GR-A-06b: Loose VIX-or-SPY Entry Gate (VIX<30)"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
