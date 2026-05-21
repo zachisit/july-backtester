@@ -20,7 +20,9 @@ Example Config
 "comparison_tickers": [
     {"symbol": "SPY", "role": "both", "label": "SPY"},
     {"symbol": "QQQ", "role": "benchmark", "label": "QQQ"},
-    {"symbol": "I:VIX", "role": "dependency"},  # label defaults to "VIX"
+    {"symbol": "I:VIX", "role": "dependency"},          # label defaults to "VIX"
+    {"symbol": "GLD",  "role": "dependency", "key": "gold"},  # semantic key override
+    {"symbol": "UUP",  "role": "dependency", "key": "dxy"},   # ETF proxy keyed semantically
 ]
 ```
 
@@ -28,6 +30,13 @@ Roles:
 - "benchmark" = calculate B&H return, show "vs. X (B&H)" column
 - "dependency" = available for strategy injection via @register_strategy(dependencies=[...])
 - "both" = serve both roles
+
+Optional `key` field (for "dependency" / "both" roles): override the lowercase
+dependency name that strategies declare. Without `key`, the name is auto-derived
+from the symbol (`SPY` -> `"spy"`, `$VIX` -> `"vix"`, `GLD` -> `"gld"`). With
+`key="gold"` on a GLD entry, strategies declare `dependencies=["gold"]` and
+receive `gold_df` in kwargs — decoupling strategy code from the specific ETF
+proxy chosen in config.
 
 Output Structure
 ----------------
@@ -182,8 +191,8 @@ def parse_comparison_tickers(config: dict) -> dict[str, Any]:
             # For index symbols like I:VIX, use the bare name (VIX) as default label
             if symbol.upper().startswith("I:"):
                 label = symbol[2:]  # Strip "I:" prefix
-            elif symbol.startswith("^"):
-                label = symbol[1:]  # Strip "^" prefix
+            elif symbol.startswith("^") or symbol.startswith("$"):
+                label = symbol[1:]  # Strip "^" or "$" prefix
             else:
                 label = symbol
 
@@ -193,14 +202,29 @@ def parse_comparison_tickers(config: dict) -> dict[str, Any]:
 
         # Add to dependencies if role is "dependency" or "both"
         if role in ("dependency", "both"):
-            # Dependency key is lowercase, stripped of prefixes
-            # I:VIX -> "vix", ^VIX -> "vix", SPY -> "spy"
-            if symbol.upper().startswith("I:"):
-                dep_key = symbol[2:].lower()
-            elif symbol.startswith("^"):
-                dep_key = symbol[1:].lower()
+            # Explicit "key" field wins over auto-derivation. This lets strategies
+            # declare semantic dependencies (e.g. `dependencies=["gold"]`) decoupled
+            # from the specific ETF proxy chosen in config (GLD, IAU, ...).
+            explicit_key = entry.get("key")
+            if explicit_key:
+                if not isinstance(explicit_key, str) or not explicit_key.strip():
+                    logger.warning(
+                        f"comparison_tickers[{i}] (symbol='{symbol}') has empty/invalid 'key' "
+                        f"field — falling back to auto-derived key from symbol"
+                    )
+                    explicit_key = None
+
+            if explicit_key:
+                dep_key = explicit_key.lower().strip()
             else:
-                dep_key = symbol.lower()
+                # Dependency key is lowercase, stripped of prefixes
+                # I:VIX -> "vix", ^VIX -> "vix", $VIX -> "vix", SPY -> "spy"
+                if symbol.upper().startswith("I:"):
+                    dep_key = symbol[2:].lower()
+                elif symbol.startswith("^") or symbol.startswith("$"):
+                    dep_key = symbol[1:].lower()
+                else:
+                    dep_key = symbol.lower()
 
             # Warn if duplicate dependency key (e.g., both "I:VIX" and "^VIX")
             if dep_key in dependencies:

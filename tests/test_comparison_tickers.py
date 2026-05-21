@@ -334,3 +334,115 @@ class TestParseOutputStructure:
 
         # Even though SPY is in both benchmarks and dependencies, it appears once in all_symbols
         assert result["all_symbols"] == ["SPY"]
+
+
+# ---------------------------------------------------------------------------
+# TestKeyOverride — explicit `key` field decouples dep name from symbol
+# ---------------------------------------------------------------------------
+
+class TestKeyOverride:
+    """Test the optional `key` field on dependency entries.
+
+    Lets strategies declare semantic dependencies (e.g. `["gold"]`) decoupled
+    from the specific ETF proxy chosen in config (GLD vs IAU).
+    """
+
+    def test_explicit_key_overrides_auto_derived(self):
+        """`key="gold"` on a GLD entry produces dep_key 'gold', not 'gld'."""
+        config = {
+            "comparison_tickers": [
+                {"symbol": "GLD", "role": "dependency", "key": "gold"},
+            ]
+        }
+        result = parse_comparison_tickers(config)
+        assert result["dependencies"] == {"gold": "GLD"}
+        assert "gld" not in result["dependencies"]
+
+    def test_explicit_key_lowercased(self):
+        """The provided key is lowercased before storage."""
+        config = {
+            "comparison_tickers": [
+                {"symbol": "UUP", "role": "dependency", "key": "DXY"},
+            ]
+        }
+        result = parse_comparison_tickers(config)
+        assert result["dependencies"] == {"dxy": "UUP"}
+
+    def test_explicit_key_stripped(self):
+        """Surrounding whitespace in the key is stripped."""
+        config = {
+            "comparison_tickers": [
+                {"symbol": "USO", "role": "dependency", "key": "  oil  "},
+            ]
+        }
+        result = parse_comparison_tickers(config)
+        assert result["dependencies"] == {"oil": "USO"}
+
+    def test_empty_key_falls_back_to_auto_derivation(self):
+        """An empty/whitespace `key` is ignored, auto-derivation kicks in."""
+        config = {
+            "comparison_tickers": [
+                {"symbol": "GLD", "role": "dependency", "key": "   "},
+            ]
+        }
+        result = parse_comparison_tickers(config)
+        # Falls back to auto-derived key from symbol
+        assert result["dependencies"] == {"gld": "GLD"}
+
+    def test_non_string_key_falls_back_to_auto_derivation(self):
+        """A non-string `key` (e.g. int) is ignored, auto-derivation kicks in."""
+        config = {
+            "comparison_tickers": [
+                {"symbol": "GLD", "role": "dependency", "key": 42},
+            ]
+        }
+        result = parse_comparison_tickers(config)
+        assert result["dependencies"] == {"gld": "GLD"}
+
+    def test_no_key_field_uses_auto_derivation(self):
+        """When `key` is absent entirely, behaviour is unchanged from before."""
+        config = {
+            "comparison_tickers": [
+                {"symbol": "GLD", "role": "dependency"},
+            ]
+        }
+        result = parse_comparison_tickers(config)
+        assert result["dependencies"] == {"gld": "GLD"}
+
+    def test_gold_track_full_config(self):
+        """End-to-end: the full gold-track comparison_tickers config parses correctly."""
+        config = {
+            "comparison_tickers": [
+                {"symbol": "SPY",  "role": "both",       "label": "SPY"},
+                {"symbol": "$VIX", "role": "dependency"},
+                {"symbol": "GLD",  "role": "dependency", "key": "gold"},
+                {"symbol": "TLT",  "role": "dependency", "key": "tnx"},
+                {"symbol": "UUP",  "role": "dependency", "key": "dxy"},
+                {"symbol": "USO",  "role": "dependency", "key": "oil"},
+            ]
+        }
+        result = parse_comparison_tickers(config)
+        assert result["dependencies"] == {
+            "spy":  "SPY",
+            "vix":  "$VIX",
+            "gold": "GLD",
+            "tnx":  "TLT",
+            "dxy":  "UUP",
+            "oil":  "USO",
+        }
+        assert result["benchmarks"] == [{"symbol": "SPY", "label": "SPY"}]
+        assert set(result["all_symbols"]) == {"SPY", "$VIX", "GLD", "TLT", "UUP", "USO"}
+
+    def test_key_role_benchmark_only_ignored(self):
+        """`key` is meaningless on a benchmark-only entry (no dependency injection)."""
+        config = {
+            "comparison_tickers": [
+                {"symbol": "GLD", "role": "benchmark", "key": "gold"},
+            ]
+        }
+        result = parse_comparison_tickers(config)
+        # No dependency entry should appear regardless of `key`
+        assert result["dependencies"] == {}
+        # GLD is still a benchmark
+        assert result["benchmarks"] == [{"symbol": "GLD", "label": "GLD"}]
+

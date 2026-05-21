@@ -75,6 +75,26 @@ def _load_bars_per_year(run_dir: Path) -> int | None:
         return None
 
 
+def _load_risk_free_rate(run_dir: Path) -> float | None:
+    """Read risk_free_rate from config_snapshot.json in a run directory.
+
+    Returns the rate (float) if present and valid (>= 0),
+    or None if the file is missing, the key is absent, or the value is invalid.
+    """
+    snapshot_path = run_dir / "config_snapshot.json"
+    if not snapshot_path.is_file():
+        return None
+    try:
+        with open(snapshot_path, "r", encoding="utf-8") as fh:
+            snapshot = json.load(fh)
+        rate = snapshot.get("risk_free_rate")
+        if rate is not None and float(rate) >= 0:
+            return float(rate)
+    except (json.JSONDecodeError, ValueError, TypeError):
+        pass
+    return None
+
+
 def _load_wfa_split_ratio(run_dir: Path) -> float | None:
     """Read wfa_split_ratio from config_snapshot.json in a run directory.
 
@@ -181,6 +201,11 @@ def main():
         if wfa_ratio is not None:
             print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
 
+        # Load risk-free rate from this run's config_snapshot.json (if present)
+        risk_free_rate = _load_risk_free_rate(run_dir)
+        if risk_free_rate is not None:
+            print(f"Risk-free rate loaded from config_snapshot.json: {risk_free_rate}")
+
         output_dir = str(run_dir / "detailed_reports")
         _noise_csv = run_dir / "noise_sample_data.csv"
         config_params = {
@@ -191,6 +216,8 @@ def main():
         }
         if bars_per_year is not None:
             config_params['TRADING_DAYS_PER_YEAR'] = bars_per_year
+        if risk_free_rate is not None:
+            config_params['RISK_FREE_RATE'] = risk_free_rate
         count = 0
         for csv_file in csv_files:
             report_name = csv_file.stem
@@ -226,10 +253,11 @@ def main():
             else:
                 output_dir = "detailed_reports"
 
-        # Load timeframe-aware annualization factor and WFA split ratio from
-        # config_snapshot.json if the CSV is inside a run dir
+        # Load timeframe-aware annualization factor, WFA split ratio, and risk-free rate
+        # from config_snapshot.json if the CSV is inside a run dir
         wfa_ratio = None
         bars_per_year = None
+        risk_free_rate = None
         csv_parts = Path(csv_path).parts
         if "analyzer_csvs" in csv_parts:
             idx = csv_parts.index("analyzer_csvs")
@@ -240,6 +268,9 @@ def main():
             wfa_ratio = _load_wfa_split_ratio(_run_dir)
             if wfa_ratio is not None:
                 print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
+            risk_free_rate = _load_risk_free_rate(_run_dir)
+            if risk_free_rate is not None:
+                print(f"Risk-free rate loaded from config_snapshot.json: {risk_free_rate}")
 
         if args.report_name:
             report_name = args.report_name
@@ -268,6 +299,8 @@ def main():
             config_params['PORTFOLIO_TIMELINE'] = portfolio_timeline
         if bars_per_year is not None:
             config_params['TRADING_DAYS_PER_YEAR'] = bars_per_year
+        if risk_free_rate is not None:
+            config_params['RISK_FREE_RATE'] = risk_free_rate
         generate_trade_report(trades_df, output_dir, report_name, config_params)
 
 

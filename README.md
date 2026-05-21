@@ -212,9 +212,57 @@ graph TD
     E --> F[Output Folder created: output/runs/RUN_ID/]
     F -->|Terminal Output| G[Summary Table & Correlation Matrix]
     F -->|Raw Trade Data| H[analyzer_csvs/ Portfolio / Strategy.csv]
+    F -->|LLM-readable JSON| K[llm_verdict.json]
     H --> I[Run: python report.py --all output/runs/RUN_ID]
     I --> J[PDF & Markdown Reports generated in detailed_reports/]
 ```
+
+---
+
+## LLM Verdict
+
+Every run writes `output/runs/<run_id>/llm_verdict.json` — a machine-readable file designed to let an LLM, script, or downstream tool evaluate strategy results without parsing terminal output.
+
+### What it contains
+
+Each strategy entry includes:
+
+| Field | Description |
+|---|---|
+| `beats_spy` | `true` / `false` boolean |
+| `verdict` | Plain-English string — e.g. `"BEATS SPY by +81684.50pp"` or `"LAGS SPY by -788.75pp"` |
+| `strategy_return_pct` | Total return as a float |
+| `benchmarks` | Per-benchmark breakdown: `bh_return_pct`, `beats`, `outperformance_pp` |
+| `sharpe_ratio`, `calmar_ratio`, `max_drawdown_pct`, `win_rate_pct` | Key risk metrics |
+| `mc_verdict`, `wfa_verdict` | Monte Carlo and Walk-Forward verdicts |
+| `equity_curve` | Monthly normalized equity curve (strategy + all benchmarks), starting at 100 |
+| `annual_returns` | Year-by-year strategy vs benchmark returns |
+| `curve_smoothness` | Equity curve quality analysis (see below) |
+
+### Curve smoothness
+
+The `curve_smoothness` block scores the equity curve on five criteria:
+
+| Criterion | Threshold |
+|---|---|
+| R² of log-equity vs linear trend | ≥ 0.90 |
+| Positive months | ≥ 60% |
+| Longest plateau (months without new high) | < 12 months |
+| Upthrust months (monthly return > mean + 3σ) | ≤ 2 |
+| Worst single-month drawdown | > −10% |
+
+**Verdict:** `SMOOTH` (0 failures) · `ACCEPTABLE` (1 failure) · `ROUGH` (2+ failures)
+
+The `smooth_notes` array explains every failure in plain English.
+
+### Terminal output
+
+The terminal prints a single summary line per run:
+```
+LLM verdict written to 'output/runs/2026-04-30_10-00-40/llm_verdict.json' (1/3 beat SPY)
+```
+
+The full structured data is in the JSON file — it is not printed to the terminal.
 
 ---
 

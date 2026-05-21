@@ -64,6 +64,24 @@ def get_bars_for_period(period_str: str, timeframe: str, multiplier: int = 1) ->
         else:
             raise ValueError(f"Cannot use period unit '{unit}' with Minute ('MIN') timeframe. Use 'd', 'h', or 'min'.")
             
+    elif timeframe == 'W':
+        TRADING_DAYS_PER_WEEK = 5
+        if unit == 'd':
+            return max(1, round(value / TRADING_DAYS_PER_WEEK))
+        elif unit == 'w':
+            return value
+        else:
+            raise ValueError(f"Cannot use period unit '{unit}' with Weekly ('W') timeframe. Use 'd' or 'w'.")
+
+    elif timeframe == 'M':
+        TRADING_DAYS_PER_MONTH = 21
+        if unit == 'd':
+            return max(1, round(value / TRADING_DAYS_PER_MONTH))
+        elif unit == 'm':
+            return value
+        else:
+            raise ValueError(f"Cannot use period unit '{unit}' with Monthly ('M') timeframe. Use 'd' or 'm'.")
+
     else:
         raise ValueError(f"Unsupported timeframe in config: {timeframe}")
 
