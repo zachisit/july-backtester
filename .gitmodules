@@ -4,3 +4,6 @@
 [submodule "parquet_data"]
 	path = parquet_data
 	url = https://github.com/zachisit/july-backtester-norgate-data.git
+[submodule "usaspending_data"]
+	path = usaspending_data
+	url = https://github.com/zachisit/july-backtester-usaspending-data.git
