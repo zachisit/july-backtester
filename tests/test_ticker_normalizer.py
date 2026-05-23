@@ -332,3 +332,37 @@ class TestCanonicalMapCompleteness:
         """CANONICAL_INDEX_MAP should have 11 indices."""
         # VIX, VXN, TNX, TYX, FVX, IRX, SPX, NDX, DJI, RUT, NYA, DXY = 12 actually
         assert len(CANONICAL_INDEX_MAP) == 12
+
+
+# ---------------------------------------------------------------------------
+# Regression: v1.8.0 broke Norgate $VIX lookup on parquet by aliasing to csv
+# ---------------------------------------------------------------------------
+
+class TestParquetNorgatePrefixPreserved:
+    """v1.8.0 aliased parquet -> csv to make I:VIX work, but that side-effect
+    converted $VIX -> 'VIX', and the parquet service then loaded the unrelated
+    stock-ticker file (VIX.parquet) instead of the Norgate index file
+    ($VIX.parquet). Fixed in v1.8.1 by stripping only the Polygon 'I:' prefix
+    for parquet and preserving everything else.
+    """
+
+    def test_dollar_vix_preserved_for_parquet(self):
+        from helpers.ticker_normalizer import normalize_ticker
+        assert normalize_ticker("$VIX", "parquet") == "$VIX"
+
+    def test_dollar_spx_preserved_for_parquet(self):
+        from helpers.ticker_normalizer import normalize_ticker
+        assert normalize_ticker("$SPX", "parquet") == "$SPX"
+
+    def test_caret_vix_preserved_for_parquet(self):
+        """Yahoo-style ^VIX should also pass through unchanged (user's data
+        layout decides what file exists)."""
+        from helpers.ticker_normalizer import normalize_ticker
+        assert normalize_ticker("^VIX", "parquet") == "^VIX"
+
+    def test_bare_vix_preserved_for_parquet(self):
+        """Bare 'VIX' must NOT be canonicalized to '$VIX' — the user typed
+        bare and they get bare. If their data layout disagrees, that's a
+        layout problem, not a normalizer problem."""
+        from helpers.ticker_normalizer import normalize_ticker
+        assert normalize_ticker("VIX", "parquet") == "VIX"
