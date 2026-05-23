@@ -95,6 +95,48 @@ def _load_risk_free_rate(run_dir: Path) -> float | None:
     return None
 
 
+def _load_strategy_verdicts(run_dir: Path) -> list[dict]:
+    """Load llm_verdict.json from a run directory if present.
+
+    Returns the ``strategies`` list (one entry per strategy). Empty list on
+    missing file or parse error.
+    """
+    import json as _json
+    path = run_dir / "llm_verdict.json"
+    if not path.is_file():
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = _json.load(fh)
+        return data.get("strategies", []) or []
+    except Exception:
+        return []
+
+
+def _sanitize_for_filename(name: str) -> str:
+    """Mirror the engine's analyzer-csv name sanitization (spaces -> _, drop ( ) :)."""
+    return (name or "").replace(" ", "_").replace("(", "").replace(")", "").replace(":", "")
+
+
+def _match_strategy_verdict(verdicts: list[dict], strategy_stem: str,
+                            portfolio_dir: str) -> dict | None:
+    """Find the llm_verdict entry matching a per-strategy CSV file.
+
+    ``strategy_stem`` is the CSV file stem (sanitized); ``portfolio_dir`` is the
+    parent folder name (sanitized portfolio name).
+    """
+    for v in verdicts:
+        v_strat = _sanitize_for_filename(v.get("strategy", ""))
+        v_port = _sanitize_for_filename(v.get("portfolio", ""))
+        if v_strat == strategy_stem and v_port == portfolio_dir:
+            return v
+    # fallback: match on strategy only (handles trade-csv naming variants)
+    for v in verdicts:
+        if _sanitize_for_filename(v.get("strategy", "")) == strategy_stem:
+            return v
+    return None
+
+
 def _load_wfa_split_ratio(run_dir: Path) -> float | None:
     """Read wfa_split_ratio from config_snapshot.json in a run directory.
 
@@ -218,6 +260,10 @@ def main():
             config_params['TRADING_DAYS_PER_YEAR'] = bars_per_year
         if risk_free_rate is not None:
             config_params['RISK_FREE_RATE'] = risk_free_rate
+        _strategy_verdicts = _load_strategy_verdicts(run_dir)
+        if _strategy_verdicts:
+            print(f"Loaded {len(_strategy_verdicts)} strategy verdicts from llm_verdict.json")
+
         count = 0
         for csv_file in csv_files:
             report_name = csv_file.stem
@@ -227,6 +273,10 @@ def main():
             this_config = {**config_params}
             if portfolio_timeline is not None:
                 this_config['PORTFOLIO_TIMELINE'] = portfolio_timeline
+            _verdict_match = _match_strategy_verdict(_strategy_verdicts, csv_file.stem,
+                                                    csv_file.parent.name)
+            if _verdict_match is not None:
+                this_config['STRATEGY_VERDICT'] = _verdict_match
             generate_trade_report(trades_df, output_dir, report_name, this_config)
             count += 1
 

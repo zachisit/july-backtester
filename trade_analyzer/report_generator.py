@@ -260,6 +260,63 @@ def generate_overall_metrics_summary(
     return title, summary_text
 
 
+def generate_strategy_verdict_summary(verdict: dict | None) -> tuple[str, str]:
+    """Render the Strategy Verdict tearsheet section.
+
+    Parameters
+    ----------
+    verdict
+        A dict from ``output/runs/<id>/llm_verdict.json``'s ``strategies`` list
+        (full entry — keys include ``strategy``, ``portfolio``, ``verdict``,
+        ``mc_verdict``, ``mc_score``, ``wfa_verdict``, ``wfa_rolling_verdict``,
+        ``curve_smoothness``). When ``None`` or missing, returns a single-line
+        placeholder.
+
+    Returns
+    -------
+    (title, summary_text) suitable for appending to ``report_sections`` as a
+    ``{'type': 'text', ...}`` entry.
+    """
+    title = "Strategy Verdict"
+
+    if not verdict:
+        return title, "No strategy verdict available — llm_verdict.json not found or no matching entry."
+
+    lines: list[str] = []
+    strat = verdict.get("strategy", "?")
+    port = verdict.get("portfolio", "")
+    lines.append(f"{'Strategy:':<45} {strat}")
+    if port:
+        lines.append(f"{'Portfolio:':<45} {port}")
+
+    headline = verdict.get("verdict")
+    if headline:
+        lines.append(f"{'Benchmark Verdict:':<45} {headline}")
+
+    mc_v = verdict.get("mc_verdict")
+    mc_s = verdict.get("mc_score")
+    if mc_v is not None:
+        score_part = f"  (score: {mc_s})" if mc_s is not None else ""
+        lines.append(f"{'Monte Carlo Verdict:':<45} {mc_v}{score_part}")
+
+    wfa = verdict.get("wfa_verdict")
+    if wfa is not None:
+        lines.append(f"{'WFA Verdict:':<45} {wfa}")
+
+    wfa_roll = verdict.get("wfa_rolling_verdict")
+    if wfa_roll is not None:
+        lines.append(f"{'Rolling WFA Verdict:':<45} {wfa_roll}")
+
+    smooth = verdict.get("curve_smoothness") or {}
+    smooth_verdict = smooth.get("smooth_verdict")
+    if smooth_verdict is not None:
+        lines.append(f"{'Smoothness Verdict:':<45} {smooth_verdict}")
+        for note in (smooth.get("smooth_notes") or []):
+            lines.append(f"{'  - ' + note:<45}")
+
+    return title, "\n".join(lines)
+
+
 def generate_wfa_summary(wfa_result: dict, wfa_split_date: str | None, wfa_split_ratio) -> tuple[str, str]:
     """Generate the Walk-Forward Analysis section for the report.
 

@@ -197,6 +197,13 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
         )
         report_sections.append({'type': 'text', 'title': wfa_title, 'data': wfa_summary})
 
+        # Strategy Verdict section — surfaces the per-strategy llm_verdict.json
+        # entry (benchmark + MC + WFA + smoothness) when caller passes one via
+        # config_params['STRATEGY_VERDICT']. See report.py for the matching logic.
+        _verdict_dict = config_params.get('STRATEGY_VERDICT')
+        _verdict_title, _verdict_text = report_generator.generate_strategy_verdict_summary(_verdict_dict)
+        report_sections.append({'type': 'text', 'title': _verdict_title, 'data': _verdict_text})
+
         # --- Stress Test Analysis — Noise Injection Overlay ---
         _noise_csv_path = config_params.get('NOISE_CSV_PATH')
         if _noise_csv_path and os.path.isfile(_noise_csv_path):
