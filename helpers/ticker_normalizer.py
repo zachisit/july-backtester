@@ -260,11 +260,17 @@ def normalize_ticker(symbol: str, provider: str) -> str:
     '^XYZ'  # Unknown index — fallback
     """
     provider = provider.lower()
-    # Parquet files are stored under bare canonical names (e.g. VIX.parquet,
-    # TNX.parquet) — same convention as CSV. Aliasing here means I:VIX, $VIX,
-    # ^VIX all normalize to "VIX" so the parquet service can resolve the file.
+    # Parquet: targeted Polygon-prefix strip. The Norgate parquet convention
+    # uses '$VIX.parquet' for indices, so we MUST NOT strip '$' or convert
+    # to a bare 'VIX' lookup (that would resolve to the unrelated stock-ticker
+    # file when both exist — see v1.8.0 regression that returned the wrong
+    # VIX series to vol_axis_strategies). Strip only the Polygon 'I:' prefix
+    # so user-typed 'I:VIX' resolves to the bare 'VIX' file when present
+    # (covered by test_parquet_index_returns_bare_symbol).
     if provider == "parquet":
-        provider = "csv"
+        if symbol.upper().startswith("I:"):
+            return symbol[2:]
+        return symbol
     canonical_name, original_format = _extract_canonical_name(symbol)
 
     # Not an index — equity ticker, pass through unchanged
