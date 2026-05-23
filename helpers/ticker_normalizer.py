@@ -260,10 +260,11 @@ def normalize_ticker(symbol: str, provider: str) -> str:
     '^XYZ'  # Unknown index — fallback
     """
     provider = provider.lower()
-    # Parquet files keep the symbol as-is — the parquet service does case-insensitive
-    # file lookup and handles both Norgate-style ($VIX.parquet) and bare (VIX.parquet) names.
+    # Parquet files are stored under bare canonical names (e.g. VIX.parquet,
+    # TNX.parquet) — same convention as CSV. Aliasing here means I:VIX, $VIX,
+    # ^VIX all normalize to "VIX" so the parquet service can resolve the file.
     if provider == "parquet":
-        return symbol
+        provider = "csv"
     canonical_name, original_format = _extract_canonical_name(symbol)
 
     # Not an index — equity ticker, pass through unchanged
