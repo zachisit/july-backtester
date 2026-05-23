@@ -790,6 +790,26 @@ def build_wfa_page(
     return fig
 
 
+def build_strategy_verdict_page(verdict: dict | None) -> plt.Figure | None:
+    """Render the per-strategy verdict (benchmark + MC + WFA + smoothness)
+    as a standalone monospace text page in the modern tearsheet PDF.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+        The rendered page.
+    None
+        When ``verdict`` is falsy (no entry available in llm_verdict.json).
+        Caller should skip adding the page.
+    """
+    if not verdict:
+        return None
+    # Lazy import to avoid a circular dependency at module load time.
+    from .report_generator import generate_strategy_verdict_summary
+    title, text = generate_strategy_verdict_summary(verdict)
+    return _build_text_page(title, text)
+
+
 def build_appendix_metrics_page(overall_metrics_text: str) -> plt.Figure:
     """Appendix page: full verbose text metrics in monospace."""
     return _build_text_page('Appendix — Full Performance Metrics', overall_metrics_text)
@@ -944,6 +964,12 @@ def generate_tearsheet_pdf(report_data: dict, output_path: str):
                                    trades_df, daily_equity)
         if wfa_page is not None:
             pages.append(('Walk-Forward Analysis', wfa_page))
+
+        # P13: Strategy Verdict (optional — only when report_data carries it,
+        # populated by report.py from llm_verdict.json — issue #158)
+        _verdict_page = build_strategy_verdict_page(report_data.get('strategy_verdict'))
+        if _verdict_page is not None:
+            pages.append(('Strategy Verdict', _verdict_page))
 
         # Appendix
         if overall_text:

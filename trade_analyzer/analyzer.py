@@ -493,6 +493,11 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
                 'cleaning_summary':    cleaning_summary if isinstance(cleaning_summary, str) else str(cleaning_summary),
                 'overall_metrics_text': _overall_text,
                 'top_n_trades':        top_n_trades,
+                # Strategy verdict (benchmark + MC + WFA + smoothness) — issue #158.
+                # Populated by report.py from output/runs/<id>/llm_verdict.json;
+                # absent when called from contexts that lack the JSON (e.g. unit
+                # tests). build_strategy_verdict_page() skips when None/missing.
+                'strategy_verdict':    config_params.get('STRATEGY_VERDICT'),
             }
             generate_tearsheet_pdf(_report_data, output_pdf_path)
             pdf_save_attempted = True

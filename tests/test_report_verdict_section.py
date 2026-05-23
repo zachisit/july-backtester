@@ -125,3 +125,138 @@ class TestMatchStrategyVerdict:
 
     def test_empty_verdicts_returns_none(self):
         assert report_cli._match_strategy_verdict([], "anything", "anything") is None
+
+
+# ---------------------------------------------------------------------------
+# Test Class: Modern tearsheet PDF Strategy Verdict page (TDD)
+# ---------------------------------------------------------------------------
+# The modern PDF generator (trade_analyzer._pdf_pages.generate_tearsheet_pdf)
+# builds pages from a separate report_data dict, NOT from the legacy
+# report_sections list. The Strategy Verdict section must be rendered as its
+# own page in this modern flow.
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+
+
+def _collect_text(fig) -> str:
+    """Return concatenated text content of all text artists in a Figure."""
+    pieces = []
+    for ax in fig.get_axes():
+        for t in ax.texts:
+            pieces.append(t.get_text())
+    for t in fig.texts:
+        pieces.append(t.get_text())
+    return "\n".join(pieces)
+
+
+class TestBuildStrategyVerdictPage:
+    def test_returns_figure_when_verdict_provided(self):
+        from trade_analyzer._pdf_pages import build_strategy_verdict_page
+        fig = build_strategy_verdict_page(SAMPLE_VERDICT)
+        assert fig is not None
+        assert isinstance(fig, plt.Figure)
+        plt.close(fig)
+
+    def test_returns_none_when_verdict_missing(self):
+        from trade_analyzer._pdf_pages import build_strategy_verdict_page
+        assert build_strategy_verdict_page(None) is None
+
+    def test_returns_none_when_verdict_empty(self):
+        from trade_analyzer._pdf_pages import build_strategy_verdict_page
+        assert build_strategy_verdict_page({}) is None
+
+    def test_figure_contains_benchmark_verdict(self):
+        from trade_analyzer._pdf_pages import build_strategy_verdict_page
+        fig = build_strategy_verdict_page(SAMPLE_VERDICT)
+        text = _collect_text(fig)
+        assert "BEATS SPY by +2522.16pp" in text
+        plt.close(fig)
+
+    def test_figure_contains_mc_verdict(self):
+        from trade_analyzer._pdf_pages import build_strategy_verdict_page
+        fig = build_strategy_verdict_page(SAMPLE_VERDICT)
+        text = _collect_text(fig)
+        assert "DD Understated, High Tail Risk" in text
+        plt.close(fig)
+
+    def test_figure_contains_smoothness_and_notes(self):
+        from trade_analyzer._pdf_pages import build_strategy_verdict_page
+        fig = build_strategy_verdict_page(SAMPLE_VERDICT)
+        text = _collect_text(fig)
+        assert "ACCEPTABLE" in text
+        assert "plateau:" in text
+        plt.close(fig)
+
+    def test_figure_contains_page_title(self):
+        from trade_analyzer._pdf_pages import build_strategy_verdict_page
+        fig = build_strategy_verdict_page(SAMPLE_VERDICT)
+        text = _collect_text(fig)
+        assert "Strategy Verdict" in text
+        plt.close(fig)
+
+
+class TestGenerateTearsheetPdfIncludesVerdict:
+    def test_strategy_verdict_page_present_in_pdf(self, tmp_path, monkeypatch):
+        """When report_data carries 'strategy_verdict', generate_tearsheet_pdf
+        must add a 'Strategy Verdict' entry to its internal pages list."""
+        from trade_analyzer import _pdf_pages
+
+        captured = []
+
+        class _RecordingPdfPages:
+            def __init__(self, path):
+                self.path = path
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+            def savefig(self, fig, **kwargs):
+                # Record the page title from any axes that contain a likely title text
+                title = ""
+                for ax in fig.get_axes():
+                    for t in ax.texts:
+                        s = t.get_text() or ""
+                        if "Strategy Verdict" in s or "Executive Summary" in s or "Walk-Forward" in s:
+                            title = s
+                            break
+                    if title:
+                        break
+                captured.append(title)
+
+        monkeypatch.setattr(_pdf_pages, "PdfPages", _RecordingPdfPages)
+
+        import pandas as _pd
+        trades_df = _pd.DataFrame({
+            "Date": _pd.to_datetime(["2020-01-02", "2020-06-01"]),
+            "Ex. date": _pd.to_datetime(["2020-03-01", "2020-09-01"]),
+            "Profit": [100.0, -50.0],
+        })
+        report_data = {
+            "name": "TestStrat",
+            "run_date": "20260522_120000",
+            "trades_df": trades_df,
+            "initial_equity": 100_000,
+            "daily_equity": _pd.Series([100_000, 110_000], index=trades_df["Date"]),
+            "daily_returns": _pd.Series([0.0, 0.1], index=trades_df["Date"]),
+            "benchmark_df": None,
+            "benchmark_ticker": "SPY",
+            "monthly_perf": _pd.DataFrame(),
+            "symbol_perf": _pd.DataFrame(),
+            "mc_results": {},
+            "wfa_result": {},
+            "core_metrics": {"total_profit": 50.0, "sharpe": 1.0, "profit_factor": 2.0, "total_trades": 2},
+            "risk_free_rate": 0.05,
+            "rolling_window": 50,
+            "cleaning_summary": "",
+            "overall_metrics_text": "",
+            "top_n_trades": 10,
+            "strategy_verdict": SAMPLE_VERDICT,
+        }
+        output_path = tmp_path / "out.pdf"
+        _pdf_pages.generate_tearsheet_pdf(report_data, str(output_path))
+
+        # At least one captured page must be the Strategy Verdict page
+        assert any("Strategy Verdict" in c for c in captured), \
+            f"expected a Strategy Verdict page; captured titles: {captured}"
