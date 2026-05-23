@@ -57,7 +57,7 @@ def generate_llm_verdict(all_results, benchmark_returns, run_id=None, output_dir
 
         timeline = result.get("portfolio_timeline")
         curve, annual = _build_equity_curve(timeline, benchmark_dfs, label_order)
-        smoothness = _compute_smoothness(timeline)
+        smoothness = compute_smoothness(timeline)
 
         entry = {
             "strategy": result.get("Strategy", ""),
@@ -204,7 +204,11 @@ def _build_equity_curve(timeline, benchmark_dfs, label_order):
     return curve, annual
 
 
-def _compute_smoothness(timeline):
+def _compute_smoothness(timeline):  # backwards-compat alias for tests
+    return compute_smoothness(timeline)
+
+
+def compute_smoothness(timeline):
     """
     Compute curve smoothness metrics from a daily (or monthly) equity Series.
     Resamples to monthly internally. Returns None when < 12 months of data.

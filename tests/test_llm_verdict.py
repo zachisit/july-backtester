@@ -385,3 +385,44 @@ class TestCurveSmoothness:
         with open(path) as f:
             s = json.load(f)["strategies"][0]
         assert s["curve_smoothness"] is None
+
+
+# ---------------------------------------------------------------------------
+# Test Class: compute_smoothness public alias (issue #158)
+# ---------------------------------------------------------------------------
+
+class TestComputeSmoothnessPublicAlias:
+    """compute_smoothness was extracted to public API so main.py can attach
+    smooth_verdict to result dicts without re-importing the underscore name.
+    The underscore alias is kept for backwards compatibility with this test
+    file.
+    """
+
+    def test_public_compute_smoothness_exists(self):
+        from helpers.llm_verdict import compute_smoothness
+        assert callable(compute_smoothness)
+
+    def test_underscore_alias_still_works(self):
+        from helpers.llm_verdict import _compute_smoothness, compute_smoothness
+        tl = _make_timeline(n_days=500)
+        a = _compute_smoothness(tl)
+        b = compute_smoothness(tl)
+        assert a == b
+
+    def test_returns_smooth_verdict_field(self):
+        from helpers.llm_verdict import compute_smoothness
+        tl = _make_timeline(n_days=500)
+        result = compute_smoothness(tl)
+        assert result is not None
+        assert "smooth_verdict" in result
+        assert result["smooth_verdict"] in ("SMOOTH", "ACCEPTABLE", "ROUGH")
+
+    def test_none_timeline_returns_none(self):
+        from helpers.llm_verdict import compute_smoothness
+        assert compute_smoothness(None) is None
+
+    def test_short_timeline_returns_none(self):
+        import pandas as pd
+        from helpers.llm_verdict import compute_smoothness
+        tl = pd.Series([100, 101, 102], index=pd.bdate_range("2024-01-01", periods=3))
+        assert compute_smoothness(tl) is None

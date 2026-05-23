@@ -81,7 +81,7 @@ def _get_t2_cols(benchmark_columns):
              'Expectancy (R)', 'SQN'])
 
 _T3_COLS = ['Strategy', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
-            'Avg. Corr', 'MC Verdict', 'MC Score']
+            'Avg. Corr', 'MC Verdict', 'MC Score', 'Smooth Verdict']
 
 # Short display names for verbose tables only (T2 and T3).
 # Core Performance (T1) headers are already short and stay unchanged.
@@ -99,6 +99,7 @@ _VERBOSE_SHORT_NAMES = {
     'Rolling WFA':       'RollWFA',
     'Avg. Corr':         'Corr',
     'MC Verdict':        'MC',
+    'Smooth Verdict':    'Smooth',
 }
 
 
@@ -241,6 +242,7 @@ def generate_single_asset_summary_report(symbol_results, benchmark_returns, symb
             'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)',
             'rolling_sharpe_final': 'Roll.Sharpe(last)',
             'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)',
+            'smooth_verdict': 'Smooth Verdict',
         }
         rename_map.update(benchmark_columns["display_names"])
         filtered_df.rename(columns=rename_map, inplace=True)
@@ -252,7 +254,7 @@ def generate_single_asset_summary_report(symbol_results, benchmark_returns, symb
                        'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
                        'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades',
                        'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
-                       'MC Verdict', 'MC Score'])
+                       'MC Verdict', 'MC Score', 'Smooth Verdict'])
 
         summary_df_display = filtered_df.reindex(columns=report_cols).fillna('N/A').sort_values(by='MC Score', ascending=False).reset_index(drop=True)
 
@@ -387,6 +389,7 @@ def generate_final_summary(all_results, benchmark_returns):
         'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)',
         'rolling_sharpe_final': 'Roll.Sharpe(last)',
         'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)',
+        'smooth_verdict': 'Smooth Verdict',
     }
     rename_map.update(benchmark_columns["display_names"])
     final_df.rename(columns=rename_map, inplace=True)
@@ -398,7 +401,7 @@ def generate_final_summary(all_results, benchmark_returns):
                    'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
                    'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades',
                    'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
-                   'MC Verdict', 'MC Score'])
+                   'MC Verdict', 'MC Score', 'Smooth Verdict'])
 
     final_df_display = final_df.reindex(columns=report_cols).fillna('N/A')
 
@@ -570,6 +573,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_
             'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)',
             'rolling_sharpe_final': 'Roll.Sharpe(last)',
             'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)',
+            'smooth_verdict': 'Smooth Verdict',
         }
         # Add benchmark column renames
         rename_map.update(benchmark_columns["display_names"])
@@ -582,7 +586,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_
                        'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
                        'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades',
                        'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
-                       'Avg. Corr', 'MC Verdict', 'MC Score'])
+                       'Avg. Corr', 'MC Verdict', 'MC Score', 'Smooth Verdict'])
 
         summary_df_display = display_df.reindex(columns=report_cols).fillna('N/A').reset_index(drop=True)
 
@@ -785,6 +789,7 @@ def generate_portfolio_summary_report(all_results, benchmark_returns, duration_s
         'rolling_sharpe_mean': 'Roll.Sharpe(avg)', 'rolling_sharpe_min': 'Roll.Sharpe(min)',
         'rolling_sharpe_final': 'Roll.Sharpe(last)',
         'max_recovery_days': 'Max Rcvry (d)', 'avg_recovery_days': 'Avg Rcvry (d)',
+        'smooth_verdict': 'Smooth Verdict',
     }
     rename_map.update(benchmark_columns["display_names"])
     filtered_df.rename(columns=rename_map, inplace=True)
@@ -796,7 +801,7 @@ def generate_portfolio_summary_report(all_results, benchmark_returns, duration_s
                    'Roll.Sharpe(avg)', 'Roll.Sharpe(min)', 'Roll.Sharpe(last)',
                    'Profit Factor', 'Win Rate', 'Avg. Hold (d)', 'Trades',
                    'Expectancy (R)', 'SQN', 'OOS P&L (%)', 'WFA Verdict', 'Rolling WFA',
-                   'MC Verdict', 'MC Score'])
+                   'MC Verdict', 'MC Score', 'Smooth Verdict'])
 
     summary_df_display = filtered_df.reindex(columns=report_cols).fillna('N/A')
     summary_df_sorted = summary_df_display
