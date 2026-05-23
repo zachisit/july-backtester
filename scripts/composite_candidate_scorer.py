@@ -83,12 +83,12 @@ def _load_trades(path: str) -> pd.DataFrame:
 
 def _sleeve_equity_curve(trades: pd.DataFrame, initial_capital: float,
                          calendar: pd.DatetimeIndex) -> pd.Series:
-    """Build a daily equity curve normalized to start at 1.0.
+    """Build a daily equity curve normalized to start at 1.0 from trade exits.
 
-    Equity at date D = 1 + cumulative(Profit) / initial_capital  for all
+    Equity at date D = 1 + cumulative(Profit) / initial_capital for all
     trades with ExitDate <= D. Between exits the curve is flat. Open
     positions are not marked-to-market here — only realized profits move
-    the curve.
+    the curve. Use _load_mtm_equity_curve for daily MTM (preferred).
     """
     if trades.empty:
         return pd.Series(1.0, index=calendar, name="equity")
@@ -99,6 +99,53 @@ def _sleeve_equity_curve(trades: pd.DataFrame, initial_capital: float,
     equity = 1.0 + daily_pnl.cumsum() / initial_capital
     equity.name = "equity"
     return equity
+
+
+def _load_mtm_equity_curve(run_dir: Path, portfolio: str, strategy: str,
+                           calendar: pd.DatetimeIndex) -> pd.Series:
+    """Load the engine's daily mark-to-market equity curve from a run's
+    analyzer_csvs/<Portfolio>/<Strategy>_equity.csv file.
+
+    Engine sanitizes folder/file names with: spaces → _, ( ) and : stripped.
+    Falls back to a flat 1.0 series if the file is missing or empty.
+    """
+    # Find the portfolio folder via case-insensitive substring matching
+    analyzer_root = run_dir / "analyzer_csvs"
+    if not analyzer_root.exists():
+        return pd.Series(1.0, index=calendar, name="equity")
+
+    target_port_sig = portfolio.replace(" ", "_")
+    port_dir = None
+    for child in analyzer_root.iterdir():
+        if child.is_dir() and child.name == target_port_sig:
+            port_dir = child; break
+        if child.is_dir() and child.name == portfolio:
+            port_dir = child; break
+    if port_dir is None:
+        return pd.Series(1.0, index=calendar, name="equity")
+
+    # Find the strategy file via prefix matching
+    target_strat_sig = (strategy
+                        .replace(" ", "_")
+                        .replace("(", "").replace(")", "")
+                        .replace(":", ""))
+    eq_path = None
+    for child in port_dir.glob("*_equity.csv"):
+        stem = child.stem[:-len("_equity")]
+        if stem == target_strat_sig:
+            eq_path = child; break
+        if stem.startswith(target_strat_sig[:30]):
+            eq_path = child  # don't break — exact match preferred
+    if eq_path is None or not eq_path.exists():
+        return pd.Series(1.0, index=calendar, name="equity")
+
+    eq = pd.read_csv(eq_path, parse_dates=["Date"])
+    eq["Date"] = eq["Date"].dt.tz_localize(None) if eq["Date"].dt.tz is not None else eq["Date"]
+    eq = eq.set_index("Date")["Equity"]
+    initial = eq.iloc[0] if eq.iloc[0] > 0 else 100_000.0
+    eq_norm = (eq / initial).reindex(calendar, method="ffill").fillna(1.0)
+    eq_norm.name = "equity"
+    return eq_norm
 
 
 def _composite_calendar(*sleeves: pd.DataFrame) -> pd.DatetimeIndex:
@@ -186,6 +233,10 @@ def main():
     p.add_argument("--candidate-index", type=int, default=None,
                    help="treat sleeve at this index (0-based) as the CANDIDATE — "
                         "report composite-with vs composite-without metrics")
+    p.add_argument("--equity-from-runs", nargs="+", default=None,
+                   help="list of output/runs/<run_id>/ directories to load daily MTM "
+                        "equity curves from instead of trade-log cumulative profit (preferred — "
+                        "captures intra-trade MTM and open-position drawdowns).")
     args = p.parse_args()
 
     if not args.sleeve:
@@ -222,16 +273,30 @@ def main():
 
     sleeve_equities = {}
     sleeve_metrics_out = []
+    run_dirs = [Path(p) for p in (args.equity_from_runs or [])]
     for (strat, port, w), trades in zip(sleeve_specs, sleeve_trade_dfs):
-        eq = _sleeve_equity_curve(trades, args.initial_capital, cal)
+        eq = None
+        if run_dirs:
+            for run_dir in run_dirs:
+                cand_eq = _load_mtm_equity_curve(run_dir, port, strat, cal)
+                # accept the first non-flat curve we find (MTM moves day-to-day)
+                if cand_eq.std() > 1e-9:
+                    eq = cand_eq
+                    break
+        if eq is None:
+            eq = _sleeve_equity_curve(trades, args.initial_capital, cal)
+            source = "TRADE-LOG"
+        else:
+            source = "MTM-CSV"
         label = f"{strat[:40]} | {port}"
         sleeve_equities[label] = eq
         m = _metrics(eq)
         m["sleeve"] = label
         m["weight"] = w
         m["n_trades"] = int(len(trades))
+        m["source"] = source
         sleeve_metrics_out.append(m)
-        print(f"\n=== sleeve: {label} (weight {w:.0%}, n_trades={len(trades)}) ===")
+        print(f"\n=== sleeve: {label} (weight {w:.0%}, n_trades={len(trades)}, source={source}) ===")
         print(f"  total return:    {m['total_return_pct']:>10,.1f}%")
         print(f"  max drawdown:    {m['max_dd_pct']:>10,.2f}%")
         print(f"  max recovery:    {m['max_recovery_days']:>10} days")
