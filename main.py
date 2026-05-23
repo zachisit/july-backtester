@@ -196,6 +196,17 @@ def run_single_simulation(args):
                 result.get("initial_capital", CONFIG["initial_capital"]),
             )
 
+            # --- Smoothness verdict (surfaced in summary tables, terminal verdict block,
+            # PDF tearsheet) — same compute as helpers/llm_verdict.compute_smoothness ---
+            from helpers.llm_verdict import compute_smoothness as _compute_smoothness
+            _smooth = _compute_smoothness(result.get("portfolio_timeline"))
+            if _smooth:
+                result["smooth_verdict"] = _smooth.get("smooth_verdict", "N/A")
+                result["smooth_notes"] = _smooth.get("smooth_notes", []) or []
+            else:
+                result["smooth_verdict"] = "N/A"
+                result["smooth_notes"] = []
+
             return result
             
     except Exception:
@@ -699,6 +710,10 @@ def main():
 
     duration_seconds = time.monotonic() - start_time
     generate_portfolio_summary_report(all_portfolio_results, benchmark_returns, duration_seconds, run_folder_name)
+
+    from helpers.verdict_format import print_strategy_verdicts as _print_verdicts
+    _print_verdicts(all_portfolio_results, benchmark_returns)
+
     generate_llm_verdict(all_portfolio_results, benchmark_returns, run_folder_name, benchmark_dfs=benchmark_dfs)
     generate_sensitivity_report(all_portfolio_results, run_folder_name)
 

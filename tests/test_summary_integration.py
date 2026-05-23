@@ -428,3 +428,62 @@ class TestGeneratePerPortfolioSummarySignature:
         import config as _config_module
         monkeypatch.setitem(_config_module.CONFIG, "verbose_output", False)
         self._call_summary({}, monkeypatch=monkeypatch)
+
+
+# ---------------------------------------------------------------------------
+# Test Class: Smooth Verdict column propagation (issue #158)
+# ---------------------------------------------------------------------------
+
+class TestSmoothVerdictColumn:
+    """Verify smooth_verdict propagates from result dict into verbose summary."""
+
+    def test_t3_cols_includes_smooth_verdict(self):
+        from helpers.summary import _T3_COLS
+        assert "Smooth Verdict" in _T3_COLS
+
+    def test_verbose_short_name_for_smooth_verdict(self):
+        from helpers.summary import _VERBOSE_SHORT_NAMES
+        assert _VERBOSE_SHORT_NAMES.get("Smooth Verdict") == "Smooth"
+
+    def test_smooth_verdict_renders_in_verbose_output(self, monkeypatch):
+        """When a result dict carries smooth_verdict, the verbose Robustness table
+        must show the Smooth column with the value."""
+        import config as _config_module
+        monkeypatch.setitem(_config_module.CONFIG, "verbose_output", True)
+
+        result = _make_result(vs_benchmarks={"SPY": 0.05})
+        result["smooth_verdict"] = "ACCEPTABLE"
+
+        buf = io.StringIO()
+        with (
+            redirect_stdout(buf),
+            patch("helpers.summary.os.makedirs"),
+            patch.object(pd.DataFrame, "to_csv"),
+        ):
+            generate_per_portfolio_summary(
+                [result], "TestPort", {"SPY": 0.12}, "test_run_001"
+            )
+        out = buf.getvalue()
+        assert "Smooth" in out
+        assert "ACCEPTABLE" in out
+
+    def test_missing_smooth_verdict_shows_na(self, monkeypatch):
+        """When smooth_verdict is absent, the column still renders with N/A."""
+        import config as _config_module
+        monkeypatch.setitem(_config_module.CONFIG, "verbose_output", True)
+
+        result = _make_result(vs_benchmarks={"SPY": 0.05})
+        # do not set smooth_verdict
+
+        buf = io.StringIO()
+        with (
+            redirect_stdout(buf),
+            patch("helpers.summary.os.makedirs"),
+            patch.object(pd.DataFrame, "to_csv"),
+        ):
+            generate_per_portfolio_summary(
+                [result], "TestPort", {"SPY": 0.12}, "test_run_001"
+            )
+        out = buf.getvalue()
+        assert "Smooth" in out
+        assert "N/A" in out
