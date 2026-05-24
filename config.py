@@ -170,7 +170,8 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "DM_SPY_IEF": ["SPY", "IEF"],
+        "SPY_BH": ["SPY"],
+        "PSQ_BH": ["PSQ"],
     },
 
     # ============================================================
@@ -283,7 +284,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["DM-005: Antonacci dual-momentum SPY vs IEF (12m, monthly rebal)"],  # v2 iter005
+    "strategies": ["BH-006: Buy and hold (signal=1 from bar 0)"],  # v2 iter006
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
