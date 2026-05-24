@@ -39,12 +39,12 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2007-04-12",  # re-run iter030 to get ml_features.parquet
-    
+    "start_date": "2006-06-21",  # v2 iter001: SH inception (blind window)
+
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
     #   grab the current date the app is ran
-    "end_date": "2025-06-30",
+    "end_date": "2022-12-31",  # v2 blind window — 2023+ held out by BLIND_DESIGN_CUTOFF
 
     # --- Initial Capital ---
     # No currency symbol or commas. Based in USD.
@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "SPY_CreditFast": ["SPY"],
+        "SH_Inv001": ["SH"],
     },
 
     # ============================================================
@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["DefSwitch-041: SPY long when HYG/LQD > SMA20 (fast credit-spread gate, single-symbol)"],
+    "strategies": ["Inv-001: Long SH when SPY below SMA20"],  # v2 iter001
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
@@ -379,7 +379,7 @@ CONFIG = {
     #                       verification pass). False = enforce.
     #
     # See BLIND_DESIGN_PROTOCOL.md for the full protocol.
-    "BLIND_DESIGN_CUTOFF": None,
+    "BLIND_DESIGN_CUTOFF": "2023-01-01",
     "BLIND_DESIGN_UNLOCK": False,
 }
 
