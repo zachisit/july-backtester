@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["PC-002: Vol-targeted SSO/SHY (target 15% portfolio vol, monthly)"],  # v3 iter002
+    "strategies": ["PC-002: Vol-targeted SSO/SHY (target 15% portfolio vol, monthly)"],  # v3 iter002 (PC-002b iter002-alt preserved in strategy file but not selected)
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
