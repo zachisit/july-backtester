@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "SPY_Mom": ["SPY"],
+        "DM_SPY_IEF": ["SPY", "IEF"],
     },
 
     # ============================================================
@@ -218,7 +218,7 @@ CONFIG = {
     # and "atr" types of stops
     #   {"type": "atr", "period": 14, "multiplier": 3.0}
     "stop_loss_configs": [
-        {"type": "atr", "period": 14, "multiplier": 2.0},  # v2 iter004: Turtle-default ATR trail
+        {"type": "none"},  # v2 iter005: Antonacci dual-momentum has no stop
     ],
 
     # ============================================================
@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["Mom-004: Donchian-20 breakout (ATR-trail exit via stop_config)"],  # v2 iter004
+    "strategies": ["DM-005: Antonacci dual-momentum SPY vs IEF (12m, monthly rebal)"],  # v2 iter005
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP

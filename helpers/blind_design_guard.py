@@ -78,6 +78,32 @@ def check(df, source: str = "data load") -> None:
         )
 
 
+def trim_to_cutoff(df):
+    """Return *df* truncated to rows strictly before BLIND_DESIGN_CUTOFF.
+
+    Use this inside v2 strategies that read parquet directly for cross-asset
+    indicators (where the data service injection is not applicable). The
+    returned DataFrame is guaranteed safe to feed to ``check`` afterward.
+    No-op when the cutoff is unset or BLIND_DESIGN_UNLOCK is True.
+    """
+    cutoff, unlock = _get_cutoff_and_unlock()
+    if cutoff is None or unlock or df is None or len(df) == 0:
+        return df
+    idx = df.index
+    if not isinstance(idx, pd.DatetimeIndex):
+        return df
+    if idx.tz is None:
+        idx = idx.tz_localize("UTC")
+        df = df.copy()
+        df.index = idx
+    else:
+        idx_utc = idx.tz_convert("UTC")
+        if not idx_utc.equals(idx):
+            df = df.copy()
+            df.index = idx_utc
+    return df.loc[df.index < cutoff]
+
+
 def enforce(fetcher):
     """Decorator: enforce cutoff on the DataFrame returned by *fetcher*.
 
