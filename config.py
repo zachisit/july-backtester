@@ -364,6 +364,20 @@ CONFIG = {
     # False (default) = include EoB mark-to-market closes (original behaviour)
     # True            = realized trades only; EoB positions are dropped
     "exclude_open_positions": False,
+
+    # ============================================================
+    # SECTION 23: DATA QUALITY VALIDATION
+    # ============================================================
+    # Pre-flight data quality checks before backtest runs.
+    # Detects: missing bars, price jumps, OHLC violations, negative prices, zero volume
+    "data_quality_checks": True,
+
+    # Minimum quality score (0-100) to proceed with backtest in strict mode
+    "data_quality_threshold": 80,
+
+    # When True, fail fast if any symbol has score < threshold
+    # When False (default), log warnings and continue
+    "strict_data_quality": False,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102
