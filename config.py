@@ -39,12 +39,12 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2004-01-01",
+    "start_date": "2007-04-12",  # re-run iter030 to get ml_features.parquet
     
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
     #   grab the current date the app is ran
-    "end_date": datetime.now().strftime("%Y-%m-%d"),
+    "end_date": "2025-06-30",
 
     # --- Initial Capital ---
     # No currency symbol or commas. Based in USD.
@@ -170,11 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "AutoResearch": ["SPY", "QQQ", "AAPL"],
-        #"My Symbols": ["AAPL"],
-        #"Nasdaq 100": "nasdaq_100.json",
-        #"Nasdaq Biotech": "nasdaq_biotech_tickers.json",
-        #"Russell 1000": "russell_1000.json",
+        "DefSwitch_SPY_IEF": ["SPY", "IEF"],
     },
 
     # ============================================================
@@ -183,7 +179,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 1.0,
+    "allocation_per_trade": 1.0,  # iter032: single-symbol GDX trend
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -287,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["AutoResearch SMA"],
+    "strategies": ["DefSwitch-034: HYG-gated SPY/IEF switch (DefSwitch-030 variant, shorter-duration bond)"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
@@ -339,7 +335,7 @@ CONFIG = {
     # When True, writes a consolidated Parquet file of all trades (all strategies,
     # all portfolios) to output/runs/<run_id>/ml_features.parquet after the run.
     # Requires pyarrow or fastparquet: pip install pyarrow
-    "export_ml_features": False,
+    "export_ml_features": True,
 
     # ============================================================
     # SECTION 21: VERBOSE SUMMARY TABLE
