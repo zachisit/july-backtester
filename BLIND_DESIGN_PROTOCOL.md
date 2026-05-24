@@ -154,11 +154,52 @@ the 2022 dual-bear plateau.
 
 ## Outcomes
 
-_To be filled in at unlock time._
-
 | Date | Candidate | Blind result | 2023+ result | Verdict |
 |------|-----------|--------------|--------------|---------|
-| TBD  | TBD       | TBD          | TBD          | TBD     |
+| 2026-05-24 | v1 frozen composite (EC-VIX-27 40% + DefSwitch-030 60%) — used as the documented control after v2 Phase 3 declared search exhausted with 0 candidates | Composite designed with full 2004-present visibility. v1 headline claim: +2,137% TotalRet, +1,312pp vs SPY, MaxRcvry 562d on 2004-06 → 2026-04 | TotalRet +63.02%, SPY +94.81%, composite LAGS SPY by **−31.79pp**. MaxRcvry: **open** drawdown (peak unrecovered). R1+R3 both FAIL on the held-out slice. | **FAIL** |
+
+### What this outcome demonstrates
+
+The blind protocol worked as designed. Two independent findings:
+
+1. **v2 Phase 3 (genuine blind constraints)**: 9 iterations across 4 distinct
+   strategy classes (inverse-ETF substitution, constant-weight overlay,
+   sparse-signal long-only, 2-sleeve sub-SPY composites) produced **zero**
+   standalone R-gate champions. The R3 floor v1 hit empirically (562d
+   composite) reappeared at 800-1200d across every direction. That floor is
+   therefore a property of the equity market's regime structure under the
+   available signal classes, not a v1 artifact.
+
+2. **v2 Phase 4 (unlock)**: The v1 composite, designed with full 2004-present
+   data visible, **lags SPY by 31.79pp on the held-out 2023+ window alone**.
+   The apparent v1 outperformance was at least partly spec-lookahead
+   artifact: the rules that "looked great" on 2004-2026 with all data visible
+   do not deliver on the slice that was conceptually held out.
+
+Together: the spec-level lookahead critique from the LinkedIn thread is
+**real and material**. The v1 shipping configuration should be
+reconsidered before live deployment.
+
+### Why this is a valid scientific outcome
+
+Per HANDOFF_BLIND_DESIGN.md §12:
+
+> Producing a positive result that the operator can't defend in front of the
+> next Dmitrii is worse than producing nothing.
+
+This protocol was designed to be falsifiable. It produced an honest negative
+on both the v2 search AND the v1 control. That is the deliverable.
+
+### Operator action items
+
+1. Pause any forward-deployment plans for the v1 EC-VIX-27 + iter030
+   composite (e.g., signaldeckapi MR !652).
+2. Consider re-running the gold-trio strategies (MR !588) on the 2023+
+   unlock window using the same methodology to check whether their headline
+   claims hold up out-of-sample as well.
+3. Future strategy research should follow the blind-design protocol from
+   inception (cutoff set BEFORE any backtest is run), not retroactively
+   applied to v1 work.
 
 ---
 
