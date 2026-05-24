@@ -363,6 +363,24 @@ CONFIG = {
     # False (default) = include EoB mark-to-market closes (original behaviour)
     # True            = realized trades only; EoB positions are dropped
     "exclude_open_positions": False,
+
+    # ============================================================
+    # SECTION 23: BLIND-DESIGN PROTOCOL (v2 autonomous loop)
+    # ============================================================
+    # Operationalises the response to spec-level lookahead critique.
+    # When BLIND_DESIGN_CUTOFF is set (e.g. "2023-01-01"), every data-load
+    # path raises BlindDesignViolation if any returned row has a timestamp
+    # at or past the cutoff. Research, parameter selection, and QA must
+    # happen on pre-cutoff data only. The held-out era is unlocked exactly
+    # once for a final one-shot verification.
+    #
+    # BLIND_DESIGN_CUTOFF: ISO date string (UTC). None = guard disabled.
+    # BLIND_DESIGN_UNLOCK: True = bypass guard (use only for the final
+    #                       verification pass). False = enforce.
+    #
+    # See BLIND_DESIGN_PROTOCOL.md for the full protocol.
+    "BLIND_DESIGN_CUTOFF": None,
+    "BLIND_DESIGN_UNLOCK": False,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

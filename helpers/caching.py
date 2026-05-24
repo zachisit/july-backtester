@@ -51,6 +51,8 @@ def get_cached_data(symbol: str, start: str, end: str, timeframe: str, multiplie
                         f"lags requested {start} by {lag_days} days — discarding and re-fetching."
                     )
                     return None
+                from helpers.blind_design_guard import check as _blind_check
+                _blind_check(df, source=f"caching.get_cached_data({symbol})")
                 return df
             except Exception as e:
                 logger.warning(f"Could not read cache file '{filepath}'. Will re-fetch. Error: {e}")
