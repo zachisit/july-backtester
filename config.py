@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "PC_SSO_SHY": ["SSO", "SHY"],
+        "SPY_Mom5": ["SPY"],
     },
 
     # ============================================================
@@ -218,7 +218,7 @@ CONFIG = {
     # and "atr" types of stops
     #   {"type": "atr", "period": 14, "multiplier": 3.0}
     "stop_loss_configs": [
-        {"type": "none"},  # v2 iter005: Antonacci dual-momentum has no stop
+        {"type": "atr", "period": 14, "multiplier": 1.5},  # v3 iter005: tighter than Mom-004's 2.0
     ],
 
     # ============================================================
@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["PC-004: Vol-targeted SSO/SHY daily-rebal with 5% deadband (QA-prescribed)"],  # v3 iter004
+    "strategies": ["Mom-005: Donchian-10 fast-entry + ATR-trail (v3 fast-recovery sleeve)"],  # v3 iter005
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
