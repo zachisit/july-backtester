@@ -128,7 +128,8 @@ def _load_mtm_equity_curve(run_dir: Path, portfolio: str, strategy: str,
     target_strat_sig = (strategy
                         .replace(" ", "_")
                         .replace("(", "").replace(")", "")
-                        .replace(":", ""))
+                        .replace(":", "")
+                        .replace("/", "_"))
     eq_path = None
     for child in port_dir.glob("*_equity.csv"):
         stem = child.stem[:-len("_equity")]
