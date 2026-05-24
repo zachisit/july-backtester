@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "SPY_VIX_Regime": ["SPY"],
+        "SPY_CreditFast": ["SPY"],
     },
 
     # ============================================================
@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["VIX-040: VIX regime gate on SPY (long when VIX<20 AND VIX<SMA20; flat when VIX>30)"],
+    "strategies": ["DefSwitch-041: SPY long when HYG/LQD > SMA20 (fast credit-spread gate, single-symbol)"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
