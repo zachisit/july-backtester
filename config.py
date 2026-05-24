@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "SH_Inv001": ["SH"],
+        "SPY_SH_Switch": ["SPY", "SH"],
     },
 
     # ============================================================
@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["Inv-001: Long SH when SPY below SMA20"],  # v2 iter001
+    "strategies": ["Inv-002: SPY/SH defensive switch (SPY > SMA20 -> SPY, else SH)"],  # v2 iter002
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
