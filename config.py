@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["Inv-002: SPY/SH defensive switch (SPY > SMA20 -> SPY, else SH)"],  # v2 iter002
+    "strategies": ["Inv-003: SPY/SH defensive switch (SMA200 — Faber gate)"],  # v2 iter003
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
