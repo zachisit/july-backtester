@@ -39,7 +39,7 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2006-06-21",  # v2 iter001: SH inception (blind window)
+    "start_date": "2004-01-01",  # v2 iter004+: full blind window (no SH dependency)
 
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "SPY_SH_Switch": ["SPY", "SH"],
+        "SPY_Mom": ["SPY"],
     },
 
     # ============================================================
@@ -218,7 +218,7 @@ CONFIG = {
     # and "atr" types of stops
     #   {"type": "atr", "period": 14, "multiplier": 3.0}
     "stop_loss_configs": [
-        {"type": "none"},
+        {"type": "atr", "period": 14, "multiplier": 2.0},  # v2 iter004: Turtle-default ATR trail
     ],
 
     # ============================================================
@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["Inv-003: SPY/SH defensive switch (SMA200 — Faber gate)"],  # v2 iter003
+    "strategies": ["Mom-004: Donchian-20 breakout (ATR-trail exit via stop_config)"],  # v2 iter004
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
