@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "PC_SPY_IEF_GLD": ["SPY", "IEF", "GLD"],
+        "PC_SSO_SHY": ["SSO", "SHY"],
     },
 
     # ============================================================
@@ -179,7 +179,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.5,  # v3 iter001: 2-of-3 monthly winners get ~50% each
+    "allocation_per_trade": 1.0,  # v3 iter002: at most one of {SSO, SHY} held — full allocation
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["PC-001: Equal-risk-contribution SPY/IEF/GLD (inverse-vol, monthly)"],  # v3 iter001
+    "strategies": ["PC-002: Vol-targeted SSO/SHY (target 15% portfolio vol, monthly)"],  # v3 iter002
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
