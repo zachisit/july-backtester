@@ -170,8 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "SPY_BH": ["SPY"],
-        "PSQ_BH": ["PSQ"],
+        "DM_SPY_GLD": ["SPY", "GLD"],
     },
 
     # ============================================================
@@ -284,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["BH-006: Buy and hold (signal=1 from bar 0)"],  # v2 iter006
+    "strategies": ["DM-009: Cross-asset relative-strength SPY vs GLD (12m, monthly)"],  # v2 iter009
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
