@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "DefSwitch_SPY_IEF": ["SPY", "IEF"],
+        "SPY_VIX_Regime": ["SPY"],
     },
 
     # ============================================================
@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["DefSwitch-034: HYG-gated SPY/IEF switch (DefSwitch-030 variant, shorter-duration bond)"],
+    "strategies": ["VIX-040: VIX regime gate on SPY (long when VIX<20 AND VIX<SMA20; flat when VIX>30)"],
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
