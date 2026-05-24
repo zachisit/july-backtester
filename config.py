@@ -170,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "DM_SPY_GLD": ["SPY", "GLD"],
+        "PC_SPY_IEF_GLD": ["SPY", "IEF", "GLD"],
     },
 
     # ============================================================
@@ -179,7 +179,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 1.0,  # iter032: single-symbol GDX trend
+    "allocation_per_trade": 0.5,  # v3 iter001: 2-of-3 monthly winners get ~50% each
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -283,7 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    "strategies": ["DM-009: Cross-asset relative-strength SPY vs GLD (12m, monthly)"],  # v2 iter009
+    "strategies": ["PC-001: Equal-risk-contribution SPY/IEF/GLD (inverse-vol, monthly)"],  # v3 iter001
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
