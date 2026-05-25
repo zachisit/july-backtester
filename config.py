@@ -39,12 +39,12 @@ CONFIG = {
     # Either set the specific start date, or set a time way in the past
     #   e.g. '1900-01-01' and the code will dynamically grab the last
     #   available start date from the Data Provider that you're using
-    "start_date": "2004-01-01",
-    
+    "start_date": "2004-01-01",  # v2 iter004+: full blind window (no SH dependency)
+
     # --- Start Date ---
     # Either hard code a specific date, or use the below to dynamically
     #   grab the current date the app is ran
-    "end_date": datetime.now().strftime("%Y-%m-%d"),
+    "end_date": "2022-12-31",  # v2 blind window — 2023+ held out by BLIND_DESIGN_CUTOFF
 
     # --- Initial Capital ---
     # No currency symbol or commas. Based in USD.
@@ -89,6 +89,7 @@ CONFIG = {
     # the period. Strategies declaring dependencies=["spy"] etc. will be skipped.
     "comparison_tickers": [
          {"symbol": "SPY",  "role": "both",       "label": "SPY"},
+         # Kalman β Gold only needs SPY as dep. VIX kept for regime heatmap.
          {"symbol": "$VIX", "role": "dependency"},
     ],
 
@@ -169,7 +170,7 @@ CONFIG = {
     "min_bars_required": 250,
 
     "portfolios": {
-        "NDX+Energy+Defense": "ndx_energy.json",
+        "SPY_Mom5": ["SPY"],
     },
 
     # ============================================================
@@ -178,7 +179,7 @@ CONFIG = {
     # --- Allocation Per Trade Settings ---
     # Percentage of total equity to allocate to each new position
     #   e.g., 10% for a max of 10 concurrent positions
-    "allocation_per_trade": 0.025,
+    "allocation_per_trade": 1.0,  # v3 iter002: at most one of {SSO, SHY} held — full allocation
 
     # --- Volume-Based Liquidity Filter ---
     # Maximum fraction of the 20-day Average Daily Volume (ADV) that a single
@@ -217,7 +218,7 @@ CONFIG = {
     # and "atr" types of stops
     #   {"type": "atr", "period": 14, "multiplier": 3.0}
     "stop_loss_configs": [
-        {"type": "none"},
+        {"type": "atr", "period": 14, "multiplier": 1.5},  # v3 iter005: tighter than Mom-004's 2.0
     ],
 
     # ============================================================
@@ -241,7 +242,7 @@ CONFIG = {
     # Rolling multi-fold WFA (opt-in — keep None for normal runs).
     # wfa_folds: None or 0 → disabled; int >= 2 → number of equal-width OOS folds.
     # wfa_min_fold_trades: minimum OOS trades required to score a fold.
-    "wfa_folds": 3,
+    "wfa_folds": 5,
     "wfa_min_fold_trades": 5,
 
     # ============================================================
@@ -282,9 +283,7 @@ CONFIG = {
     # Names must match the 'name' argument passed to @register_strategy exactly
     # (case-sensitive). Any name not found in the registry logs a WARNING and is
     # skipped — a typo will not cause a crash.
-    # RESEARCH COMPLETE (Session 9): EC-VIX-27 is max P&L champion (4122.28%, ACCEPTABLE)
-    # EC-VIX-25 is the robust champion (4040.1%, worst_month=-9.61%, safer margin)
-    "strategies": ["EC-VIX-27: WR70 SMA120 minimal-entry-25 vix-95th VIX-pct"],
+    "strategies": ["Mom-005: Donchian-10 fast-entry + ATR-trail (v3 fast-recovery sleeve)"],  # v3 iter005
 
     # ============================================================
     # SECTION 15: PARAMETER SENSITIVITY SWEEP
@@ -318,7 +317,7 @@ CONFIG = {
     # "block" — block-bootstrap: samples consecutive blocks of trades, preserving
     #            win/loss autocorrelation and regime clustering.
     # mc_block_size: number of consecutive trades per block. None = auto (sqrt of trade count).
-    "mc_sampling": "iid",
+    "mc_sampling": "block",
     "mc_block_size": None,
 
     # ============================================================
@@ -336,7 +335,7 @@ CONFIG = {
     # When True, writes a consolidated Parquet file of all trades (all strategies,
     # all portfolios) to output/runs/<run_id>/ml_features.parquet after the run.
     # Requires pyarrow or fastparquet: pip install pyarrow
-    "export_ml_features": False,
+    "export_ml_features": True,
 
     # ============================================================
     # SECTION 21: VERBOSE SUMMARY TABLE
@@ -364,6 +363,24 @@ CONFIG = {
     # False (default) = include EoB mark-to-market closes (original behaviour)
     # True            = realized trades only; EoB positions are dropped
     "exclude_open_positions": False,
+
+    # ============================================================
+    # SECTION 23: BLIND-DESIGN PROTOCOL (v2 autonomous loop)
+    # ============================================================
+    # Operationalises the response to spec-level lookahead critique.
+    # When BLIND_DESIGN_CUTOFF is set (e.g. "2023-01-01"), every data-load
+    # path raises BlindDesignViolation if any returned row has a timestamp
+    # at or past the cutoff. Research, parameter selection, and QA must
+    # happen on pre-cutoff data only. The held-out era is unlocked exactly
+    # once for a final one-shot verification.
+    #
+    # BLIND_DESIGN_CUTOFF: ISO date string (UTC). None = guard disabled.
+    # BLIND_DESIGN_UNLOCK: True = bypass guard (use only for the final
+    #                       verification pass). False = enforce.
+    #
+    # See BLIND_DESIGN_PROTOCOL.md for the full protocol.
+    "BLIND_DESIGN_CUTOFF": "2023-01-01",
+    "BLIND_DESIGN_UNLOCK": False,
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

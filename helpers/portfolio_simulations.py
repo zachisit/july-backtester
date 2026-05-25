@@ -201,7 +201,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     continue
                 shares = alloc / ep
                 commission = shares * CONFIG['commission_per_share']
-                cash += shares * ep - commission   # short seller receives proceeds
+                # Short proceeds are NOT credited to cash here. The position's
+                # unrealized P&L is tracked via the mark-to-market line in the
+                # equity loop (S*P_entry - S*P_current); the cover block adds the
+                # realized P&L on exit. Crediting proceeds at entry AND adding
+                # realized P&L at cover double-counts S*P_entry, which produced
+                # the 1e+32% runaway documented in AUTONOMOUS_LOG.md iter001-002.
+                cash -= commission
                 short_positions[symbol] = {
                     'entry_date': date, 'entry_price': ep,
                     'shares': shares, 'notional': shares * ep, 'total_borrow_cost': 0.0,

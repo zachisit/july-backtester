@@ -102,9 +102,12 @@ def register_strategy(
     name : str
         Display name shown in terminal reports and CSV output.
     dependencies : list[str], optional
-        External dataframes required at runtime.  Supported values:
-        ``"spy"``, ``"vix"``.  main.py injects these into **kwargs before
-        calling the logic function.
+        External dataframes required at runtime.  Any key configured in
+        ``CONFIG["comparison_tickers"]`` is available — either the
+        auto-derived lowercase symbol (``"spy"``, ``"vix"``, ``"gld"``) or
+        an explicit ``"key"`` override (e.g. ``"gold"``, ``"dxy"``, ``"tnx"``,
+        ``"oil"``). main.py injects these into ``**kwargs`` as ``<key>_df``
+        before calling the logic function.
     params : dict, optional
         Static parameters stored alongside the strategy.  main.py merges
         these into **kwargs before calling the logic function so the function

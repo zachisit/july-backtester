@@ -1,5 +1,6 @@
 import logging
 from config import CONFIG
+from helpers.blind_design_guard import enforce as _blind_enforce
 
 # Import Polygon helpers at module level for backwards compatibility.
 # These are only used when data_provider == "polygon".
@@ -18,32 +19,36 @@ def get_data_service():
         "yahoo"   — Yahoo Finance via yfinance
         "csv"     — Local CSV files (see config["csv_data_dir"])
         "parquet" — Local Parquet files (see config["parquet_data_dir"])
+
+    The returned callable is wrapped in the blind-design guard so that any
+    returned data crossing BLIND_DESIGN_CUTOFF raises BlindDesignViolation
+    (no-op when the cutoff is unset or BLIND_DESIGN_UNLOCK is True).
     """
     provider = CONFIG.get("data_provider", "polygon").lower()
 
     if provider == "polygon":
         logger.info("Using Polygon.io data service.")
-        return get_price_data
+        return _blind_enforce(get_price_data)
 
     if provider == "norgate":
         logger.info("Using Norgate data service.")
         from .norgate_service import get_price_data as _fetcher
-        return _fetcher
+        return _blind_enforce(_fetcher)
 
     if provider == "yahoo":
         logger.info("Using Yahoo Finance data service.")
         from .yahoo_service import get_price_data as _fetcher
-        return _fetcher
+        return _blind_enforce(_fetcher)
 
     if provider == "csv":
         logger.info("Using local CSV data service.")
         from .csv_service import get_price_data as _fetcher
-        return _fetcher
+        return _blind_enforce(_fetcher)
 
     if provider == "parquet":
         logger.info("Using local Parquet data service.")
         from .parquet_service import get_price_data as _fetcher
-        return _fetcher
+        return _blind_enforce(_fetcher)
 
     raise ValueError(
         f"Unsupported data_provider '{provider}'. "
