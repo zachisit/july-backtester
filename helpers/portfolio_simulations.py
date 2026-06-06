@@ -353,6 +353,78 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     
     exclude_open = CONFIG.get('exclude_open_positions', False)
 
+    # --- SURVIVORSHIP BIAS: FORCE-CLOSE DELISTED OPEN POSITIONS ---
+    # This MUST run before the End-of-Backtest mark-to-market block below.
+    # Otherwise, a still-open position in a delisted symbol would either be
+    # marked-to-market at its last bar (exclude_open=False) or dropped entirely
+    # (exclude_open=True) — in both cases the delisting loss would be silently
+    # ignored, defeating the purpose of survivorship handling.
+    survivorship_stats = {}
+    # Each entry: (symbol, delisting_ts, shares, exit_price) — used to correct the
+    # equity curve, whose daily-loop values still mark the position to market.
+    _delisting_corrections = []
+    if delisting_dates and CONFIG.get("include_delisted", False):
+        _price_assumption = CONFIG.get("delisting_price_assumption", "last_close")
+        _positions_delisted = 0
+        _total_delisting_loss = 0.0
+        for symbol in list(positions.keys()):
+            if symbol not in delisting_dates:
+                continue
+            pos = positions[symbol]
+            delisting_ts = pd.Timestamp(delisting_dates[symbol])
+            entry_ts = pos['entry_date']
+            if delisting_ts < entry_ts:
+                continue  # delisted before we entered — leave for normal handling
+
+            # Determine exit price under the configured assumption.
+            if _price_assumption == "zero":
+                exit_price = 0.0
+            else:  # "last_close": last available Close on/before the delisting date
+                exit_price = pos['entry_price']  # fallback
+                sym_df = portfolio_data.get(symbol)
+                if sym_df is not None and not sym_df.empty:
+                    prior = sym_df.loc[sym_df.index <= delisting_ts, 'Close'].dropna()
+                    if not prior.empty:
+                        exit_price = float(prior.iloc[-1])
+
+            commission = pos['shares'] * CONFIG['commission_per_share']
+            net_pnl = ((exit_price - pos['entry_price']) * pos['shares']) - (2 * commission)
+            # Realised proceeds return to cash (delisting is a real liquidation).
+            cash += (pos['shares'] * exit_price) - commission
+
+            _initial_sl = pos.get('initial_stop_loss_level')
+            if pd.notna(_initial_sl) and _initial_sl > 0 and _initial_sl < pos['entry_price']:
+                _initial_risk_per_share = pos['entry_price'] - _initial_sl
+            else:
+                _initial_risk_per_share = pos['entry_price'] * 0.01
+            _r_multiple = (net_pnl / (_initial_risk_per_share * pos['shares'])
+                           if _initial_risk_per_share > 0 and pos['shares'] > 0 else None)
+
+            trade_counter += 1
+            _pos_value = pos['shares'] * pos['entry_price']
+            trade_log.append({
+                'Symbol': symbol, 'Trade': f"Long {trade_counter}",
+                'EntryDate': pos['entry_date'].isoformat(), 'EntryPrice': pos['entry_price'],
+                'ExitDate': delisting_ts.isoformat(), 'ExitPrice': exit_price,
+                'Profit': net_pnl, 'ProfitPct': net_pnl / _pos_value if _pos_value > 0 else -1.0,
+                'Shares': pos['shares'], 'is_win': 1 if net_pnl > 0 else 0,
+                'HoldDuration': (delisting_ts - pos['entry_date']).days,
+                'MAE_pct': 0.0, 'MFE_pct': 0.0, 'ExitReason': "Delisting",
+                'InitialRisk': _initial_risk_per_share, 'RMultiple': _r_multiple,
+                **pos.get('features', {}),
+            })
+            _delisting_corrections.append((symbol, delisting_ts, pos['shares'], exit_price))
+            _positions_delisted += 1
+            _total_delisting_loss += net_pnl
+            del positions[symbol]  # exclude from EoB mark-to-market / drop logic
+
+        survivorship_stats = {
+            "positions_delisted": _positions_delisted,
+            "total_delisting_loss": _total_delisting_loss,
+            "delisting_loss_pct": (_total_delisting_loss / initial_capital
+                                   if initial_capital > 0 else 0.0),
+        }
+
     # --- START: MARK-TO-MARKET LOGIC ---
     # After the main loop, check for any positions that are still open.
     # Skipped when exclude_open_positions=True (realized-only reporting mode).
@@ -391,21 +463,32 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     pnl_list = [t['Profit'] for t in trade_log]
     if not pnl_list: return None
 
-    # --- SURVIVORSHIP BIAS ADJUSTMENT ---
-    # Force-close open positions when stocks are delisted
-    survivorship_stats = {}
-    if delisting_dates and CONFIG.get("include_delisted", False):
-        from helpers.survivorship import adjust_for_survivorship, apply_delisting_to_timeline
-        delisting_price_assumption = CONFIG.get("delisting_price_assumption", "last_close")
-        trade_log, survivorship_stats = adjust_for_survivorship(
-            trade_log, delisting_dates, initial_capital, delisting_price_assumption,
-            portfolio_data=portfolio_data,
-        )
-        # Recompute pnl_list and equity curve after adjustment so all risk
-        # metrics (Sharpe, drawdown, CAGR) reflect the delisting losses.
-        pnl_list = [t['Profit'] for t in trade_log]
-        if not pnl_list: return None
-        portfolio_timeline = apply_delisting_to_timeline(portfolio_timeline, trade_log)
+    # --- SURVIVORSHIP BIAS: CORRECT EQUITY CURVE FOR DELISTED POSITIONS ---
+    # The daily loop marked each now-delisted position to market for every bar
+    # of the hold, including bars on/after the delisting date. From the delisting
+    # date forward the position is no longer held — its value is the realised
+    # proceeds (shares * exit_price), which were added to cash above. So for each
+    # date >= delisting we replace the marked-to-market contribution
+    # (shares * Close[date]) with the frozen realised value (shares * exit_price).
+    # This avoids double-counting the loss and keeps Sharpe/drawdown/CAGR correct.
+    if _delisting_corrections:
+        for symbol, delisting_ts, shares, exit_price in _delisting_corrections:
+            sym_df = portfolio_data.get(symbol)
+            if sym_df is None:
+                continue
+            mask = portfolio_timeline.index >= delisting_ts
+            for dt in portfolio_timeline.index[mask]:
+                if pd.isna(portfolio_timeline.loc[dt]):
+                    continue
+                # What the daily loop added for this symbol on this date.
+                if dt in sym_df.index:
+                    mtm_close = sym_df.loc[dt, 'Close']
+                else:
+                    prior_idx = sym_df.index[sym_df.index < dt]
+                    mtm_close = sym_df.loc[prior_idx[-1], 'Close'] if len(prior_idx) else np.nan
+                if pd.isna(mtm_close):
+                    continue
+                portfolio_timeline.loc[dt] += shares * (exit_price - mtm_close)
 
     duration_list = [t['HoldDuration'] for t in trade_log]
     if exclude_open:

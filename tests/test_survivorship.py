@@ -553,3 +553,112 @@ class TestEquityCurveRecomputation:
         # Bars 6-9: both -5k and -8k applied
         assert result.iloc[6] == pytest.approx(87_000.0)
         assert result.iloc[9] == pytest.approx(87_000.0)
+
+
+# ---------------------------------------------------------------------------
+# Integration: run_portfolio_simulation end-to-end with a delisted symbol.
+#
+# These guard against the regression where an open position in a delisted
+# symbol was either marked-to-market at its last bar (exclude_open_positions
+# False) or dropped entirely (exclude_open_positions True) BEFORE the
+# survivorship adjustment ran — silently ignoring the delisting loss.
+# ---------------------------------------------------------------------------
+class TestRunPortfolioSimulationSurvivorship:
+    def _flat_df(self, start="2001-01-01", end="2001-12-31", price=100.0):
+        dates = pd.bdate_range(start, end)
+        return pd.DataFrame(
+            {"Open": price, "High": price + 1, "Low": price - 1,
+             "Close": price, "Volume": 1e6},
+            index=dates,
+        )
+
+    def _patched_cfg(self, **overrides):
+        import config
+        cfg = dict(config.CONFIG)
+        cfg.update({
+            "include_delisted": True,
+            "delisting_price_assumption": "zero",
+            "exclude_open_positions": False,
+            "slippage_pct": 0.0,
+            "commission_per_share": 0.0,
+            "volume_impact_coeff": 0.0,
+            "htb_rate_annual": 0.0,
+            "execution_time": "close",
+            "max_pct_adv": None,
+        })
+        cfg.update(overrides)
+        return cfg
+
+    def _run(self, cfg, portfolio_data, signals, delisting_dates):
+        import importlib
+        from unittest.mock import patch
+        import config
+        import helpers.portfolio_simulations as ps
+        try:
+            with patch.object(config, "CONFIG", cfg):
+                importlib.reload(ps)  # rebind module-level CONFIG to the patched dict
+                return ps.run_portfolio_simulation(
+                    portfolio_data, signals, 100000.0, 0.10,
+                    None, None, None, {"type": "none"},
+                    delisting_dates=delisting_dates,
+                )
+        finally:
+            # Reload AFTER the patch context exits so the module is rebound to the
+            # real CONFIG — otherwise later tests inherit the patched config.
+            importlib.reload(ps)
+
+    def test_open_delisted_position_force_closed_default_config(self):
+        """exclude_open_positions=False: delisting loss must hit P&L, not be MTM'd away."""
+        cfg = self._patched_cfg()
+        df = self._flat_df()
+        sig = pd.Series(0, index=df.index); sig.iloc[0] = 1  # buy and hold
+        res = self._run(cfg, {"ENRON": df}, {"ENRON": sig}, {"ENRON": "2001-06-15"})
+        assert res is not None
+        assert res["positions_delisted"] == 1
+        # 10% allocation, total loss -> -10% headline and -10% loss_pct
+        assert res["delisting_loss_pct"] == pytest.approx(-0.10, abs=1e-6)
+        assert res["pnl_percent"] == pytest.approx(-0.10, abs=1e-6)
+        reasons = [t["ExitReason"] for t in res["trade_log"] if t["Symbol"] == "ENRON"]
+        assert reasons == ["Delisting"]
+
+    def test_equity_curve_steps_down_at_delisting_date(self):
+        cfg = self._patched_cfg()
+        df = self._flat_df()
+        sig = pd.Series(0, index=df.index); sig.iloc[0] = 1
+        res = self._run(cfg, {"ENRON": df}, {"ENRON": sig}, {"ENRON": "2001-06-15"})
+        tl = res["portfolio_timeline"]
+        assert tl.loc["2001-06-01"] == pytest.approx(100000.0)
+        assert tl.loc["2001-07-02"] == pytest.approx(90000.0)
+        assert tl.iloc[-1] == pytest.approx(90000.0)
+
+    def test_open_delisted_position_force_closed_exclude_open(self):
+        """exclude_open_positions=True must NOT drop a delisted open position."""
+        cfg = self._patched_cfg(exclude_open_positions=True)
+        df = self._flat_df()
+        sig = pd.Series(0, index=df.index); sig.iloc[0] = 1
+        res = self._run(cfg, {"ENRON": df}, {"ENRON": sig}, {"ENRON": "2001-06-15"})
+        assert res is not None
+        assert res["positions_delisted"] == 1
+        assert res["delisting_loss_pct"] == pytest.approx(-0.10, abs=1e-6)
+
+    def test_last_close_assumption_uses_actual_price(self):
+        cfg = self._patched_cfg(delisting_price_assumption="last_close")
+        df = self._flat_df()
+        # Drop price to 40 from June onward; last close on/before delist = 40
+        df.loc[df.index >= "2001-06-01", "Close"] = 40.0
+        sig = pd.Series(0, index=df.index); sig.iloc[0] = 1
+        res = self._run(cfg, {"ENRON": df}, {"ENRON": sig}, {"ENRON": "2001-06-15"})
+        enron = [t for t in res["trade_log"] if t["Symbol"] == "ENRON"][0]
+        assert enron["ExitPrice"] == pytest.approx(40.0)
+        # entry 100, exit 40 -> -60% on the position; 10% allocation -> -6% headline
+        assert res["pnl_percent"] == pytest.approx(-0.06, abs=1e-3)
+
+    def test_no_delisting_when_disabled(self):
+        cfg = self._patched_cfg(include_delisted=False)
+        df = self._flat_df()
+        sig = pd.Series(0, index=df.index); sig.iloc[0] = 1
+        res = self._run(cfg, {"ENRON": df}, {"ENRON": sig}, {"ENRON": "2001-06-15"})
+        # survivorship disabled -> EoB mark-to-market, no Delisting exit
+        assert res.get("positions_delisted") in (None, 0)
+        reasons = [t["ExitReason"] for t in res["trade_log"]]
+        assert "Delisting" not in reasons
