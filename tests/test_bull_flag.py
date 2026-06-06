@@ -14,13 +14,13 @@ from custom_strategies.bull_flag import bull_flag_breakout
 
 # Default params mirrored from the @register_strategy registration (daily).
 PARAMS = dict(
-    pole_min_gain=0.18,
-    pole_max_bars=12,
+    pole_min_gain=0.12,
+    pole_max_bars=15,
     flag_min_bars=3,
     flag_max_bars=15,
     flag_max_retrace=0.40,
-    flag_vol_contraction=0.75,
-    breakout_vol_mult=1.5,
+    flag_vol_contraction=1.0,
+    breakout_vol_mult=1.1,
     vol_ma_bars=20,
     trend_ma_bars=50,
     time_stop_bars=20,

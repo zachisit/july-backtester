@@ -3,15 +3,22 @@
 
 Pattern definition (daily bars)
 -------------------------------
-1. FLAGPOLE  — a sharp advance: >= ``pole_min_gain`` (default 18%) from the
-   lowest low to the highest high within ``pole_max_bars`` (default 12).
+1. FLAGPOLE  — a sharp advance: >= ``pole_min_gain`` (default 12%) from the
+   lowest low to the highest high within ``pole_max_bars`` (default 15).
 2. FLAG      — a short, shallow rest after the pole: ``flag_min_bars`` to
    ``flag_max_bars`` (default 3-15) bars, holding above
    ``pole_high - flag_max_retrace * pole_height`` (default 40% retrace max),
-   with average flag volume contracting below
-   ``flag_vol_contraction`` x average pole volume (default 0.75).
+   with average flag volume not exceeding
+   ``flag_vol_contraction`` x average pole volume (default 1.0 — the flag
+   must not expand volume relative to the pole).
 3. BREAKOUT  — today's Close clears the flag high on expanding volume
-   (>= ``breakout_vol_mult`` x ``vol_ma_bars``-bar average volume).
+   (>= ``breakout_vol_mult`` x ``vol_ma_bars``-bar average volume; default
+   1.1x — note the rolling average is already inflated by pole volume).
+
+Defaults were tuned once from a gate-funnel diagnostic on 10 momentum names
+(2018-2026): the original 18%/12-bar pole, 0.75 contraction, and 1.5x
+breakout-volume gates yielded 3 trades in 8.5 years, with the volume gate
+alone rejecting 47 of 50 otherwise-valid breakouts.
 
 Entry is detected on the bar CLOSE (end-of-day knowable, no intrabar
 lookahead — see the warning on ``atr_trailing_stop_logic_breakout_entry``
@@ -53,13 +60,13 @@ _MUL = CONFIG.get("timeframe_multiplier", 1)
     name="Bull Flag Breakout",
     dependencies=[],
     params={
-        "pole_min_gain": 0.18,
-        "pole_max_bars": get_bars_for_period("12d", _TF, _MUL),
+        "pole_min_gain": 0.12,
+        "pole_max_bars": get_bars_for_period("15d", _TF, _MUL),
         "flag_min_bars": get_bars_for_period("3d", _TF, _MUL),
         "flag_max_bars": get_bars_for_period("15d", _TF, _MUL),
         "flag_max_retrace": 0.40,
-        "flag_vol_contraction": 0.75,
-        "breakout_vol_mult": 1.5,
+        "flag_vol_contraction": 1.0,
+        "breakout_vol_mult": 1.1,
         "vol_ma_bars": get_bars_for_period("20d", _TF, _MUL),
         "trend_ma_bars": get_bars_for_period("50d", _TF, _MUL),
         "time_stop_bars": get_bars_for_period("20d", _TF, _MUL),
