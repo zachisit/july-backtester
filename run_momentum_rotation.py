@@ -37,7 +37,7 @@ if __name__ == "__main__":
 
     py      = sys.executable
     version = "v3" if args.v3 else "v2"
-    script  = f"scripts/momentum_rotation_{version}.py"
+    script  = os.path.join("custom_strategies", "private", f"momentum_rotation_{version}.py")
 
     print(f"\n  Running: Momentum Rotation {version.upper()}")
     print(f"  Script : {script}")
