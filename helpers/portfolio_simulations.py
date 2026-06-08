@@ -272,6 +272,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     price=entry_price,
                     symbol_data=df.loc[:date],
                     config=CONFIG,
+                    allocation_pct=allocation_pct,  # honour the caller's allocation, not CONFIG only
                     **sizing_kwargs
                 )
 

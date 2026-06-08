@@ -28,6 +28,7 @@ def calculate_position_size(
     price: float,
     symbol_data: pd.DataFrame,
     config: dict,
+    allocation_pct: float | None = None,
     **kwargs
 ) -> float:
     """
@@ -67,7 +68,7 @@ def calculate_position_size(
     ... )
     """
     if method == "fixed":
-        return _fixed_allocation(equity, price, config)
+        return _fixed_allocation(equity, price, config, allocation_pct=allocation_pct)
 
     elif method == "kelly":
         return _kelly_criterion(equity, price, config, **kwargs)
@@ -82,16 +83,22 @@ def calculate_position_size(
         logger.warning(
             f"Unknown position sizing method '{method}'. Falling back to 'fixed'."
         )
-        return _fixed_allocation(equity, price, config)
+        return _fixed_allocation(equity, price, config, allocation_pct=allocation_pct)
 
 
-def _fixed_allocation(equity: float, price: float, config: dict) -> float:
+def _fixed_allocation(equity: float, price: float, config: dict, allocation_pct: float | None = None) -> float:
     """
     Fixed percentage allocation (current default behavior).
 
     allocation_per_trade = 10% → 10% of equity allocated to each trade
+
+    When the caller passes an explicit ``allocation_pct`` (i.e. the engine's
+    ``allocation_pct`` parameter), it takes precedence over the config value so
+    the function honours the argument it was given rather than silently reading
+    CONFIG. Falls back to ``config["allocation_per_trade"]`` when not provided.
     """
-    allocation_pct = config.get("allocation_per_trade", 0.10)
+    if allocation_pct is None:
+        allocation_pct = config.get("allocation_per_trade", 0.10)
     capital_to_allocate = equity * allocation_pct
     shares = capital_to_allocate / price if price > 0 else 0.0
     return shares
