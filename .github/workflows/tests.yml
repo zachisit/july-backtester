@@ -24,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas "numpy<2.0" tqdm boto3 requests python-dotenv orjson pyarrow yfinance matplotlib seaborn pytest
+          pip install pandas "numpy<2.0" tqdm boto3 requests python-dotenv PyYAML orjson pyarrow yfinance matplotlib seaborn pytest
           pip install pandas-ta
 
       - name: Run tests

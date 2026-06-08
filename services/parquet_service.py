@@ -54,6 +54,9 @@ def _find_parquet(symbol: str, parquet_dir: str) -> str | None:
     """
     Find the Parquet file for *symbol* with case-insensitive lookup.
     Returns the full file path, or None if not found.
+    Also checks for Norgate-style date-suffixed files (e.g. ALTR-201512.parquet)
+    used for delisted/acquired tickers; returns the sentinel "_multi_" string
+    when multiple date-suffix files exist (caller must use _find_parquet_multi).
     """
     if not os.path.isdir(parquet_dir):
         logger.warning(f"Parquet data directory does not exist: {parquet_dir}")
@@ -73,6 +76,18 @@ def _find_parquet(symbol: str, parquet_dir: str) -> str | None:
     for fname in os.listdir(parquet_dir):
         if fname.upper() == target:
             return os.path.join(parquet_dir, fname)
+
+    # Fallback: Norgate date-suffixed files e.g. ALTR-201512.parquet
+    prefix = safe.upper() + "-"
+    dated = sorted(
+        fname for fname in os.listdir(parquet_dir)
+        if fname.upper().startswith(prefix) and fname.upper().endswith(".PARQUET")
+    )
+    if len(dated) == 1:
+        return os.path.join(parquet_dir, dated[0])
+    if len(dated) > 1:
+        # Signal to caller that multiple period files exist
+        return "_multi_|" + parquet_dir + "|" + safe
 
     return None
 
@@ -161,11 +176,30 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
         )
         return None
 
-    try:
-        df = pd.read_parquet(filepath)
-    except Exception as e:
-        logger.error(f"Failed to read parquet file '{filepath}': {e}")
-        return None
+    # Handle multiple date-suffix period files (Norgate delisted format)
+    if filepath.startswith("_multi_|"):
+        _, fdir, safe = filepath.split("|", 2)
+        prefix = safe.upper() + "-"
+        parts = sorted(
+            f for f in os.listdir(fdir)
+            if f.upper().startswith(prefix) and f.upper().endswith(".PARQUET")
+        )
+        frames = []
+        for part in parts:
+            try:
+                frames.append(pd.read_parquet(os.path.join(fdir, part)))
+            except Exception as e:
+                logger.warning(f"Could not read '{part}': {e}")
+        if not frames:
+            return None
+        df = pd.concat(frames).sort_index()
+        df = df[~df.index.duplicated(keep="first")]
+    else:
+        try:
+            df = pd.read_parquet(filepath)
+        except Exception as e:
+            logger.error(f"Failed to read parquet file '{filepath}': {e}")
+            return None
 
     logger.debug(f"Loaded {len(df)} rows from {filepath}")
 

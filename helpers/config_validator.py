@@ -95,6 +95,9 @@ KNOWN_KEYS: set[str] = {
     "include_delisted",
     "delisting_price_assumption",
     "delisted_symbols_file",
+    # SECTION 24: Point-in-Time Universe Paths
+    "nq100_pit_path",
+    "sp500_pit_path",
     # S3
     "s3_reports_bucket",
     "upload_to_s3",

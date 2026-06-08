@@ -386,6 +386,22 @@ CONFIG = {
     # bias correction.
     # Example: "delisted_symbols_file": "nasdaq_100_delisted.json"
     "delisted_symbols_file": None,
+
+    # ============================================================
+    # SECTION 24: POINT-IN-TIME UNIVERSE PATHS
+    # ============================================================
+    # Absolute paths to local clones of the PIT data repos.
+    # Required when using "pit:nq100" or "pit:sp500" as a portfolio value.
+    # Leave as "" to fall back to the NQ100_DATA_ROOT / SP500_DATA_ROOT
+    # environment variables, or drop the YAML files directly into:
+    #   tickers_to_scan/point_in_time/nq100/
+    #   tickers_to_scan/point_in_time/sp500/
+    #
+    # Repos:
+    #   NQ100 — https://github.com/shardul0701/NQ100-Survivorship-bias-data-2004-2026
+    #   SP500 — https://github.com/shardul0701/SP500-Survivorship-bias-data-2004-2026
+    "nq100_pit_path": r"c:\Users\shard\Light Water Internship\NQ100-Survivorship-bias-data-2004-2026",
+    "sp500_pit_path": r"c:\Users\shard\Light Water Internship\SP500-Survivorship-bias-data-2004-2026",
 }
 
 if CONFIG.get("data_provider") == "norgate":  # noqa: SIM102

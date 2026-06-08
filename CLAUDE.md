@@ -32,6 +32,7 @@ helpers/wfa_rolling.py             # Rolling multi-fold WFA (get_fold_dates, eva
 helpers/ml_export.py               # ML trade feature export (export_trade_features)
 helpers/sensitivity.py             # Parameter sensitivity sweep (build_param_grid, label_for_params, is_sweep_enabled)
 helpers/regime.py                  # VIX regime heatmap (build_regime_heatmap, print_regime_heatmap, classify_vix_regime)
+helpers/point_in_time.py           # Point-in-time index universe resolver for portfolios like "pit:nq100" and "pit:sp500"
 helpers/init_wizard.py             # First-time setup wizard invoked via python main.py --init
 helpers/correlation.py             # Strategy correlation matrix (run_correlation_analysis, compute_avg_correlations)
 helpers/caching.py                 # Local Parquet cache (24h TTL)
@@ -64,6 +65,8 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "timeframe_multiplier": 1          # e.g. 5 for 5-min bars
 "portfolios": {"My Symbols": ["AAPL"]}             # single ticker (replaces old symbols_to_test)
 "portfolios": {"Nasdaq 100": "nasdaq_100.json"}  # pre-built JSON list
+"portfolios": {"Nasdaq 100 PIT": "pit:nq100"}    # point-in-time members as of start_date
+"portfolios": {"S&P 500 PIT": "pit:sp500"}       # requires PIT YAML files or SP500_DATA_ROOT
 "allocation_per_trade": 0.10       # 10% equity per position
 "stop_loss_configs": [{"type": "none"}]  # or {"type":"percentage","value":0.05}
 "slippage_pct": 0.0005

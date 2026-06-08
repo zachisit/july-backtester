@@ -101,6 +101,17 @@ The engine runs every strategy in `custom_strategies/` against SPY, prints a res
 },
 ```
 
+**Point-in-time index universe** — resolve S&P 500 or Nasdaq 100 membership as of `start_date`:
+
+```python
+"portfolios": {
+    "Nasdaq 100 PIT": "pit:nq100",
+    "S&P 500 PIT": "pit:sp500",
+},
+```
+
+Place PIT YAML files under `tickers_to_scan/point_in_time/`, or set `NQ100_DATA_ROOT` / `SP500_DATA_ROOT`.
+
 Validate before a long run: `python main.py --dry-run`
 
 See [examples/](examples/) for ready-to-use config files and annotated strategy examples.

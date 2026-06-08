@@ -9,6 +9,7 @@ tqdm==4.67.1
 boto3==1.40.2          # used for S3 report uploads only, not auth
 requests==2.32.3
 python-dotenv==1.1.1
+PyYAML==6.0.2
 pandas-ta==0.3.14b0
 orjson==3.11.1
 pyarrow==21.0.0
