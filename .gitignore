@@ -11,6 +11,9 @@ __pycache__/
 .vscode/
 .idea/
 
+# Daily cron logs (scripts/polygon_daily_update.sh)
+logs/
+
 # Environment variables file
 .env
 *.env

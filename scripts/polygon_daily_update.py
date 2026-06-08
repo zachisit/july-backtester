@@ -229,7 +229,19 @@ def last_trading_day(session, api_key, before: str | None = None) -> str:
 
 
 def _business_days(start: str, end: str) -> list[str]:
-    return [d.strftime("%Y-%m-%d") for d in pd.bdate_range(start=start, end=end)]
+    """Trading days in [start, end].
+
+    Prefers the NYSE calendar (skips market holidays like MLK Day, Thanksgiving)
+    when ``pandas_market_calendars`` is installed; otherwise falls back to
+    weekday-only ``bdate_range``. Holidays only cost a wasted empty API call under
+    the fallback, so the dependency is optional, not required.
+    """
+    try:
+        import pandas_market_calendars as mcal
+        sched = mcal.get_calendar("NYSE").schedule(start_date=start, end_date=end)
+        return [d.strftime("%Y-%m-%d") for d in sched.index]
+    except Exception:
+        return [d.strftime("%Y-%m-%d") for d in pd.bdate_range(start=start, end=end)]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
