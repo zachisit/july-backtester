@@ -25,21 +25,13 @@ import os
 
 import pandas as pd
 
+from helpers.filename_utils import sanitize_symbol_for_filename as _sanitize_filename
+
 logger = logging.getLogger(__name__)
 
 # Project root = parent of this services/ package
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CANONICAL_COLS = ["Open", "High", "Low", "Close", "Volume"]
-
-# Characters illegal in Windows filenames (and generally problematic on any OS)
-_ILLEGAL_FILENAME_CHARS = r'\/:*?"<>|'
-
-
-def _sanitize_filename(symbol: str) -> str:
-    """Replace characters that are illegal in Windows filenames with underscores."""
-    for ch in _ILLEGAL_FILENAME_CHARS:
-        symbol = symbol.replace(ch, "_")
-    return symbol
 
 
 def _resolve_dir(config: dict) -> str:

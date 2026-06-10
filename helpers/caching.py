@@ -4,20 +4,16 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-import re # Import the regular expressions module
+
+from helpers.filename_utils import sanitize_symbol_for_filename as _sanitize_filename
 
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURABLE SETTINGS ---
 CACHE_DIR = "data_cache"
-CACHE_TTL_HOURS = 24 
+CACHE_TTL_HOURS = 24
 
 os.makedirs(CACHE_DIR, exist_ok=True)
-
-def _sanitize_filename(symbol: str) -> str:
-    """Replaces characters invalid for filenames with an underscore."""
-    # This regex will replace any character that is NOT a letter, digit, hyphen, or underscore.
-    return re.sub(r'[^a-zA-Z0-9_-]', '_', symbol)
 
 def get_cached_data(symbol: str, start: str, end: str, timeframe: str, multiplier: int) -> pd.DataFrame | None:
     """Checks for and loads a DataFrame from a local Parquet cache."""
