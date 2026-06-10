@@ -163,7 +163,7 @@ class TestFreshFilesIgnored:
         fresh_mtime = (datetime.now() - timedelta(days=2)).timestamp()
 
         def fake_getmtime(path):
-            return stale_mtime if "old" in path else fresh_mtime
+            return stale_mtime if os.path.basename(path) == "old.parquet" else fresh_mtime
 
         with patch("os.path.getmtime", side_effect=fake_getmtime), \
              caplog.at_level(logging.WARNING):
