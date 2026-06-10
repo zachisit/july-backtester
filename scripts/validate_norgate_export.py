@@ -20,19 +20,13 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-_ILLEGAL_FILENAME_CHARS = r'\\/:*?"<>|'
+from helpers.filename_utils import sanitize_symbol_for_filename as _sanitize_filename
 
 DATABASES = [
     "US Equities",
     "US Equities Delisted",
     "US Indices",
 ]
-
-
-def _sanitize_filename(symbol: str) -> str:
-    for ch in _ILLEGAL_FILENAME_CHARS:
-        symbol = symbol.replace(ch, "_")
-    return symbol
 
 
 def validate(output_dir: Path) -> None:
