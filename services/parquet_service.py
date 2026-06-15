@@ -25,6 +25,8 @@ import os
 
 import pandas as pd
 
+from helpers.ticker_normalizer import normalize_ticker
+
 logger = logging.getLogger(__name__)
 
 # Project root = parent of this services/ package
@@ -167,7 +169,13 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     UTC DatetimeIndex named 'Datetime', or None on any error / no data.
     """
     parquet_dir = _resolve_dir(config)
-    filepath = _find_parquet(symbol, parquet_dir)
+    # Prefer the user's literal sanitized filename (I:VIX -> I_VIX.parquet),
+    # then fall back to the provider-normalized convention (I:VIX -> VIX).
+    requested_symbol = symbol
+    filepath = _find_parquet(requested_symbol, parquet_dir)
+    symbol = normalize_ticker(requested_symbol, "parquet")
+    if filepath is None and symbol != requested_symbol:
+        filepath = _find_parquet(symbol, parquet_dir)
 
     if filepath is None:
         logger.warning(

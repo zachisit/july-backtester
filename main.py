@@ -292,9 +292,14 @@ def main():
     from datetime import datetime as _dt
     try:
         start = _dt.strptime(CONFIG["start_date"], "%Y-%m-%d")
-        end = _dt.strptime(CONFIG["end_date"], "%Y-%m-%d")
-        if start >= end:
-            errors.append(f"  - start_date ({CONFIG['start_date']}) must be before end_date ({CONFIG['end_date']})")
+        # PR #187 Fix — end_date=None guard (review item: S2 validation crashed on None)
+        # end_date=None is a valid "run to today" sentinel; strptime(None) raised TypeError.
+        # Only validate the ordering when an explicit date string is set.
+        _end_date_str = CONFIG.get("end_date")
+        if _end_date_str is not None:
+            end = _dt.strptime(_end_date_str, "%Y-%m-%d")
+            if start >= end:
+                errors.append(f"  - start_date ({CONFIG['start_date']}) must be before end_date ({_end_date_str})")
     except ValueError as e:
         errors.append(f"  - Invalid date format in config: {e}")
 
@@ -304,6 +309,14 @@ def main():
 
     if not CONFIG.get("portfolios"):
         errors.append("  - portfolios is empty. Add at least one entry to run, e.g. \"My Symbols\": [\"AAPL\"].")
+
+    # PR #187 Fix 6 — validator consolidation (review item: duplicate module)
+    # validate_config lives in the single canonical helpers/config_validator.py;
+    # the duplicate config_validators.py (plural) was removed entirely.
+    from helpers.config_validator import validate_config
+    for _warn in validate_config(CONFIG):  # warns on typo'd / unknown config keys
+        logger.warning(_warn)
+
 
     if errors:
         print("\n[ERROR] Invalid configuration in config.py:")
@@ -505,6 +518,18 @@ def main():
     # Loop through each portfolio sequentially
     for portfolio_name, value in _portfolios.items():
         logger.info(f"--> Preparing and running portfolio: {portfolio_name}")
+
+        # PR #187 Fix 3 — legacy PIT keyword normalisation (review item: minor nit)
+        # The original docs and .env.example showed "sp500_pit" / "nq100_pit" as valid
+        # portfolio values, but the resolver only understood the "pit:" prefix form.
+        # Silently rewrite both legacy spellings so old configs continue to work.
+        if isinstance(value, str) and value == "sp500_pit":
+            value = "pit:sp500"
+            logger.info(f"  -> '{portfolio_name}': normalised 'sp500_pit' → 'pit:sp500'")
+        elif isinstance(value, str) and value == "nq100_pit":
+            value = "pit:nq100"
+            logger.info(f"  -> '{portfolio_name}': normalised 'nq100_pit' → 'pit:nq100'")
+
         _current_pit_schedule = None  # reset each portfolio; set only for pit: portfolios
 
         # --- Data fetching for the current portfolio (no changes) ---
@@ -674,6 +699,11 @@ def main():
         # overhead beyond a vectorised lookup.
         if _current_pit_schedule is not None:
             from helpers.point_in_time import pit_members_on as _pit_members_on
+            from helpers.pit_enforcement import (
+                build_member_mask as _pit_build_member_mask,
+                build_forced_exit_mask as _pit_build_forced_exit_mask,
+                membership_intervals as _pit_membership_intervals,
+            )
             _pit_member_masks: dict[str, object] = {}
             for _sym, _df in portfolio_data.items():
                 _dates = _df.index
@@ -685,6 +715,37 @@ def main():
                 )
             _n_with_history = sum(m.any() for m in _pit_member_masks.values())
             logger.info(f"  -> PIT masks built: {_n_with_history}/{len(_pit_member_masks)} symbols have at least one membership day")
+
+            # PR #187 Fix 2 — wire pit_enforcement columns into portfolio_data (major review item)
+            # pit_enforcement.py (build_member_mask, build_forced_exit_mask) was tested in
+            # isolation but never connected to the engine: _pit_flag() in portfolio_simulations.py
+            # always returned the column's default (False) because main.py never populated
+            # _pit_member or _pit_force_exit.  The two column writes below close that gap.
+            #
+            # _pit_member  → True on bars when the symbol IS an index member.
+            #                 The simulator skips entries and fires "PIT Membership Exit"
+            #                 on the first non-member bar after an open long.
+            # _pit_force_exit → True on the LAST available member bar when no timely
+            #                 next-bar exists after index removal (e.g. sudden delisting).
+            #                 The simulator closes at that bar's Close rather than waiting.
+            _pit_intervals = _pit_membership_intervals(value, CONFIG)
+            _exit_buffer = CONFIG.get("pit_exit_buffer_days", 10)
+            _backtest_end = CONFIG.get("end_date") or str(pd.Timestamp.now().normalize().date())
+            _n_forced = 0
+            for _sym, _mask in _pit_member_masks.items():
+                _df = portfolio_data[_sym]
+                _df["_pit_member"] = _mask.reindex(_df.index, fill_value=False)
+                _sym_intervals = _pit_intervals.get(_sym, [])
+                if _sym_intervals:
+                    _force_mask = _pit_build_forced_exit_mask(
+                        _df.index, _sym_intervals, _backtest_end, _exit_buffer
+                    )
+                else:
+                    _force_mask = pd.Series(False, index=_df.index)
+                _df["_pit_force_exit"] = _force_mask
+                if _force_mask.any():
+                    _n_forced += 1
+            logger.info(f"  -> PIT columns written to portfolio_data: {_n_forced} symbols have forced-exit bars")
         else:
             _pit_member_masks = None
         # --- END PIT MEMBERSHIP MASKS ---
@@ -733,7 +794,12 @@ def main():
             for _i, _r in enumerate(tqdm(p.imap(run_single_simulation, tasks_for_this_portfolio), total=_total, desc="  -> Running sims"), start=1):
                 _results.append(_r)
                 if _i in _checkpoints:
-                    _elapsed = _time.monotonic() - _start_pool
+                    # PR #187 follow-up — ZeroDivisionError guard (test: test_progress_tracking.py)
+                    # On fast machines / CI, the first checkpoint fires within nanoseconds
+                    # of pool start, making elapsed=0.0 and raising ZeroDivisionError.
+                    # Clamping to 1e-9 s is indistinguishable from "instant" in the display
+                    # ({elapsed:.0f}s still shows "0s") but prevents the crash.
+                    _elapsed = max(_time.monotonic() - _start_pool, 1e-9)
                     _rate = _i / _elapsed
                     _remaining = (_total - _i) / _rate if _rate > 0 else 0
                     logger.info(f"  -> Progress: {_i}/{_total} tasks done | Elapsed: {_elapsed:.0f}s | ETA: {_remaining:.0f}s remaining")

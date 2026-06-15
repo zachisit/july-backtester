@@ -260,13 +260,10 @@ def normalize_ticker(symbol: str, provider: str) -> str:
     '^XYZ'  # Unknown index — fallback
     """
     provider = provider.lower()
-    # Parquet: targeted Polygon-prefix strip. The Norgate parquet convention
-    # uses '$VIX.parquet' for indices, so we MUST NOT strip '$' or convert
-    # to a bare 'VIX' lookup (that would resolve to the unrelated stock-ticker
-    # file when both exist — see v1.8.0 regression that returned the wrong
-    # VIX series to vol_axis_strategies). Strip only the Polygon 'I:' prefix
-    # so user-typed 'I:VIX' resolves to the bare 'VIX' file when present
-    # (covered by test_parquet_index_returns_bare_symbol).
+    if provider == "merged":
+        provider = "csv"
+    # Parquet preserves the user's filename convention. Strip only Polygon's
+    # I: prefix; bare, caret, and Norgate-dollar symbols remain unchanged.
     if provider == "parquet":
         if symbol.upper().startswith("I:"):
             return symbol[2:]

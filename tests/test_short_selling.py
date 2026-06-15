@@ -30,9 +30,9 @@ class TestConfigDefaults:
         """htb_rate_annual must exist in CONFIG."""
         assert "htb_rate_annual" in CONFIG
 
-    def test_htb_rate_annual_default_is_0_02(self):
-        """Default htb_rate_annual must be 0.02 (2% p.a. — easy-to-borrow baseline)."""
-        assert CONFIG["htb_rate_annual"] == 0.02
+    def test_htb_rate_annual_default_is_zero_for_long_config(self):
+        """The shipped long-only config keeps borrow cost disabled by default."""
+        assert CONFIG["htb_rate_annual"] == 0.0
 
     def test_htb_rate_non_negative(self):
         """htb_rate_annual must be non-negative (a negative borrow rate makes no sense)."""

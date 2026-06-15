@@ -1,12 +1,21 @@
 # helpers/config_validator.py
 """
-Config key validation — warns on unknown or typo'd keys in CONFIG.
+Config validation helpers — unknown-key warnings and forward-test-mode checks.
 
 Public API
 ----------
 validate_config(config: dict) -> list[str]
     Returns a list of warning messages for unrecognised keys.
     Each message includes a "did you mean?" suggestion if a close match exists.
+
+    Empty list means valid.
+
+validate_intraday_config(config: dict) -> list[str]
+validate_comparison_tickers(config: dict) -> list[str]
+    Additional structural validators.
+
+This is the single canonical home for all config validation. (The former
+config_validators.py duplicate was removed; everything lives here.)
 """
 
 import difflib
@@ -22,6 +31,7 @@ logger = logging.getLogger(__name__)
 KNOWN_KEYS: set[str] = {
     # SECTION 1: Data Provider
     "data_provider",
+    "polygon_api_secret_name",  # PR #187: added — was triggering "unknown key" warning
     "csv_data_dir",
     "parquet_data_dir",
     # SECTION 2: Backtest Period & Capital
@@ -104,16 +114,24 @@ KNOWN_KEYS: set[str] = {
     "kelly_fraction",
     "target_risk_per_trade",
     "max_portfolio_heat",
-    # SECTION 26: Point-in-Time Universe Paths
-    "nq100_pit_path",
+    # PIT and merged-data screening
+    "pit_enforce_daily",
+    "pit_warmup_days",
+    "pit_exit_buffer_days",
+    "pit_coverage_tolerance_days",
     "sp500_pit_path",
     # SECTION 27: Deterministic Entry Queue
     "entry_priority",
     "entry_random_seed",
+    "nq100_pit_path",
+    "merged_quality_filter_enabled",
+    "merged_exclude_statuses",
+    "merged_min_avg_dollar_volume",
     # S3
     "s3_reports_bucket",
     "upload_to_s3",
 }
+
 
 
 def validate_config(config: dict) -> list[str]:

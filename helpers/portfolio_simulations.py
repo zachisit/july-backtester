@@ -39,6 +39,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
     prev_trading_dates = { symbol: df.index.to_series().shift(1) for symbol, df in portfolio_data.items() }
 
+    def _pit_flag(symbol, date, column, default):
+        df = portfolio_data[symbol]
+        if column not in df.columns or date not in df.index:
+            return default
+        value = df.at[date, column]
+        return default if pd.isna(value) else bool(value)
+
     for date in portfolio_timeline.index:
         # --- EQUITY CALCULATION ---
         current_market_value = 0.0
@@ -73,9 +80,26 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 continue
 
             raw_exit_price, exit_date, exit_reason = np.nan, pd.NaT, "Strategy Exit"
-            
+
+            # PIT membership is enforced on the execution date. This prevents a
+            # prior-day signal from entering or retaining a position at the first
+            # non-member open. If no post-leave bar exists, main.py marks the last
+            # available member bar for a conservative close liquidation.
+            pit_member = _pit_flag(symbol, date, '_pit_member', True)
+            pit_force_exit = _pit_flag(symbol, date, '_pit_force_exit', False)
+            if pit_force_exit:
+                raw_exit_price = portfolio_data[symbol].loc[date].get('Close')
+                exit_date = date
+                exit_reason = "PIT Membership Exit (last available close)"
+            elif not pit_member:
+                raw_exit_price = portfolio_data[symbol].loc[date].get(
+                    'Open' if execution_time == 'open' else 'Close')
+                exit_date = date
+                exit_reason = "PIT Membership Exit"
+
             # --- STOP-LOSS CHECK ---
-            if stop_config.get("type") != "none" and pd.notna(pos.get('stop_loss_level')):
+            if (pd.isna(raw_exit_price) and stop_config.get("type") != "none"
+                    and pd.notna(pos.get('stop_loss_level'))):
                 current_low = portfolio_data[symbol].loc[date].get('Low')
                 if pd.notna(current_low) and current_low <= pos['stop_loss_level']:
                     raw_exit_price = pos['stop_loss_level']
@@ -174,8 +198,18 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             if date not in portfolio_data[symbol].index:
                 continue
             sig_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
-            if pd.notna(sig_date) and sig_date in signals[symbol].index and signals[symbol].loc[sig_date] < 0:
-                cover = portfolio_data[symbol].loc[date].get('Open' if execution_time == 'open' else 'Close')
+            pit_member = _pit_flag(symbol, date, '_pit_member', True)
+            pit_force_exit = _pit_flag(symbol, date, '_pit_force_exit', False)
+            strategy_cover = (
+                pd.notna(sig_date) and sig_date in signals[symbol].index
+                and signals[symbol].loc[sig_date] < 0
+            )
+            if pit_force_exit or not pit_member or strategy_cover:
+                cover_field = (
+                    'Close' if pit_force_exit
+                    else ('Open' if execution_time == 'open' else 'Close')
+                )
+                cover = portfolio_data[symbol].loc[date].get(cover_field)
                 if pd.isna(cover):
                     continue
                 cover_slip = cover * (1 + CONFIG['slippage_pct'])
@@ -232,6 +266,9 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         for symbol, df in _short_items:
             if date not in df.index or symbol in positions or symbol in short_positions:
                 continue
+            if (not _pit_flag(symbol, date, '_pit_member', True)
+                    or _pit_flag(symbol, date, '_pit_force_exit', False)):
+                continue
             sig_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
             if pd.notna(sig_date) and sig_date in signals[symbol].index and signals[symbol].loc[sig_date] == -2:
                 ep = df.loc[date].get('Open' if execution_time == 'open' else 'Close')
@@ -273,6 +310,9 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 continue
 
             if symbol in positions: continue
+            if (not _pit_flag(symbol, date, '_pit_member', True)
+                    or _pit_flag(symbol, date, '_pit_force_exit', False)):
+                continue
             raw_entry_price, entry_exec_date = np.nan, pd.NaT
             signal_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
             if pd.notna(signal_date) and signal_date in signals[symbol].index and signals[symbol].loc[signal_date] == 1:
