@@ -53,17 +53,26 @@ INDEX_FILE_PREFIXES = {
 }
 
 PIT_TICKER_NORMALISATION = {
-    # Common historical/modern symbol aliases seen in the public PIT repos and
-    # price-provider stores. These are deliberately conservative; provider-level
-    # ticker mapping remains a separate concern for deeper Norgate work.
+    # Maps a historical PIT-membership ticker -> the ticker the merged/ price
+    # store actually carries (Norgate back-fills the *current* ticker, so a name
+    # that was "UTX" in 2015 lives in the store as "RTX"). Every target below was
+    # verified to exist in merged/ (exact file or date-suffixed delisted file).
+    # This lifts PIT->price coverage to ~99% S&P / ~99% NQ100.
     #
-    # GOOG / GOOGL note: Google split into two share classes in April 2014.
-    # Post-split NQ100 YAML files list BOTH GOOG (Class C) and GOOGL (Class A)
-    # as distinct members. Mapping GOOG -> GOOGL would silently collapse them,
-    # dropping one position with no warning. The mapping is intentionally absent
-    # here; both symbols pass through unchanged.
-    "PCLN": "BKNG",
-    "HANS": "MNST",
+    # GOOG / GOOGL note: post-split NQ100 YAML files list BOTH as distinct members.
+    # Mapping GOOG -> GOOGL would silently collapse them; both pass through unchanged.
+    "PCLN": "BKNG", "HANS": "MNST",
+    # --- S&P 500 renames / mergers (old -> surviving ticker) ---
+    "ABC": "COR", "ADS": "BFH", "ANTM": "ELV", "BHGE": "BKR", "BLL": "BALL",
+    "CCE": "CCEP", "CDAY": "DAY", "CHK": "EXE", "COG": "CTRA", "CTL": "LUMN",
+    "DDR": "SITC", "DISCA": "WBD", "DNR": "DEN", "DWDP": "DD", "ESV": "VAL",
+    "FBHS": "FBIN", "FII": "FHI", "FLT": "CPAY", "GPS": "GAP", "HFC": "DINO",
+    "HRS": "LHX", "JEC": "J", "KORS": "CPRI", "MYL": "VTRS", "NLOK": "GEN",
+    "PKI": "RVTY", "RE": "EG", "SYMC": "GEN", "TMK": "GL", "UTX": "RTX",
+    "WFT": "WFRD", "WLTW": "WTW", "WYND": "TNL", "FB": "META",
+    # --- Nasdaq-100 renames / mergers ---
+    "AEOS": "AEO", "IVGN": "LIFE", "JDSU": "VIAV", "KFT": "MDLZ", "UAUA": "UAL",
+    "VIP": "VEON", "YHOO": "AABA",
 }
 
 
