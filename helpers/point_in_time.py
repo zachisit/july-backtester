@@ -53,11 +53,9 @@ INDEX_FILE_PREFIXES = {
 }
 
 PIT_TICKER_NORMALISATION = {
-    # Maps a historical PIT-membership ticker -> the ticker the merged/ price
-    # store actually carries (Norgate back-fills the *current* ticker, so a name
-    # that was "UTX" in 2015 lives in the store as "RTX"). Every target below was
-    # verified to exist in merged/ (exact file or date-suffixed delisted file).
-    # This lifts PIT->price coverage to ~99% S&P / ~99% NQ100.
+    # Maps historical PIT-membership tickers -> the ticker the parquet store carries
+    # (Norgate back-fills the *current* ticker, so a name that was "UTX" in 2015
+    # lives in the store as "RTX"). This lifts PIT->price coverage to ~99% S&P / ~99% NQ100.
     #
     # GOOG / GOOGL note: post-split NQ100 YAML files list BOTH as distinct members.
     # Mapping GOOG -> GOOGL would silently collapse them; both pass through unchanged.

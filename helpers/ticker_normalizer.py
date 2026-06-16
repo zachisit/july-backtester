@@ -260,8 +260,6 @@ def normalize_ticker(symbol: str, provider: str) -> str:
     '^XYZ'  # Unknown index — fallback
     """
     provider = provider.lower()
-    if provider == "merged":
-        provider = "csv"
     # Parquet preserves the user's filename convention. Strip only Polygon's
     # I: prefix; bare, caret, and Norgate-dollar symbols remain unchanged.
     if provider == "parquet":
