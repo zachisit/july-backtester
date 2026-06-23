@@ -191,7 +191,13 @@ def plot_equity_and_drawdown(
             axes[0].plot(x, trades_df['Equity'], color=T['primary'], linewidth=1.6, label='Equity')
             axes[0].fill_between(x, trades_df['Equity'].min() * 0.99, trades_df['Equity'],
                                  color=T['primary'], alpha=0.06)
-            _fmt_dollar(axes[0])
+            eq_min = trades_df['Equity'].min()
+            use_log = trades_df['Equity'].max() / max(eq_min, 1) > 10
+            if use_log:
+                axes[0].set_yscale('log')
+                axes[0].yaxis.set_major_formatter(mtick.FuncFormatter(lambda v, _: f'${v:,.0f}'))
+            else:
+                _fmt_dollar(axes[0])
         else:
             axes[0].text(0.5, 0.5, 'Equity data not available',
                          ha='center', va='center', transform=axes[0].transAxes)
