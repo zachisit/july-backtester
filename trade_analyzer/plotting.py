@@ -465,7 +465,12 @@ def plot_benchmark_comparison(
                         where=(eq_final >= bp_norm), color=T['positive'], alpha=0.08)
         ax.fill_between(eq_final.index, bp_norm, eq_final,
                         where=(eq_final < bp_norm), color=T['negative'], alpha=0.08)
-        _fmt_dollar(ax)
+        use_log = eq_final.max() / max(eq_final.min(), 1) > 10
+        if use_log:
+            ax.set_yscale('log')
+            ax.yaxis.set_major_formatter(mtick.FuncFormatter(lambda v, _: f'${v:,.0f}'))
+        else:
+            _fmt_dollar(ax)
         ax.legend()
         _style_ax(ax, title=title, xlabel='Date', ylabel='Portfolio Value ($)')
         fig.autofmt_xdate(rotation=25, ha='right')
@@ -581,7 +586,13 @@ def plot_mc_fan(
         ax.axhline(initial_equity, color=T['neutral'], linestyle=':', linewidth=1.0,
                    label=f'Initial (${initial_equity:,.0f})')
 
-        _fmt_dollar(ax)
+        p5_pos_min = p5[p5 > 0].min() if (p5 > 0).any() else initial_equity
+        use_log = p95.max() / max(p5_pos_min, 1) > 10
+        if use_log:
+            ax.set_yscale('log')
+            ax.yaxis.set_major_formatter(mtick.FuncFormatter(lambda v, _: f'${v:,.0f}'))
+        else:
+            _fmt_dollar(ax)
         ax.legend(loc='upper left')
         _style_ax(ax, title=f"{title} ({n_sims:,} sims)",
                   xlabel='Trade #', ylabel='Simulated Equity ($)')
