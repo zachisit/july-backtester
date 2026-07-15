@@ -263,4 +263,14 @@ CONFIG = {
     "pit_warmup_days": 400,              # calendar days of pre-join data for indicators
     "pit_exit_buffer_days": 10,          # grace-period bars after index removal
     "pit_coverage_tolerance_days": 7,
+
+    # --- PIT Data Repo Paths (optional) ---
+    # Absolute paths to local clones of the PIT ticker-history repos.
+    # Leave as "" to fall back to the NQ100_DATA_ROOT / SP500_DATA_ROOT
+    # environment variables (see .env.example), or drop the YAML files
+    # directly under tickers_to_scan/point_in_time/{nq100,sp500}/.
+    #   NQ100 -- https://github.com/shardul0701/NQ100-Survivorship-bias-data-2004-2026
+    #   SP500 -- https://github.com/shardul0701/SP500-Survivorship-bias-data-2004-2026
+    "nq100_pit_path": "",
+    "sp500_pit_path": "",
 }

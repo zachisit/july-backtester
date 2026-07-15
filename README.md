@@ -101,7 +101,7 @@ The engine runs every strategy in `custom_strategies/` against SPY, prints a res
 },
 ```
 
-**Point-in-time index universe** — resolve S&P 500 or Nasdaq 100 membership as of `start_date`:
+**Point-in-time index universe** — survivorship-bias-free S&P 500 / Nasdaq 100 backtests. Resolves the full historical ticker union between `start_date` and `end_date` (including delisted/removed constituents), then gates entry/exit signals per-date on actual index membership:
 
 ```python
 "portfolios": {
@@ -110,7 +110,16 @@ The engine runs every strategy in `custom_strategies/` against SPY, prints a res
 },
 ```
 
-Place PIT YAML files under `tickers_to_scan/point_in_time/`, or set `NQ100_DATA_ROOT` / `SP500_DATA_ROOT`.
+Requires the ticker-history YAML data from these two public repos:
+
+- Nasdaq 100 — https://github.com/shardul0701/NQ100-Survivorship-bias-data-2004-2026
+- S&P 500 — https://github.com/shardul0701/SP500-Survivorship-bias-data-2004-2026
+
+Clone each repo locally, then point this project at them via **one** of:
+
+1. Env vars (recommended — copy `.env.example` to `.env` and fill in): `NQ100_DATA_ROOT` / `SP500_DATA_ROOT`, each pointing at the repo root (not the `src/` subfolder — the loader appends that path itself).
+2. Config keys in `config.py`: `nq100_pit_path` / `sp500_pit_path`.
+3. Drop the YAML files directly under `tickers_to_scan/point_in_time/nq100/` or `tickers_to_scan/point_in_time/sp500/`.
 
 Validate before a long run: `python main.py --dry-run`
 
