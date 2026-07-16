@@ -136,6 +136,7 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     # "Adj Close" → "Close" (when auto_adjust=False)
     col_map.update({c: "Close" for c in df.columns if c.lower() in ("adj close", "adjusted close")})
     df = df.rename(columns=col_map)
+    df = df.loc[:, ~df.columns.duplicated(keep="first")]
 
     # Keep only the canonical OHLCV columns that are present
     canonical = ["Open", "High", "Low", "Close", "Volume"]

@@ -87,7 +87,7 @@ CONFIG = {
     # SECTION 8: ALLOCATION & EXECUTION
     # ============================================================
     "allocation_per_trade": 0.10,   # fraction of equity per position
-    "max_pct_adv": 0.05,            # max order size as % of 20-day avg daily volume
+    "max_pct_adv": 0.05,               # max order size as % of 20-day avg daily volume
     "execution_time": "open",       # "open" = next-day open fill
     "roc_thresholds": [0.0, 0.5],
 
@@ -109,7 +109,7 @@ CONFIG = {
     # ============================================================
     # SECTION 11: WALK-FORWARD ANALYSIS
     # ============================================================
-    "wfa_split_ratio": 0.80,        # 0.80 = 80% IS / 20% OOS; None = disabled
+    "wfa_split_ratio": 0.80,          # 0.80 = 80% IS / 20% OOS; None = disabled
     "wfa_folds": None,              # None = rolling WFA disabled; int >=2 = folds
     "wfa_min_fold_trades": 5,
 
