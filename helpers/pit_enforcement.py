@@ -62,31 +62,34 @@ def _kind(value: str) -> str | None:
 
 
 # ----------------------------------------------------------------- intervals ---
-def _sp500_intervals(start: str, end: str, repo: str) -> dict:
-    """Per-ticker membership spells from the S&P change-event timeline.
+def _yaml_change_intervals(start: str, end: str, yaml_dir: "Path",
+                           file_prefix: str, seed_year: int = 2004) -> dict:
+    """Build per-ticker membership spells from a change-event YAML timeline.
 
-    Returns ``{normalised_ticker: [(spell_start, spell_end), ...]}``. A removal
-    closes the open spell at the change date; a later re-add opens a new spell,
-    so gaps are represented as separate intervals rather than swallowed.
+    Shared by S&P 500 and Nasdaq-100 — both use the same YAML schema
+    (``tickers_on_Jan_1`` + ``changes`` with ``union``/``difference``). Returns
+    ``{normalised_ticker: [(spell_start, spell_end), ...]}``. A removal closes the
+    open spell at the change date; a later re-add opens a new spell, so gaps are
+    represented as separate intervals rather than swallowed.
     """
     import pandas as pd
-    from helpers.pit_universe import _load_sp500_yaml
+    from helpers.pit_universe import _load_sp500_yaml as _load_yaml  # generic YAML loader
 
-    yaml_dir = Path(repo) / "src" / "sp500_ticker_history"
+    yaml_dir = Path(yaml_dir)
     if not yaml_dir.is_dir():
         return {}
     end_y = int(end[:4])
 
     events = []          # (date_str, added_set, removed_set)
     seed = set()
-    for year in range(2004, end_y + 1):
-        path = yaml_dir / f"sp500-ticker-changes-{year}.yaml"
+    for year in range(seed_year, end_y + 1):
+        path = yaml_dir / f"{file_prefix}-{year}.yaml"
         if not path.exists():
             continue
-        data = _load_sp500_yaml(path)
+        data = _load_yaml(path)
         if not data:
             continue
-        if year == 2004:
+        if year == seed_year:
             seed = {str(t) for t in (data.get("tickers_on_Jan_1") or [])}
         for d in sorted((data.get("changes") or {}).keys()):
             e = data["changes"][d]
@@ -123,6 +126,29 @@ def _sp500_intervals(start: str, end: str, repo: str) -> dict:
     for n, s in open_spell.items():       # still a member at period end
         intervals.setdefault(n, []).append((s, end_ts))
     return intervals
+
+
+def _sp500_intervals(start: str, end: str, repo: str) -> dict:
+    """Per-ticker S&P 500 membership spells from the change-event YAML timeline."""
+    return _yaml_change_intervals(
+        start, end, Path(repo) / "src" / "sp500_ticker_history",
+        "sp500-ticker-changes",
+    )
+
+
+def _nq100_intervals_from_yaml(start: str, end: str, repo: str) -> dict:
+    """Per-ticker Nasdaq-100 membership spells from the change-event YAML timeline.
+
+    Mirrors :func:`_sp500_intervals` for the NQ100 data repo (same schema, the
+    ``src/nasdaq_100_ticker_history/n100-ticker-changes-YYYY.yaml`` layout). This
+    is the survivorship-free source; the legacy daily-snapshot parquet path in
+    :func:`_nq100_intervals` remains as a fallback.
+    """
+    for sub in ("nasdaq_100_ticker_history", "nasdaq100_ticker_history"):
+        yaml_dir = Path(repo) / "src" / sub
+        if yaml_dir.is_dir():
+            return _yaml_change_intervals(start, end, yaml_dir, "n100-ticker-changes")
+    return {}
 
 
 def _nq100_intervals(start: str, end: str, parquet_path: str,
@@ -180,10 +206,41 @@ def membership_intervals(value: str, config: dict | None = None) -> dict:
     if kind == "sp500":
         repo = config.get("sp500_pit_path") or os.environ.get("SP500_DATA_ROOT", "")
         return _sp500_intervals(start, end, repo) if repo else {}
+
+    # nq100: prefer the survivorship-free change-event YAML repo (config key or
+    # NQ100_DATA_ROOT env, symmetric with sp500). Fall back to the legacy
+    # daily-snapshot parquet only when the YAML repo yields nothing, so users
+    # without the data repo see unchanged behaviour.
+    repo = config.get("nq100_pit_path") or os.environ.get("NQ100_DATA_ROOT", "")
+    if repo:
+        yaml_intervals = _nq100_intervals_from_yaml(start, end, repo)
+        if yaml_intervals:
+            return yaml_intervals
     parquet = config.get("nq100_pit_path") or os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "data", "nq100_membership.parquet")
     return _nq100_intervals(start, end, parquet)
+
+
+def _tz_coercer(tz):
+    """Return a function that aligns a scalar timestamp to ``tz``.
+
+    Membership YAML dates and ``end_date`` are tz-naive, but price-data indices
+    are often tz-aware (parquet daily bars are normalised to UTC). Comparing the
+    two raises ``InvalidComparison``. This coercer localises naive inputs to the
+    index tz (or strips tz when the index is naive), so both operands match.
+    """
+    import pandas as pd
+
+    def _coerce(ts):
+        ts = pd.Timestamp(ts)
+        if tz is not None:
+            ts = ts.tz_localize(tz) if ts.tzinfo is None else ts.tz_convert(tz)
+        elif ts.tzinfo is not None:
+            ts = ts.tz_localize(None)
+        return ts
+
+    return _coerce
 
 
 def build_member_mask(index, intervals_for_symbol):
@@ -195,8 +252,10 @@ def build_member_mask(index, intervals_for_symbol):
     mask = pd.Series(False, index=index)
     if not intervals_for_symbol:
         return mask
+    idx = pd.DatetimeIndex(index)
+    _coerce = _tz_coercer(idx.tz)
     for s, e in intervals_for_symbol:
-        mask |= (index >= pd.Timestamp(s)) & (index <= pd.Timestamp(e))
+        mask |= (idx >= _coerce(s)) & (idx <= _coerce(e))
     return mask
 
 
@@ -209,10 +268,15 @@ def build_forced_exit_mask(index, intervals_for_symbol, backtest_end,
     if not intervals_for_symbol or idx.empty:
         return forced
 
-    backtest_end = pd.Timestamp(backtest_end)
+    # Membership dates and backtest_end are tz-naive, but price-data indices may
+    # be tz-aware (parquet daily bars are normalised to UTC). Align the naive
+    # operands to the index tz so the comparisons below don't raise
+    # InvalidComparison between tz-aware and tz-naive values. No-op for naive idx.
+    _coerce = _tz_coercer(idx.tz)
+    backtest_end = _coerce(backtest_end)
     grace = pd.Timedelta(days=exit_buffer_days)
     for _start, end in intervals_for_symbol:
-        end = pd.Timestamp(end)
+        end = _coerce(end)
         if end >= backtest_end:
             continue
         timely_post_bars = idx[(idx > end) & (idx <= end + grace)]

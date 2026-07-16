@@ -215,7 +215,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 cover_slip = cover * (1 + CONFIG['slippage_pct'])
                 commission = spos['shares'] * CONFIG['commission_per_share']
                 net_pnl = (spos['shares'] * spos['entry_price']) - (spos['shares'] * cover_slip) - (2 * commission) - spos.get('total_borrow_cost', 0.0)
-                cash += spos['shares'] * (spos['entry_price'] - cover_slip) - commission
+                cash -= spos['shares'] * cover_slip + commission  # pay to buy back shares (entry already credited proceeds)
                 trade_counter += 1
                 # MAE/MFE for shorts: favorable = price drops, adverse = price rises
                 short_trade_df = portfolio_data[symbol].loc[spos['entry_date']:date]
