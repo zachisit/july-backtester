@@ -101,7 +101,7 @@ This installs: `pandas`, `numpy`, `tqdm`, `boto3` (S3 uploads only), `requests`,
 
 The backtester reads your Polygon.io API key directly from a `.env` file or environment variable — no AWS configuration required.
 
-1. Get your Polygon.io API key from [https://polygon.io/dashboard/api-keys](https://polygon.io/dashboard/api-keys)
+1. Get your Polygon.io API key from [http://web.archive.org/web/20240524001838/https://polygon.io/dashboard/api-keys](https://polygon.io/dashboard/api-keys)
 
 2. Copy `.env.example` to `.env` in the project root:
 
