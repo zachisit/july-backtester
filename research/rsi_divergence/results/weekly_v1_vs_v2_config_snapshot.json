@@ -1,0 +1,99 @@
+{
+  "data_provider": "polygon",
+  "polygon_api_secret_name": "POLYGON_API_KEY",
+  "csv_data_dir": "csv_data",
+  "start_date": "2003-01-01",
+  "end_date": "2026-12-31",
+  "initial_capital": 100000.0,
+  "timeframe": "W",
+  "timeframe_multiplier": 1,
+  "price_adjustment": "total_return",
+  "benchmark_symbol": "SPY",
+  "comparison_tickers": [
+    {
+      "symbol": "SPY",
+      "role": "both"
+    },
+    {
+      "symbol": "QQQ",
+      "role": "benchmark"
+    },
+    {
+      "symbol": "I:VIX",
+      "role": "dependency"
+    },
+    {
+      "symbol": "I:TNX",
+      "role": "dependency"
+    }
+  ],
+  "save_individual_trades": true,
+  "mc_score_min_to_show_in_summary": -9999,
+  "min_pandl_to_show_in_summary": -9999,
+  "max_acceptable_drawdown": 1.0,
+  "min_performance_vs_spy": -9999.0,
+  "min_performance_vs_qqq": -9999.0,
+  "save_only_filtered_trades": false,
+  "show_qqq_losers": true,
+  "min_bars_required": 100,
+  "portfolios": {
+    "Nasdaq 100": "nasdaq_100.json"
+  },
+  "allocation_per_trade": 0.1,
+  "max_pct_adv": 0.05,
+  "execution_time": "open",
+  "roc_thresholds": [
+    0.0,
+    0.5
+  ],
+  "stop_loss_configs": [
+    {
+      "type": "atr",
+      "multiplier": 2.0,
+      "period": 14
+    }
+  ],
+  "min_trades_for_mc": 50,
+  "num_mc_simulations": 1000,
+  "wfa_split_ratio": 0.8,
+  "wfa_folds": null,
+  "wfa_min_fold_trades": 5,
+  "slippage_pct": 0.0005,
+  "commission_per_share": 0.002,
+  "risk_free_rate": 0.05,
+  "noise_injection_pct": 0.0,
+  "strategies": [
+    "RSI Divergence (14)",
+    "RSI Divergence v2 (Trend+Confirm)"
+  ],
+  "sensitivity_sweep_enabled": false,
+  "sensitivity_sweep_pct": 0.2,
+  "sensitivity_sweep_steps": 2,
+  "sensitivity_sweep_min_val": 2,
+  "rolling_sharpe_window": 126,
+  "htb_rate_annual": 0.0,
+  "mc_sampling": "iid",
+  "mc_block_size": null,
+  "volume_impact_coeff": 0.0,
+  "export_ml_features": false,
+  "entry_priority": "alphabetical",
+  "entry_random_seed": 42,
+  "verbose_output": true,
+  "exclude_open_positions": false,
+  "upload_to_s3": false,
+  "s3_reports_bucket": "",
+  "include_delisted": false,
+  "delisting_price_assumption": "last_close",
+  "delisted_symbols_file": null,
+  "data_quality_checks": true,
+  "data_quality_threshold": 80,
+  "strict_data_quality": false,
+  "position_sizing_method": "fixed",
+  "kelly_fraction": 0.25,
+  "target_risk_per_trade": 0.02,
+  "max_portfolio_heat": 0.1,
+  "pit_enforce_daily": true,
+  "pit_warmup_days": 400,
+  "pit_exit_buffer_days": 10,
+  "pit_coverage_tolerance_days": 7
+}
