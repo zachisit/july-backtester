@@ -144,7 +144,8 @@ def run_single_simulation(args):
         # Call the simulation, passing the stop_config and using the global dataframes.
         result = run_portfolio_simulation(
             portfolio_data, final_signals, CONFIG["initial_capital"], CONFIG["allocation_per_trade"],
-            spy_df_local, vix_df_local, tnx_df_local, stop_config, delisting_dates_global
+            spy_df_local, vix_df_local, tnx_df_local, stop_config,
+            delisting_dates=delisting_dates_global,
         )
         
         if result is None: return None
