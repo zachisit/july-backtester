@@ -32,6 +32,27 @@ except AttributeError:
 logger = logging.getLogger(__name__)
 
 
+def _dependency_warning_for_failed_fetch(symbol: str, dependencies: dict) -> str | None:
+    """Build a warning explaining a failed comparison-ticker fetch's downstream impact.
+
+    Returns ``None`` when *symbol* isn't a strategy dependency (e.g. a
+    benchmark-only ticker like QQQ) -- a plain fetch-failure warning already
+    covers that case. When it *is* a dependency (e.g. I:VIX backing
+    ``vix_df``), a failed fetch means the strategy receives ``None`` for that
+    kwarg and any regime/filter gate ANDed on it fails closed (zero trades)
+    rather than raising -- easy to misread as "no edge" instead of "no data".
+    """
+    dep_keys = [k for k, v in dependencies.items() if v == symbol]
+    if not dep_keys:
+        return None
+    return (
+        f"  -> '{symbol}' backs the {'/'.join(dep_keys)}_df dependency. Any active "
+        f"strategy declaring dependencies={dep_keys} will receive {dep_keys[0]}_df=None "
+        "and its regime/filter gates fail CLOSED (zero trades) rather than raising — "
+        "check for a silently-empty result before concluding the strategy has no edge."
+    )
+
+
 def _pick_reference_df(comparison_dfs: dict) -> pd.DataFrame:
     """Return the reference DataFrame used to derive the actual data period.
 
@@ -597,14 +618,9 @@ def main():
                 comparison_dfs[symbol] = df
             else:
                 logger.warning(f"Failed to fetch data for comparison ticker '{symbol}' (normalized: '{normalized}')")
-                dep_keys = [k for k, v in comparison_config["dependencies"].items() if v == symbol]
-                if dep_keys:
-                    logger.warning(
-                        f"  -> '{symbol}' backs the {'/'.join(dep_keys)}_df dependency. Any active "
-                        f"strategy declaring dependencies={dep_keys} will receive {dep_keys[0]}_df=None "
-                        "and its regime/filter gates fail CLOSED (zero trades) rather than raising — "
-                        "check for a silently-empty result before concluding the strategy has no edge."
-                    )
+                dep_warning = _dependency_warning_for_failed_fetch(symbol, comparison_config["dependencies"])
+                if dep_warning:
+                    logger.warning(dep_warning)
 
         # Derive actual data period from comparison ticker data if available,
         # otherwise fall back to config dates (valid when comparison_tickers = [])
