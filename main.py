@@ -597,6 +597,14 @@ def main():
                 comparison_dfs[symbol] = df
             else:
                 logger.warning(f"Failed to fetch data for comparison ticker '{symbol}' (normalized: '{normalized}')")
+                dep_keys = [k for k, v in comparison_config["dependencies"].items() if v == symbol]
+                if dep_keys:
+                    logger.warning(
+                        f"  -> '{symbol}' backs the {'/'.join(dep_keys)}_df dependency. Any active "
+                        f"strategy declaring dependencies={dep_keys} will receive {dep_keys[0]}_df=None "
+                        "and its regime/filter gates fail CLOSED (zero trades) rather than raising — "
+                        "check for a silently-empty result before concluding the strategy has no edge."
+                    )
 
         # Derive actual data period from comparison ticker data if available,
         # otherwise fall back to config dates (valid when comparison_tickers = [])
