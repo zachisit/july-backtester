@@ -1,0 +1,44 @@
+name: Discord Merge Notification
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  notify:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Post merge notice to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          PR_TITLE: ${{ github.event.pull_request.title || 'Manual test trigger' }}
+          PR_NUMBER: ${{ github.event.pull_request.number || '0' }}
+          PR_URL: ${{ github.event.pull_request.html_url || github.server_url }}/${{ github.repository }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login || github.actor }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::error::DISCORD_WEBHOOK_URL secret is not set. Run: gh secret set DISCORD_WEBHOOK_URL --repo $REPO_NAME"
+            exit 1
+          fi
+
+          payload=$(jq -n \
+            --arg title "✅ PR merged into \`main\` — $REPO_NAME" \
+            --arg pr_title "$PR_TITLE" \
+            --arg pr_number "$PR_NUMBER" \
+            --arg pr_author "$PR_AUTHOR" \
+            --arg url "$PR_URL" \
+            '{
+              embeds: [{
+                title: $title,
+                description: ("**#" + $pr_number + ": " + $pr_title + "**\nby " + $pr_author),
+                url: $url,
+                color: 5763719
+              }]
+            }')
+
+          curl -sf -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"

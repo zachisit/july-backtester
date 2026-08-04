@@ -23,7 +23,20 @@ def get_data_service():
 
     if provider == "polygon":
         logger.info("Using Polygon.io data service.")
-        return get_price_data
+        # Dispatch per symbol: futures contract tickers (e.g. "ESM6") or explicit
+        # per-symbol overrides use Polygon's dedicated /futures endpoint; everything
+        # else uses the equities/index aggs path. NOTE: routing intentionally ignores
+        # instruments.default_asset_class — benchmark/dependency tickers (SPY, I:VIX)
+        # share this fetch path and must not be rerouted by a blanket "future" default.
+        from .futures_service import get_price_data as _futures_fetch
+        from helpers.instruments import is_futures_data_symbol as _is_fut
+
+        def _polygon_dispatch(symbol, start_date, end_date, config):
+            if _is_fut(symbol, config):
+                return _futures_fetch(symbol, start_date, end_date, config)
+            return get_price_data(symbol, start_date, end_date, config)
+
+        return _polygon_dispatch
 
     if provider == "norgate":
         logger.info("Using Norgate data service.")

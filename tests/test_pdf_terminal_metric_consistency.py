@@ -201,7 +201,13 @@ class TestSharpePeriodConsistency:
         tl = _make_timeline()
         pnl_list = [float(tl.iloc[-1] - tl.iloc[0])]
 
-        terminal_metrics = calculate_advanced_metrics(pnl_list, tl, [len(tl)])
+        # Pin config to daily bars so get_bars_per_year() matches this test's
+        # own TRADING_DAYS=252 assumption, regardless of the timeframe the
+        # project's config.py currently happens to be set to (e.g. an intraday
+        # futures run elsewhere in the repo).
+        from unittest.mock import patch
+        with patch.dict("config.CONFIG", {"timeframe": "D", "timeframe_multiplier": 1}):
+            terminal_metrics = calculate_advanced_metrics(pnl_list, tl, [len(tl)])
         terminal_sharpe = terminal_metrics["sharpe_ratio"]
 
         # Simulate what analyzer.py now does: derive daily_returns from portfolio_timeline
@@ -330,3 +336,46 @@ class TestRiskFreeRateConsistency:
         """_load_risk_free_rate returns None when config_snapshot.json is absent."""
         from report import _load_risk_free_rate
         assert _load_risk_free_rate(tmp_path) is None
+
+
+# ---------------------------------------------------------------------------
+# Initial capital consistency
+# ---------------------------------------------------------------------------
+
+class TestInitialCapitalConsistency:
+    """PDF Total Return/CAGR/MC fan chart must use the backtester's initial_capital,
+    not the analyzer's hardcoded $50,000 default.
+
+    Bug: report.py's --equity CLI flag defaulted to
+    trade_analyzer.default_config.INITIAL_EQUITY ($50,000) with no fallback to
+    the run's actual config_snapshot.json initial_capital. When report.py --all
+    was invoked without an explicit --equity override, every dollar/percentage
+    figure derived from initial_equity was corrupted: the cover-page Total
+    Return was inflated ~20x, CAGR ~2.5x, and the Monte Carlo percentile table's
+    bottom quartile (P1/P5/P10/P25) falsely showed complete ruin ($0, -100%)
+    because trades sized against the real (much larger) capital were resampled
+    onto the tiny $50,000 base.
+    """
+
+    def test_load_initial_capital_reads_from_snapshot(self, tmp_path):
+        """_load_initial_capital must return the value stored in config_snapshot.json."""
+        import json
+        from report import _load_initial_capital
+
+        snapshot = {"initial_capital": 1_000_000.0, "timeframe": "D"}
+        (tmp_path / "config_snapshot.json").write_text(json.dumps(snapshot))
+        assert _load_initial_capital(tmp_path) == pytest.approx(1_000_000.0)
+
+    def test_load_initial_capital_returns_none_when_missing(self, tmp_path):
+        """_load_initial_capital returns None when config_snapshot.json is absent."""
+        from report import _load_initial_capital
+        assert _load_initial_capital(tmp_path) is None
+
+    def test_load_initial_capital_returns_none_for_invalid_value(self, tmp_path):
+        """Zero/negative initial_capital is treated as invalid (falls back to default)."""
+        import json
+        from report import _load_initial_capital
+
+        snapshot = {"initial_capital": 0, "timeframe": "D"}
+        (tmp_path / "config_snapshot.json").write_text(json.dumps(snapshot))
+        assert _load_initial_capital(tmp_path) is None

@@ -114,15 +114,19 @@ def get_bars_per_year(config: dict) -> int:
 
     Notes:
         - Assumes 252 trading days per year (NYSE/NASDAQ standard)
-        - Assumes 6.5 trading hours per day (9:30 AM - 4:00 PM ET)
-        - For minute bars: bars_per_year = 252 * 6.5 * 60 / multiplier
-        - For hourly bars: bars_per_year = 252 * 6.5 / multiplier
+        - Assumes 6.5 trading hours per day (9:30 AM - 4:00 PM ET) unless
+          overridden via config["trading_hours_per_day"] — e.g. round-the-clock
+          futures (CME Globex ~23h/day) trade far more bars/year on an intraday
+          timeframe than an RTH-only equity, so the default understates their
+          true annualization factor.
+        - For minute bars: bars_per_year = 252 * trading_hours_per_day * 60 / multiplier
+        - For hourly bars: bars_per_year = 252 * trading_hours_per_day / multiplier
 
     Raises:
         ValueError: If timeframe is not supported.
     """
     TRADING_DAYS_PER_YEAR = 252
-    HOURS_PER_DAY = 6.5  # NYSE/NASDAQ standard (9:30 AM - 4:00 PM ET)
+    HOURS_PER_DAY = float(config.get("trading_hours_per_day", 6.5))  # override for 24h instruments
     MINUTES_PER_HOUR = 60
 
     timeframe = config.get("timeframe", "D").upper()

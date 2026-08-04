@@ -26,7 +26,11 @@ import pandas as pd
 import pytest
 from unittest.mock import patch
 
-from helpers.pit_enforcement import build_member_mask, build_forced_exit_mask
+from helpers.pit_enforcement import (
+    build_member_mask,
+    build_forced_exit_mask,
+    membership_intervals,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +143,85 @@ class TestBuildForcedExitMask:
         idx = pd.bdate_range("2020-01-02", "2020-01-10")
         forced = build_forced_exit_mask(idx, [], backtest_end="2020-01-20")
         assert not forced.any()
+
+
+# ---------------------------------------------------------------------------
+# tz-aware indices — parquet daily bars are normalised to UTC, but membership
+# dates / end_date are tz-naive. The masks must not raise InvalidComparison.
+# (Regression: pit:sp500 crashed here on tz-aware price data.)
+# ---------------------------------------------------------------------------
+
+class TestTzAwareMasks:
+    def test_forced_exit_mask_tz_aware_index(self):
+        idx = pd.bdate_range("2017-01-02", "2017-12-29", tz="UTC")
+        # Spell ends Fri 2017-06-16; next business day is Mon 2017-06-19 (3 cal
+        # days later) — outside a 1-day buffer, so the last member bar is forced.
+        intervals = [(pd.Timestamp("2017-01-02"), pd.Timestamp("2017-06-16"))]
+        forced = build_forced_exit_mask(idx, intervals, backtest_end="2026-12-31",
+                                        exit_buffer_days=1)
+        assert forced.any()
+        # The marked bar's label must stay tz-aware so it aligns with the index.
+        marked = forced[forced].index
+        assert marked[-1].tzinfo is not None
+        assert marked[-1] == pd.Timestamp("2017-06-16", tz="UTC")
+
+    def test_member_mask_tz_aware_index(self):
+        idx = pd.bdate_range("2017-01-02", "2017-12-29", tz="UTC")
+        intervals = [(pd.Timestamp("2017-01-02"), pd.Timestamp("2017-06-19"))]
+        mask = build_member_mask(idx, intervals)
+        assert mask.loc["2017-01-03"]          # inside spell
+        assert not mask.loc["2017-09-01"]      # after spell
+        assert mask.sum() > 0
+
+
+# ---------------------------------------------------------------------------
+# nq100 forced-exit intervals now load from the change-event YAML repo
+# (NQ100_DATA_ROOT / nq100_pit_path), symmetric with sp500 — previously nq100
+# only read a hardcoded daily-snapshot parquet, so forced-exit was a silent
+# no-op for survivorship-free nq100 runs.
+# ---------------------------------------------------------------------------
+
+class TestNq100YamlIntervals:
+    def _make_repo(self, tmp_path):
+        d = tmp_path / "src" / "nasdaq_100_ticker_history"
+        d.mkdir(parents=True)
+        (d / "n100-ticker-changes-2004.yaml").write_text(
+            "year: 2004\n"
+            "tickers_on_Jan_1:\n"
+            "  - AAA\n"
+            "  - BBB\n"
+            "changes:\n"
+            "  '2004-06-15':\n"
+            "    union: [CCC]\n"
+            "    difference: [BBB]\n",
+            encoding="utf-8",
+        )
+        return tmp_path
+
+    def test_nq100_yaml_intervals_via_config_key(self, tmp_path):
+        repo = self._make_repo(tmp_path)
+        config = {"start_date": "2004-01-01", "end_date": "2004-12-31",
+                  "nq100_pit_path": str(repo)}
+        intervals = membership_intervals("pit:nq100", config)
+        assert set(intervals) == {"AAA", "BBB", "CCC"}
+        # BBB removed on 2004-06-15 — spell closes there, not at period end
+        assert intervals["BBB"][0][1] == pd.Timestamp("2004-06-15")
+        # CCC added on 2004-06-15, still a member at end
+        assert intervals["CCC"][0][0] == pd.Timestamp("2004-06-15")
+        assert intervals["CCC"][0][1] == pd.Timestamp("2004-12-31")
+
+    def test_nq100_yaml_intervals_via_env(self, tmp_path, monkeypatch):
+        repo = self._make_repo(tmp_path)
+        monkeypatch.setenv("NQ100_DATA_ROOT", str(repo))
+        config = {"start_date": "2004-01-01", "end_date": "2004-12-31"}
+        intervals = membership_intervals("pit:nq100", config)
+        assert "AAA" in intervals and "CCC" in intervals
+
+    def test_nq100_no_repo_returns_empty_not_crash(self, tmp_path, monkeypatch):
+        # No env, no config path, no legacy parquet → empty (unchanged behaviour).
+        monkeypatch.delenv("NQ100_DATA_ROOT", raising=False)
+        config = {"start_date": "2004-01-01", "end_date": "2004-12-31"}
+        assert membership_intervals("pit:nq100", config) == {}
 
 
 # ---------------------------------------------------------------------------
