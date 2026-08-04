@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 _PRICE_JUMP_THRESHOLD = 0.20
 
 
-def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D") -> tuple[float, list[str]]:
+def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
+                   calendar: str = "NYSE") -> tuple[float, list[str]]:
     """
     Validate OHLCV data and return quality score 0-100 and list of issues.
 
@@ -124,8 +125,10 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D") -> tuple
             demerits += min(10, int(pct))  # 1 point per 1% of bars
 
     # --- CHECK 6: Missing bars ---
-    # Only check for daily data (intraday missing bars are common due to market hours)
-    if timeframe.upper() == "D" and total_bars > 1:
+    # Only check for daily equities data. Futures (CME_ETH, 23/5 sessions with a
+    # different holiday calendar) don't match a Mon–Fri business-day count, so the
+    # NYSE-based estimate would flag phantom gaps — skip it for non-NYSE calendars.
+    if timeframe.upper() == "D" and total_bars > 1 and str(calendar).upper() == "NYSE":
         expected_bars = _estimate_expected_bars(df.index[0], df.index[-1], timeframe)
         if expected_bars > total_bars:
             missing = expected_bars - total_bars
@@ -170,7 +173,8 @@ def _estimate_expected_bars(start_dt: pd.Timestamp, end_dt: pd.Timestamp, timefr
         return 0
 
 
-def quality_report(symbols: list[str], data: dict[str, pd.DataFrame], timeframe: str = "D") -> pd.DataFrame:
+def quality_report(symbols: list[str], data: dict[str, pd.DataFrame], timeframe: str = "D",
+                   config: dict | None = None) -> pd.DataFrame:
     """
     Generate quality report for multiple symbols.
 
@@ -201,7 +205,14 @@ def quality_report(symbols: list[str], data: dict[str, pd.DataFrame], timeframe:
             })
             continue
 
-        score, issues = validate_ohlcv(df, symbol, timeframe)
+        calendar = "NYSE"
+        if config is not None:
+            try:
+                from helpers.instruments import resolve_instrument
+                calendar = resolve_instrument(symbol, config).calendar
+            except Exception:
+                calendar = "NYSE"
+        score, issues = validate_ohlcv(df, symbol, timeframe, calendar=calendar)
         rows.append({
             "symbol": symbol,
             "score": score,

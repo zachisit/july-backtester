@@ -57,7 +57,13 @@ def generate_llm_verdict(all_results, benchmark_returns, run_id=None, output_dir
 
         timeline = result.get("portfolio_timeline")
         curve, annual = _build_equity_curve(timeline, benchmark_dfs, label_order)
-        smoothness = compute_smoothness(timeline)
+        # Reuse the profile resolved in the worker (main.py) so the JSON verdict
+        # and the terminal/summary verdict agree; fall back to config/auto here.
+        profile_name = result.get("smoothness_profile")
+        if not profile_name:
+            from helpers.smoothness_profiles import resolve_profile_name
+            profile_name = resolve_profile_name(None, CONFIG)
+        smoothness = compute_smoothness(timeline, profile_name)
 
         entry = {
             "strategy": result.get("Strategy", ""),
@@ -78,7 +84,18 @@ def generate_llm_verdict(all_results, benchmark_returns, run_id=None, output_dir
             "equity_curve": curve,
             "annual_returns": annual,
             "curve_smoothness": smoothness,
+            "smoothness_profile": profile_name,
         }
+
+        # Fold in the MC "DD Understated" caveat for concentrated/regime-dependent
+        # strategies scored under i.i.d. resampling (reporting-layer only).
+        from helpers.smoothness_profiles import mc_sampling_caveat
+        _mc_note = result.get("mc_sampling_note") or mc_sampling_caveat(
+            result.get("mc_verdict"), profile_name, CONFIG.get("mc_sampling", "iid")
+        )
+        if _mc_note:
+            entry["mc_sampling_note"] = _mc_note
+
         strategy_entries.append(entry)
 
     strategy_entries.sort(
@@ -204,11 +221,11 @@ def _build_equity_curve(timeline, benchmark_dfs, label_order):
     return curve, annual
 
 
-def _compute_smoothness(timeline):  # backwards-compat alias for tests
-    return compute_smoothness(timeline)
+def _compute_smoothness(timeline, profile=None):  # backwards-compat alias for tests
+    return compute_smoothness(timeline, profile)
 
 
-def compute_smoothness(timeline):
+def compute_smoothness(timeline, profile=None):
     """
     Compute curve smoothness metrics from a daily (or monthly) equity Series.
     Resamples to monthly internally. Returns None when < 12 months of data.
@@ -218,10 +235,23 @@ def compute_smoothness(timeline):
         ACCEPTABLE — 1 failure
         ROUGH      — 2+ failures
 
-    Failure conditions:
-        R² < 0.90 | positive_months < 60% | longest_flat >= 12 |
-        upthrust_count > 2 | max_monthly_dd < -10%
+    Failure conditions (thresholds resolved from ``profile``):
+        R² < r2_min | positive_months < positive_months_min |
+        longest_flat >= longest_flat_max | upthrust_count > upthrust_max |
+        max_monthly_dd < worst_month_min
+
+    ``profile`` selects the threshold set (see
+    :mod:`helpers.smoothness_profiles`). ``None`` -> the ``equity`` defaults,
+    which reproduce the legacy hard-coded constants byte-for-byte so default
+    runs are unchanged. May also be a profile name or a partial-override dict.
+    The applied profile name is echoed back in the ``profile`` result key.
     """
+    from helpers.smoothness_profiles import get_thresholds, EQUITY
+
+    th = get_thresholds(profile)
+    profile_name = profile if isinstance(profile, str) else (
+        profile.get("name", "custom") if hasattr(profile, "get") else EQUITY
+    )
     import numpy as np
     import pandas as pd
 
@@ -284,16 +314,16 @@ def compute_smoothness(timeline):
         upthrust_count = 0
 
     failures = []
-    if r2 < 0.90:
-        failures.append(f"r2: {r2:.2f} below 0.90 threshold")
-    if pos_pct < 60.0:
-        failures.append(f"positive_months: {pos_pct:.1f}% below 60% threshold")
-    if longest_flat >= 12:
+    if r2 < th["r2_min"]:
+        failures.append(f"r2: {r2:.2f} below {th['r2_min']:.2f} threshold")
+    if pos_pct < th["positive_months_min"]:
+        failures.append(f"positive_months: {pos_pct:.1f}% below {th['positive_months_min']:.0f}% threshold")
+    if longest_flat >= th["longest_flat_max"]:
         failures.append(f"plateau: {longest_flat} consecutive months without new high")
-    if upthrust_count > 2:
+    if upthrust_count > th["upthrust_max"]:
         failures.append(f"upthrust: {upthrust_count} outlier months detected")
-    if max_dd_pct < -10.0:
-        failures.append(f"drawdown: {max_dd_pct:.1f}% worst month exceeds -10% threshold")
+    if max_dd_pct < th["worst_month_min"]:
+        failures.append(f"drawdown: {max_dd_pct:.1f}% worst month exceeds {th['worst_month_min']:.0f}% threshold")
 
     n_fail = len(failures)
     verdict = "SMOOTH" if n_fail == 0 else ("ACCEPTABLE" if n_fail == 1 else "ROUGH")
@@ -307,6 +337,7 @@ def compute_smoothness(timeline):
         "upthrust_count": upthrust_count,
         "smooth_verdict": verdict,
         "smooth_notes": failures,
+        "profile": profile_name,
     }
 
 

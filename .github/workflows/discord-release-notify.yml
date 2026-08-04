@@ -1,0 +1,61 @@
+name: Discord Release Notification
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Post release notice to Discord
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
+          RELEASE_NAME: ${{ github.event.release.name || 'Manual test trigger' }}
+          TAG_NAME: ${{ github.event.release.tag_name || 'v0.0.0-test' }}
+          RELEASE_BODY: ${{ github.event.release.body || 'No release notes provided.' }}
+          RELEASE_URL: ${{ github.event.release.html_url || format('{0}/{1}', github.server_url, github.repository) }}
+          RELEASE_AUTHOR: ${{ github.event.release.author.login || github.actor }}
+          IS_PRERELEASE: ${{ github.event.release.prerelease || 'false' }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::error::DISCORD_RELEASE_WEBHOOK_URL secret is not set. Run: gh secret set DISCORD_RELEASE_WEBHOOK_URL --repo $REPO_NAME"
+            exit 1
+          fi
+
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            TITLE_PREFIX="🧪 Pre-release published"
+            COLOR=15844367
+          else
+            TITLE_PREFIX="🚀 New release published"
+            COLOR=3066993
+          fi
+
+          # Truncate long release notes inside jq so the cut is codepoint-safe
+          # (never splits a multibyte char) — Discord embed descriptions cap at 4096.
+          payload=$(jq -n \
+            --arg title "$TITLE_PREFIX — $REPO_NAME" \
+            --arg release_name "$RELEASE_NAME" \
+            --arg tag "$TAG_NAME" \
+            --arg author "$RELEASE_AUTHOR" \
+            --arg body "$RELEASE_BODY" \
+            --arg url "$RELEASE_URL" \
+            --argjson color "$COLOR" \
+            '($body | if (. | length) > 3500
+                      then .[:3500] + "\n\n_(truncated — see full notes on GitHub)_"
+                      else . end) as $b
+             | {
+                embeds: [{
+                  title: $title,
+                  description: ("**" + $release_name + "** (`" + $tag + "`)\nby " + $author + "\n\n" + $b),
+                  url: $url,
+                  color: $color
+                }]
+              }')
+
+          curl -sf --max-time 30 -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"

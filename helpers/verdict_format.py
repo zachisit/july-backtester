@@ -90,6 +90,9 @@ def format_strategy_verdict_lines(result: Mapping,
     if mc_v is not None:
         score_part = f" (score: {mc_s})" if mc_s is not None else ""
         lines.append(f"{indent}MC:         {mc_v}{score_part}")
+    mc_note = result.get("mc_sampling_note")
+    if mc_note:
+        lines.append(f"{indent}  note: {mc_note}")
 
     # WFA
     wfa = result.get("wfa_verdict")
@@ -102,7 +105,9 @@ def format_strategy_verdict_lines(result: Mapping,
     # Smoothness
     smooth = result.get("smooth_verdict")
     if smooth is not None:
-        lines.append(f"{indent}Smoothness: {smooth}")
+        profile = result.get("smoothness_profile")
+        profile_part = f" [{profile}]" if profile else ""
+        lines.append(f"{indent}Smoothness: {smooth}{profile_part}")
         for note in (result.get("smooth_notes") or []):
             lines.append(f"{indent}  - {note}")
 

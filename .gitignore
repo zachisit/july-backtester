@@ -53,3 +53,6 @@ custom_strategies/private/*.py
 !custom_strategies/private/_TEMPLATE_strategy.py
 custom_strategies/private/**/*.py
 !custom_strategies/private/.gitkeep
+
+# Local 1-min FX cache built by scripts/fetch_fx_minute.py (multi-GB)
+fx_minute_cache/

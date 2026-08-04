@@ -210,6 +210,14 @@ def calculate_daily_returns(trades_df: pd.DataFrame, initial_equity: float) -> T
     """
     Calculates daily equity and returns based on trade exit dates.
 
+    The equity series is built on a **business-day** index (Mon-Fri; see
+    issue #250) so its sample density (~252-261/yr) is consistent with the
+    ``trading_days_per_year=252`` annualization convention used throughout
+    ``calculations.py`` and ``metrics_v3.py``. This is a fallback path used
+    only when no daily mark-to-market ``portfolio_timeline`` is supplied by
+    the backtester (see ``analyzer.py``'s ``PORTFOLIO_TIMELINE`` override,
+    which is already trading-day-dense and takes precedence when available).
+
     Args:
         trades_df (pd.DataFrame): Cleaned trades DataFrame with 'Ex. date' and
                                   a cumulative profit column ('Cumulative_Profit' or 'Cum. Profit').
@@ -217,8 +225,9 @@ def calculate_daily_returns(trades_df: pd.DataFrame, initial_equity: float) -> T
 
     Returns:
         Tuple[pd.Series, pd.Series]: A tuple containing:
-            - daily_equity Series (indexed by Date).
-            - daily_returns Series (indexed by Date).
+            - daily_equity Series (indexed by business day, plus any actual
+              trade-exit date that falls outside the business-day calendar).
+            - daily_returns Series (same index).
             Returns empty Series if calculation is not possible.
     """
     #print("\n--- Calculating Daily Returns ---")
@@ -253,8 +262,32 @@ def calculate_daily_returns(trades_df: pd.DataFrame, initial_equity: float) -> T
             # Keep the LAST equity value for that day
             equity_curve = equity_curve[~equity_curve.index.duplicated(keep='last')]
 
-            # Create full date range and forward-fill equity
-            full_date_range = pd.date_range(start=equity_curve.index.min(), end=last_trade_date, freq='D')
+            # Create full date range and forward-fill equity.
+            #
+            # NOTE (issue #250): this used to be freq='D' (every calendar day,
+            # weekends included as a flat-forwarded copy of the prior Friday's
+            # close). Every downstream annualized metric (Sharpe, Sortino,
+            # annualized volatility, rolling windows — see calculations.py and
+            # metrics_v3.py) assumes ~252 samples/year (trading_days_per_year),
+            # but a calendar-day series produces ~365 samples/year. That
+            # mismatch understated the sqrt(N) annualization scalar relative
+            # to the series' actual sample density (roughly halving Sharpe/
+            # Sortino magnitude), and — for Sortino specifically — let
+            # synthetic flat (0%) weekend rows count as "downside" whenever
+            # they sat below the MAR, mixing idle weekends into the downside
+            # deviation.
+            #
+            # Business days (~252-261/bdate-year; US market holidays are not
+            # excluded) match the 252-day annualization convention used
+            # everywhere else in this module far more closely than calendar
+            # days, and removing the weekend rows fixes the Sortino
+            # double-counting at the source. `.union(equity_curve.index)`
+            # guarantees any actual trade-exit date is preserved even in the
+            # rare case it falls on a non-business day, so no equity data
+            # point is ever silently dropped by the switch to a business-day
+            # index.
+            full_date_range = pd.bdate_range(start=equity_curve.index.min(), end=last_trade_date)
+            full_date_range = full_date_range.union(equity_curve.index)
             daily_equity = equity_curve.reindex(full_date_range).ffill()
             # Fill any remaining NaNs at the beginning (if first trade wasn't day 1)
             daily_equity.fillna(initial_equity, inplace=True)

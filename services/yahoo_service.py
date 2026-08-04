@@ -137,10 +137,14 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     col_map.update({c: "Close" for c in df.columns if c.lower() in ("adj close", "adjusted close")})
     df = df.rename(columns=col_map)
 
-    # Keep only the canonical OHLCV columns that are present
+    # Keep only the canonical OHLCV columns that are present.
+    # When auto_adjust=False, yfinance returns both Close and Adj Close; after
+    # renaming both to "Close", pandas returns duplicate columns on df[...].
+    # Dedup here keeps the first occurrence (unadjusted Close).
     canonical = ["Open", "High", "Low", "Close", "Volume"]
     available = [c for c in canonical if c in df.columns]
     df = df[available].copy()
+    df = df.loc[:, ~df.columns.duplicated(keep="first")]
 
     # Normalise index → UTC DatetimeIndex named 'Datetime'
     if not isinstance(df.index, pd.DatetimeIndex):

@@ -43,7 +43,9 @@ CONFIG = {
     # portfolio.  role="benchmark" → buy-and-hold return column in summary.
     # role="dependency" → available to strategies (spy_df, vix_df).
     # role="both" → benchmark + dependency.
-    "price_adjustment": "none",
+    # Use split/dividend-adjusted prices by default. "none" returns raw bars and
+    # creates phantom jump trades across splits (e.g. AMZN 20-for-1).
+    "price_adjustment": "total_return",
     "benchmark_symbol": "SPY",
     "comparison_tickers": [
         {"symbol": "SPY",   "role": "both"},
@@ -153,8 +155,26 @@ CONFIG = {
     # ============================================================
     # SECTION 18: MONTE CARLO SAMPLING
     # ============================================================
-    "mc_sampling": "iid",           # "iid" = independent; "block" = block-bootstrap
+    "mc_sampling": "iid",           # "iid" = independent; "block" = block-bootstrap;
+                                    # "auto" = block for a concentrated_futures smoothness
+                                    # profile, else iid (calibrates the MC "DD-Understated"
+                                    # verdict for single-instrument regime-dependent strategies)
     "mc_block_size": None,          # None = auto floor(sqrt(N))
+
+    # ============================================================
+    # SECTION 18b: CURVE-SMOOTHNESS VERDICT PROFILE
+    # ============================================================
+    # Which threshold set the SMOOTH/ACCEPTABLE/ROUGH verdict is judged against
+    # (see helpers/smoothness_profiles.py). The equity thresholds assume a
+    # steadily-compounding, many-name book; a concentrated / event-driven
+    # strategy (e.g. a single-instrument futures breakout) structurally trips
+    # them even when working as intended.
+    #   "auto"                 -> derive per strategy from the portfolio's
+    #                             instrument asset class (futures -> looser
+    #                             "concentrated_futures" profile, else "equity").
+    #   "equity"               -> force the legacy equity thresholds.
+    #   "concentrated_futures" -> force the looser concentrated profile.
+    "smoothness_profile": "auto",
 
     # ============================================================
     # SECTION 19: VOLUME-BASED MARKET IMPACT
@@ -263,4 +283,55 @@ CONFIG = {
     "pit_warmup_days": 400,              # calendar days of pre-join data for indicators
     "pit_exit_buffer_days": 10,          # grace-period bars after index removal
     "pit_coverage_tolerance_days": 7,
+
+    # ============================================================
+    # SECTION 27: INSTRUMENT METADATA (equities / futures)
+    # ============================================================
+    # Per-symbol trading metadata resolved by helpers/instruments.py. Equities are
+    # the default and reproduce prior behaviour exactly (point_value=1, full-notional
+    # cash, per-share commission, %-slippage). Futures opt in either via a contract-
+    # month ticker (e.g. "ESM6") or an explicit override below.
+    "instruments": {
+        # "future" makes EVERY symbol in the portfolio a futures contract; leave as
+        # "equity" for mixed/equity runs and opt individual symbols in via overrides.
+        "default_asset_class": "equity",
+
+        # Futures defaults (used for any resolved futures instrument):
+        "futures_initial_margin_pct": 0.10,   # fraction of notional posted at entry
+        "futures_commission_per_contract": 2.50,  # $ per contract, one side
+        "futures_slippage_ticks": 1.0,        # slippage in ticks per fill
+
+        # Optional per-root overrides of the built-in seed tables:
+        # "point_values": {"ES": 50.0, "NQ": 20.0},
+        # "tick_sizes":   {"ES": 0.25, "NQ": 0.25},
+
+        # Explicit per-symbol overrides. Each dict may set "asset_class" and any
+        # Instrument field (point_value, tick_size, initial_margin_pct, ...):
+        # "overrides": {
+        #     "NQ":  {"asset_class": "future", "point_value": 20.0, "tick_size": 0.25},
+        #     "SI":  {"asset_class": "equity"},  # keep the Silvergate ticker as equity
+        # },
+        "overrides": {},
+    },
+
+    # ============================================================
+    # SECTION 28: SUB-BAR (INTRADAY) RESOLUTION
+    # ============================================================
+    # When True AND finer-resolution bars are supplied to the engine, stop fills are
+    # resolved against the intraday series (a gap through the stop fills at the worse
+    # sub-bar open instead of optimistically at the stop level). Opt-in; requires
+    # 1-min data availability, so it is off by default.
+    "intrabar_resolution": False,
+    # Finer-resolution timeframe fetched per symbol when intrabar_resolution is on.
+    "intrabar_timeframe": "MIN",     # "MIN" | "H"
+    "intrabar_multiplier": 1,        # e.g. 5 for 5-minute sub-bars
+
+    # ============================================================
+    # SECTION 29: FUTURES MAINTENANCE MARGIN
+    # ============================================================
+    # Force-liquidate a futures position when posted margin + unrealized P&L falls
+    # below notional * maintenance_margin_pct (logged as ExitReason "Margin Call").
+    # 0.0 = disabled (default). Set below the instrument's initial_margin_pct, e.g.
+    # 0.07 with a 0.10 initial. Equities (cash_full) are never margin-called.
+    "maintenance_margin_pct": 0.0,
 }

@@ -3,8 +3,9 @@ name: Tests
 on:
   push:
     branches: [main]
+  # Run on ALL pull requests, not just those targeting main, so stacked/feature
+  # PRs (e.g. one based on another feature branch) don't silently skip CI.
   pull_request:
-    branches: [main]
 
 jobs:
   test:

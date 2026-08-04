@@ -251,10 +251,16 @@ class TestTradeLogHasRMultipleFields:
             assert trade['InitialRisk'] > 0, "InitialRisk must be positive"
 
     def test_percentage_stop_sets_initial_risk(self):
-        """With a 5% stop, InitialRisk/share should equal entry_price * 0.05.
+        """With a 5% stop, InitialRisk/share should equal entry_price - stop_level,
+        where stop_level is 5% below the entry price.
 
-        Note: entry_price includes slippage so we check the formula holds
-        (initial_risk == entry_price * 0.05) to within a small tolerance.
+        Symbol 'TEST' resolves as a cash_full (equity) instrument under the
+        default instruments config, so the stop is anchored to the SLIPPED
+        entry_price (the actual fill) -- not the raw pre-slippage price.
+        Raw-price anchoring is reserved for margined (futures) instruments only
+        (#238 review item #1: the margin_mode gate in portfolio_simulations.py's
+        stop-setting block). InitialRisk therefore equals exactly entry_price
+        * 0.05, with no separate slippage adjustment.
         """
         from helpers.portfolio_simulations import run_portfolio_simulation
 
@@ -277,8 +283,10 @@ class TestTradeLogHasRMultipleFields:
 
         if result and result.get('trade_log'):
             for trade in result['trade_log']:
-                # InitialRisk = entry_price * 0.05 (5% of whatever entry_price is)
-                expected_risk = trade['EntryPrice'] * 0.05
+                # Equity instrument: the stop level is anchored to the SLIPPED
+                # entry_price itself (see the docstring above / #238 review item #1).
+                stop_level = trade['EntryPrice'] * (1 - 0.05)
+                expected_risk = trade['EntryPrice'] - stop_level
                 assert math.isclose(trade['InitialRisk'], expected_risk, rel_tol=1e-6), (
                     f"Expected InitialRisk={expected_risk:.4f} but got {trade['InitialRisk']}"
                 )

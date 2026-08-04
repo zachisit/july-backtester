@@ -299,6 +299,10 @@ def generate_strategy_verdict_summary(verdict: dict | None) -> tuple[str, str]:
         score_part = f"  (score: {mc_s})" if mc_s is not None else ""
         lines.append(f"{'Monte Carlo Verdict:':<45} {mc_v}{score_part}")
 
+    mc_note = verdict.get("mc_sampling_note")
+    if mc_note:
+        lines.append(f"{'  MC note:':<45} {mc_note}")
+
     wfa = verdict.get("wfa_verdict")
     if wfa is not None:
         lines.append(f"{'WFA Verdict:':<45} {wfa}")
@@ -310,7 +314,9 @@ def generate_strategy_verdict_summary(verdict: dict | None) -> tuple[str, str]:
     smooth = verdict.get("curve_smoothness") or {}
     smooth_verdict = smooth.get("smooth_verdict")
     if smooth_verdict is not None:
-        lines.append(f"{'Smoothness Verdict:':<45} {smooth_verdict}")
+        profile = verdict.get("smoothness_profile") or smooth.get("profile")
+        profile_part = f"  [{profile}]" if profile else ""
+        lines.append(f"{'Smoothness Verdict:':<45} {smooth_verdict}{profile_part}")
         for note in (smooth.get("smooth_notes") or []):
             lines.append(f"{'  - ' + note:<45}")
 

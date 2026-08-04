@@ -68,6 +68,9 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "portfolios": {"Nasdaq 100 PIT": "pit:nq100"}    # point-in-time members as of start_date
 "portfolios": {"S&P 500 PIT": "pit:sp500"}       # requires PIT YAML files or SP500_DATA_ROOT
 "allocation_per_trade": 0.10       # 10% equity per position
+"position_sizing_method": "fixed"  # "fixed"|"kelly"|"vol_parity"|"risk_parity"|"risk_pct_capped"|"fixed_contracts"
+"fixed_contracts_per_trade": 1     # contracts/trade when position_sizing_method="fixed_contracts"
+"trading_hours_per_day": 6.5       # session hours for annualization; set 24 for 24h futures
 "stop_loss_configs": [{"type": "none"}]  # or {"type":"percentage","value":0.05}
 "slippage_pct": 0.0005
 "commission_per_share": 0.002
@@ -86,8 +89,9 @@ scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run wit
 "sensitivity_sweep_min_val": 2   # floor for generated values (prevents SMA period = 0)
 "rolling_sharpe_window": 126     # rolling Sharpe window in trading days; 0 or None = disable
 "htb_rate_annual": 0.02          # annual hard-to-borrow rate debited daily on short positions
-"mc_sampling": "iid"             # "iid" = independent resampling; "block" = block-bootstrap
+"mc_sampling": "iid"             # "iid" = independent; "block" = block-bootstrap; "auto" = block for concentrated_futures profile else iid
 "mc_block_size": None            # block size for block-bootstrap; None = auto floor(sqrt(N))
+"smoothness_profile": "auto"     # smoothness-verdict thresholds: "auto"|"equity"|"concentrated_futures"
 "volume_impact_coeff": 0.0       # square-root market impact coefficient; 0.0 = disabled
 ```
 
@@ -176,12 +180,34 @@ output/
 
 ## Do Not Touch
 - `helpers/indicators.py` strategy **logic** (all working correctly) — docstring additions and documentation improvements are permitted provided no signal logic, parameter handling, imports, or formatting is changed
-- `helpers/simulations.py` and `helpers/portfolio_simulations.py` simulation engines
+- `helpers/simulations.py` and `helpers/portfolio_simulations.py` simulation engines — **the execution core was deliberately refactored for futures support (issue #229): every cost/sizing/accounting site now routes through the instrument-metadata layer (`helpers/instruments.py`). The equity path is protected byte-for-byte by the golden-master suite (`tests/test_engine_characterization.py`) — any change here MUST keep that suite green.**
 - `helpers/monte_carlo.py`
 - `tickers_to_scan/` JSON files
 - The multiprocessing architecture (`init_worker`, `run_single_simulation`, `Pool`)
 
 > **`helpers/summary.py`** — can be touched; actively maintained. `save_only_filtered_trades` now correctly filters by the display criteria captured in Step 2 of `generate_per_portfolio_summary` (see Known Issues Fixed below).
+
+## Futures Support / Instrument Metadata (issue #229)
+
+The engine is instrument-aware: **`helpers/instruments.py`** resolves a per-symbol `Instrument` (`resolve_instrument(symbol, config)`) carrying `point_value` ($/point), `tick_size`, `margin_mode`, `commission_model`/value, `slippage_model`/value, `integer_units`, `borrow_applies`, `calendar`. **Equities are the default and reproduce the pre-#229 arithmetic byte-for-byte** (point_value=1, `cash_full` margin, per-share commission, %-slippage). Futures opt in via a contract-month ticker (e.g. `ESM6`) or `config["instruments"]["overrides"]`.
+
+- **Cost/accounting helpers** in `instruments.py` (`commission`, `apply_slippage`, `round_units`, `market_value`, `margin_required`, `unrealized_pnl`, `borrow_cost_per_bar`, `stop_level`, `atr_stop_level`, `atr_stop_distance_pct`) replace the formerly hard-coded sites in `portfolio_simulations.py`.
+- **Futures execution:** margin accounting (entry reserves initial margin, not full notional; equity = cash + unrealized P&L; `reserved_margin` tracks buying power), integer contracts, `$/point` P&L, point-capped stop `{"type":"points","value":N}`, no borrow on futures shorts.
+- **Margin-based futures sizing (#238):** for margined instruments (`margin_mode == INITIAL_MARGIN`) contract count derives from `margin_required()`, not target-notional / `point_value` (which increasingly floored to 0 contracts as price appreciated, silently under-sizing/skipping late trades). The gate is `margin_mode`-first (checked before `point_value != 1.0`), so a futures instrument with `point_value == 1.0` still sizes on margin. Equity sizing (`CASH_FULL`) is unchanged. Applies to both long and short entry paths.
+- **Stop anchoring (#238):** `percentage`/`points` stop levels anchor to the **raw pre-slippage entry price for margined futures only** — `_stop_anchor = raw_entry_price if inst.margin_mode == INITIAL_MARGIN else entry_price`. Equities (`CASH_FULL`) keep the pre-PR slipped-fill anchor **byte-for-byte** (golden master unchanged). *Caveat:* the `trailing_atr` stop path anchors its initial stop/target/breakeven-floor to `raw_entry_price` **unconditionally** (not yet `margin_mode`-gated) — harmless today (trailing_atr is a futures-only mechanic with no equity consumer and no golden-master coverage), tracked as a follow-up. So "equities restore pre-PR behavior" holds for `percentage`/`points` stops, not `trailing_atr`.
+- **Sizing methods (#238):** `config["position_sizing_method"]` selects `fixed` (default) | `kelly` | `vol_parity` | `risk_parity` | `risk_pct_capped` (risk-based sizing with a hard cap) | `fixed_contracts` (a fixed count via `fixed_contracts_per_trade`); wired on both long and short paths. `trading_hours_per_day` (default 6.5) sets the session-hours divisor for annualization of non-RTH / 24h instruments. All three keys are read via `CONFIG.get(...)` with defaults and registered in `config_validator.KNOWN_KEYS`; defaults preserve existing behavior.
+- **Scaled exits:** a fractional exit signal `-1 < s < 0` scales OUT `abs(s)` of the position; full exit remains `s <= -1`.
+- **Sub-bar resolution (opt-in):** `config["intrabar_resolution"]=True` + `intrabar_data` passed to `run_portfolio_simulation` refines stop fills via `helpers/intrabar.py` (gap-through-stop fills at the sub-bar open). Off by default → unchanged. `main.py::_build_intrabar_data` fetches finer bars per symbol via the data provider; an optional `config["intrabar_parquet_source"]` overrides that with one 1-min OHLC parquet. That path is resolved **portably** — `~`/`$ENV` expansion + relative paths resolved against the project root via `_resolve_intrabar_source` — and if the file is absent the run **warns and falls back to the provider fetch** rather than silently disabling sub-bar resolution (no more contributor-local absolute-path dependency).
+- **Data path:** `services/futures_service.py` (Polygon dedicated `/futures/v1/aggs`), plus CSV/Parquet for pre-built continuous series; `services/__init__.py` dispatches futures tickers to the futures endpoint. `helpers/continuous_contract.py` builds back-adjusted continuous series (panama/ratio + volume-roll). `helpers/data_quality.py` missing-bar check is calendar-aware (skipped for `CME_ETH`).
+- **Config:** SECTION 27 `instruments` (asset-class defaults, per-root point-value/tick tables, per-symbol overrides), SECTION 28 `intrabar_resolution`/`intrabar_timeframe`/`intrabar_multiplier`, SECTION 29 `maintenance_margin_pct`.
+- **Exit configs (v1.11.0, issue #234):**
+  - `{"type":"trailing_atr","stop_mult":..,"trail_mult":..,"t1_mult":..,"point_cap":N,"floor":"breakeven"}` — Sleeve A mechanic: ATR **locked at the breakout bar** (the signal bar, `prev_trading_dates[entry_exec_date]` — assumes `execution_time="open"`); initial stop `entry - min(stop_mult*atr, point_cap)`; arms the trail when price reaches `entry + eff_stop_dist*(t1_mult/stop_mult)` (target is R:R off the *capped* stop); post-arm ratchets `running-max High - trail_mult*atr_locked` (trail leg uncapped), floored at literal entry. **Bidirectional** — `side="long"`/`"short"` mirror in `_update_trailing_atr_stop`; the short entry/cover loops wire the full stop/target/trail + margin-call + real InitialRisk/RMultiple, and open shorts are marked-to-market at end-of-backtest.
+    - Known conservative assumptions (issue #234 review): on a bar hitting both init-stop and target, the engine resolves stop-first (pre-arm); maintenance-margin uses entry-price notional (calls marginally early).
+  - `{"type":"atr","multiplier":..,"point_cap":N}` — ATR stop distance clipped at `N` points per trade (`instruments.atr_stop_level(point_cap=)`).
+  - `maintenance_margin_pct` (SECTION 29): per-bar force-liquidation of a futures position when `margin + unrealized_pnl < notional*pct`, logged `ExitReason "Margin Call"`. `0.0` = disabled.
+  - Futures data resolution is dynamic (`services/futures_service._resolution`): `MIN×5→"5min"`, `H×2→"2hour"`, `D→"1session"`.
+  - `continuous_contract.rolls_spanned(entry, exit, roll_dates)` flags a held position crossing a roll (long-horizon guard).
+- **Regression guard:** `tests/test_engine_characterization.py` (golden master) + `test_instruments.py`, `test_futures_engine.py`, `test_futures_service.py`, `test_continuous_contract.py`, `test_scaled_exits.py`, `test_intrabar.py`, `test_intrabar_wiring.py`, `test_data_quality_calendar.py`, `test_futures_234.py`.
 
 ## Data Providers
 
@@ -233,6 +259,8 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 **Plan history caps**: Polygon limits available history based on plan tier. A starter plan capped at ~2021; a paid plan extends that (confirmed: ~2016 on current plan). The `Actual Data Period` line in the run summary shows the true start Polygon returned — if it lags the configured `start_date`, the plan tier is the constraint. There is no pagination bug in `polygon_service.py` — the single page with 50,000-bar limit returns all available bars correctly.
 
 **Cache validation bug (issue #123)**: The local Parquet cache keys data by *requested* date range, not actual returned range. If Polygon returns plan-capped data (e.g. 2016–now) for a 2004 request, the cache stores that truncated result under a key named `SPY_2004-01-01_..._day_1.parquet`. After a plan upgrade, subsequent runs still serve the old capped data from cache — silently — until the cache entry is manually deleted or expires. **Fix**: add start-date validation in the `helpers/caching.py` read path; if `df.index.min()` lags the requested start by >30 days, treat as a cache miss and re-fetch. See issue #123 for the full implementation spec.
+
+**Index history cap is separate and tighter than the equities cap (issue #261)**: `I:VIX` and `I:TNX` (the two comparison-ticker dependencies most strategies rely on for regime gates) only return data from **2023-02-14 onward** on the current plan — confirmed for both symbols directly against the API, independent of the equities ~5yr rolling cap described above. Requesting an earlier `start_date` returns an empty result (HTTP 200, zero bars), not an error. Because `spy_df`/`vix_df` are injected as `None` when the fetch fails, and the None-guards added for issue-empty-comparison-tickers make `None` a *silent no-op* rather than a crash, any strategy whose regime/filter logic ANDs on `vix_df` (e.g. `MA Confluence (Full Stack) w/ Regime Filter`) will fail its gate closed for the whole requested window — **zero trades, no error, no warning** prior to this fix. `main.py`'s comparison-ticker fetch loop now logs an explicit warning when a failed fetch backs an active dependency (see the `dep_keys` check next to the `Failed to fetch data for comparison ticker` warning), but the underlying data-availability gap is a Polygon plan-tier limit, not a bug in this codebase — **use `data_provider = "yahoo"` (`^VIX`/`^TNX`, full history) for any backtest whose window starts before 2023-02-14 and depends on VIX/TNX-gated strategies.**
 
 ### S1/S2 Test Robustness
 
@@ -462,15 +490,35 @@ Controlled by two config keys (SECTION 18):
 
 | Key | Default | Description |
 | --- | --- | --- |
-| `mc_sampling` | `"iid"` | `"iid"` = independent resampling (original behaviour); `"block"` = block-bootstrap |
+| `mc_sampling` | `"iid"` | `"iid"` = independent resampling (original behaviour); `"block"` = block-bootstrap; `"auto"` = block for a `concentrated_futures` smoothness profile, else iid |
 | `mc_block_size` | `None` | Trades per block. `None` = auto: `floor(sqrt(N))` (Politis-Romano rule of thumb) |
 
 - **`"iid"` (default)**: trades are resampled independently, each with equal probability. Fast and statistically clean for strategies with no autocorrelation.
 - **`"block"`**: consecutive blocks of `block_size` trades are sampled as a unit, preserving win/loss streaks and regime clustering. Use when the strategy shows known regime dependency (e.g., consistently loses only during bear markets / high-VIX periods identified by the Regime Heatmap).
+- **`"auto"` (issue #243)**: resolved per strategy in `main.py::run_single_simulation` via `helpers.smoothness_profiles.resolve_mc_sampling` — a `concentrated_futures` profile (single-instrument regime-dependent strategy, e.g. Sleeve A) gets `"block"`, everything else `"iid"`. This calibrates the MC **"DD-Understated"** verdict, which i.i.d. resampling structurally trips for that strategy class. Applied via a **scoped `CONFIG["mc_sampling"]` override** (restored in a `finally`) around the MC call — `helpers/monte_carlo.py` is Do-Not-Touch, so the effective method is chosen at the caller. The effective value is stored on the result as `mc_sampling_effective` and feeds `mc_sampling_caveat` (so the "consider block" note stays silent once block is actually used). Default stays `"iid"` → opt-in, no change to existing runs.
 - **Auto block size**: `max(1, int(N ** 0.5))`. For 100 trades → blocks of 10; for 400 trades → blocks of 20.
 - **Circular wrap**: blocks that extend past the end of the trade list wrap around — no trades are omitted and edge blocks are not under-represented.
 - **No caller changes**: `run_monte_carlo_simulation` signature is unchanged. The refactor extracted a `_equity_and_drawdown` helper used by both branches.
 - **Tests**: `tests/test_mc_block_bootstrap.py` — 9 tests: config defaults, output shapes, auto block size resolution, streak divergence (>1% std difference), small trade guard, i.i.d. seed match, and no-key default.
+
+## Smoothness Verdict Profiles (asset-class-aware)
+
+The curve-smoothness verdict (`compute_smoothness` in `helpers/llm_verdict.py`) grades an equity curve **SMOOTH / ACCEPTABLE / ROUGH** by counting how many of five failure conditions trip. Those five thresholds were originally hard-coded constants chosen for a steadily-compounding, many-name **equity** book. A concentrated, event-driven strategy (e.g. a single-instrument futures breakout sleeve — one instrument, long dead stretches between edges, risk-based sizing producing occasional big months) structurally trips `plateau >= 12` and `upthrust > 2` **when working exactly as intended** — that is what its curve looks like, not instability. Judging it against equity-book thresholds mislabels correct behaviour as ROUGH.
+
+**`helpers/smoothness_profiles.py`** — pure, stateless module making the thresholds a named **profile**:
+
+- `SMOOTHNESS_PROFILES` — `"equity"` (default; the legacy constants **byte-for-byte**) and `"concentrated_futures"` (looser: `r2_min` 0.70, `positive_months_min` 45, `longest_flat_max` 24, `upthrust_max` 6, `worst_month_min` -20).
+- `get_thresholds(profile)` — `None` → equity defaults (no-regression); a name → that profile (unknown → equity + `[WARNING]`); a `dict` → partial/full override merged over equity defaults.
+- `resolve_profile_name(symbols, config)` — precedence: (1) explicit `config["smoothness_profile"]` if not `"auto"`; (2) `"auto"` → derive from the portfolio's instrument **asset class** via `resolve_instrument` (all symbols futures → `concentrated_futures`, else `equity`); (3) `equity` fallback.
+- `mc_sampling_caveat(mc_verdict, profile, mc_sampling)` — reporting-layer note folding in the MC **"DD Understated"** flag: fires only for a non-equity profile with a "DD Understated" verdict under `mc_sampling="iid"`, recommending `mc_sampling="block"` (block-bootstrap preserves the streak clustering these strategies live on). **Never touches `helpers/monte_carlo.py` or the MC score.**
+
+**Config**: `smoothness_profile` (SECTION 18b, default `"auto"`) — `"auto"` | `"equity"` | `"concentrated_futures"`.
+
+**Wiring**: `compute_smoothness(timeline, profile=None)` gains an optional profile (None = byte-identical equity default) and echoes the applied profile back in the `"profile"` result key. The worker (`main.py::run_single_simulation`) resolves the profile from `portfolio_data` symbols + `CONFIG`, stores `result["smoothness_profile"]` and (when applicable) `result["mc_sampling_note"]`, and passes the profile to `compute_smoothness`. The verdict is surfaced with its profile tag in **all** existing surfaces: `llm_verdict.json` (`smoothness_profile` + `curve_smoothness.profile` + `mc_sampling_note`), the terminal STRATEGY VERDICTS block (`helpers/verdict_format.py`), the PDF tearsheet (`trade_analyzer/report_generator.py`), and the verbose summary tables (`helpers/summary.py` — new `Smooth Prof.` column, short name `Prof`).
+
+**No-regression guarantee**: default runs (`smoothness_profile="auto"` with equity portfolios, or `profile=None`) produce the exact legacy grades — `smooth_verdict` stays the raw `SMOOTH/ACCEPTABLE/ROUGH` string.
+
+**Tests**: `tests/test_smoothness_profiles.py` — profile thresholds, dict-override merge, `resolve_profile_name` (explicit/auto/mixed/empty), byte-identical equity default, looser-profile-never-adds-failures invariant, and the MC caveat gating.
 
 ## Recovery Time
 
