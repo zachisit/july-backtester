@@ -162,7 +162,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         {symbol: "YYYY-MM-DD"} mapping of delisting dates from helpers/survivorship.py.
         When provided, open positions are force-closed on delisting.
     """
-    from helpers.timeframe_utils import get_bars_per_year
+    from helpers.timeframe_utils import get_bars_per_year, get_bars_for_period
 
     execution_time = CONFIG.get("execution_time", "open").lower()
     htb_rate_annual = CONFIG.get("htb_rate_annual", 0.0)
@@ -173,6 +173,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # Dynamic HTB rate compounding based on timeframe (fixes issue #55)
     bars_per_year = get_bars_per_year(CONFIG)
     htb_rate_per_bar = (1.0 + htb_rate_annual) ** (1.0 / bars_per_year) - 1.0 if htb_rate_annual > 0 else 0.0
+
+    # 20-trading-day ADV window expressed in bars for the configured timeframe
+    # (issue #264). A hardcoded window=20 covers 20 *bars*, not 20 trading
+    # days -- on 5-minute bars that's ~100 minutes, not a month of history --
+    # which silently miscalibrates the max_pct_adv liquidity cap and the
+    # volume-impact market-impact model on any intraday timeframe.
+    _adv_window_bars = get_bars_for_period(
+        "20d", CONFIG.get("timeframe", "D"), CONFIG.get("timeframe_multiplier", 1)
+    )
 
     short_positions: dict = {}
 
@@ -1059,7 +1068,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # --- VOLUME-BASED LIQUIDITY FILTER ---
                 max_pct_adv = CONFIG.get('max_pct_adv') or 0
                 if max_pct_adv > 0 and 'Volume' in df.columns:
-                    adv_20 = df['Volume'].rolling(window=20, min_periods=1).mean().get(entry_exec_date, np.nan)
+                    adv_20 = df['Volume'].rolling(window=_adv_window_bars, min_periods=1).mean().get(entry_exec_date, np.nan)
                     if pd.notna(adv_20) and adv_20 > 0:
                         max_shares_allowed = adv_20 * max_pct_adv
                         if max_shares_allowed <= 0:
@@ -1070,7 +1079,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 entry_impact_bps = 0.0
                 impact_coeff = CONFIG.get('volume_impact_coeff', 0.0)
                 if impact_coeff > 0 and 'Volume' in df.columns:
-                    adv_20_impact = df['Volume'].rolling(window=20, min_periods=1).mean().get(entry_exec_date, np.nan)
+                    adv_20_impact = df['Volume'].rolling(window=_adv_window_bars, min_periods=1).mean().get(entry_exec_date, np.nan)
                     if pd.notna(adv_20_impact) and adv_20_impact > 0:
                         order_pct_of_adv = shares / adv_20_impact
                         impact_additional = impact_coeff * np.sqrt(order_pct_of_adv)
