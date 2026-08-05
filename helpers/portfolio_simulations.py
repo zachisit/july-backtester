@@ -162,7 +162,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         {symbol: "YYYY-MM-DD"} mapping of delisting dates from helpers/survivorship.py.
         When provided, open positions are force-closed on delisting.
     """
-    from helpers.timeframe_utils import get_bars_per_year, get_bars_for_period
+    from helpers.timeframe_utils import get_bars_per_year, get_bars_per_day
 
     execution_time = CONFIG.get("execution_time", "open").lower()
     htb_rate_annual = CONFIG.get("htb_rate_annual", 0.0)
@@ -174,14 +174,25 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     bars_per_year = get_bars_per_year(CONFIG)
     htb_rate_per_bar = (1.0 + htb_rate_annual) ** (1.0 / bars_per_year) - 1.0 if htb_rate_annual > 0 else 0.0
 
-    # 20-trading-day ADV window expressed in bars for the configured timeframe
-    # (issue #264). A hardcoded window=20 covers 20 *bars*, not 20 trading
-    # days -- on 5-minute bars that's ~100 minutes, not a month of history --
-    # which silently miscalibrates the max_pct_adv liquidity cap and the
-    # volume-impact market-impact model on any intraday timeframe.
-    _adv_window_bars = get_bars_for_period(
-        "20d", CONFIG.get("timeframe", "D"), CONFIG.get("timeframe_multiplier", 1)
-    )
+    # --- 20-trading-day average DAILY volume (issue #264) ---
+    # A hardcoded rolling(window=20).mean() on raw bars is the mean volume of
+    # one BAR, not one DAY, whenever more than one bar makes up a trading
+    # session (H/MIN timeframes) -- e.g. on 5-minute bars it averages ~100
+    # minutes of volume and calls that "daily" volume, silently miscalibrating
+    # both the max_pct_adv liquidity cap and the volume-impact market-impact
+    # model. get_bars_per_day() (unlike get_bars_for_period, which ignores
+    # `timeframe_multiplier` in its H-timeframe branch) correctly resolves how
+    # many bars make up one session, so the window spans ~20 real trading
+    # days and the per-bar mean is rescaled back up into a genuine
+    # daily-volume figure. For D/W/M timeframes bars_per_day == 1, so this is
+    # a byte-for-byte no-op (protects the equity golden master).
+    _adv_bars_per_day = get_bars_per_day(CONFIG)
+    _adv_window_bars = 20 * _adv_bars_per_day
+
+    def _daily_adv(volume_series, at_date):
+        """Trailing ~20-trading-day average DAILY volume as of `at_date`."""
+        per_bar_avg = volume_series.rolling(window=_adv_window_bars, min_periods=1).mean().get(at_date, np.nan)
+        return per_bar_avg * _adv_bars_per_day if pd.notna(per_bar_avg) else np.nan
 
     short_positions: dict = {}
 
@@ -224,7 +235,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         exit_impact_bps = 0.0
         _coeff = CONFIG.get('volume_impact_coeff', 0.0)
         if _coeff > 0 and 'Volume' in portfolio_data[symbol].columns:
-            _adv = portfolio_data[symbol]['Volume'].rolling(window=20, min_periods=1).mean().get(exit_date, np.nan)
+            _adv = _daily_adv(portfolio_data[symbol]['Volume'], exit_date)
             if pd.notna(_adv) and _adv > 0:
                 _impact = _coeff * np.sqrt(pos['shares'] / _adv)
                 exit_price = exit_price * (1 - _impact)
@@ -512,7 +523,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             exit_impact_bps = 0.0
             _exit_impact_coeff = CONFIG.get('volume_impact_coeff', 0.0)
             if _exit_impact_coeff > 0 and 'Volume' in portfolio_data[symbol].columns:
-                _adv_exit = portfolio_data[symbol]['Volume'].rolling(window=20, min_periods=1).mean().get(date, np.nan)
+                _adv_exit = _daily_adv(portfolio_data[symbol]['Volume'], date)
                 if pd.notna(_adv_exit) and _adv_exit > 0:
                     _order_pct = pos['shares'] / _adv_exit
                     _impact = _exit_impact_coeff * np.sqrt(_order_pct)
@@ -1068,7 +1079,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # --- VOLUME-BASED LIQUIDITY FILTER ---
                 max_pct_adv = CONFIG.get('max_pct_adv') or 0
                 if max_pct_adv > 0 and 'Volume' in df.columns:
-                    adv_20 = df['Volume'].rolling(window=_adv_window_bars, min_periods=1).mean().get(entry_exec_date, np.nan)
+                    adv_20 = _daily_adv(df['Volume'], entry_exec_date)
                     if pd.notna(adv_20) and adv_20 > 0:
                         max_shares_allowed = adv_20 * max_pct_adv
                         if max_shares_allowed <= 0:
@@ -1079,7 +1090,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 entry_impact_bps = 0.0
                 impact_coeff = CONFIG.get('volume_impact_coeff', 0.0)
                 if impact_coeff > 0 and 'Volume' in df.columns:
-                    adv_20_impact = df['Volume'].rolling(window=_adv_window_bars, min_periods=1).mean().get(entry_exec_date, np.nan)
+                    adv_20_impact = _daily_adv(df['Volume'], entry_exec_date)
                     if pd.notna(adv_20_impact) and adv_20_impact > 0:
                         order_pct_of_adv = shares / adv_20_impact
                         impact_additional = impact_coeff * np.sqrt(order_pct_of_adv)

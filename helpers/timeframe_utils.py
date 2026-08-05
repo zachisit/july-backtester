@@ -152,3 +152,66 @@ def get_bars_per_year(config: dict) -> int:
             f"Unsupported timeframe '{timeframe}'. "
             f"Must be one of: D, H, MIN, W, M"
         )
+
+
+def get_bars_per_day(config: dict) -> int:
+    """
+    Calculate the number of bars in a single trading day for a given timeframe.
+
+    Used to rescale a rolling *per-bar* volume average into a true average
+    *daily* volume figure (see the max_pct_adv liquidity cap and
+    volume_impact_coeff market-impact model in
+    helpers/portfolio_simulations.py, issue #264): the mean of Volume over a
+    window of N bars is the mean volume of ONE bar, not one day, whenever
+    more than one bar makes up a trading day. Multiplying that per-bar mean
+    by get_bars_per_day() converts it into a daily-equivalent figure.
+
+    Deliberately independent of get_bars_for_period(), which ignores
+    `timeframe_multiplier` in its H-timeframe 'd'-unit branch (a separate,
+    pre-existing bug left untouched to avoid changing behavior for any
+    strategy already depending on it). get_bars_per_day() always honours
+    the multiplier.
+
+    Args:
+        config (dict): CONFIG dict with 'timeframe', optional
+                        'timeframe_multiplier', and optional
+                        'trading_hours_per_day' (default 6.5).
+
+    Returns:
+        int: Number of bars per trading day. Always >= 1.
+
+    Examples:
+        >>> get_bars_per_day({"timeframe": "D"})
+        1
+        >>> get_bars_per_day({"timeframe": "H", "timeframe_multiplier": 2})
+        3
+        >>> get_bars_per_day({"timeframe": "MIN", "timeframe_multiplier": 5})
+        78
+
+    Raises:
+        ValueError: If timeframe is not supported or timeframe_multiplier <= 0.
+    """
+    HOURS_PER_DAY = float(config.get("trading_hours_per_day", 6.5))
+    MINUTES_PER_HOUR = 60
+
+    timeframe = config.get("timeframe", "D").upper()
+    multiplier = int(config.get("timeframe_multiplier", 1))
+
+    if multiplier <= 0:
+        raise ValueError(f"timeframe_multiplier must be > 0, got {multiplier}")
+
+    if timeframe == "D":
+        return 1
+    elif timeframe == "H":
+        return max(1, int(HOURS_PER_DAY / multiplier))
+    elif timeframe == "MIN":
+        return max(1, int((HOURS_PER_DAY * MINUTES_PER_HOUR) / multiplier))
+    elif timeframe in ("W", "M"):
+        # Already one bar per period -- a weekly/monthly bar's Volume is a
+        # whole period's volume already, not a fraction of a day's.
+        return 1
+    else:
+        raise ValueError(
+            f"Unsupported timeframe '{timeframe}'. "
+            f"Must be one of: D, H, MIN, W, M"
+        )

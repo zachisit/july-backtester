@@ -5,6 +5,7 @@ Unit tests for helpers/timeframe_utils.py — timeframe conversion utilities.
 Covers:
   get_bars_for_period  — period string to bar count conversion
   get_bars_per_year    — bars per year for metrics annualization
+  get_bars_per_day     — bars per trading day (issue #264 round 2 review)
 """
 
 import os
@@ -15,7 +16,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from helpers.timeframe_utils import get_bars_for_period, get_bars_per_year
+from helpers.timeframe_utils import get_bars_for_period, get_bars_per_year, get_bars_per_day
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +114,86 @@ class TestGetBarsPerYear:
         config = {"timeframe": "MIN", "timeframe_multiplier": -5}
         with pytest.raises(ValueError, match="must be > 0"):
             get_bars_per_year(config)
+
+
+# ---------------------------------------------------------------------------
+# TestGetBarsPerDay (issue #264 — Shardul's round-2 review)
+# ---------------------------------------------------------------------------
+
+class TestGetBarsPerDay:
+    """Test get_bars_per_day() — bars in a single trading day, per timeframe.
+
+    Unlike get_bars_for_period, this correctly honours `multiplier` for the
+    H timeframe (get_bars_for_period("Nd", "H", mult) ignores `mult` for the
+    'd' unit branch -- a separate, pre-existing bug intentionally left alone
+    here to avoid changing behavior for any strategy already depending on
+    it; see PR #265 discussion). get_bars_per_day is used exclusively to
+    rescale a per-bar volume average into a true average-daily-volume figure
+    for the max_pct_adv / volume_impact_coeff liquidity/impact models.
+    """
+
+    def test_daily_timeframe(self):
+        assert get_bars_per_day({"timeframe": "D"}) == 1
+
+    def test_hourly_1h(self):
+        """1-hour bars: 6.5 hours/day -> 6 bars/day (int truncates)."""
+        assert get_bars_per_day({"timeframe": "H", "timeframe_multiplier": 1}) == 6
+
+    def test_hourly_2h_honours_multiplier(self):
+        """2-hour bars: 6.5/2 = 3.25 -> 3 bars/day.
+
+        get_bars_for_period("20d", "H", 2) incorrectly ignores the multiplier
+        here (returns 130, i.e. as if multiplier were 1) -- get_bars_per_day
+        must not repeat that bug.
+        """
+        assert get_bars_per_day({"timeframe": "H", "timeframe_multiplier": 2}) == 3
+
+    def test_hourly_4h_honours_multiplier(self):
+        assert get_bars_per_day({"timeframe": "H", "timeframe_multiplier": 4}) == 1
+
+    def test_minute_5m(self):
+        """5-minute bars: 6.5*60/5 = 78 bars/day."""
+        assert get_bars_per_day({"timeframe": "MIN", "timeframe_multiplier": 5}) == 78
+
+    def test_minute_1m(self):
+        assert get_bars_per_day({"timeframe": "MIN", "timeframe_multiplier": 1}) == 390
+
+    def test_weekly_timeframe(self):
+        """Weekly bars already represent a whole period's volume -- no rescale."""
+        assert get_bars_per_day({"timeframe": "W"}) == 1
+
+    def test_monthly_timeframe(self):
+        assert get_bars_per_day({"timeframe": "M"}) == 1
+
+    def test_case_insensitive(self):
+        assert get_bars_per_day({"timeframe": "min", "timeframe_multiplier": 5}) == 78
+
+    def test_missing_timeframe_defaults_to_daily(self):
+        assert get_bars_per_day({}) == 1
+
+    def test_missing_multiplier_defaults_to_one(self):
+        assert get_bars_per_day({"timeframe": "H"}) == 6
+
+    def test_custom_trading_hours_per_day(self):
+        """24h futures (trading_hours_per_day=24) get proportionally more bars/day."""
+        config = {"timeframe": "MIN", "timeframe_multiplier": 5, "trading_hours_per_day": 24}
+        assert get_bars_per_day(config) == 288
+
+    def test_unsupported_timeframe_raises(self):
+        with pytest.raises(ValueError, match="Unsupported timeframe 'Y'"):
+            get_bars_per_day({"timeframe": "Y"})
+
+    def test_zero_multiplier_raises(self):
+        with pytest.raises(ValueError, match="must be > 0"):
+            get_bars_per_day({"timeframe": "H", "timeframe_multiplier": 0})
+
+    def test_negative_multiplier_raises(self):
+        with pytest.raises(ValueError, match="must be > 0"):
+            get_bars_per_day({"timeframe": "MIN", "timeframe_multiplier": -5})
+
+    def test_always_at_least_one(self):
+        """A coarse multiplier on an intraday timeframe never floors to 0 bars/day."""
+        assert get_bars_per_day({"timeframe": "H", "timeframe_multiplier": 100}) >= 1
 
 
 # ---------------------------------------------------------------------------
