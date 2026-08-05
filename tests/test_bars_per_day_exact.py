@@ -136,6 +136,26 @@ class TestBarsPerDayDelegation:
                 1, int(get_bars_per_day_exact(cfg))
             )
 
+    def test_inherits_multiplier_validation(self):
+        with pytest.raises(ValueError, match="timeframe_multiplier"):
+            get_bars_per_day({"timeframe": "MIN", "timeframe_multiplier": 0})
+
+    def test_inherits_session_length_validation(self):
+        """
+        Behaviour change from #268: delegating to the exact helper means the
+        int wrapper now raises on a zero-length session where it previously
+        returned 1. Pinned here because it is a public-API contract change.
+        """
+        with pytest.raises(ValueError, match="trading_hours_per_day"):
+            get_bars_per_day(
+                {"timeframe": "H", "timeframe_multiplier": 1,
+                 "trading_hours_per_day": 0}
+            )
+
+    def test_inherits_unsupported_timeframe_validation(self):
+        with pytest.raises(ValueError, match="Unsupported timeframe"):
+            get_bars_per_day({"timeframe": "Q"})
+
 
 class TestAdvWindowSpansTwentyDays:
     """

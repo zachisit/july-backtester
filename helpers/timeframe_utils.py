@@ -278,7 +278,11 @@ def get_bars_per_day(config: dict) -> int:
         78
 
     Raises:
-        ValueError: If timeframe is not supported or timeframe_multiplier <= 0.
+        ValueError: If timeframe is not supported, timeframe_multiplier <= 0,
+                    or (intraday timeframes only) trading_hours_per_day <= 0.
+                    The last condition is inherited from
+                    get_bars_per_day_exact() and is new as of #268; it
+                    previously returned 1 for a zero-length session.
     """
     # Single source of truth: same branches, same validation, then clamp to
     # a usable bar count. max(1, ...) keeps a sub-daily-resolution config
