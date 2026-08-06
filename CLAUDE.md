@@ -634,7 +634,7 @@ Fixed in two parts:
 
 D/W/M resolve to exactly `1.0`, so the window stays 20 and the rescale is `×1.0` — byte-for-byte no-op, golden master unaffected.
 
-**Tests**: `tests/test_adv_liquidity_intraday.py` (window/cap/impact end-to-end), `tests/test_bars_per_day_exact.py` (exact bars-per-day, delegation, 20-day-span invariant).
+**Tests**: `tests/test_adv_liquidity_intraday.py` (window/cap/impact end-to-end on 5-min bars), `tests/test_bars_per_day_exact.py` (exact bars-per-day, delegation, 20-day-span invariant, plus `test_engine_end_to_end_uses_exact_bars_per_day` — a 4H simulation that is what actually pins the engine to the exact helper; the span-invariant tests reimplement the window formula and so cannot detect engine drift on their own).
 
 ### ATR Column Name Mismatch (fixed 2026-03-13)
 
