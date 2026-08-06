@@ -51,6 +51,22 @@ SLIP_TICKS = "ticks"
 NYSE = "NYSE"
 CME_ETH = "CME_ETH"
 
+# Length of ONE trading session per calendar, in hours (issue #270).
+# NYSE regular hours are 09:30-16:00 ET. CME electronic trading runs
+# Sun 17:00 CT -> Fri 16:00 CT with a 60-minute daily maintenance break, so a
+# session is 23 hours, not 24.
+#
+# NOT applied by default -- see resolve_session_hours(). The engine's global
+# `trading_hours_per_day` stays authoritative unless a run opts in, because
+# silently switching a futures book from 6.5 to 23 would move every ADV and
+# annualised figure in it.
+CALENDAR_SESSION_HOURS: dict[str, float] = {
+    NYSE: 6.5,
+    CME_ETH: 23.0,
+}
+
+DEFAULT_SESSION_HOURS = 6.5
+
 # CME contract-month codes (Jan..Dec) — used to parse a root from e.g. "ESM6".
 _MONTH_CODES = "FGHJKMNQUVXZ"
 # Matches PRODUCT + MONTH_CODE + YEAR_DIGIT(s): "ESM6", "MNQZ26", "CLF7", "M2KZ6".
@@ -103,6 +119,8 @@ class Instrument:
     integer_units: bool = False         # True -> whole contracts
     borrow_applies: bool = True         # False for futures (no stock-loan fee)
     calendar: str = NYSE                # NYSE | CME_ETH
+    session_hours: float | None = None  # hours in one session; None -> resolve
+                                        # from config (see resolve_session_hours)
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +186,54 @@ def _futures_instrument(symbol: str, config: dict) -> Instrument:
         borrow_applies=False,
         calendar=CME_ETH,
     )
+
+
+def resolve_session_hours(symbol: str, config: dict) -> float:
+    """Hours in one trading session for *symbol* (issue #270).
+
+    ``trading_hours_per_day`` is a single process-wide number, but instruments
+    already resolve per symbol. A book mixing equities (6.5h RTH) with 24h
+    futures therefore gets the wrong session length for one side no matter
+    what the global is set to — which feeds straight into the 20-day ADV
+    window (issues #264/#268) and into annualisation.
+
+    Precedence, chosen so **no existing configuration changes behaviour**:
+
+      1. ``config["instruments"]["overrides"][symbol]["session_hours"]`` —
+         explicit per-symbol value, always wins.
+      2. ``config["instruments"]["session_hours_from_calendar"] is True`` —
+         opt-in: derive from the resolved instrument's calendar
+         (:data:`CALENDAR_SESSION_HOURS`). This is what makes a genuinely
+         mixed book correct.
+      3. ``config["trading_hours_per_day"]`` — the existing global.
+      4. :data:`DEFAULT_SESSION_HOURS` (6.5).
+
+    Steps 3 and 4 are exactly the pre-#270 behaviour, so a run that sets
+    neither an override nor the opt-in flag is unaffected.
+
+    Raises:
+        ValueError: If the resolved session length is not > 0.
+    """
+    inst_cfg = config.get("instruments", {}) or {}
+
+    instrument = resolve_instrument(symbol, config)
+    if instrument.session_hours is not None:
+        hours = float(instrument.session_hours)
+    elif inst_cfg.get("session_hours_from_calendar"):
+        hours = float(
+            CALENDAR_SESSION_HOURS.get(
+                instrument.calendar,
+                config.get("trading_hours_per_day", DEFAULT_SESSION_HOURS),
+            )
+        )
+    else:
+        hours = float(config.get("trading_hours_per_day", DEFAULT_SESSION_HOURS))
+
+    if hours <= 0:
+        raise ValueError(
+            f"session hours for '{symbol}' must be > 0, got {hours}"
+        )
+    return hours
 
 
 def is_futures_data_symbol(symbol: str, config: dict) -> bool:
