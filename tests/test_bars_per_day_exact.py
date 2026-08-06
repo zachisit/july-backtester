@@ -36,7 +36,16 @@ from helpers.timeframe_utils import (  # noqa: E402
 
 
 def _window(config):
-    """Reproduce the ADV window sizing in helpers/portfolio_simulations.py."""
+    """
+    Reproduce the ADV window sizing in helpers/portfolio_simulations.py.
+
+    This is a REIMPLEMENTATION of the production expression (which is a local
+    inside run_portfolio_simulation and so cannot be imported). Tests built on
+    it verify the arithmetic is right; they cannot detect the engine drifting
+    away from it. TestAdvWindowSpansTwentyDays.
+    test_engine_end_to_end_uses_exact_bars_per_day runs the real simulation
+    and is what actually pins the engine.
+    """
     return max(1, round(20 * get_bars_per_day_exact(config)))
 
 
@@ -185,6 +194,16 @@ class TestAdvWindowSpansTwentyDays:
             {"timeframe": "H", "timeframe_multiplier": 1},
             {"timeframe": "H", "timeframe_multiplier": 2},
             {"timeframe": "H", "timeframe_multiplier": 4},
+            # 6 and 7 are the multipliers where 20*bpd lands far enough from
+            # a whole number that round() and int() disagree (21.67 -> 22 vs
+            # 21; 18.57 -> 19 vs 18), so they document why the formula rounds
+            # rather than truncates. NOTE: this is a formula-level assertion
+            # -- _window() below reimplements the production expression, so it
+            # cannot detect a change to the engine itself. The engine binding
+            # is pinned separately by
+            # test_engine_end_to_end_uses_exact_bars_per_day.
+            {"timeframe": "H", "timeframe_multiplier": 6},
+            {"timeframe": "H", "timeframe_multiplier": 7},
         ],
     )
     def test_window_spans_twenty_days_within_tolerance(self, config):
