@@ -107,6 +107,17 @@ class TestExactBarsPerDay:
         with pytest.raises(ValueError, match="Unsupported timeframe"):
             get_bars_per_day_exact({"timeframe": "Q"})
 
+    def test_unsupported_timeframe_reported_before_session_length(self):
+        """
+        An unsupported timeframe must report itself as such even when another
+        key is also invalid -- otherwise a user debugging `timeframe: "Q"`
+        gets pointed at trading_hours_per_day instead.
+        """
+        with pytest.raises(ValueError, match="Unsupported timeframe"):
+            get_bars_per_day_exact(
+                {"timeframe": "Q", "trading_hours_per_day": 0}
+            )
+
 
 class TestBarsPerDayDelegation:
     """The integer version stays byte-for-byte what it was, via the exact one."""

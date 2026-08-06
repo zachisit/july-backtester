@@ -211,6 +211,16 @@ def get_bars_per_day_exact(config: dict) -> float:
     if multiplier <= 0:
         raise ValueError(f"timeframe_multiplier must be > 0, got {multiplier}")
 
+    # Validate the timeframe BEFORE the session-length check below, so an
+    # unsupported timeframe always reports itself as such rather than being
+    # masked by an unrelated key that the branch it would have taken happens
+    # to read.
+    if timeframe not in ("D", "W", "M", "H", "MIN"):
+        raise ValueError(
+            f"Unsupported timeframe '{timeframe}'. "
+            f"Must be one of: D, H, MIN, W, M"
+        )
+
     if timeframe in ("D", "W", "M"):
         # Already one bar per period -- a daily/weekly/monthly bar's Volume
         # is a whole period's volume already, not a fraction of a day's.
@@ -229,13 +239,7 @@ def get_bars_per_day_exact(config: dict) -> float:
 
     if timeframe == "H":
         return HOURS_PER_DAY / multiplier
-    elif timeframe == "MIN":
-        return (HOURS_PER_DAY * MINUTES_PER_HOUR) / multiplier
-    else:
-        raise ValueError(
-            f"Unsupported timeframe '{timeframe}'. "
-            f"Must be one of: D, H, MIN, W, M"
-        )
+    return (HOURS_PER_DAY * MINUTES_PER_HOUR) / multiplier
 
 
 def get_bars_per_day(config: dict) -> int:
