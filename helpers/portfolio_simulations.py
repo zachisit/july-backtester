@@ -209,6 +209,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # Scoped to this closure ON PURPOSE, not module level: workers process
     # many strategies/portfolios in one process, and a module-level cache
     # would serve one portfolio's volume series to the next.
+    #
+    # Deliberately unbounded. It trades memory for time at roughly one
+    # float64 series per traded symbol -- on a 500-name book of 5-minute
+    # bars over 2 years that is ~314KB x 500 = ~157MB, against the ~790MB of
+    # OHLCV the same run already holds resident, so ~20% on top of data that
+    # must be in memory anyway. Only symbols that actually reach an ADV
+    # lookup are cached, and the whole dict is released when the simulation
+    # returns. An LRU bound would reintroduce exactly the recomputation this
+    # exists to remove, so size it down only if a real run shows pressure.
     _adv_cache: dict = {}
 
     # min_periods stays 1 DELIBERATELY (issue #269). Raising it to one full
