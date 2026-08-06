@@ -326,11 +326,18 @@ CONFIG = {
         # "session_hours_from_calendar": True,
 
         # Explicit per-symbol overrides. Each dict may set "asset_class" and any
-        # Instrument field (point_value, tick_size, initial_margin_pct, ...):
+        # Instrument field (point_value, tick_size, initial_margin_pct, ...).
+        #
+        # An override dict is authoritative for asset class: the contract-month
+        # auto-detection that would otherwise recognise "ESM6" as a future is
+        # only consulted when a symbol has NO override. So always spell out
+        # "asset_class": "future" when overriding a futures symbol -- omitting
+        # it silently resolves the symbol as a cash equity (point_value 1.0,
+        # cash_full margin, fractional units, borrow charged, NYSE calendar).
         # "overrides": {
         #     "NQ":  {"asset_class": "future", "point_value": 20.0, "tick_size": 0.25},
         #     "SI":  {"asset_class": "equity"},  # keep the Silvergate ticker as equity
-        #     "ESM6": {"session_hours": 23},     # 23h CME session, not the 6.5h global
+        #     "ESM6": {"asset_class": "future", "session_hours": 23},  # 23h CME session
         # },
         "overrides": {},
     },
