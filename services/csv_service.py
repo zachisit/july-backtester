@@ -52,23 +52,7 @@ _COL_ALIASES: dict[str, str] = {
 }
 
 
-# Characters illegal in Windows filenames (and generally problematic on any OS)
-_ILLEGAL_FILENAME_CHARS = r'\/:*?"<>|'
-
-
-def _sanitize_filename(symbol: str) -> str:
-    """
-    Replace characters that are illegal in Windows filenames with underscores.
-
-    Examples
-    --------
-    ``"I:VIX"``   → ``"I_VIX"``
-    ``"$I:TNX"``  → ``"$I_TNX"``
-    ``"AAPL"``    → ``"AAPL"``   (unchanged)
-    """
-    for ch in _ILLEGAL_FILENAME_CHARS:
-        symbol = symbol.replace(ch, "_")
-    return symbol
+from helpers.filename_utils import sanitize_symbol_for_filename as _sanitize_filename
 
 
 def _resolve_dir(config: dict) -> str:
