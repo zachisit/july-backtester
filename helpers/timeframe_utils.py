@@ -154,7 +154,7 @@ def get_bars_per_year(config: dict) -> int:
         )
 
 
-def get_bars_per_day_exact(config: dict) -> float:
+def get_bars_per_day_exact(config: dict, session_hours: float | None = None) -> float:
     """
     Bars in a single trading day as an EXACT (unrounded) float.
 
@@ -184,6 +184,16 @@ def get_bars_per_day_exact(config: dict) -> float:
         config (dict): CONFIG dict with 'timeframe', optional
                         'timeframe_multiplier', and optional
                         'trading_hours_per_day' (default 6.5).
+        session_hours (float | callable | None): explicit session length,
+                        overriding config['trading_hours_per_day']. Pass the
+                        value from
+                        helpers.instruments.resolve_session_hours(symbol,
+                        config) for per-symbol correctness on a mixed book
+                        (issue #270), or a zero-arg CALLABLE returning it to
+                        defer that resolution -- it is then invoked only on
+                        intraday timeframes, so a D/W/M run neither pays for
+                        nor can fail on a session length it never reads.
+                        None keeps the process-wide global.
 
     Returns:
         float: Bars per trading day, unrounded. May be < 1.0 when a single
@@ -202,7 +212,6 @@ def get_bars_per_day_exact(config: dict) -> float:
         ValueError: If timeframe is not supported, timeframe_multiplier <= 0,
                     or trading_hours_per_day <= 0.
     """
-    HOURS_PER_DAY = float(config.get("trading_hours_per_day", 6.5))
     MINUTES_PER_HOUR = 60
 
     timeframe = config.get("timeframe", "D").upper()
@@ -224,7 +233,22 @@ def get_bars_per_day_exact(config: dict) -> float:
     if timeframe in ("D", "W", "M"):
         # Already one bar per period -- a daily/weekly/monthly bar's Volume
         # is a whole period's volume already, not a fraction of a day's.
+        # Returns BEFORE resolving session hours: these timeframes never read
+        # the session length, so they must not fail (or pay) for it. That is
+        # also why `session_hours` may be a callable -- see below.
         return 1.0
+
+    # Resolved only now, on the branches that actually consult it. Accepting a
+    # zero-arg callable lets a caller defer per-symbol resolution (which can
+    # itself raise) until we know an intraday timeframe needs it.
+    if callable(session_hours):
+        session_hours = session_hours()
+
+    HOURS_PER_DAY = float(
+        config.get("trading_hours_per_day", 6.5)
+        if session_hours is None
+        else session_hours
+    )
 
     # Only the intraday branches consult the session length, so validate it
     # here rather than penalising daily runs for a key they never read. A

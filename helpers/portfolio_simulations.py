@@ -195,8 +195,32 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # for D/W/M and MIN 5/15/30. For D/W/M bars_per_day == 1.0 exactly, so the
     # window is 20 and the rescale is x1.0 -- a byte-for-byte no-op that
     # protects the equity golden master.
-    _adv_bars_per_day = get_bars_per_day_exact(CONFIG)
-    _adv_window_bars = max(1, round(20 * _adv_bars_per_day))
+    # Resolved PER SYMBOL (issue #270): `trading_hours_per_day` is one
+    # process-wide number, but instruments already resolve per symbol, so a
+    # book mixing equities (6.5h RTH) with 24h futures gets the wrong
+    # bars-per-day for one side of it whatever the global says. Defaults are
+    # unchanged -- resolve_session_hours() falls back to the global unless a
+    # run sets a per-symbol override or opts into calendar-derived hours --
+    # so this is a no-op for every existing config.
+    _adv_params_cache: dict = {}
+
+    def _adv_params(symbol):
+        """(window_bars, bars_per_day) for *symbol*, computed once."""
+        params = _adv_params_cache.get(symbol)
+        if params is None:
+            # Passed as a CALLABLE so per-symbol resolution happens only on
+            # intraday timeframes. A D/W/M run never reads a session length,
+            # and must not start failing on a bad `trading_hours_per_day` it
+            # would otherwise have ignored.
+            bars_per_day = get_bars_per_day_exact(
+                CONFIG,
+                session_hours=lambda: _inst.resolve_session_hours(symbol, CONFIG),
+            )
+            params = _adv_params_cache[symbol] = (
+                max(1, round(20 * bars_per_day)),
+                bars_per_day,
+            )
+        return params
 
     # Per-symbol memo for the rolling ADV series (issue #269). Each call used
     # to recompute .rolling().mean() across the WHOLE series and then keep a
@@ -235,11 +259,12 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         """Trailing ~20-trading-day average DAILY volume as of `at_date`."""
         adv_series = _adv_cache.get(symbol)
         if adv_series is None:
+            window_bars, bars_per_day = _adv_params(symbol)
             adv_series = _adv_cache[symbol] = (
                 volume_series.rolling(
-                    window=_adv_window_bars, min_periods=1
+                    window=window_bars, min_periods=1
                 ).mean()
-                * _adv_bars_per_day
+                * bars_per_day
             )
         # NaN propagates through the multiply, so a missing/NaN bar still
         # yields NaN here exactly as the per-call version did.

@@ -634,6 +634,25 @@ Fixed in two parts:
 
 D/W/M resolve to exactly `1.0`, so the window stays 20 and the rescale is `×1.0` — byte-for-byte no-op, golden master unaffected.
 
+### Per-Symbol Session Length (issue #270)
+
+`trading_hours_per_day` is one process-wide number, but instruments already resolve per symbol. A book mixing equities (6.5h RTH) with 24h futures therefore gets the wrong bars-per-day for one side of it whatever the global says — feeding the 20-day ADV window above.
+
+`helpers/instruments.py::resolve_session_hours(symbol, config)` resolves it per symbol, in this precedence:
+
+1. `instruments.overrides[SYMBOL]["session_hours"]` — explicit, always wins. **An override dict is authoritative for asset class**, so a futures symbol must spell out `{"asset_class": "future", "session_hours": 23}` — the contract-month auto-detection that recognises `ESM6` as a future is only consulted when the symbol has *no* override, and omitting `asset_class` silently resolves it as a cash equity (point_value 1.0, `cash_full` margin, fractional units, borrow charged, NYSE calendar). Pre-existing `resolve_instrument` precedence from #229; pinned by `TestOverrideKeepsFuturesClassification`.
+2. `instruments.session_hours_from_calendar: True` — opt-in; derives from the instrument's calendar via `CALENDAR_SESSION_HOURS` (NYSE 6.5, CME_ETH **23.0** — CME electronic trading is Sun 17:00 → Fri 16:00 CT with a 60-minute daily maintenance break, so a session is 23h, not 24)
+3. `trading_hours_per_day` — the existing global
+4. `6.5`
+
+Steps 3–4 are exactly the pre-#270 behaviour, so **a run that sets neither an override nor the opt-in flag is unaffected**. `get_bars_per_day_exact(config, session_hours=...)` takes the resolved value; `run_portfolio_simulation` computes `(window_bars, bars_per_day)` per symbol and caches them alongside the ADV memo.
+
+**Scope decision — annualization stays global.** `get_bars_per_year()` shares the same session assumption but was deliberately left process-wide. Moving it per-symbol changes reported Sharpe/CAGR on existing futures runs, which is a reporting-comparability decision rather than a correctness fix; the ADV path has a concrete correctness impact and #265 had already isolated its call sites. Tracked as an open question on #270.
+
+**Tests**: `tests/test_per_symbol_session_hours.py` — precedence ladder, opt-in defaults off, engine-level mixed-book cap divergence, and the no-regression default path.
+
+### ADV Fix Tests
+
 **Tests**: `tests/test_adv_liquidity_intraday.py` (window/cap/impact end-to-end on 5-min bars), `tests/test_bars_per_day_exact.py` (exact bars-per-day, delegation, 20-day-span invariant, plus `test_engine_end_to_end_uses_exact_bars_per_day` — a 4H simulation that is what actually pins the engine to the exact helper; the span-invariant tests reimplement the window formula and so cannot detect engine drift on their own).
 
 ### ATR Column Name Mismatch (fixed 2026-03-13)
