@@ -617,6 +617,25 @@ The internal `Trade` counter column is always dropped.
 
 ## Known Issues Fixed
 
+### ADV Window Was 20 *Bars*, Not 20 Trading Days (issues #264, #268 — fixed 2026-08-05)
+
+Both ADV-based mechanics — the `max_pct_adv` liquidity cap (on by default at `0.05`) and the `volume_impact_coeff` market-impact model — computed "20-day average daily volume" as `rolling(window=20).mean()` over raw bars. Correct on daily data (20 bars == 20 trading days); wrong by orders of magnitude on intraday data, where 20 bars is ~100 minutes of 5-minute volume. This was the root cause of intraday backtests diverging from daily runs of the same strategy and of returns shifting non-proportionally with `initial_capital` (bigger capital → bigger share counts → hit the mis-scaled cap sooner).
+
+Fixed in two parts:
+
+1. **#264/#265 — window horizon + per-bar-vs-per-day rescale.** All four ADV call sites in `helpers/portfolio_simulations.py` (entry cap, entry impact, normal exit impact, intrabar same-bar close) now route through a single `_daily_adv()` closure, so they cannot drift independently again. The window spans 20 real sessions and the per-bar mean is rescaled into a daily figure. The correctness identity is `mean(20*bpd bars) * bpd == sum(window)/20`.
+2. **#268 — exact, not truncated, bars-per-day.** That identity only holds while the window genuinely spans 20 days, so the rescale must use `get_bars_per_day_exact()` (float) rather than the truncated bar count. `get_bars_per_day()` truncates `6.5 / multiplier`, which cost 1H/2H/MIN60 7.7% and 4H 38.5% of their true ADV — leaving #264 closed only for `D`/`W`/`M` and `MIN` 5/15/30.
+
+**Which helper to use:** `get_bars_per_day_exact(config) -> float` for any *scaling factor*; `get_bars_per_day(config) -> int` (which now delegates to it) only where a genuine bar *count* is needed. Both honour `timeframe_multiplier`, unlike `get_bars_for_period()` — whose H-timeframe multiplier bug is separate and tracked in #267.
+
+**Direction of the old error:** understated ADV made the cap bind *earlier* and impact charge *more*, so affected runs looked worse than reality, never better.
+
+`trading_hours_per_day <= 0` now raises on intraday timeframes instead of silently producing a zero ADV that rejected every trade.
+
+D/W/M resolve to exactly `1.0`, so the window stays 20 and the rescale is `×1.0` — byte-for-byte no-op, golden master unaffected.
+
+**Tests**: `tests/test_adv_liquidity_intraday.py` (window/cap/impact end-to-end on 5-min bars), `tests/test_bars_per_day_exact.py` (exact bars-per-day, delegation, 20-day-span invariant, plus `test_engine_end_to_end_uses_exact_bars_per_day` — a 4H simulation that is what actually pins the engine to the exact helper; the span-invariant tests reimplement the window formula and so cannot detect engine drift on their own).
+
 ### ATR Column Name Mismatch (fixed 2026-03-13)
 
 `main.py` writes the 14-period ATR column as `ATR_14`, but `helpers/portfolio_simulations.py` had two `.get('ATR')` calls that silently returned `NaN`:

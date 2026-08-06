@@ -162,7 +162,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         {symbol: "YYYY-MM-DD"} mapping of delisting dates from helpers/survivorship.py.
         When provided, open positions are force-closed on delisting.
     """
-    from helpers.timeframe_utils import get_bars_per_year, get_bars_per_day
+    from helpers.timeframe_utils import get_bars_per_year, get_bars_per_day_exact
 
     execution_time = CONFIG.get("execution_time", "open").lower()
     htb_rate_annual = CONFIG.get("htb_rate_annual", 0.0)
@@ -180,14 +180,23 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # session (H/MIN timeframes) -- e.g. on 5-minute bars it averages ~100
     # minutes of volume and calls that "daily" volume, silently miscalibrating
     # both the max_pct_adv liquidity cap and the volume-impact market-impact
-    # model. get_bars_per_day() (unlike get_bars_for_period, which ignores
-    # `timeframe_multiplier` in its H-timeframe branch) correctly resolves how
-    # many bars make up one session, so the window spans ~20 real trading
-    # days and the per-bar mean is rescaled back up into a genuine
-    # daily-volume figure. For D/W/M timeframes bars_per_day == 1, so this is
-    # a byte-for-byte no-op (protects the equity golden master).
-    _adv_bars_per_day = get_bars_per_day(CONFIG)
-    _adv_window_bars = 20 * _adv_bars_per_day
+    # model. get_bars_per_day_exact() (unlike get_bars_for_period, which
+    # ignores `timeframe_multiplier` in its H-timeframe branch) correctly
+    # resolves how many bars make up one session, so the window spans ~20 real
+    # trading days and the per-bar mean is rescaled back up into a genuine
+    # daily-volume figure. The correctness identity is
+    #
+    #     mean(20*bpd bars) * bpd == sum(window)/(20*bpd) * bpd == sum(window)/20
+    #
+    # i.e. total volume over the window / 20 days -- but that only holds while
+    # the window actually spans 20 days. Hence the EXACT (float) bars-per-day
+    # here rather than the truncated bar count (issue #268): int() truncation
+    # cost 1H/2H 7.7% and 4H 38.5% of their true ADV, leaving #264 closed only
+    # for D/W/M and MIN 5/15/30. For D/W/M bars_per_day == 1.0 exactly, so the
+    # window is 20 and the rescale is x1.0 -- a byte-for-byte no-op that
+    # protects the equity golden master.
+    _adv_bars_per_day = get_bars_per_day_exact(CONFIG)
+    _adv_window_bars = max(1, round(20 * _adv_bars_per_day))
 
     def _daily_adv(volume_series, at_date):
         """Trailing ~20-trading-day average DAILY volume as of `at_date`."""
