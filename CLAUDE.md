@@ -640,7 +640,7 @@ D/W/M resolve to exactly `1.0`, so the window stays 20 and the rescale is `×1.0
 
 `helpers/instruments.py::resolve_session_hours(symbol, config)` resolves it per symbol, in this precedence:
 
-1. `instruments.overrides[SYMBOL]["session_hours"]` — explicit, always wins
+1. `instruments.overrides[SYMBOL]["session_hours"]` — explicit, always wins. **An override dict is authoritative for asset class**, so a futures symbol must spell out `{"asset_class": "future", "session_hours": 23}` — the contract-month auto-detection that recognises `ESM6` as a future is only consulted when the symbol has *no* override, and omitting `asset_class` silently resolves it as a cash equity (point_value 1.0, `cash_full` margin, fractional units, borrow charged, NYSE calendar). Pre-existing `resolve_instrument` precedence from #229; pinned by `TestOverrideKeepsFuturesClassification`.
 2. `instruments.session_hours_from_calendar: True` — opt-in; derives from the instrument's calendar via `CALENDAR_SESSION_HOURS` (NYSE 6.5, CME_ETH **23.0** — CME electronic trading is Sun 17:00 → Fri 16:00 CT with a 60-minute daily maintenance break, so a session is 23h, not 24)
 3. `trading_hours_per_day` — the existing global
 4. `6.5`
