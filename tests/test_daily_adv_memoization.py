@@ -190,6 +190,61 @@ class TestCacheIsScopedToOneRun:
         assert by_symbol["ILQ"]["Shares"] == pytest.approx(100.0, rel=1e-9)
 
 
+class TestCacheIsSharedAcrossEntryAndExitSites:
+    """
+    The entry sites populate the cache from `df['Volume']`; the exit sites
+    read it back via `portfolio_data[symbol]['Volume']`. Those are separate
+    expressions over the same underlying frame, so this pins that the cached
+    series serves both -- and, because the volume ramps, that the memo
+    returns a per-DATE value rather than one frozen number.
+    """
+
+    def test_entry_and_exit_each_use_their_own_bars_adv(self):
+        coeff = 0.1
+        exit_idx = ENTRY_IDX + 10
+
+        df = _daily_df(20_000.0)
+        df["Volume"] = [1_000.0 * (i + 1) for i in range(len(df))]
+
+        signal = pd.Series(0, index=df.index)
+        signal.iloc[ENTRY_IDX] = 1
+        signal.iloc[exit_idx] = -1  # real exit -> exercises the exit ADV site
+
+        with patch.dict("config.CONFIG", _base_config(volume_impact_coeff=coeff)):
+            result = run_portfolio_simulation(
+                portfolio_data={"TEST": df},
+                signals={"TEST": signal},
+                initial_capital=1_000_000.0,
+                allocation_pct=0.10,
+                spy_df=None,
+                vix_df=None,
+                tnx_df=None,
+                stop_config={"type": "none"},
+            )
+
+        trade = result["trade_log"][0]
+        assert trade["ExitReason"] != "End of Backtest", (
+            "fixture regressed: this must take the normal exit path"
+        )
+
+        adv = df["Volume"].rolling(window=20, min_periods=1).mean()
+        entry_adv = adv.get(df.index[ENTRY_IDX])
+        exit_adv = adv.get(df.index[exit_idx])
+
+        # The ramp must actually make the two bars differ, or this proves
+        # nothing about per-date lookups.
+        assert entry_adv != pytest.approx(exit_adv, rel=1e-6)
+
+        shares = trade["Shares"]
+        assert shares == pytest.approx(entry_adv * 0.05, rel=1e-9)
+
+        expected_entry = PRICE * (1 + coeff * ((shares / entry_adv) ** 0.5))
+        expected_exit = PRICE * (1 - coeff * ((shares / exit_adv) ** 0.5))
+
+        assert trade["EntryPrice"] == pytest.approx(expected_entry, rel=1e-9)
+        assert trade["ExitPrice"] == pytest.approx(expected_exit, rel=1e-9)
+
+
 class TestMinPeriodsStaysOne:
     """
     #269 also proposed raising min_periods to one full session so the early
