@@ -321,7 +321,9 @@ CONFIG = {
         # of it -- which feeds the 20-day ADV window used by max_pct_adv and
         # volume_impact_coeff. Two ways to fix a mixed book, both opt-in so
         # existing runs are untouched:
-        #   1. per-symbol, via an override below: {"session_hours": 23}
+        #   1. per-symbol, via an override below:
+        #      {"asset_class": "future", "session_hours": 23}
+        #      (spell out asset_class -- see the override note below)
         #   2. blanket, from each instrument's calendar (NYSE 6.5, CME_ETH 23):
         # "session_hours_from_calendar": True,
 

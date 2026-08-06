@@ -416,7 +416,9 @@ class TestOverrideKeepsFuturesClassification:
         overridden = resolve_instrument("ESM6", self._CFG)
 
         for field in ("point_value", "margin_mode", "integer_units",
-                      "borrow_applies", "calendar", "tick_size"):
+                      "borrow_applies", "calendar", "tick_size",
+                      "commission_model", "slippage_model",
+                      "initial_margin_pct"):
             assert getattr(overridden, field) == getattr(auto, field), field
 
     def test_omitting_asset_class_silently_downgrades_to_equity(self):
