@@ -233,6 +233,86 @@ class TestAdvWindowSpansTwentyDays:
             assert _window(cfg) == 20
             assert get_bars_per_day_exact(cfg) == 1.0
 
+    def test_engine_end_to_end_uses_exact_bars_per_day(self):
+        """
+        Pins the ENGINE, not just the arithmetic.
+
+        The invariant tests above reimplement the window formula, so they
+        would all still pass if helpers/portfolio_simulations.py were
+        reverted to the truncated get_bars_per_day(). This runs the real
+        simulation on 4H bars, where the two helpers disagree most:
+
+            exact:     window round(20*1.625) = 32 bars, ADV = V * 1.625
+            truncated: window 20*1            = 20 bars, ADV = V * 1.000
+
+        With V = 20,000/bar and max_pct_adv = 5%, the cap is 1,625 shares
+        under the fix and 1,000 shares under the bug -- so this test fails
+        if the production line regresses.
+        """
+        from unittest.mock import patch
+
+        import pandas as pd
+
+        from helpers.portfolio_simulations import run_portfolio_simulation
+
+        per_bar_volume = 20_000.0
+        price = 1.0
+        n_bars = 80
+        entry_idx = 60  # >32 bars of history behind the window
+
+        idx = pd.DatetimeIndex(
+            pd.date_range("2024-01-02", periods=n_bars, freq="4h")
+        )
+        idx.name = "Datetime"
+        df = pd.DataFrame(
+            {
+                "Open": price, "High": price, "Low": price, "Close": price,
+                "Volume": per_bar_volume,
+            },
+            index=idx,
+        )
+
+        signal = pd.Series(0, index=idx)
+        signal.iloc[entry_idx] = 1  # enter, never exit -> closed by end-of-run MTM
+
+        test_config = {
+            "timeframe": "H",
+            "timeframe_multiplier": 4,
+            "trading_hours_per_day": 6.5,
+            "execution_time": "close",
+            "slippage_pct": 0.0,
+            "commission_per_share": 0.0,
+            "max_pct_adv": 0.05,
+            "volume_impact_coeff": 0.0,
+            "risk_free_rate": 0.05,
+            "htb_rate_annual": 0.0,
+            "position_sizing_method": "fixed",
+        }
+
+        with patch.dict("config.CONFIG", test_config):
+            result = run_portfolio_simulation(
+                portfolio_data={"TEST": df},
+                signals={"TEST": signal},
+                initial_capital=100_000.0,   # asks for 10,000 shares at $1
+                allocation_pct=0.10,         # -> the cap is what binds
+                spy_df=None,
+                vix_df=None,
+                tnx_df=None,
+                stop_config={"type": "none"},
+            )
+
+        assert result is not None
+        trade = result["trade_log"][0]
+
+        exact_cap = per_bar_volume * 1.625 * 0.05      # 1,625
+        truncated_cap = per_bar_volume * 1.0 * 0.05    # 1,000
+
+        assert trade["Shares"] == pytest.approx(exact_cap, rel=1e-6), (
+            f"expected the exact-bars-per-day cap ({exact_cap}), got "
+            f"{trade['Shares']} -- {truncated_cap} means the engine "
+            f"regressed to the truncated get_bars_per_day()"
+        )
+
     def test_true_daily_adv_recovered_on_four_hour_bars(self):
         """
         End-to-end arithmetic on the worst case (4H, previously -38.5%):
