@@ -38,6 +38,36 @@ from helpers.portfolio_simulations import run_portfolio_simulation  # noqa: E402
 from helpers.timeframe_utils import get_bars_per_day_exact  # noqa: E402
 
 
+class TestCalendarSessionHoursTable:
+    """
+    The table encodes factual claims about each venue, so assert the literal
+    numbers -- referencing the constant symbolically elsewhere would let a
+    value change slip through silently.
+    """
+
+    def test_nyse_is_a_six_and_a_half_hour_session(self):
+        """09:30-16:00 ET regular hours."""
+        assert CALENDAR_SESSION_HOURS[NYSE] == 6.5
+
+    def test_cme_eth_is_twenty_three_not_twenty_four(self):
+        """
+        CME electronic trading runs Sun 17:00 -> Fri 16:00 CT with a
+        60-minute daily maintenance break, so one session is 23h. This
+        deliberately differs from the `24` CLAUDE.md suggests for the global
+        `trading_hours_per_day`; changing it should be a conscious decision,
+        not a silent edit.
+        """
+        assert CALENDAR_SESSION_HOURS[CME_ETH] == 23.0
+
+    def test_every_calendar_constant_has_an_entry(self):
+        for calendar in (NYSE, CME_ETH):
+            assert calendar in CALENDAR_SESSION_HOURS
+            assert CALENDAR_SESSION_HOURS[calendar] > 0
+
+    def test_default_matches_the_nyse_entry(self):
+        assert DEFAULT_SESSION_HOURS == CALENDAR_SESSION_HOURS[NYSE]
+
+
 class TestResolveSessionHoursPrecedence:
     """1. per-symbol override -> 2. calendar opt-in -> 3. global -> 4. default."""
 
