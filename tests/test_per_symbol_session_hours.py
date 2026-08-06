@@ -124,6 +124,53 @@ class TestBarsPerDayAcceptsExplicitSessionHours:
             get_bars_per_day_exact({"timeframe": "MIN"}, session_hours=0)
 
 
+class TestSessionHoursResolutionIsLazy:
+    """
+    D/W/M never read a session length, so they must neither pay for resolving
+    one nor be able to fail on it. Passing a callable defers resolution to the
+    intraday branches only.
+    """
+
+    @pytest.mark.parametrize("timeframe", ["D", "W", "M"])
+    def test_callable_is_not_invoked_for_daily_timeframes(self, timeframe):
+        calls = []
+
+        def _boom():
+            calls.append(1)
+            raise AssertionError("session hours resolved on a D/W/M timeframe")
+
+        assert get_bars_per_day_exact(
+            {"timeframe": timeframe}, session_hours=_boom
+        ) == 1.0
+        assert calls == []
+
+    def test_callable_is_invoked_for_intraday(self):
+        calls = []
+
+        def _hours():
+            calls.append(1)
+            return 23.0
+
+        result = get_bars_per_day_exact(
+            {"timeframe": "H", "timeframe_multiplier": 1}, session_hours=_hours
+        )
+        assert result == pytest.approx(23.0)
+        assert calls == [1]
+
+    @pytest.mark.parametrize("timeframe", ["D", "W", "M"])
+    def test_daily_run_survives_a_bad_global_it_never_reads(self, timeframe):
+        """
+        Regression: wiring per-symbol resolution in eagerly made a D run with
+        trading_hours_per_day=0 raise, where it had always worked.
+        """
+        from helpers.instruments import resolve_session_hours as _rsh
+
+        cfg = {"timeframe": timeframe, "trading_hours_per_day": 0}
+        assert get_bars_per_day_exact(
+            cfg, session_hours=lambda: _rsh("AAPL", cfg)
+        ) == 1.0
+
+
 # --- engine-level -----------------------------------------------------------
 
 PRICE = 1.0
@@ -246,6 +293,49 @@ class TestEngineUsesPerSymbolSessionHours:
         assert trade["Shares"] == pytest.approx(
             volume * CALENDAR_SESSION_HOURS[NYSE] * 0.05, rel=1e-9
         )
+
+    def test_daily_run_ignores_a_bad_session_length_entirely(self):
+        """
+        End-to-end form of the laziness guard: a daily backtest with a
+        nonsensical trading_hours_per_day must still run and still cap.
+        """
+        volume = 20_000.0
+        idx = pd.DatetimeIndex(pd.date_range("2024-01-02", periods=60, freq="B"))
+        idx.name = "Datetime"
+        df = pd.DataFrame(
+            {"Open": PRICE, "High": PRICE, "Low": PRICE, "Close": PRICE,
+             "Volume": volume},
+            index=idx,
+        )
+        signal = pd.Series(0, index=idx)
+        signal.iloc[40] = 1
+
+        cfg = {
+            "timeframe": "D",
+            "trading_hours_per_day": 0,   # nonsense, and irrelevant on D
+            "execution_time": "close",
+            "slippage_pct": 0.0,
+            "commission_per_share": 0.0,
+            "max_pct_adv": 0.05,
+            "volume_impact_coeff": 0.0,
+            "risk_free_rate": 0.05,
+            "htb_rate_annual": 0.0,
+            "position_sizing_method": "fixed",
+        }
+        with patch.dict("config.CONFIG", cfg):
+            result = run_portfolio_simulation(
+                portfolio_data={"T": df},
+                signals={"T": signal},
+                initial_capital=1_000_000.0,
+                allocation_pct=0.10,
+                spy_df=None,
+                vix_df=None,
+                tnx_df=None,
+                stop_config={"type": "none"},
+            )
+
+        trade = result["trade_log"][0]
+        assert trade["Shares"] == pytest.approx(volume * 0.05, rel=1e-9)
 
     def test_global_still_applies_when_nothing_is_overridden(self):
         volume = 20_000.0

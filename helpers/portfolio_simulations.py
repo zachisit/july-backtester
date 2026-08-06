@@ -208,8 +208,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         """(window_bars, bars_per_day) for *symbol*, computed once."""
         params = _adv_params_cache.get(symbol)
         if params is None:
+            # Passed as a CALLABLE so per-symbol resolution happens only on
+            # intraday timeframes. A D/W/M run never reads a session length,
+            # and must not start failing on a bad `trading_hours_per_day` it
+            # would otherwise have ignored.
             bars_per_day = get_bars_per_day_exact(
-                CONFIG, session_hours=_inst.resolve_session_hours(symbol, CONFIG)
+                CONFIG,
+                session_hours=lambda: _inst.resolve_session_hours(symbol, CONFIG),
             )
             params = _adv_params_cache[symbol] = (
                 max(1, round(20 * bars_per_day)),
