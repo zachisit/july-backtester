@@ -375,3 +375,93 @@ class TestEngineUsesPerSymbolSessionHours:
         )
         trade = result["trade_log"][0]
         assert trade["Shares"] == pytest.approx(volume * 13.0 * 0.05, rel=1e-9)
+
+
+class TestOverrideKeepsFuturesClassification:
+    """
+    An override dict is authoritative for asset class: `resolve_instrument`
+    only consults the contract-month auto-detection when a symbol has *no*
+    override. Setting session hours on a futures symbol therefore has to
+    spell out "asset_class": "future", or the symbol silently resolves as a
+    cash equity and every futures mechanic ($/point P&L, initial-margin
+    accounting, integer contracts, no borrow) is lost while the session
+    hours themselves still look correct.
+
+    The other tests in this file deliberately pass "asset_class": "equity"
+    so their assertions are about session hours rather than contract
+    rounding -- which is exactly why nothing here was covered before.
+    """
+
+    _CFG = {"instruments": {"overrides": {
+        "ESM6": {"asset_class": "future", "session_hours": 23},
+    }}}
+
+    def test_documented_override_form_stays_a_future(self):
+        """The form config.py documents must preserve every futures mechanic."""
+        inst = resolve_instrument("ESM6", self._CFG)
+
+        assert inst.session_hours == 23
+        assert inst.point_value == 50.0
+        assert inst.integer_units is True
+        assert inst.borrow_applies is False
+        assert inst.calendar == CME_ETH
+
+    def test_documented_override_matches_the_un_overridden_instrument(self):
+        """
+        Everything except session_hours should be identical to what the
+        contract-month auto-detection produces on its own -- the override is
+        meant to add session hours, not reclassify the instrument.
+        """
+        auto = resolve_instrument("ESM6", {})
+        overridden = resolve_instrument("ESM6", self._CFG)
+
+        for field in ("point_value", "margin_mode", "integer_units",
+                      "borrow_applies", "calendar", "tick_size"):
+            assert getattr(overridden, field) == getattr(auto, field), field
+
+    def test_omitting_asset_class_silently_downgrades_to_equity(self):
+        """
+        Pins the trap itself. This is pre-existing `resolve_instrument`
+        precedence (#229), asserted so the behaviour cannot change silently
+        in either direction -- and so the reason the docs must spell out
+        "asset_class" stays visible.
+        """
+        inst = resolve_instrument(
+            "ESM6",
+            {"instruments": {"overrides": {"ESM6": {"session_hours": 23}}}},
+        )
+
+        assert inst.session_hours == 23          # the hours still land...
+        assert inst.point_value == 1.0           # ...but it is a cash equity
+        assert inst.integer_units is False
+        assert inst.borrow_applies is True
+        assert inst.calendar == NYSE
+
+    def test_engine_sizes_a_futures_classified_symbol_in_whole_contracts(self):
+        """
+        End-to-end: a genuinely futures-classified symbol keeps integer-unit
+        sizing through the engine while still using its 23h session for ADV.
+
+        The volume is chosen so the ADV cap lands on a fractional number of
+        units (1_111 * 23 * 0.05 = 1277.65), which an equity resolves to
+        as-is and a future must floor -- so the assertion cannot pass by
+        accident on a symbol that was silently downgraded.
+        """
+        volume = 1_111.0
+        expected_cap = volume * 23.0 * 0.05
+
+        fut = _run({"ESM6": _hourly_df(volume)}, cfg_extra=self._CFG)
+        eq = _run(
+            {"ESM6": _hourly_df(volume)},
+            cfg_extra={"instruments": {"overrides": {
+                "ESM6": {"asset_class": "equity", "session_hours": 23},
+            }}},
+        )
+
+        fut_shares = fut["trade_log"][0]["Shares"]
+        eq_shares = eq["trade_log"][0]["Shares"]
+
+        assert eq_shares == pytest.approx(expected_cap, rel=1e-9)
+        assert fut_shares == float(int(fut_shares))       # whole contracts
+        assert fut_shares == pytest.approx(int(expected_cap), rel=1e-9)
+        assert fut_shares != pytest.approx(eq_shares, rel=1e-9)
