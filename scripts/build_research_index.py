@@ -178,6 +178,13 @@ def collect_csv_rows(prefix_filter: list[str] | None = None) -> list[dict]:
                 header = reader.fieldnames or []
                 for row in reader:
                     norm = _normalise_row(row, header)
+                    # The summary CSV normally carries run_id as its first
+                    # column, but the directory name is equally authoritative
+                    # and is what load_llm_verdicts() falls back to. Without
+                    # this, a CSV missing the column would silently lose every
+                    # enrichment field on the join below.
+                    if not norm["run_id"]:
+                        norm["run_id"] = run_id
                     all_rows.append(norm)
         except Exception as e:
             print(f"  [WARN] Could not read {csv_path}: {e}", file=sys.stderr)

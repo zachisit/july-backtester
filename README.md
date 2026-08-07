@@ -293,6 +293,69 @@ The full structured data is in the JSON file — it is not printed to the termin
 
 ---
 
+## Comparing Runs — Research Index
+
+Each run writes its own folder under `output/runs/`. That is fine for one backtest, but tuning a
+strategy produces a run per parameter change, and by the twentieth one the question *"which
+settings actually gave the best Calmar, and did that one pass walk-forward?"* means opening twenty
+folders by hand.
+
+`scripts/build_research_index.py` collapses that into a single sortable CSV:
+
+```bash
+python scripts/build_research_index.py
+```
+
+It walks every `output/runs/*/overall_portfolio_summary.csv`, joins each row to the matching
+strategy entry in that run's `llm_verdict.json`, attaches the source file and parameter count for
+the strategy, and writes **`output/research_index.csv`** — one row per strategy per portfolio per
+run.
+
+```
+Building strategy lookup... 38 strategies found.
+Loading LLM verdicts... 214 verdict keys loaded.
+Collecting CSV rows... 96 rows from 12 CSVs.
+
+Wrote 96 rows → output/research_index.csv
+  WFA Pass rows:       54 / 96
+  Rows with LLM data:  96
+```
+
+### What you get per row
+
+Everything from the run summary — `P&L (%)`, `vs. SPY (B&H)`, `Max DD`, `Calmar`, `Sharpe`,
+`Profit Factor`, `Win Rate`, `Trades`, `Expectancy (R)`, `SQN`, `OOS P&L (%)`, `WFA Verdict`,
+`Rolling WFA`, `MC Verdict`, `MC Score` — plus the run's own context (`run_id`, `data_provider`,
+`start_date`, `end_date`, `timeframe`) and four columns joined in from elsewhere:
+
+| Column | Source |
+|---|---|
+| `llm_beats_spy`, `llm_smooth_verdict`, `llm_longest_flat_months`, `llm_smoothness_r2` | that run's `llm_verdict.json` |
+| `code_file`, `param_count` | parsed from the `@register_strategy` block that defines the strategy |
+
+`code_file` and `param_count` are what make the index answer *"is my best result also my simplest
+one?"* — a strategy that only wins with eight tuned parameters is a different proposition from one
+that wins with two.
+
+### Narrowing the scan
+
+```bash
+python scripts/build_research_index.py --runs-only myrun other-run
+```
+
+Only run IDs starting with one of the given prefixes are scanned. Useful when `output/runs/` has
+grown large and you only care about one experiment.
+
+### Notes
+
+- Read-only. It never modifies a run folder, and writes only to the git-ignored `output/`.
+- Strategies whose source file cannot be found simply leave `code_file` and `param_count` blank —
+  the rest of the row is still written.
+- Sorting the CSV by `Calmar` or `vs. SPY (B&H)` in any spreadsheet is usually the fastest way to
+  see which experiment actually worked.
+
+---
+
 ## CLI Flags
 
 Every setting in `config.py` can be overridden at runtime — no file editing required.
