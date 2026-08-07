@@ -221,6 +221,13 @@ def run_single_simulation(args):
         for symbol, df in portfolio_data.items():
             kwargs = {}
 
+            # Always inject the ticker being processed so per-symbol /
+            # event-driven strategies (e.g. one keyed on a per-ticker
+            # earnings-date table) can identify which symbol's DataFrame
+            # they are evaluating. Backward-compatible: existing strategies
+            # take (df, **kwargs) and ignore unknown keys.
+            kwargs["symbol"] = symbol
+
             # Dynamic dependency injection
             for dep_key in dependencies:
                 dep_symbol = dependency_map_global.get(dep_key)
