@@ -7,10 +7,10 @@ Merges:
   - All output/runs/*/overall_portfolio_summary.csv files
   - LLM verdict data (beats_spy, smooth_verdict, longest_flat_months) from
     output/runs/*/llm_verdict.json when available
-  - code_file and param_count parsed from each @register_strategy block in
-    custom_strategies/private/*.py, when that submodule is checked out.
-    The lookup is optional enrichment — with no submodule present the glob
-    yields nothing and those two columns are simply left blank.
+  - code_file and param_count parsed from each @register_strategy block found
+    anywhere under custom_strategies/ — the bundled plugins plus any private
+    submodule mounted underneath. Strategies with no matching source file just
+    leave those two columns blank.
 
 Run from the project root:
 
@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 PROJECT_ROOT = Path(__file__).parent.parent
 RUNS_DIR = PROJECT_ROOT / "output" / "runs"
-PRIVATE_DIR = PROJECT_ROOT / "custom_strategies" / "private"
+STRATEGY_DIR = PROJECT_ROOT / "custom_strategies"
 OUTPUT_PATH = PROJECT_ROOT / "output" / "research_index.csv"
 
 # ---------------------------------------------------------------------------
@@ -78,8 +78,10 @@ def _extract_strategies_from_file(py_path: Path) -> dict[str, dict]:
 
 def build_strategy_lookup() -> dict[str, dict]:
     lookup = {}
-    for py_path in sorted(PRIVATE_DIR.glob("*.py")):
-        if py_path.name == "_TEMPLATE_strategy.py":
+    # Recursive: picks up the plugins bundled in custom_strategies/ as well as
+    # any private submodule mounted underneath it.
+    for py_path in sorted(STRATEGY_DIR.rglob("*.py")):
+        if py_path.name == "_TEMPLATE_strategy.py" or py_path.name.startswith("__"):
             continue
         try:
             extracted = _extract_strategies_from_file(py_path)
