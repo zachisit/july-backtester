@@ -48,6 +48,7 @@ services/csv_service.py            # Local CSV files ({csv_data_dir}/{SYMBOL}.cs
 tickers_to_scan/                   # JSON ticker lists (nasdaq_100.json, sp-500.json, etc.)
 scripts/                           # One-off diagnostic and utility scripts (NOT part of the pipeline)
 scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run with: python scripts/debug_data.py
+scripts/build_research_index.py    # Consolidates all output/runs/ summaries + llm_verdict.json into output/research_index.csv
 ```
 
 ## Scripts Directory
