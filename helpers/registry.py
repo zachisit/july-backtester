@@ -97,6 +97,14 @@ def register_strategy(
     The decorated function **must** accept ``(df, **kwargs)`` and return the
     DataFrame with a ``Signal`` column added.
 
+    Injected kwargs
+    ---------------
+    The engine always injects ``kwargs["symbol"]`` — the ticker string for the
+    DataFrame currently being processed (e.g. ``"AAPL"``) — before calling the
+    logic function. This lets per-symbol / event-driven strategies (for example
+    one keyed on a per-ticker earnings-date table) identify which symbol they
+    are evaluating. Strategies that do not need it simply ignore the extra key.
+
     Parameters
     ----------
     name : str
