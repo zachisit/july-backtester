@@ -98,6 +98,11 @@ CONFIG = {
     # ============================================================
     # {"type": "none"} | {"type": "percentage", "value": 0.05}
     # | {"type": "atr", "multiplier": 2.0}
+    # | {"type": "signal_bar", "buffer": 0.005}
+    #     Structural stop at the SIGNAL bar's extreme rather than a distance from
+    #     entry: long stops under that bar's Low, short stops above its High.
+    #     "buffer" (fraction, default 0.0) pads the level away from the printed
+    #     extreme so noise doesn't graze it. Static — it does not trail.
     "stop_loss_configs": [
         {"type": "none"},
     ],

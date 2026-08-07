@@ -749,6 +749,16 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if pd.notna(_ab) and pd.notna(_cb):
                             _s_stop = _inst.atr_stop_level(_cb, _ab, stop_config.get("multiplier", 3.0),
                                                            side="short", point_cap=stop_config.get("point_cap"))
+                elif _sc_type == 'signal_bar':
+                    # Mirror of the long-side branch: stop ABOVE the signal bar's high.
+                    # `sig_date` is already the true signal bar for both execution_time modes.
+                    if pd.notna(sig_date) and sig_date in df.index:
+                        _sb = df.loc[sig_date]
+                        _lvl = _inst.signal_bar_stop_level(
+                            _sb.get('High'), _sb.get('Low'),
+                            stop_config.get("buffer", 0.0), side="short")
+                        if _lvl is not None:
+                            _s_stop = _lvl
                 elif _sc_type == 'trailing_atr':
                     _dbe = prev_trading_dates[symbol].get(date)
                     _ab = df.loc[_dbe].get('ATR_14') if (pd.notna(_dbe) and _dbe in df.index) else np.nan
@@ -1215,6 +1225,21 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                     close_before_entry, atr_before_entry,
                                     stop_config.get("multiplier", 3.0), side="long",
                                     point_cap=stop_config.get("point_cap"))
+
+                    elif _stype == 'signal_bar':
+                        # Structural stop anchored to the SIGNAL bar's low, not to the entry
+                        # price. `signal_date` is the bar that produced the signal — the bar
+                        # before the fill under execution_time="open", the fill bar itself
+                        # under "close". Either way the level is known at entry, so there is
+                        # no look-ahead; unlike the 'atr' branch this reads the signal bar
+                        # directly instead of assuming the open-fill offset.
+                        if pd.notna(signal_date) and signal_date in df.index:
+                            _sb = df.loc[signal_date]
+                            _lvl = _inst.signal_bar_stop_level(
+                                _sb.get('High'), _sb.get('Low'),
+                                stop_config.get("buffer", 0.0), side="long")
+                            if _lvl is not None:
+                                stop_loss_level = _lvl
 
                     elif _stype == 'trailing_atr':
                         # Sleeve A mechanic. Lock ATR at the breakout (signal) bar and keep it
