@@ -222,6 +222,41 @@ The engine is instrument-aware: **`helpers/instruments.py`** resolves a per-symb
   - `continuous_contract.rolls_spanned(entry, exit, roll_dates)` flags a held position crossing a roll (long-horizon guard).
 - **Regression guard:** `tests/test_engine_characterization.py` (golden master) + `test_instruments.py`, `test_futures_engine.py`, `test_futures_service.py`, `test_continuous_contract.py`, `test_scaled_exits.py`, `test_intrabar.py`, `test_intrabar_wiring.py`, `test_data_quality_calendar.py`, `test_futures_234.py`.
 
+## Structural Stop — `signal_bar` (SECTION 9)
+
+`{"type": "signal_bar", "buffer": 0.005}` places the initial stop at the **signal bar's own
+extreme** instead of a distance measured from the entry fill: long stops at `signal_bar.Low *
+(1 - buffer)`, short stops at `signal_bar.High * (1 + buffer)`. `buffer` is a fraction
+(default `0.0`); it pads the level so noise doesn't graze a stop sitting exactly on the
+printed extreme. The level is **static — it does not trail**.
+
+- **Helper**: `helpers/instruments.signal_bar_stop_level(bar_high, bar_low, buffer, side)`.
+  Returns `None` for a missing/zero/negative/NaN extreme, which the engine treats as "no stop".
+- **`bars_back`** (default `0`) walks the anchor further back through
+  `prev_trading_dates` via the module-level `_walk_back()` helper: `1` anchors to the bar
+  *before* the trigger. Many setups are specified that way — the trigger bar is the reversal,
+  and the level worth defending is the last bar of the move that preceded it. Walking off the
+  start of the series yields `NaT` → no stop for that trade.
+- **Wiring**: both entry paths in `helpers/portfolio_simulations.py` resolve the signal bar
+  from the loop's existing `signal_date` / `sig_date` variable — the bar *before* the fill under
+  `execution_time="open"`, the fill bar itself under `"close"`. This differs from the `atr`
+  branch, which hard-codes `prev_trading_dates[entry_exec_date]` and therefore assumes
+  `execution_time="open"`. No look-ahead either way: the level is known at entry.
+- **Next-Day Activation interaction (important for short holds):** a position is not
+  stop-checked until the bar *after* entry. Under `execution_time="open"` a one-session trade
+  (enter next open, exit the open after) is therefore unprotected for its entire holding
+  session — the stop can only alter the exit bar's fill. To express "stop active during the
+  session I hold", pair `signal_bar` with `execution_time="close"`. Multi-session holds are
+  unaffected.
+- **Fill assumption**: like every daily-bar stop in the engine, a stopped trade fills *at* the
+  stop level; a bar that opens through the stop is not refilled at the open unless
+  `intrabar_resolution` is enabled. On strategies where the stop is dormant for a session this
+  flatters results — see `custom_strategies/private/research_context/scripts/eth_btc_fade_stop_test.py`
+  for a gap-aware cross-check harness.
+- **Tests**: `tests/test_signal_bar_stop.py` — 19 tests: helper arithmetic and guards, long/short
+  fire-and-hold cases, buffer widening, `InitialRisk` measured from the signal-bar extreme, and
+  a no-trail regression.
+
 ## Data Providers
 
 ### Yahoo Finance (`data_provider = "yahoo"`)
