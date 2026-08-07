@@ -232,6 +232,11 @@ printed extreme. The level is **static — it does not trail**.
 
 - **Helper**: `helpers/instruments.signal_bar_stop_level(bar_high, bar_low, buffer, side)`.
   Returns `None` for a missing/zero/negative/NaN extreme, which the engine treats as "no stop".
+- **`bars_back`** (default `0`) walks the anchor further back through
+  `prev_trading_dates` via the module-level `_walk_back()` helper: `1` anchors to the bar
+  *before* the trigger. Many setups are specified that way — the trigger bar is the reversal,
+  and the level worth defending is the last bar of the move that preceded it. Walking off the
+  start of the series yields `NaT` → no stop for that trade.
 - **Wiring**: both entry paths in `helpers/portfolio_simulations.py` resolve the signal bar
   from the loop's existing `signal_date` / `sig_date` variable — the bar *before* the fill under
   `execution_time="open"`, the fill bar itself under `"close"`. This differs from the `atr`

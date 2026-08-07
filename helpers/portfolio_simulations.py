@@ -150,6 +150,20 @@ def _prearm_decision(high, low, stop_level, target, window_bars, side="long"):
     return ("hold", None)
 
 
+def _walk_back(prev_dates, date, n):
+    """Step ``n`` trading bars back from ``date`` using a prev-date mapping.
+
+    ``n=0`` returns ``date`` unchanged. Returns ``pd.NaT`` if the chain runs off the
+    start of the series, which callers treat as "no stop for this trade".
+    """
+    n = int(n or 0)
+    for _ in range(n):
+        if pd.isna(date):
+            return pd.NaT
+        date = prev_dates.get(date, pd.NaT)
+    return date
+
+
 def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config, size_mults=None, delisting_dates=None, intrabar_data=None):
     """
     Runs a portfolio simulation with integrated stop-loss handling and logs
@@ -752,8 +766,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 elif _sc_type == 'signal_bar':
                     # Mirror of the long-side branch: stop ABOVE the signal bar's high.
                     # `sig_date` is already the true signal bar for both execution_time modes.
-                    if pd.notna(sig_date) and sig_date in df.index:
-                        _sb = df.loc[sig_date]
+                    _sb_date = _walk_back(prev_trading_dates[symbol], sig_date,
+                                          stop_config.get("bars_back", 0))
+                    if pd.notna(_sb_date) and _sb_date in df.index:
+                        _sb = df.loc[_sb_date]
                         _lvl = _inst.signal_bar_stop_level(
                             _sb.get('High'), _sb.get('Low'),
                             stop_config.get("buffer", 0.0), side="short")
@@ -1233,8 +1249,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         # under "close". Either way the level is known at entry, so there is
                         # no look-ahead; unlike the 'atr' branch this reads the signal bar
                         # directly instead of assuming the open-fill offset.
-                        if pd.notna(signal_date) and signal_date in df.index:
-                            _sb = df.loc[signal_date]
+                        #
+                        # bars_back>0 walks the anchor further back: "stop beyond the bar
+                        # BEFORE the trigger" is how a lot of setups are actually specified
+                        # (the trigger bar is the reversal; the level to defend is the last
+                        # bar of the move that preceded it).
+                        _sb_date = _walk_back(prev_trading_dates[symbol], signal_date,
+                                              stop_config.get("bars_back", 0))
+                        if pd.notna(_sb_date) and _sb_date in df.index:
+                            _sb = df.loc[_sb_date]
                             _lvl = _inst.signal_bar_stop_level(
                                 _sb.get('High'), _sb.get('Low'),
                                 stop_config.get("buffer", 0.0), side="long")

@@ -193,3 +193,60 @@ class TestNoRegression:
         ])
         log = pd.DataFrame(_run(df, [1, 0, 0, 0], {"type": "none"})["trade_log"])
         assert log.empty or "Stop Loss" not in log.iloc[0]["ExitReason"]
+
+
+class TestBarsBack:
+    """`bars_back` walks the anchor further back than the signal bar itself."""
+
+    def test_bars_back_1_anchors_to_the_bar_before_the_signal(self):
+        # signal bar (day 1) Low = 98; the bar BEFORE it (day 0) Low = 92
+        df = _frame([
+            ("2024-01-02", 95, 101,  92,  99),   # bars_back=1 anchor -> 92
+            ("2024-01-03", 99, 105,  98, 104),   # signal bar        -> 98
+            ("2024-01-04", 104, 106, 103, 105),  # entry at 104
+            ("2024-01-05", 105, 105,  95,  96),  # breaks 98 but not 92
+            ("2024-01-08", 96,  97,  95,  96),
+        ])
+        sig = [0, 1, 0, 0, 0]
+        tight = pd.DataFrame(_run(df, sig, {"type": "signal_bar"})["trade_log"])
+        wide = pd.DataFrame(_run(df, sig, {"type": "signal_bar", "bars_back": 1})["trade_log"])
+        assert "Stop Loss" in tight.iloc[0]["ExitReason"]          # 98 broken
+        assert wide.empty or "Stop Loss" not in wide.iloc[0]["ExitReason"]   # 92 held
+
+    def test_bars_back_0_is_the_default_and_matches_omitting_it(self):
+        df = _frame([
+            ("2024-01-02", 95, 101,  92,  99),
+            ("2024-01-03", 99, 105,  98, 104),
+            ("2024-01-04", 104, 106, 103, 105),
+            ("2024-01-05", 105, 105,  95,  96),
+            ("2024-01-08", 96,  97,  95,  96),
+        ])
+        sig = [0, 1, 0, 0, 0]
+        a = pd.DataFrame(_run(df, sig, {"type": "signal_bar"})["trade_log"])
+        b = pd.DataFrame(_run(df, sig, {"type": "signal_bar", "bars_back": 0})["trade_log"])
+        assert a.iloc[0]["ExitPrice"] == pytest.approx(b.iloc[0]["ExitPrice"])
+
+    def test_short_bars_back_anchors_above_the_earlier_high(self):
+        df = _frame([
+            ("2024-01-02", 100, 112,  98, 100),  # bars_back=1 anchor -> 112
+            ("2024-01-03", 100, 105,  98,  99),  # signal bar        -> 105
+            ("2024-01-04",  99, 100,  97,  98),  # short at 99
+            ("2024-01-05",  98, 108,  98, 107),  # breaks 105 but not 112
+            ("2024-01-08", 107, 108, 106, 107),
+        ])
+        sig = [0, -2, 0, 0, 0]
+        tight = pd.DataFrame(_run(df, sig, {"type": "signal_bar"})["trade_log"])
+        wide = pd.DataFrame(_run(df, sig, {"type": "signal_bar", "bars_back": 1})["trade_log"])
+        assert "Stop Loss" in tight.iloc[0]["ExitReason"]
+        assert wide.empty or "Stop Loss" not in wide.iloc[0]["ExitReason"]
+
+    def test_walking_off_the_start_of_the_series_yields_no_stop(self):
+        df = _frame([
+            ("2024-01-02", 100, 105,  98, 104),  # signal on the FIRST bar
+            ("2024-01-03", 104, 106, 103, 105),
+            ("2024-01-04", 105, 105,  90,  91),
+            ("2024-01-05",  91,  92,  90,  91),
+        ])
+        log = pd.DataFrame(_run(df, [1, 0, 0, 0],
+                                {"type": "signal_bar", "bars_back": 5})["trade_log"])
+        assert log.empty or "Stop Loss" not in log.iloc[0]["ExitReason"]
