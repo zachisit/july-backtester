@@ -239,7 +239,15 @@ def run_single_simulation(args):
             # - If there are dependencies, kwargs contains spy_df etc.
             # - If there are params, kwargs contains them.
             # - If there are neither, kwargs is empty, which is fine.
-            base_signals_with_dfs[symbol] = logic_func(df.copy(), **kwargs)
+            # Stamp the symbol so precomputed-signal plugins can tell which
+            # instrument they were handed. Several plugins document this as a
+            # requirement ("signal_file_symbol dispatch stamps df.attrs['symbol']")
+            # but nothing here was setting it, so those plugins silently emitted
+            # zero signals for every symbol. df.copy() does not reliably carry
+            # attrs, so it is stamped on the copy that is actually passed.
+            _sym_df = df.copy()
+            _sym_df.attrs["symbol"] = symbol
+            base_signals_with_dfs[symbol] = logic_func(_sym_df, **kwargs)
 
         # The simulator now handles stop-loss logic internally.
         final_signals = {symbol: df['Signal'] for symbol, df in base_signals_with_dfs.items()}
