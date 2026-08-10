@@ -773,7 +773,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _lvl = _inst.signal_bar_stop_level(
                             _sb.get('High'), _sb.get('Low'),
                             stop_config.get("buffer", 0.0), side="short")
-                        if _lvl is not None:
+                        # Protective-side guard (mirror of the long branch): only arm the
+                        # stop if it sits ABOVE the short fill `ep`. A next-open that gaps
+                        # UP through the signal-bar high leaves the level below entry — not
+                        # a stop; unguarded it covers next bar in the trade's FAVOR.
+                        if _lvl is not None and _lvl > ep:
                             _s_stop = _lvl
                 elif _sc_type == 'trailing_atr':
                     _dbe = prev_trading_dates[symbol].get(date)
@@ -1261,7 +1265,14 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             _lvl = _inst.signal_bar_stop_level(
                                 _sb.get('High'), _sb.get('Low'),
                                 stop_config.get("buffer", 0.0), side="long")
-                            if _lvl is not None:
+                            # Protective-side guard: only arm the stop if it sits BELOW the
+                            # actual long fill. Under execution_time="open" the fill is the
+                            # next bar's open, which can gap DOWN through the signal-bar low;
+                            # a structural level above entry is not a stop at all — left
+                            # unguarded it fires next bar and fills at the phantom level
+                            # (in the trade's FAVOR), booking a spurious "Stop Loss" profit
+                            # and a 1%-proxy InitialRisk. Fall through to no stop instead.
+                            if _lvl is not None and _lvl < entry_price:
                                 stop_loss_level = _lvl
 
                     elif _stype == 'trailing_atr':

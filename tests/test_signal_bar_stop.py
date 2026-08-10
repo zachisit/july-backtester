@@ -250,3 +250,66 @@ class TestBarsBack:
         log = pd.DataFrame(_run(df, [1, 0, 0, 0],
                                 {"type": "signal_bar", "bars_back": 5})["trade_log"])
         assert log.empty or "Stop Loss" not in log.iloc[0]["ExitReason"]
+
+
+# --------------------------------------------------------------------------
+# Protective-side guard: a fill that gaps THROUGH the structural level leaves
+# the stop on the wrong side of entry. Left unguarded it fires next bar and
+# fills at the phantom level in the trade's FAVOR (a spurious profitable
+# "Stop Loss") and poisons InitialRisk/RMultiple. The guard drops the stop.
+# alloc 0.5 (not 1.0) so the entry is never rejected by the full-capital
+# affordability epsilon — we need the position to actually open here.
+# --------------------------------------------------------------------------
+def _run_half(df, signals, stop_config):
+    return run_portfolio_simulation(
+        portfolio_data={"TEST": df},
+        signals={"TEST": pd.Series(signals, index=df.index)},
+        initial_capital=100_000.0, allocation_pct=0.5,
+        spy_df=None, vix_df=None, tnx_df=None, stop_config=stop_config,
+    )
+
+
+class TestGapThroughEntryGuard:
+    def test_long_gap_down_below_low_does_not_fire_a_favorable_stop(self):
+        # signal-bar Low = 98; next bar GAPS DOWN and opens at 94 (below 98),
+        # so the structural stop (98) would sit ABOVE the long fill.
+        df = _frame([
+            ("2024-01-02", 100, 105,  98, 104),   # signal bar, Low = 98
+            ("2024-01-03",  94,  95,  93,  94),    # GAP DOWN: fill at 94
+            ("2024-01-04",  96,  97,  95,  96),    # trades under 98 the whole way
+            ("2024-01-05",  96,  97,  95,  96),
+            ("2024-01-08",  96,  97,  95,  96),
+        ])
+        log = pd.DataFrame(_run_half(df, [1, 0, 0, 0, 0], {"type": "signal_bar"})["trade_log"])
+        assert len(log) == 1                                   # the position DID open
+        assert "Stop Loss" not in log.iloc[0]["ExitReason"]    # no wrong-side stop fired
+        # sanity: without the guard this same bar produced a ~+4R "Stop Loss"
+        assert not (log.iloc[0]["Profit"] > 0
+                    and "Stop Loss" in log.iloc[0]["ExitReason"])
+
+    def test_short_gap_up_above_high_does_not_fire_a_favorable_stop(self):
+        # signal-bar High = 105; next bar GAPS UP and opens at 108 (above 105),
+        # so the structural stop (105) would sit BELOW the short fill.
+        df = _frame([
+            ("2024-01-02", 100, 105,  98,  99),   # signal bar, High = 105
+            ("2024-01-03", 108, 109, 107, 108),   # GAP UP: short fill at 108
+            ("2024-01-04", 106, 107, 104, 105),   # trades above 105 the whole way
+            ("2024-01-05", 105, 106, 104, 105),
+            ("2024-01-08", 105, 106, 104, 105),
+        ])
+        log = pd.DataFrame(_run_half(df, [-2, 0, 0, 0, 0], {"type": "signal_bar"})["trade_log"])
+        assert len(log) == 1
+        assert "Stop Loss" not in log.iloc[0]["ExitReason"]
+
+    def test_long_normal_fill_still_stops_below_the_low(self):
+        # Guard must NOT suppress a legitimate stop: no gap, fill above the low,
+        # price later breaks 98 -> a real (losing) Stop Loss.
+        df = _frame([
+            ("2024-01-02", 100, 105,  98, 104),
+            ("2024-01-03", 104, 106, 103, 105),   # fill at 104 (> stop 98)
+            ("2024-01-04", 105, 105,  95,  96),    # breaks 98 -> stop
+            ("2024-01-05",  96,  97,  95,  96),
+        ])
+        log = pd.DataFrame(_run_half(df, [1, 0, 0, 0], {"type": "signal_bar"})["trade_log"])
+        assert "Stop Loss" in log.iloc[0]["ExitReason"]
+        assert log.iloc[0]["Profit"] < 0                       # a real losing stop

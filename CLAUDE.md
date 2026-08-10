@@ -253,9 +253,18 @@ printed extreme. The level is **static — it does not trail**.
   `intrabar_resolution` is enabled. On strategies where the stop is dormant for a session this
   flatters results — see `custom_strategies/private/research_context/scripts/eth_btc_fade_stop_test.py`
   for a gap-aware cross-check harness.
-- **Tests**: `tests/test_signal_bar_stop.py` — 19 tests: helper arithmetic and guards, long/short
-  fire-and-hold cases, buffer widening, `InitialRisk` measured from the signal-bar extreme, and
-  a no-trail regression.
+- **Protective-side guard**: unlike `percentage`/`atr` (distance-from-entry, always on the
+  protective side), a structural level is decoupled from the fill, so under `execution_time="open"`
+  a next-open that gaps *through* the extreme leaves the stop on the WRONG side of entry (long: a
+  level above the fill; short: below it). Both entry branches therefore only arm the stop when it is
+  actually protective (`_lvl < entry_price` long / `_lvl > ep` short); otherwise they fall through
+  to no stop. Without this an inverted stop fires the next bar and fills at the phantom level *in the
+  trade's favor* — a spurious profitable "Stop Loss" that flatters P&L/win-rate and poisons
+  `InitialRisk`/`RMultiple`. Pairing with `intrabar_resolution` reduces the phantom-fill magnitude
+  but does not replace the guard.
+- **Tests**: `tests/test_signal_bar_stop.py` — 22 tests: helper arithmetic and guards, long/short
+  fire-and-hold cases, buffer widening, `InitialRisk` measured from the signal-bar extreme, a
+  no-trail regression, and gap-through-entry cases that assert the protective-side guard.
 
 ## Data Providers
 
