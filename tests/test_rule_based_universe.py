@@ -51,7 +51,15 @@ def cache_path(tmp_path):
     p = tmp_path / "universe_metrics.parquet"
     _cache(rows).to_parquet(p, index=False)
     rbu._load_cache_cached.cache_clear()
-    return {"universe_cache_path": str(p)}
+    # Threshold/schedule/collision tests are orthogonal to the instrument-type
+    # filter and use synthetic tickers (LIVE, THIN, WB, ...) that aren't real
+    # SEC registrants. Point at a path that doesn't exist so the filter is a
+    # documented no-op here rather than silently excluding everything --
+    # TestInstrumentTypeFilter below exercises the filter itself.
+    return {
+        "universe_cache_path": str(p),
+        "universe_sec_registrant_path": str(tmp_path / "no_sec_index_here.json"),
+    }
 
 
 class TestThresholds:
@@ -169,7 +177,10 @@ class TestCollisionReporting:
         p = tmp_path / "c.parquet"
         _cache(rows).to_parquet(p, index=False)
         rbu._load_cache_cached.cache_clear()
-        cfg = {"universe_cache_path": str(p)}
+        cfg = {
+            "universe_cache_path": str(p),
+            "universe_sec_registrant_path": str(tmp_path / "no_sec_index_here.json"),
+        }
         assert rbu.universe_on("2010-01-15", cfg) == ["DUP"]      # deduped
         coll = rbu.ticker_collisions("2010-01-01", "2010-12-31", cfg)
         assert len(coll) == 1
@@ -181,3 +192,133 @@ class TestMissingCache:
         rbu._load_cache_cached.cache_clear()
         with pytest.raises(FileNotFoundError, match="build_universe_cache"):
             rbu.universe_on("2010-01-01", {"universe_cache_path": str(tmp_path / "nope.parquet")})
+
+
+class TestTickerNormalisation:
+    def test_dot_becomes_hyphen(self):
+        assert rbu.normalise_universe_ticker("BRK.B") == "BRK-B"
+
+    def test_already_hyphenated_is_unchanged(self):
+        assert rbu.normalise_universe_ticker("BRK-B") == "BRK-B"
+
+    def test_lowercase_is_upcased(self):
+        assert rbu.normalise_universe_ticker("aapl") == "AAPL"
+
+    def test_explicit_alias_applied(self):
+        # Norgate stores the pre-2019 21st Century Fox entity as TFCFA; PIT
+        # rosters record the same membership slot as FOXA (issue #70 defect 2).
+        assert rbu.normalise_universe_ticker("TFCFA") == "FOXA"
+
+    def test_unaliased_ticker_passes_through(self):
+        assert rbu.normalise_universe_ticker("MSFT") == "MSFT"
+
+
+class TestInstrumentTypeFilter:
+    """issue #70 defect 1: no instrument-type filter meant ETFs/ETNs leaked
+    into the rule-based universe (>=51/185 rule-only names in Zach's gate
+    run). Every case here was found by actually running the filter against
+    the real SEC registrant snapshot, not guessed -- including three false
+    positives a first-draft keyword rule produced (NETFLIX INC matching a bare
+    "ETF" substring, LXP/RLJ being real REITs literally named after their own
+    ticker, and RY/Royal Bank of Canada's real equity sharing an ETN issuer's
+    exact title) before being fixed.
+    """
+
+    def _idx(self, **tickers):
+        return {t.upper(): title for t, title in tickers.items()}
+
+    def test_absent_from_sec_index_is_excluded(self):
+        # The majority case: '40 Act ETFs (IWM, XLF, EFA, ...) never file as
+        # Exchange Act registrants at all.
+        assert rbu.is_operating_company("IWM", self._idx(AAPL="Apple Inc.")) is False
+
+    def test_real_company_in_index_is_included(self):
+        assert rbu.is_operating_company("AAPL", self._idx(AAPL="Apple Inc.")) is True
+
+    def test_no_index_configured_is_a_no_op(self):
+        assert rbu.is_operating_company("ANYTHING", None) is True
+
+    def test_legacy_uit_with_etf_in_title_excluded(self):
+        idx = self._idx(SPY="SPDR S&P 500 ETF TRUST")
+        assert rbu.is_operating_company("SPY", idx) is False
+
+    def test_legacy_uit_without_etf_in_title_excluded(self):
+        idx = self._idx(QQQ="INVESCO QQQ TRUST, SERIES 1")
+        assert rbu.is_operating_company("QQQ", idx) is False
+
+    def test_commodity_trust_excluded(self):
+        idx = self._idx(GLD="SPDR GOLD TRUST")
+        assert rbu.is_operating_company("GLD", idx) is False
+
+    def test_bank_issued_etn_excluded(self):
+        idx = self._idx(VXX="BARCLAYS BANK PLC")
+        assert rbu.is_operating_company("VXX", idx) is False
+
+    def test_reit_with_trust_in_title_not_excluded(self):
+        # The bare "TRUST" keyword a first draft used would wrongly exclude
+        # real S&P 500 REITs that are legally structured as trusts.
+        idx = self._idx(DLR="DIGITAL REALTY TRUST, INC.")
+        assert rbu.is_operating_company("DLR", idx) is True
+
+    def test_mlp_with_lp_in_title_not_excluded(self):
+        idx = self._idx(EPD="ENTERPRISE PRODUCTS PARTNERS L.P.")
+        assert rbu.is_operating_company("EPD", idx) is True
+
+    def test_reit_named_after_its_own_ticker_not_excluded(self):
+        # LXP Industrial Trust and RLJ Lodging Trust are real REITs, not UITs
+        # -- a naive "ticker appears in its own filed title" rule would wrongly
+        # exclude them the same way it correctly flags "INVESCO QQQ TRUST".
+        assert rbu.is_operating_company("LXP", self._idx(LXP="LXP Industrial Trust")) is True
+        assert rbu.is_operating_company("RLJ", self._idx(RLJ="RLJ Lodging Trust")) is True
+
+    def test_word_containing_etf_as_substring_not_excluded(self):
+        # "NETFLIX" contains the literal substring "ETF" (n-ETF-lix); the
+        # marker match must be whole-word, not substring.
+        assert rbu.is_operating_company("NFLX", self._idx(NFLX="NETFLIX INC")) is True
+
+    def test_word_containing_gold_as_substring_not_excluded(self):
+        # "Goldman Sachs" contains the substring "GOLD"; combined with a
+        # "Trust" title that must not trigger the commodity-trust rule.
+        idx = self._idx(GJS="STRATS(SM) Trust for Goldman Sachs Group Securities, Series 2006-2")
+        assert rbu.is_operating_company("GJS", idx) is True
+
+    def test_bank_equity_sharing_etn_issuer_title_not_excluded(self):
+        # Royal Bank of Canada's own common stock (RY) files under the exact
+        # same title text ("ROYAL BANK OF CANADA") that would otherwise be
+        # used to detect RBC-issued ETNs -- title alone can't disambiguate,
+        # so that bank was dropped from the ETN issuer set entirely.
+        idx = self._idx(RY="ROYAL BANK OF CANADA")
+        assert rbu.is_operating_company("RY", idx) is True
+
+    def test_eligible_rows_applies_filter_when_configured(self, tmp_path):
+        rows = [
+            ["REALCO", "REALCO", "2020-01", 50.0, 5e7, 3000, 21],
+            ["ETFCO", "ETFCO", "2020-01", 50.0, 5e7, 3000, 21],
+        ]
+        cache_p = tmp_path / "cache.parquet"
+        _cache(rows).to_parquet(cache_p, index=False)
+        sec_p = tmp_path / "sec.json"
+        sec_p.write_text(
+            '{"tickers": {"REALCO": "Real Operating Co Inc.", '
+            '"ETFCO": "Some Sponsor ETF Trust"}}',
+            encoding="utf-8",
+        )
+        rbu._load_cache_cached.cache_clear()
+        rbu._load_sec_index_cached.cache_clear()
+        cfg = {"universe_cache_path": str(cache_p), "universe_sec_registrant_path": str(sec_p)}
+        assert rbu.universe_on("2020-01-15", cfg) == ["REALCO"]
+
+    def test_filter_disabled_by_config_keeps_everything(self, tmp_path):
+        rows = [["ETFCO", "ETFCO", "2020-01", 50.0, 5e7, 3000, 21]]
+        cache_p = tmp_path / "cache.parquet"
+        _cache(rows).to_parquet(cache_p, index=False)
+        sec_p = tmp_path / "sec.json"
+        sec_p.write_text('{"tickers": {"ETFCO": "Some Sponsor ETF Trust"}}', encoding="utf-8")
+        rbu._load_cache_cached.cache_clear()
+        rbu._load_sec_index_cached.cache_clear()
+        cfg = {
+            "universe_cache_path": str(cache_p),
+            "universe_sec_registrant_path": str(sec_p),
+            "universe_exclude_non_operating_companies": False,
+        }
+        assert rbu.universe_on("2020-01-15", cfg) == ["ETFCO"]

@@ -48,7 +48,9 @@ liquid one wins, and the collision is reported by
 """
 from __future__ import annotations
 
+import json
 import os
+import re
 from functools import lru_cache
 
 import pandas as pd
@@ -62,10 +64,14 @@ __all__ = [
     "members_on",
     "resolve_rule_portfolio",
     "ticker_collisions",
+    "normalise_universe_ticker",
+    "load_sec_registrant_index",
+    "is_operating_company",
 ]
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_CACHE = os.path.join(_ROOT, "universe_cache", "universe_metrics.parquet")
+_DEFAULT_SEC_INDEX = os.path.join(_ROOT, "universe_cache", "sec_operating_company_tickers.json")
 
 #: Threshold defaults. A universe definition is a parameter, not a fact --
 #: sweep these rather than asserting them (see the sensitivity note on #70).
@@ -74,7 +80,131 @@ DEFAULTS = {
     "universe_min_dollar_volume": 5e6,    # $ 20-day average
     "universe_min_bars": 252,             # ~1y of history before eligibility
     "universe_top_n": None,               # None = uncapped; int = top N by adv20
+    "universe_exclude_non_operating_companies": True,  # see is_operating_company()
+    "universe_sec_registrant_path": None,  # None = default committed snapshot
 }
+
+# --- ticker normalisation ---------------------------------------------------
+# Norgate uses '.' for share classes (BRK.B); this project's PIT rosters and
+# price providers use '-' (BRK-B, matching helpers.point_in_time's own
+# normalisation and, empirically, SEC EDGAR's own convention). A handful of
+# names also changed ticker across a corporate action that is NOT a pure
+# share-class rename -- e.g. Norgate stores the pre-2019 21st Century Fox
+# entity under its historical ticker TFCFA, while PIT rosters record that same
+# membership slot under the surviving Fox Corp ticker FOXA. Those need an
+# explicit alias, the same way helpers.point_in_time.PIT_TICKER_NORMALISATION
+# aliases old->current tickers (UTX->RTX etc.) for the index PIT paths.
+RULE_TICKER_ALIASES = {
+    "TFCFA": "FOXA",
+}
+
+
+def normalise_universe_ticker(raw: str) -> str:
+    """Canonical ticker for a Norgate security stem's base ticker."""
+    t = str(raw).strip().upper().replace(".", "-")
+    return RULE_TICKER_ALIASES.get(t, t)
+
+
+# --- instrument-type filter (issue #70 gate defect 1) -----------------------
+# The Norgate bar corpus has no security-type field, so "is this a stock" has
+# to be answered indirectly. Absence from SEC's own Exchange-Act registrant
+# index is the primary signal: '40 Act ETFs (iShares, sector SPDRs, ARK funds
+# -- IWM, XLF, TLT, ARKK, EFA, HYG, EWZ, FXI, XLE, XLK, IVV, EEM among the
+# names the #70 gate actually surfaced) file as investment companies, not
+# Exchange Act reporting companies, and never appear in the registrant index
+# at all. A handful of older structures DO have an Exchange Act CIK and would
+# slip through that check alone -- legacy index unit-investment-trusts (SPY,
+# QQQ, DIA), precious-metal/commodity grantor trusts (GLD, SLV, USO, ...), and
+# bank-issued ETNs (VXX, VXZ, DJP, filed under the issuing bank's own name) --
+# so a registrant that IS present gets a second check against its own
+# SEC-filed title. "TRUST" and "FUND" alone are deliberately NOT used as
+# markers: real S&P 500 REITs (Digital Realty TRUST, Federal Realty
+# Investment TRUST, Vornado Realty TRUST) and MLPs legitimately carry those
+# words, and a blind match would silently exclude large, liquid, legitimate
+# equities -- worse than the bug this is fixing.
+_FUND_TITLE_MARKERS = ("ETF", "PROSHARES", "TEUCRIUM")
+_ETN_ISSUER_TITLES = {
+    "BARCLAYS BANK PLC", "CREDIT SUISSE AG", "UBS AG",
+    "JPMORGAN CHASE FINANCIAL CO LLC", "GS FINANCE CORP",
+    "CITIGROUP GLOBAL MARKETS HOLDINGS INC", "MORGAN STANLEY FINANCE LLC",
+    "DEUTSCHE BANK AG",
+    # NOT "BANK OF MONTREAL" or "ROYAL BANK OF CANADA": those banks' own
+    # common stock (BMO, RY) files under those near-identical titles too
+    # ("BANK OF MONTREAL /CAN/", "ROYAL BANK OF CANADA" exactly for RY) --
+    # verified empirically that neither bank currently backs any ETN ticker
+    # under the bare form in SEC's data, so excluding the bare title would
+    # only have wrongly dropped RY, a real, liquid bank stock, for no gain.
+}
+_COMMODITY_WORDS = ("GOLD", "SILVER", "PLATINUM", "PALLADIUM", "OIL", "GAS",
+                    "GASOLINE", "COMMODITY", "AGRICULTURE", "METAL", "METALS",
+                    "GSCI")
+# Legacy 1990s-era equity-index Unit Investment Trusts. SPY/DIA/MDY's own SEC
+# titles already contain "ETF" ("SPDR S&P 500 ETF TRUST" etc.); QQQ's does not
+# ("INVESCO QQQ TRUST, SERIES 1"), so it needs an explicit entry rather than a
+# generic "ticker appears in its own title" rule -- that generic rule was
+# tried first and wrongly excluded real REITs that are literally named after
+# their own ticker (LXP Industrial Trust, RLJ Lodging Trust).
+_LEGACY_INDEX_UIT_TICKERS = {"QQQ"}
+
+
+def _contains_word(title_upper: str, word: str) -> bool:
+    """Whole-word match, not substring -- "ETF" must not fire on NETFLIX,
+    and "GOLD" must not fire on GOLDMAN SACHS."""
+    return re.search(rf"\b{re.escape(word)}\b", title_upper) is not None
+
+
+def _looks_like_fund_or_trust(ticker: str, title: str) -> bool:
+    t = title.upper()
+    if ticker.upper() in _LEGACY_INDEX_UIT_TICKERS:
+        return True
+    if any(_contains_word(t, marker) for marker in _FUND_TITLE_MARKERS):
+        return True
+    if t in _ETN_ISSUER_TITLES:
+        return True
+    if (_contains_word(t, "TRUST") or _contains_word(t, "FUND")) and any(
+        _contains_word(t, w) for w in _COMMODITY_WORDS
+    ):
+        return True
+    return False
+
+
+def is_operating_company(ticker: str, sec_index: dict | None) -> bool:
+    """True if *ticker* is a real reporting company, not an ETF/ETN/fund.
+
+    ``sec_index`` is ``None`` when no registrant snapshot is configured; the
+    filter no-ops (returns True) in that case rather than excluding
+    everything, so callers without the snapshot fall back to threshold-only
+    behaviour. Note ADRs and other non-US-domiciled operating companies (e.g.
+    BABA, JD) currently pass this check -- domicile filtering is a separate,
+    still-open concern from the instrument-type problem this addresses.
+    """
+    if sec_index is None:
+        return True
+    title = sec_index.get(ticker.upper())
+    if title is None:
+        return False
+    return not _looks_like_fund_or_trust(ticker, title)
+
+
+@lru_cache(maxsize=4)
+def _load_sec_index_cached(path: str) -> dict | None:
+    if not path or not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+    return {str(k).upper(): str(v) for k, v in raw.get("tickers", {}).items()}
+
+
+def _sec_index_path(config: dict | None) -> str:
+    if config and config.get("universe_sec_registrant_path"):
+        p = os.path.expanduser(os.path.expandvars(str(config["universe_sec_registrant_path"])))
+        return p if os.path.isabs(p) else os.path.join(_ROOT, p)
+    return _DEFAULT_SEC_INDEX
+
+
+def load_sec_registrant_index(config: dict | None = None) -> dict | None:
+    """Load the {ticker: SEC-filed title} snapshot, or ``None`` if absent."""
+    return _load_sec_index_cached(_sec_index_path(config))
 
 
 def _cfg(config: dict | None, key: str):
@@ -123,6 +253,11 @@ def _eligible_rows(cache: pd.DataFrame, month: str, config: dict | None) -> pd.D
         & (rows["adv20"] >= float(_cfg(config, "universe_min_dollar_volume")))
         & (rows["bars_to_date"] >= int(_cfg(config, "universe_min_bars")))
     ]
+    if _cfg(config, "universe_exclude_non_operating_companies"):
+        sec_index = load_sec_registrant_index(config)
+        if sec_index is not None and not rows.empty:
+            keep = rows["ticker"].map(lambda t: is_operating_company(t, sec_index))
+            rows = rows[keep]
     return rows.sort_values("adv20", ascending=False)
 
 
