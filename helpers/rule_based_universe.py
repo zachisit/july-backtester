@@ -50,7 +50,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from functools import lru_cache
 
 import pandas as pd
@@ -66,12 +65,16 @@ __all__ = [
     "ticker_collisions",
     "normalise_universe_ticker",
     "load_sec_registrant_index",
+    "load_leveraged_inverse_etn_list",
     "is_leveraged_inverse_or_etn",
 ]
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_CACHE = os.path.join(_ROOT, "universe_cache", "universe_metrics.parquet")
 _DEFAULT_SEC_INDEX = os.path.join(_ROOT, "universe_cache", "sec_operating_company_tickers.json")
+_DEFAULT_LEV_INV_ETN_LIST = os.path.join(
+    _ROOT, "universe_cache", "leveraged_inverse_etn_tickers.json"
+)
 
 #: Threshold defaults. A universe definition is a parameter, not a fact --
 #: sweep these rather than asserting them (see the sensitivity note on #70).
@@ -82,6 +85,7 @@ DEFAULTS = {
     "universe_top_n": None,               # None = uncapped; int = top N by adv20
     "universe_exclude_leveraged_inverse_etn": True,  # see is_leveraged_inverse_or_etn()
     "universe_sec_registrant_path": None,  # None = default committed snapshot
+    "universe_leveraged_inverse_etn_path": None,  # None = default committed curated list
 }
 
 # --- ticker normalisation ---------------------------------------------------
@@ -115,91 +119,82 @@ def normalise_universe_ticker(raw: str) -> str:
 # The universe is broker-constrained, not index-shaped: Zach's actual
 # tradeable set is "US common stock (ADRs included) + any ETF Vanguard
 # permits buying long" -- so plain ETFs (SPY, QQQ, IWM, GLD, ...) belong in
-# the universe and must NOT be excluded. Gate defect 1 was still real (a
-# universe silently 25%+ ETFs when you believe you're trading stocks is a
-# bug), but the fix is a narrower filter, not blanket ETF removal.
+# the universe and must NOT be excluded. What actually needs excluding is the
+# subset Vanguard will not accept purchases of: leveraged ETFs, inverse ETFs,
+# and (per Zach's 2026-08-17 correction) ALL ETNs, not just leveraged/inverse
+# ones -- Vanguard's own policy wording groups "leveraged or inverse
+# products, ETNs, and Memecoin ETFs" as three coordinate categories, not two.
 #
-# What actually needs excluding is the subset Vanguard will not accept
-# purchases of (their January 2019 policy): leveraged ETFs (2x/3x, e.g.
-# TQQQ/SOXL/FAS/UPRO), inverse ETFs (SQQQ/SH/SDS/TZA/SPXU), and ETNs
-# (VXX/VXZ/DJP). Long-only makes this self-consistent -- inverse products are
-# the only route to short exposure at Vanguard and they're blocked, so there
-# is nothing else to represent. The exact Vanguard-permitted list is their
-# policy and it changes; the markers below are a working definition pending
-# confirmation, not a settled fact (see the requirement-change comment on
-# issue #70 / PR #281, 2026-08-16).
+# Round 2 of this filter (commit 224fd9f) matched on the security's SEC-filed
+# title. That mechanism does not work on the real target tickers: TQQQ,
+# SOXL, FAS, and SQQQ are '40 Act investment companies, not Exchange Act
+# registrants, so they never appear in the SEC registrant index at all; ETNs
+# like VXX/DJP are titled only by their issuing bank (e.g. "BARCLAYS BANK
+# PLC"), which carries no product-derived text to match against. Zach found
+# this via his own real-cache measurement against 224fd9f, not via review --
+# the filter shipped believing it worked and did not.
 #
-# This is identification by POSITIVE title match only -- never by absence
-# from the SEC registrant snapshot. An earlier version of this filter used
-# absence (of ANY kind) to exclude, which wrongly stripped 91.4% of the
-# corpus's delisted securities (Lehman, Bear Stearns, Merrill, Countrywide,
-# ...) because that snapshot only lists currently-registered companies and
-# can't distinguish "is a fund" from "is dead". Scoping absence-based
-# exclusion to only-live-names was the interim fix for that. Moving to a
-# positive leveraged/inverse/ETN list removes the need for an absence signal
-# entirely, so that whole failure mode is gone rather than patched: an
-# unknown or unregistered ticker is simply never excluded by this filter.
+# Round 3 (this version) replaces title matching with direct membership in a
+# curated ticker list, since no authoritative machine-readable Vanguard
+# ticker list exists (Vanguard publishes categories, not tickers). See
+# universe_cache/leveraged_inverse_etn_tickers.json for the list itself, its
+# provenance, and its explicit "approximation, not derived fact" caveat.
+# scripts/detect_leveraged_etf_by_beta.py is the intended completeness check
+# for gaps in that list.
 #
-# Issuers name these products consistently, which is what makes a small,
-# auditable marker list tractable here in a way a general "is this a fund"
-# list is not: ProShares brands its geared products "Ultra"/"UltraShort"/
-# "UltraPro", Direxion's are "... Bull/Bear 3X Shares", and notes carry "ETN"
-# in their own SEC-filed title regardless of issuer (iPath, VelocityShares,
-# bank-issued). A generic "leverage multiplier + direction word" fallback
-# catches newer issuers (GraniteShares, MicroSectors, ...) that don't use
-# either house style. Whole-word matching, not substring, throughout -- see
-# _contains_word.
-_ETN_MARKER = "ETN"
-_STANDALONE_LEVERAGED_MARKERS = ("ULTRAPRO", "ULTRASHORT")
-_PROSHARES_DIRECTIONAL_MARKERS = ("ULTRA", "SHORT")
-_DIREXION_DIRECTIONAL_MARKERS = ("BULL", "BEAR")
-_LEVERAGE_MULTIPLIER_TOKENS = ("2X", "3X")
-_DIRECTIONAL_TOKENS = ("BULL", "BEAR", "LONG", "SHORT")
+# This is still identification by POSITIVE match only -- never by absence
+# from any snapshot or list. A ticker missing from the curated list (whether
+# a plain ETF, a common stock, or a delisted security this list's compiler
+# simply never enumerated) is NEVER excluded by this filter. That is what
+# keeps the Round-1 survivorship failure mode (91.4% of delisted securities
+# wrongly stripped because they were absent from a registrant snapshot)
+# structurally impossible here: this filter has no absence-based branch at
+# all, in either round 2 or round 3.
 
 
-def _contains_word(title_upper: str, word: str) -> bool:
-    """Whole-word match, not substring -- "ETN" must not fire on a title that
-    merely contains it as a substring of another word."""
-    return re.search(rf"\b{re.escape(word)}\b", title_upper) is not None
+@lru_cache(maxsize=4)
+def _load_lev_inv_etn_set_cached(path: str) -> frozenset | None:
+    if not path or not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+    return frozenset(str(t).upper() for t in raw.get("tickers", []))
 
 
-def _looks_like_leveraged_inverse_or_etn(ticker: str, title: str) -> bool:
-    t = title.upper()
-    if _contains_word(t, _ETN_MARKER):
-        return True
-    if any(_contains_word(t, marker) for marker in _STANDALONE_LEVERAGED_MARKERS):
-        return True
-    if _contains_word(t, "PROSHARES") and any(
-        _contains_word(t, w) for w in _PROSHARES_DIRECTIONAL_MARKERS
-    ):
-        return True
-    if _contains_word(t, "DIREXION") and any(
-        _contains_word(t, w) for w in _DIREXION_DIRECTIONAL_MARKERS
-    ):
-        return True
-    if any(_contains_word(t, m) for m in _LEVERAGE_MULTIPLIER_TOKENS) and any(
-        _contains_word(t, w) for w in _DIRECTIONAL_TOKENS
-    ):
-        return True
-    return False
+def _lev_inv_etn_list_path(config: dict | None) -> str:
+    if config and config.get("universe_leveraged_inverse_etn_path"):
+        p = os.path.expanduser(
+            os.path.expandvars(str(config["universe_leveraged_inverse_etn_path"]))
+        )
+        return p if os.path.isabs(p) else os.path.join(_ROOT, p)
+    return _DEFAULT_LEV_INV_ETN_LIST
 
 
-def is_leveraged_inverse_or_etn(ticker: str, sec_index: dict | None) -> bool:
+def load_leveraged_inverse_etn_list(config: dict | None = None) -> frozenset | None:
+    """Load the curated {ticker, ...} exclusion set, or ``None`` if absent.
+
+    See ``universe_cache/leveraged_inverse_etn_tickers.json`` for what this
+    is compiled from and its known coverage gaps. This is a hand-maintained
+    approximation, not a derived fact -- extend the committed file (and its
+    provenance notes) when a gap is found, rather than special-casing tickers
+    in code.
+    """
+    return _load_lev_inv_etn_set_cached(_lev_inv_etn_list_path(config))
+
+
+def is_leveraged_inverse_or_etn(ticker: str, lev_inv_etn_set: frozenset | None) -> bool:
     """True if *ticker* should be excluded as leveraged, inverse, or an ETN.
 
-    Positive identification only, via the security's own SEC-filed title
-    (:func:`_looks_like_leveraged_inverse_or_etn`). ``sec_index`` being
-    ``None``, or *ticker* being absent from it, NEVER excludes -- an unknown
-    or unregistered ticker (including every delisted security, and every
-    plain ETF Vanguard permits) simply passes through. See the module-level
-    comment above for why absence was dropped as a signal entirely.
+    Positive identification only, via direct membership in the curated
+    ticker set. ``lev_inv_etn_set`` being ``None``, or *ticker* being absent
+    from it, NEVER excludes -- an unknown ticker (including every delisted
+    security, and every plain ETF Vanguard permits) simply passes through.
+    See the module-level comment above for why this replaced the Round-2
+    SEC-title mechanism, and why absence is not used as a signal.
     """
-    if sec_index is None:
+    if lev_inv_etn_set is None:
         return False
-    title = sec_index.get(ticker.upper())
-    if title is None:
-        return False
-    return _looks_like_leveraged_inverse_or_etn(ticker, title)
+    return ticker.upper() in lev_inv_etn_set
 
 
 @lru_cache(maxsize=4)
@@ -221,15 +216,11 @@ def _sec_index_path(config: dict | None) -> str:
 def load_sec_registrant_index(config: dict | None = None) -> dict | None:
     """Load the {ticker: SEC-filed title} snapshot, or ``None`` if absent.
 
-    This is a dated snapshot of who is registered *as of the day it was
-    built* (``scripts/build_sec_registrant_index.py``), not a point-in-time
-    history. Because :func:`is_leveraged_inverse_or_etn` only excludes on a
-    positive title match, a ticker's absence from a fresher or older snapshot
-    doesn't change any outcome by itself -- but a ticker whose *title changed*
-    (e.g. a fund rebranding into a leveraged product, or vice versa) between
-    snapshots would. Re-generating this file is therefore still a decision
-    worth calling out in whatever changed it, not treated as a routine data
-    refresh.
+    No longer used by the leveraged/inverse/ETN filter (see
+    :func:`load_leveraged_inverse_etn_list`) -- retained for symbology and
+    ticker-alias work, per Zach's 2026-08-17 comment that "the SEC snapshot
+    still earns its place for the symbology and alias work; it just isn't
+    the source for this question."
     """
     return _load_sec_index_cached(_sec_index_path(config))
 
@@ -281,10 +272,10 @@ def _eligible_rows(cache: pd.DataFrame, month: str, config: dict | None) -> pd.D
         & (rows["bars_to_date"] >= int(_cfg(config, "universe_min_bars")))
     ]
     if _cfg(config, "universe_exclude_leveraged_inverse_etn"):
-        sec_index = load_sec_registrant_index(config)
-        if sec_index is not None and not rows.empty:
+        lev_inv_etn_set = load_leveraged_inverse_etn_list(config)
+        if lev_inv_etn_set is not None and not rows.empty:
             exclude = rows["ticker"].apply(
-                lambda tk: is_leveraged_inverse_or_etn(tk, sec_index)
+                lambda tk: is_leveraged_inverse_or_etn(tk, lev_inv_etn_set)
             )
             rows = rows[~exclude]
     return rows.sort_values("adv20", ascending=False)
