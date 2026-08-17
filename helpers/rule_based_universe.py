@@ -66,7 +66,7 @@ __all__ = [
     "ticker_collisions",
     "normalise_universe_ticker",
     "load_sec_registrant_index",
-    "is_operating_company",
+    "is_leveraged_inverse_or_etn",
 ]
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -80,7 +80,7 @@ DEFAULTS = {
     "universe_min_dollar_volume": 5e6,    # $ 20-day average
     "universe_min_bars": 252,             # ~1y of history before eligibility
     "universe_top_n": None,               # None = uncapped; int = top N by adv20
-    "universe_exclude_non_operating_companies": True,  # see is_operating_company()
+    "universe_exclude_leveraged_inverse_etn": True,  # see is_leveraged_inverse_or_etn()
     "universe_sec_registrant_path": None,  # None = default committed snapshot
 }
 
@@ -112,133 +112,94 @@ def normalise_universe_ticker(raw: str) -> str:
 
 
 # --- instrument-type filter (issue #70 gate defect 1) -----------------------
-# The Norgate bar corpus has no security-type field, so "is this a stock" has
-# to be answered indirectly. Absence from SEC's own Exchange-Act registrant
-# index is one signal: '40 Act ETFs (iShares, sector SPDRs, ARK funds -- IWM,
-# XLF, TLT, ARKK, EFA, HYG, EWZ, FXI, XLE, XLK, IVV, EEM among the names the
-# #70 gate actually surfaced) file as investment companies, not Exchange Act
-# reporting companies, and never appear in the registrant index at all.
+# The universe is broker-constrained, not index-shaped: Zach's actual
+# tradeable set is "US common stock (ADRs included) + any ETF Vanguard
+# permits buying long" -- so plain ETFs (SPY, QQQ, IWM, GLD, ...) belong in
+# the universe and must NOT be excluded. Gate defect 1 was still real (a
+# universe silently 25%+ ETFs when you believe you're trading stocks is a
+# bug), but the fix is a narrower filter, not blanket ETF removal.
 #
-# But that snapshot only lists CURRENTLY registered companies, so absence
-# conflates two different facts: "this is a fund" vs. "this company no longer
-# exists" -- and delisted operating companies are exactly the population a
-# survivorship-free universe exists to preserve. PR #281 review measured
-# 91.4% of the corpus's delisted (TICKER-YYYYMM) securities as absent and
-# therefore wrongly excluded under a blanket absence rule, including Lehman
-# Brothers, Bear Stearns, Merrill Lynch, and Countrywide -- a silent
-# reintroduction of survivorship bias. So absence is used to exclude ONLY
-# names still live at the end of the corpus (see is_operating_company's
-# ``is_delisted`` parameter); it is never applied to a TICKER-YYYYMM security.
-# This is a deliberate interim, not a complete fix -- some currently-live
-# ETFs that are absent from the SEC index would, symmetrically, need a
-# positive fund-ticker list to be caught with the same rigor; see the
-# docstring on is_operating_company.
+# What actually needs excluding is the subset Vanguard will not accept
+# purchases of (their January 2019 policy): leveraged ETFs (2x/3x, e.g.
+# TQQQ/SOXL/FAS/UPRO), inverse ETFs (SQQQ/SH/SDS/TZA/SPXU), and ETNs
+# (VXX/VXZ/DJP). Long-only makes this self-consistent -- inverse products are
+# the only route to short exposure at Vanguard and they're blocked, so there
+# is nothing else to represent. The exact Vanguard-permitted list is their
+# policy and it changes; the markers below are a working definition pending
+# confirmation, not a settled fact (see the requirement-change comment on
+# issue #70 / PR #281, 2026-08-16).
 #
-# A handful of older structures DO have an Exchange Act CIK and would slip
-# through the absence check alone -- legacy index unit-investment-trusts
-# (SPY, QQQ, DIA), precious-metal/commodity grantor trusts (GLD, SLV, USO,
-# ...), and bank-issued ETNs (VXX, VXZ, DJP, filed under the issuing bank's
-# own name) -- so a registrant that IS present (delisted or not) gets a
-# second, positive check against its own SEC-filed title. "TRUST" and "FUND"
-# alone are deliberately NOT used as markers: real S&P 500 REITs (Digital
-# Realty TRUST, Federal Realty Investment TRUST, Vornado Realty TRUST) and
-# MLPs legitimately carry those words, and a blind match would silently
-# exclude large, liquid, legitimate equities -- worse than the bug this is
-# fixing.
-_FUND_TITLE_MARKERS = ("ETF", "PROSHARES", "TEUCRIUM")
-_ETN_ISSUER_TITLES = {
-    "BARCLAYS BANK PLC", "CREDIT SUISSE AG", "UBS AG",
-    "JPMORGAN CHASE FINANCIAL CO LLC", "GS FINANCE CORP",
-    "CITIGROUP GLOBAL MARKETS HOLDINGS INC", "MORGAN STANLEY FINANCE LLC",
-    "DEUTSCHE BANK AG",
-    # NOT "BANK OF MONTREAL" or "ROYAL BANK OF CANADA": those banks' own
-    # common stock (BMO, RY) files under those near-identical titles too
-    # ("BANK OF MONTREAL /CAN/", "ROYAL BANK OF CANADA" exactly for RY) --
-    # verified empirically that neither bank currently backs any ETN ticker
-    # under the bare form in SEC's data, so excluding the bare title would
-    # only have wrongly dropped RY, a real, liquid bank stock, for no gain.
-}
-_COMMODITY_WORDS = ("GOLD", "SILVER", "PLATINUM", "PALLADIUM", "OIL", "GAS",
-                    "GASOLINE", "COMMODITY", "AGRICULTURE", "METAL", "METALS",
-                    "GSCI")
-# Legacy 1990s-era equity-index Unit Investment Trusts. SPY/DIA/MDY's own SEC
-# titles already contain "ETF" ("SPDR S&P 500 ETF TRUST" etc.); QQQ's does not
-# ("INVESCO QQQ TRUST, SERIES 1"), so it needs an explicit entry rather than a
-# generic "ticker appears in its own title" rule -- that generic rule was
-# tried first and wrongly excluded real REITs that are literally named after
-# their own ticker (LXP Industrial Trust, RLJ Lodging Trust).
-_LEGACY_INDEX_UIT_TICKERS = {"QQQ"}
+# This is identification by POSITIVE title match only -- never by absence
+# from the SEC registrant snapshot. An earlier version of this filter used
+# absence (of ANY kind) to exclude, which wrongly stripped 91.4% of the
+# corpus's delisted securities (Lehman, Bear Stearns, Merrill, Countrywide,
+# ...) because that snapshot only lists currently-registered companies and
+# can't distinguish "is a fund" from "is dead". Scoping absence-based
+# exclusion to only-live-names was the interim fix for that. Moving to a
+# positive leveraged/inverse/ETN list removes the need for an absence signal
+# entirely, so that whole failure mode is gone rather than patched: an
+# unknown or unregistered ticker is simply never excluded by this filter.
+#
+# Issuers name these products consistently, which is what makes a small,
+# auditable marker list tractable here in a way a general "is this a fund"
+# list is not: ProShares brands its geared products "Ultra"/"UltraShort"/
+# "UltraPro", Direxion's are "... Bull/Bear 3X Shares", and notes carry "ETN"
+# in their own SEC-filed title regardless of issuer (iPath, VelocityShares,
+# bank-issued). A generic "leverage multiplier + direction word" fallback
+# catches newer issuers (GraniteShares, MicroSectors, ...) that don't use
+# either house style. Whole-word matching, not substring, throughout -- see
+# _contains_word.
+_ETN_MARKER = "ETN"
+_STANDALONE_LEVERAGED_MARKERS = ("ULTRAPRO", "ULTRASHORT")
+_PROSHARES_DIRECTIONAL_MARKERS = ("ULTRA", "SHORT")
+_DIREXION_DIRECTIONAL_MARKERS = ("BULL", "BEAR")
+_LEVERAGE_MULTIPLIER_TOKENS = ("2X", "3X")
+_DIRECTIONAL_TOKENS = ("BULL", "BEAR", "LONG", "SHORT")
 
 
 def _contains_word(title_upper: str, word: str) -> bool:
-    """Whole-word match, not substring -- "ETF" must not fire on NETFLIX,
-    and "GOLD" must not fire on GOLDMAN SACHS."""
+    """Whole-word match, not substring -- "ETN" must not fire on a title that
+    merely contains it as a substring of another word."""
     return re.search(rf"\b{re.escape(word)}\b", title_upper) is not None
 
 
-def _looks_like_fund_or_trust(ticker: str, title: str) -> bool:
+def _looks_like_leveraged_inverse_or_etn(ticker: str, title: str) -> bool:
     t = title.upper()
-    if ticker.upper() in _LEGACY_INDEX_UIT_TICKERS:
+    if _contains_word(t, _ETN_MARKER):
         return True
-    if any(_contains_word(t, marker) for marker in _FUND_TITLE_MARKERS):
+    if any(_contains_word(t, marker) for marker in _STANDALONE_LEVERAGED_MARKERS):
         return True
-    if t in _ETN_ISSUER_TITLES:
+    if _contains_word(t, "PROSHARES") and any(
+        _contains_word(t, w) for w in _PROSHARES_DIRECTIONAL_MARKERS
+    ):
         return True
-    if (_contains_word(t, "TRUST") or _contains_word(t, "FUND")) and any(
-        _contains_word(t, w) for w in _COMMODITY_WORDS
+    if _contains_word(t, "DIREXION") and any(
+        _contains_word(t, w) for w in _DIREXION_DIRECTIONAL_MARKERS
+    ):
+        return True
+    if any(_contains_word(t, m) for m in _LEVERAGE_MULTIPLIER_TOKENS) and any(
+        _contains_word(t, w) for w in _DIRECTIONAL_TOKENS
     ):
         return True
     return False
 
 
-_DELISTED_SUFFIX_RE = re.compile(r"-\d{6}$")
+def is_leveraged_inverse_or_etn(ticker: str, sec_index: dict | None) -> bool:
+    """True if *ticker* should be excluded as leveraged, inverse, or an ETN.
 
-
-def _is_delisted_security(security: str) -> bool:
-    """True if *security* is Norgate's ``TICKER-YYYYMM`` delisted form.
-
-    Mirrors the suffix ``scripts/build_universe_cache.py`` strips to derive
-    the ``ticker`` column. Kept as a separate check rather than a shared
-    helper because the two call sites want opposite things: the cache
-    builder strips the suffix, this asks whether it was there.
-    """
-    return bool(_DELISTED_SUFFIX_RE.search(str(security)))
-
-
-def is_operating_company(
-    ticker: str, sec_index: dict | None, *, is_delisted: bool = False
-) -> bool:
-    """True if *ticker* is a real reporting company, not an ETF/ETN/fund.
-
-    ``sec_index`` is ``None`` when no registrant snapshot is configured; the
-    filter no-ops (returns True) in that case rather than excluding
-    everything, so callers without the snapshot fall back to threshold-only
-    behaviour.
-
-    Absence from ``sec_index`` excludes only when ``is_delisted`` is False
-    (the default -- a security still live at the end of the corpus). It is
-    NEVER used to exclude a delisted security: SEC's registrant snapshot only
-    lists *currently registered* companies, so a delisted name's absence just
-    as often means "this company failed/was acquired/went private" as "this
-    was always a fund" -- and the former is exactly the population a
-    survivorship-free universe exists to keep. See the module-level comment
-    above ``_FUND_TITLE_MARKERS`` for the measured impact (PR #281 review).
-
-    Positive identification via the SEC-filed title
-    (:func:`_looks_like_fund_or_trust`) still applies to delisted names when
-    they DO appear in the index -- a defunct fund sponsor can still be a
-    registrant -- only the *absence* signal is scoped to live names.
-
-    Note ADRs and other non-US-domiciled operating companies (e.g. BABA, JD)
-    currently pass this check -- domicile filtering is a separate, still-open
-    concern from the instrument-type problem this addresses.
+    Positive identification only, via the security's own SEC-filed title
+    (:func:`_looks_like_leveraged_inverse_or_etn`). ``sec_index`` being
+    ``None``, or *ticker* being absent from it, NEVER excludes -- an unknown
+    or unregistered ticker (including every delisted security, and every
+    plain ETF Vanguard permits) simply passes through. See the module-level
+    comment above for why absence was dropped as a signal entirely.
     """
     if sec_index is None:
-        return True
+        return False
     title = sec_index.get(ticker.upper())
     if title is None:
-        return is_delisted
-    return not _looks_like_fund_or_trust(ticker, title)
+        return False
+    return _looks_like_leveraged_inverse_or_etn(ticker, title)
 
 
 @lru_cache(maxsize=4)
@@ -262,12 +223,13 @@ def load_sec_registrant_index(config: dict | None = None) -> dict | None:
 
     This is a dated snapshot of who is registered *as of the day it was
     built* (``scripts/build_sec_registrant_index.py``), not a point-in-time
-    history -- re-running that script and committing a fresh snapshot changes
-    which live tickers pass the absence check (a ticker that IPO'd or
-    delisted since the snapshot was taken flips membership), which in turn
-    can change historical universe output even though no bar data changed.
-    Re-generating this file is therefore a decision that should be called out
-    in whatever changed it, not treated as a routine data refresh.
+    history. Because :func:`is_leveraged_inverse_or_etn` only excludes on a
+    positive title match, a ticker's absence from a fresher or older snapshot
+    doesn't change any outcome by itself -- but a ticker whose *title changed*
+    (e.g. a fund rebranding into a leveraged product, or vice versa) between
+    snapshots would. Re-generating this file is therefore still a decision
+    worth calling out in whatever changed it, not treated as a routine data
+    refresh.
     """
     return _load_sec_index_cached(_sec_index_path(config))
 
@@ -318,16 +280,13 @@ def _eligible_rows(cache: pd.DataFrame, month: str, config: dict | None) -> pd.D
         & (rows["adv20"] >= float(_cfg(config, "universe_min_dollar_volume")))
         & (rows["bars_to_date"] >= int(_cfg(config, "universe_min_bars")))
     ]
-    if _cfg(config, "universe_exclude_non_operating_companies"):
+    if _cfg(config, "universe_exclude_leveraged_inverse_etn"):
         sec_index = load_sec_registrant_index(config)
         if sec_index is not None and not rows.empty:
-            keep = rows.apply(
-                lambda r: is_operating_company(
-                    r["ticker"], sec_index, is_delisted=_is_delisted_security(r["security"])
-                ),
-                axis=1,
+            exclude = rows["ticker"].apply(
+                lambda tk: is_leveraged_inverse_or_etn(tk, sec_index)
             )
-            rows = rows[keep]
+            rows = rows[~exclude]
     return rows.sort_values("adv20", ascending=False)
 
 

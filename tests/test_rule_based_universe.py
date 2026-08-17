@@ -213,129 +213,125 @@ class TestTickerNormalisation:
         assert rbu.normalise_universe_ticker("MSFT") == "MSFT"
 
 
-class TestIsDelistedSecurity:
-    def test_delisted_suffix_detected(self):
-        assert rbu._is_delisted_security("WB-200812") is True
-
-    def test_bare_ticker_is_not_delisted(self):
-        assert rbu._is_delisted_security("WB") is False
-
-    def test_suffix_must_be_six_digits_at_end(self):
-        # A ticker that legitimately contains a hyphen+digits elsewhere (or a
-        # short/malformed suffix) must not false-positive as delisted.
-        assert rbu._is_delisted_security("BRK-B") is False
-        assert rbu._is_delisted_security("FOO-1234") is False
-
-
 class TestInstrumentTypeFilter:
-    """issue #70 defect 1: no instrument-type filter meant ETFs/ETNs leaked
-    into the rule-based universe (>=51/185 rule-only names in Zach's gate
-    run). Every case here was found by actually running the filter against
-    the real SEC registrant snapshot, not guessed -- including three false
-    positives a first-draft keyword rule produced (NETFLIX INC matching a bare
-    "ETF" substring, LXP/RLJ being real REITs literally named after their own
-    ticker, and RY/Royal Bank of Canada's real equity sharing an ETN issuer's
-    exact title) before being fixed.
+    """issue #70 defect 1, revised scope: the universe is broker-constrained,
+    not index-shaped (requirement change, 2026-08-16) -- Zach's tradeable set
+    is "US common stock (ADRs included) + any ETF Vanguard permits buying
+    long", so plain ETFs stay IN and only leveraged/inverse ETFs and ETNs
+    (Vanguard's January 2019 no-buy list) are excluded. This supersedes the
+    earlier "exclude every non-operating-company" version of this filter,
+    whose absence-based mechanism also caused the PR #281 survivorship
+    defect (91.4% of delisted securities wrongly excluded) -- that mechanism
+    is gone now, not patched, since positive identification never uses
+    absence at all.
     """
 
     def _idx(self, **tickers):
         return {t.upper(): title for t, title in tickers.items()}
 
-    def test_absent_from_sec_index_is_excluded(self):
-        # The majority case: '40 Act ETFs (IWM, XLF, EFA, ...) never file as
-        # Exchange Act registrants at all.
-        assert rbu.is_operating_company("IWM", self._idx(AAPL="Apple Inc.")) is False
-
-    def test_real_company_in_index_is_included(self):
-        assert rbu.is_operating_company("AAPL", self._idx(AAPL="Apple Inc.")) is True
-
     def test_no_index_configured_is_a_no_op(self):
-        assert rbu.is_operating_company("ANYTHING", None) is True
+        assert rbu.is_leveraged_inverse_or_etn("ANYTHING", None) is False
 
-    def test_legacy_uit_with_etf_in_title_excluded(self):
-        idx = self._idx(SPY="SPDR S&P 500 ETF TRUST")
-        assert rbu.is_operating_company("SPY", idx) is False
+    def test_absent_from_index_never_excluded(self):
+        # Core behavioural change: absence used to exclude (old filter) or
+        # exclude-only-if-live (PR #281 interim); now it never excludes
+        # anyone -- an unknown ticker could be a plain ETF (which belongs) or
+        # a delisted operating company (which must be kept), and this filter
+        # can't tell them apart, so it doesn't try.
+        idx = self._idx(AAPL="Apple Inc.")
+        assert rbu.is_leveraged_inverse_or_etn("IWM", idx) is False
+        assert rbu.is_leveraged_inverse_or_etn("LEH", idx) is False
 
-    def test_legacy_uit_without_etf_in_title_excluded(self):
-        idx = self._idx(QQQ="INVESCO QQQ TRUST, SERIES 1")
-        assert rbu.is_operating_company("QQQ", idx) is False
+    def test_real_operating_company_not_excluded(self):
+        assert rbu.is_leveraged_inverse_or_etn("AAPL", self._idx(AAPL="Apple Inc.")) is False
 
-    def test_commodity_trust_excluded(self):
-        idx = self._idx(GLD="SPDR GOLD TRUST")
-        assert rbu.is_operating_company("GLD", idx) is False
+    def test_plain_index_etf_not_excluded(self):
+        # SPY/IWM/GLD-style plain ETFs are the whole point of the requirement
+        # change -- they must pass even when their real SEC title is known
+        # and contains "ETF"/"TRUST".
+        idx = self._idx(
+            SPY="SPDR S&P 500 ETF TRUST",
+            QQQ="INVESCO QQQ TRUST, SERIES 1",
+            IWM="ISHARES RUSSELL 2000 ETF",
+            GLD="SPDR GOLD TRUST",
+        )
+        assert rbu.is_leveraged_inverse_or_etn("SPY", idx) is False
+        assert rbu.is_leveraged_inverse_or_etn("QQQ", idx) is False
+        assert rbu.is_leveraged_inverse_or_etn("IWM", idx) is False
+        assert rbu.is_leveraged_inverse_or_etn("GLD", idx) is False
 
-    def test_bank_issued_etn_excluded(self):
-        idx = self._idx(VXX="BARCLAYS BANK PLC")
-        assert rbu.is_operating_company("VXX", idx) is False
+    def test_proshares_ultrapro_leveraged_excluded(self):
+        idx = self._idx(TQQQ="PROSHARES ULTRAPRO QQQ")
+        assert rbu.is_leveraged_inverse_or_etn("TQQQ", idx) is True
+
+    def test_proshares_ultra_leveraged_excluded(self):
+        idx = self._idx(SSO="PROSHARES ULTRA S&P500")
+        assert rbu.is_leveraged_inverse_or_etn("SSO", idx) is True
+
+    def test_proshares_ultrashort_inverse_excluded(self):
+        idx = self._idx(SDS="PROSHARES ULTRASHORT S&P500")
+        assert rbu.is_leveraged_inverse_or_etn("SDS", idx) is True
+
+    def test_proshares_short_inverse_excluded(self):
+        idx = self._idx(SH="PROSHARES SHORT S&P500")
+        assert rbu.is_leveraged_inverse_or_etn("SH", idx) is True
+
+    def test_direxion_bull_leveraged_excluded(self):
+        idx = self._idx(SOXL="DIREXION DAILY SEMICONDUCTOR BULL 3X SHARES")
+        assert rbu.is_leveraged_inverse_or_etn("SOXL", idx) is True
+
+    def test_direxion_bear_inverse_excluded(self):
+        idx = self._idx(TZA="DIREXION DAILY SMALL CAP BEAR 3X SHARES")
+        assert rbu.is_leveraged_inverse_or_etn("TZA", idx) is True
+
+    def test_etn_excluded_regardless_of_issuer(self):
+        idx = self._idx(
+            VXX="IPATH SERIES B S&P 500 VIX SHORT-TERM FUTURES ETN",
+            DJP="IPATH SERIES B BLOOMBERG COMMODITY INDEX TOTAL RETURN ETN",
+        )
+        assert rbu.is_leveraged_inverse_or_etn("VXX", idx) is True
+        assert rbu.is_leveraged_inverse_or_etn("DJP", idx) is True
+
+    def test_generic_multiplier_and_direction_fallback_excludes_new_issuers(self):
+        # Newer single-stock leveraged ETFs (GraniteShares, MicroSectors, ...)
+        # don't use the ProShares/Direxion house style but do state the
+        # multiplier and direction explicitly in their own filed title.
+        idx = self._idx(CONL="GRANITESHARES 2X LONG COIN DAILY ETF")
+        assert rbu.is_leveraged_inverse_or_etn("CONL", idx) is True
 
     def test_reit_with_trust_in_title_not_excluded(self):
-        # The bare "TRUST" keyword a first draft used would wrongly exclude
-        # real S&P 500 REITs that are legally structured as trusts.
         idx = self._idx(DLR="DIGITAL REALTY TRUST, INC.")
-        assert rbu.is_operating_company("DLR", idx) is True
-
-    def test_mlp_with_lp_in_title_not_excluded(self):
-        idx = self._idx(EPD="ENTERPRISE PRODUCTS PARTNERS L.P.")
-        assert rbu.is_operating_company("EPD", idx) is True
+        assert rbu.is_leveraged_inverse_or_etn("DLR", idx) is False
 
     def test_reit_named_after_its_own_ticker_not_excluded(self):
-        # LXP Industrial Trust and RLJ Lodging Trust are real REITs, not UITs
-        # -- a naive "ticker appears in its own filed title" rule would wrongly
-        # exclude them the same way it correctly flags "INVESCO QQQ TRUST".
-        assert rbu.is_operating_company("LXP", self._idx(LXP="LXP Industrial Trust")) is True
-        assert rbu.is_operating_company("RLJ", self._idx(RLJ="RLJ Lodging Trust")) is True
+        assert rbu.is_leveraged_inverse_or_etn("LXP", self._idx(LXP="LXP Industrial Trust")) is False
+        assert rbu.is_leveraged_inverse_or_etn("RLJ", self._idx(RLJ="RLJ Lodging Trust")) is False
 
-    def test_word_containing_etf_as_substring_not_excluded(self):
-        # "NETFLIX" contains the literal substring "ETF" (n-ETF-lix); the
+    def test_company_named_aetna_does_not_substring_match_etn(self):
+        # "AETNA" contains the letters "ETN" but not as a whole word -- the
         # marker match must be whole-word, not substring.
-        assert rbu.is_operating_company("NFLX", self._idx(NFLX="NETFLIX INC")) is True
+        idx = self._idx(AET="AETNA INC")
+        assert rbu.is_leveraged_inverse_or_etn("AET", idx) is False
 
-    def test_word_containing_gold_as_substring_not_excluded(self):
-        # "Goldman Sachs" contains the substring "GOLD"; combined with a
-        # "Trust" title that must not trigger the commodity-trust rule.
-        idx = self._idx(GJS="STRATS(SM) Trust for Goldman Sachs Group Securities, Series 2006-2")
-        assert rbu.is_operating_company("GJS", idx) is True
+    def test_direction_word_alone_without_multiplier_not_excluded(self):
+        # "LONG"/"BULL"/"BEAR"/"SHORT" alone (no "2X"/"3X", no ProShares/
+        # Direxion issuer word) must not trip the generic fallback -- real
+        # company names can legitimately contain these as standalone words.
+        idx = self._idx(LTEA="LONG ISLAND ICED TEA CORP")
+        assert rbu.is_leveraged_inverse_or_etn("LTEA", idx) is False
 
-    def test_bank_equity_sharing_etn_issuer_title_not_excluded(self):
-        # Royal Bank of Canada's own common stock (RY) files under the exact
-        # same title text ("ROYAL BANK OF CANADA") that would otherwise be
-        # used to detect RBC-issued ETNs -- title alone can't disambiguate,
-        # so that bank was dropped from the ETN issuer set entirely.
+    def test_bank_equity_sharing_word_with_etn_issuers_not_excluded(self):
+        # A bank's own common stock (e.g. Royal Bank of Canada, RY) must not
+        # be excluded just because other banks issue ETNs -- this filter no
+        # longer keys off issuer identity at all, only the security's own
+        # title, so this is safe by construction.
         idx = self._idx(RY="ROYAL BANK OF CANADA")
-        assert rbu.is_operating_company("RY", idx) is True
+        assert rbu.is_leveraged_inverse_or_etn("RY", idx) is False
 
-    def test_delisted_and_absent_from_index_is_kept(self):
-        # PR #281 review finding: a blanket absence rule wrongly treats "not
-        # currently registered" as "was always a fund". Lehman Brothers (LEH,
-        # delisted 2008) is absent from a snapshot taken today for the same
-        # reason any failed company is -- it no longer exists to register --
-        # not because it was ever a fund. Measured: 91.4% of the corpus's
-        # delisted securities were absent and would have been wrongly
-        # excluded under the pre-fix blanket rule.
-        idx = self._idx(AAPL="Apple Inc.")
-        assert rbu.is_operating_company("LEH", idx, is_delisted=True) is True
-
-    def test_live_and_absent_from_index_is_still_excluded(self):
-        # The default (is_delisted=False) is unchanged by this fix: a name
-        # still trading today that's absent from the registrant index is
-        # still presumed a fund/ETF, same as before.
-        idx = self._idx(AAPL="Apple Inc.")
-        assert rbu.is_operating_company("IWM", idx) is False
-        assert rbu.is_operating_company("IWM", idx, is_delisted=False) is False
-
-    def test_delisted_fund_present_in_index_still_excluded_by_title(self):
-        # is_delisted only widens the absence case; positive title detection
-        # still applies unconditionally -- a delisted fund sponsor that DID
-        # register with the SEC stays excluded either way.
-        idx = self._idx(TVIX="CREDIT SUISSE AG")
-        assert rbu.is_operating_company("TVIX", idx, is_delisted=True) is False
-
-    def test_eligible_rows_keeps_delisted_company_absent_from_index(self, tmp_path):
-        # End-to-end reproduction of Zach's PR #281 finding: a real, delisted
-        # operating company (modeled on Lehman Brothers -- Norgate security
-        # "LEH-200809", ticker "LEH") absent from the SEC snapshot must
-        # survive the filter, while a live name (IWM) absent from that same
-        # snapshot must still be excluded.
+    def test_eligible_rows_keeps_plain_etf_and_delisted_company_absent_from_index(self, tmp_path):
+        # End-to-end reproduction of the requirement change: a plain ETF
+        # (IWM) and a delisted operating company absent from the SEC
+        # snapshot (modeled on Lehman Brothers) are both now kept.
         rows = [
             ["LEH-200809", "LEH", "2008-06", 60.0, 5e7, 3000, 21],
             ["IWM", "IWM", "2008-06", 60.0, 5e7, 3000, 21],
@@ -347,19 +343,19 @@ class TestInstrumentTypeFilter:
         rbu._load_cache_cached.cache_clear()
         rbu._load_sec_index_cached.cache_clear()
         cfg = {"universe_cache_path": str(cache_p), "universe_sec_registrant_path": str(sec_p)}
-        assert rbu.universe_on("2008-06-15", cfg) == ["LEH"]
+        assert rbu.universe_on("2008-06-15", cfg) == ["IWM", "LEH"]
 
-    def test_eligible_rows_applies_filter_when_configured(self, tmp_path):
+    def test_eligible_rows_excludes_leveraged_etf_when_configured(self, tmp_path):
         rows = [
             ["REALCO", "REALCO", "2020-01", 50.0, 5e7, 3000, 21],
-            ["ETFCO", "ETFCO", "2020-01", 50.0, 5e7, 3000, 21],
+            ["LEVCO", "LEVCO", "2020-01", 50.0, 5e7, 3000, 21],
         ]
         cache_p = tmp_path / "cache.parquet"
         _cache(rows).to_parquet(cache_p, index=False)
         sec_p = tmp_path / "sec.json"
         sec_p.write_text(
             '{"tickers": {"REALCO": "Real Operating Co Inc.", '
-            '"ETFCO": "Some Sponsor ETF Trust"}}',
+            '"LEVCO": "PROSHARES ULTRAPRO SOME INDEX"}}',
             encoding="utf-8",
         )
         rbu._load_cache_cached.cache_clear()
@@ -368,16 +364,16 @@ class TestInstrumentTypeFilter:
         assert rbu.universe_on("2020-01-15", cfg) == ["REALCO"]
 
     def test_filter_disabled_by_config_keeps_everything(self, tmp_path):
-        rows = [["ETFCO", "ETFCO", "2020-01", 50.0, 5e7, 3000, 21]]
+        rows = [["LEVCO", "LEVCO", "2020-01", 50.0, 5e7, 3000, 21]]
         cache_p = tmp_path / "cache.parquet"
         _cache(rows).to_parquet(cache_p, index=False)
         sec_p = tmp_path / "sec.json"
-        sec_p.write_text('{"tickers": {"ETFCO": "Some Sponsor ETF Trust"}}', encoding="utf-8")
+        sec_p.write_text('{"tickers": {"LEVCO": "PROSHARES ULTRAPRO SOME INDEX"}}', encoding="utf-8")
         rbu._load_cache_cached.cache_clear()
         rbu._load_sec_index_cached.cache_clear()
         cfg = {
             "universe_cache_path": str(cache_p),
             "universe_sec_registrant_path": str(sec_p),
-            "universe_exclude_non_operating_companies": False,
+            "universe_exclude_leveraged_inverse_etn": False,
         }
-        assert rbu.universe_on("2020-01-15", cfg) == ["ETFCO"]
+        assert rbu.universe_on("2020-01-15", cfg) == ["LEVCO"]

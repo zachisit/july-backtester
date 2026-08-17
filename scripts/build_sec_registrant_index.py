@@ -3,14 +3,16 @@ Build the SEC registrant snapshot used by the rule-based universe's
 instrument-type filter (issue #70, defect 1: no filter meant ~51/185
 rule-only names were ETFs/ETNs).
 
-SEC EDGAR's company_tickers.json lists every ticker with an Exchange Act
-CIK. Most '40 Act ETFs never appear there at all (they file as investment
-companies, not Exchange Act reporting companies), so plain absence already
-excludes the bulk of the contamination. The output here reduces that raw
-file to just {ticker: filed title} -- the title is what
-helpers.rule_based_universe.is_operating_company() checks for the handful
-of older structures (legacy index UITs, commodity trusts, bank ETNs) that
-DO have an Exchange Act CIK despite not being operating companies.
+The universe is broker-constrained, not index-shaped: plain long ETFs are
+legitimately investable and stay in, so the filter no longer uses absence
+from this snapshot as a signal at all (that both under- and over-excluded --
+see the module docstring on helpers.rule_based_universe for the survivorship
+defect absence caused). What this snapshot is for now is narrower: it
+reduces the raw SEC file to just {ticker: filed title}, and
+helpers.rule_based_universe.is_leveraged_inverse_or_etn() does a *positive*
+title match against issuers who name leveraged, inverse, and ETN products
+consistently (ProShares Ultra/UltraShort, Direxion Daily Bull/Bear 3X, iPath
+... ETN).
 
 Usage:
     python scripts/build_sec_registrant_index.py
