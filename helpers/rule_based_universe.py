@@ -94,6 +94,12 @@ DEFAULTS = {
 # membership slot under the surviving Fox Corp ticker FOXA. Those need an
 # explicit alias, the same way helpers.point_in_time.PIT_TICKER_NORMALISATION
 # aliases old->current tickers (UTX->RTX etc.) for the index PIT paths.
+#: How a future maintainer finds the next one of these: a persistent ticker
+#: collision reported by :func:`ticker_collisions`, or a rule-universe ticker
+#: that fails to resolve against a live roster/broker feed, is the usual
+#: symptom -- check whether Norgate's historical ticker for that slot differs
+#: from the ticker the roster/broker uses today before assuming it's a data
+#: bug.
 RULE_TICKER_ALIASES = {
     "TFCFA": "FOXA",
 }
@@ -108,20 +114,37 @@ def normalise_universe_ticker(raw: str) -> str:
 # --- instrument-type filter (issue #70 gate defect 1) -----------------------
 # The Norgate bar corpus has no security-type field, so "is this a stock" has
 # to be answered indirectly. Absence from SEC's own Exchange-Act registrant
-# index is the primary signal: '40 Act ETFs (iShares, sector SPDRs, ARK funds
-# -- IWM, XLF, TLT, ARKK, EFA, HYG, EWZ, FXI, XLE, XLK, IVV, EEM among the
-# names the #70 gate actually surfaced) file as investment companies, not
-# Exchange Act reporting companies, and never appear in the registrant index
-# at all. A handful of older structures DO have an Exchange Act CIK and would
-# slip through that check alone -- legacy index unit-investment-trusts (SPY,
-# QQQ, DIA), precious-metal/commodity grantor trusts (GLD, SLV, USO, ...), and
-# bank-issued ETNs (VXX, VXZ, DJP, filed under the issuing bank's own name) --
-# so a registrant that IS present gets a second check against its own
-# SEC-filed title. "TRUST" and "FUND" alone are deliberately NOT used as
-# markers: real S&P 500 REITs (Digital Realty TRUST, Federal Realty
-# Investment TRUST, Vornado Realty TRUST) and MLPs legitimately carry those
-# words, and a blind match would silently exclude large, liquid, legitimate
-# equities -- worse than the bug this is fixing.
+# index is one signal: '40 Act ETFs (iShares, sector SPDRs, ARK funds -- IWM,
+# XLF, TLT, ARKK, EFA, HYG, EWZ, FXI, XLE, XLK, IVV, EEM among the names the
+# #70 gate actually surfaced) file as investment companies, not Exchange Act
+# reporting companies, and never appear in the registrant index at all.
+#
+# But that snapshot only lists CURRENTLY registered companies, so absence
+# conflates two different facts: "this is a fund" vs. "this company no longer
+# exists" -- and delisted operating companies are exactly the population a
+# survivorship-free universe exists to preserve. PR #281 review measured
+# 91.4% of the corpus's delisted (TICKER-YYYYMM) securities as absent and
+# therefore wrongly excluded under a blanket absence rule, including Lehman
+# Brothers, Bear Stearns, Merrill Lynch, and Countrywide -- a silent
+# reintroduction of survivorship bias. So absence is used to exclude ONLY
+# names still live at the end of the corpus (see is_operating_company's
+# ``is_delisted`` parameter); it is never applied to a TICKER-YYYYMM security.
+# This is a deliberate interim, not a complete fix -- some currently-live
+# ETFs that are absent from the SEC index would, symmetrically, need a
+# positive fund-ticker list to be caught with the same rigor; see the
+# docstring on is_operating_company.
+#
+# A handful of older structures DO have an Exchange Act CIK and would slip
+# through the absence check alone -- legacy index unit-investment-trusts
+# (SPY, QQQ, DIA), precious-metal/commodity grantor trusts (GLD, SLV, USO,
+# ...), and bank-issued ETNs (VXX, VXZ, DJP, filed under the issuing bank's
+# own name) -- so a registrant that IS present (delisted or not) gets a
+# second, positive check against its own SEC-filed title. "TRUST" and "FUND"
+# alone are deliberately NOT used as markers: real S&P 500 REITs (Digital
+# Realty TRUST, Federal Realty Investment TRUST, Vornado Realty TRUST) and
+# MLPs legitimately carry those words, and a blind match would silently
+# exclude large, liquid, legitimate equities -- worse than the bug this is
+# fixing.
 _FUND_TITLE_MARKERS = ("ETF", "PROSHARES", "TEUCRIUM")
 _ETN_ISSUER_TITLES = {
     "BARCLAYS BANK PLC", "CREDIT SUISSE AG", "UBS AG",
@@ -168,21 +191,53 @@ def _looks_like_fund_or_trust(ticker: str, title: str) -> bool:
     return False
 
 
-def is_operating_company(ticker: str, sec_index: dict | None) -> bool:
+_DELISTED_SUFFIX_RE = re.compile(r"-\d{6}$")
+
+
+def _is_delisted_security(security: str) -> bool:
+    """True if *security* is Norgate's ``TICKER-YYYYMM`` delisted form.
+
+    Mirrors the suffix ``scripts/build_universe_cache.py`` strips to derive
+    the ``ticker`` column. Kept as a separate check rather than a shared
+    helper because the two call sites want opposite things: the cache
+    builder strips the suffix, this asks whether it was there.
+    """
+    return bool(_DELISTED_SUFFIX_RE.search(str(security)))
+
+
+def is_operating_company(
+    ticker: str, sec_index: dict | None, *, is_delisted: bool = False
+) -> bool:
     """True if *ticker* is a real reporting company, not an ETF/ETN/fund.
 
     ``sec_index`` is ``None`` when no registrant snapshot is configured; the
     filter no-ops (returns True) in that case rather than excluding
     everything, so callers without the snapshot fall back to threshold-only
-    behaviour. Note ADRs and other non-US-domiciled operating companies (e.g.
-    BABA, JD) currently pass this check -- domicile filtering is a separate,
-    still-open concern from the instrument-type problem this addresses.
+    behaviour.
+
+    Absence from ``sec_index`` excludes only when ``is_delisted`` is False
+    (the default -- a security still live at the end of the corpus). It is
+    NEVER used to exclude a delisted security: SEC's registrant snapshot only
+    lists *currently registered* companies, so a delisted name's absence just
+    as often means "this company failed/was acquired/went private" as "this
+    was always a fund" -- and the former is exactly the population a
+    survivorship-free universe exists to keep. See the module-level comment
+    above ``_FUND_TITLE_MARKERS`` for the measured impact (PR #281 review).
+
+    Positive identification via the SEC-filed title
+    (:func:`_looks_like_fund_or_trust`) still applies to delisted names when
+    they DO appear in the index -- a defunct fund sponsor can still be a
+    registrant -- only the *absence* signal is scoped to live names.
+
+    Note ADRs and other non-US-domiciled operating companies (e.g. BABA, JD)
+    currently pass this check -- domicile filtering is a separate, still-open
+    concern from the instrument-type problem this addresses.
     """
     if sec_index is None:
         return True
     title = sec_index.get(ticker.upper())
     if title is None:
-        return False
+        return is_delisted
     return not _looks_like_fund_or_trust(ticker, title)
 
 
@@ -203,7 +258,17 @@ def _sec_index_path(config: dict | None) -> str:
 
 
 def load_sec_registrant_index(config: dict | None = None) -> dict | None:
-    """Load the {ticker: SEC-filed title} snapshot, or ``None`` if absent."""
+    """Load the {ticker: SEC-filed title} snapshot, or ``None`` if absent.
+
+    This is a dated snapshot of who is registered *as of the day it was
+    built* (``scripts/build_sec_registrant_index.py``), not a point-in-time
+    history -- re-running that script and committing a fresh snapshot changes
+    which live tickers pass the absence check (a ticker that IPO'd or
+    delisted since the snapshot was taken flips membership), which in turn
+    can change historical universe output even though no bar data changed.
+    Re-generating this file is therefore a decision that should be called out
+    in whatever changed it, not treated as a routine data refresh.
+    """
     return _load_sec_index_cached(_sec_index_path(config))
 
 
@@ -256,7 +321,12 @@ def _eligible_rows(cache: pd.DataFrame, month: str, config: dict | None) -> pd.D
     if _cfg(config, "universe_exclude_non_operating_companies"):
         sec_index = load_sec_registrant_index(config)
         if sec_index is not None and not rows.empty:
-            keep = rows["ticker"].map(lambda t: is_operating_company(t, sec_index))
+            keep = rows.apply(
+                lambda r: is_operating_company(
+                    r["ticker"], sec_index, is_delisted=_is_delisted_security(r["security"])
+                ),
+                axis=1,
+            )
             rows = rows[keep]
     return rows.sort_values("adv20", ascending=False)
 

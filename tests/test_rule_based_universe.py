@@ -213,6 +213,20 @@ class TestTickerNormalisation:
         assert rbu.normalise_universe_ticker("MSFT") == "MSFT"
 
 
+class TestIsDelistedSecurity:
+    def test_delisted_suffix_detected(self):
+        assert rbu._is_delisted_security("WB-200812") is True
+
+    def test_bare_ticker_is_not_delisted(self):
+        assert rbu._is_delisted_security("WB") is False
+
+    def test_suffix_must_be_six_digits_at_end(self):
+        # A ticker that legitimately contains a hyphen+digits elsewhere (or a
+        # short/malformed suffix) must not false-positive as delisted.
+        assert rbu._is_delisted_security("BRK-B") is False
+        assert rbu._is_delisted_security("FOO-1234") is False
+
+
 class TestInstrumentTypeFilter:
     """issue #70 defect 1: no instrument-type filter meant ETFs/ETNs leaked
     into the rule-based universe (>=51/185 rule-only names in Zach's gate
@@ -289,6 +303,51 @@ class TestInstrumentTypeFilter:
         # so that bank was dropped from the ETN issuer set entirely.
         idx = self._idx(RY="ROYAL BANK OF CANADA")
         assert rbu.is_operating_company("RY", idx) is True
+
+    def test_delisted_and_absent_from_index_is_kept(self):
+        # PR #281 review finding: a blanket absence rule wrongly treats "not
+        # currently registered" as "was always a fund". Lehman Brothers (LEH,
+        # delisted 2008) is absent from a snapshot taken today for the same
+        # reason any failed company is -- it no longer exists to register --
+        # not because it was ever a fund. Measured: 91.4% of the corpus's
+        # delisted securities were absent and would have been wrongly
+        # excluded under the pre-fix blanket rule.
+        idx = self._idx(AAPL="Apple Inc.")
+        assert rbu.is_operating_company("LEH", idx, is_delisted=True) is True
+
+    def test_live_and_absent_from_index_is_still_excluded(self):
+        # The default (is_delisted=False) is unchanged by this fix: a name
+        # still trading today that's absent from the registrant index is
+        # still presumed a fund/ETF, same as before.
+        idx = self._idx(AAPL="Apple Inc.")
+        assert rbu.is_operating_company("IWM", idx) is False
+        assert rbu.is_operating_company("IWM", idx, is_delisted=False) is False
+
+    def test_delisted_fund_present_in_index_still_excluded_by_title(self):
+        # is_delisted only widens the absence case; positive title detection
+        # still applies unconditionally -- a delisted fund sponsor that DID
+        # register with the SEC stays excluded either way.
+        idx = self._idx(TVIX="CREDIT SUISSE AG")
+        assert rbu.is_operating_company("TVIX", idx, is_delisted=True) is False
+
+    def test_eligible_rows_keeps_delisted_company_absent_from_index(self, tmp_path):
+        # End-to-end reproduction of Zach's PR #281 finding: a real, delisted
+        # operating company (modeled on Lehman Brothers -- Norgate security
+        # "LEH-200809", ticker "LEH") absent from the SEC snapshot must
+        # survive the filter, while a live name (IWM) absent from that same
+        # snapshot must still be excluded.
+        rows = [
+            ["LEH-200809", "LEH", "2008-06", 60.0, 5e7, 3000, 21],
+            ["IWM", "IWM", "2008-06", 60.0, 5e7, 3000, 21],
+        ]
+        cache_p = tmp_path / "cache.parquet"
+        _cache(rows).to_parquet(cache_p, index=False)
+        sec_p = tmp_path / "sec.json"
+        sec_p.write_text('{"tickers": {"AAPL": "Apple Inc."}}', encoding="utf-8")
+        rbu._load_cache_cached.cache_clear()
+        rbu._load_sec_index_cached.cache_clear()
+        cfg = {"universe_cache_path": str(cache_p), "universe_sec_registrant_path": str(sec_p)}
+        assert rbu.universe_on("2008-06-15", cfg) == ["LEH"]
 
     def test_eligible_rows_applies_filter_when_configured(self, tmp_path):
         rows = [
