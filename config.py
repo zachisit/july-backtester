@@ -315,11 +315,31 @@ CONFIG = {
         # "point_values": {"ES": 50.0, "NQ": 20.0},
         # "tick_sizes":   {"ES": 0.25, "NQ": 0.25},
 
+        # Per-symbol session length (issue #270). `trading_hours_per_day`
+        # (SECTION 26) is one process-wide number, so a book mixing equities
+        # (6.5h RTH) with 24h futures gets the wrong bars-per-day for one side
+        # of it -- which feeds the 20-day ADV window used by max_pct_adv and
+        # volume_impact_coeff. Two ways to fix a mixed book, both opt-in so
+        # existing runs are untouched:
+        #   1. per-symbol, via an override below:
+        #      {"asset_class": "future", "session_hours": 23}
+        #      (spell out asset_class -- see the override note below)
+        #   2. blanket, from each instrument's calendar (NYSE 6.5, CME_ETH 23):
+        # "session_hours_from_calendar": True,
+
         # Explicit per-symbol overrides. Each dict may set "asset_class" and any
-        # Instrument field (point_value, tick_size, initial_margin_pct, ...):
+        # Instrument field (point_value, tick_size, initial_margin_pct, ...).
+        #
+        # An override dict is authoritative for asset class: the contract-month
+        # auto-detection that would otherwise recognise "ESM6" as a future is
+        # only consulted when a symbol has NO override. So always spell out
+        # "asset_class": "future" when overriding a futures symbol -- omitting
+        # it silently resolves the symbol as a cash equity (point_value 1.0,
+        # cash_full margin, fractional units, borrow charged, NYSE calendar).
         # "overrides": {
         #     "NQ":  {"asset_class": "future", "point_value": 20.0, "tick_size": 0.25},
         #     "SI":  {"asset_class": "equity"},  # keep the Silvergate ticker as equity
+        #     "ESM6": {"asset_class": "future", "session_hours": 23},  # 23h CME session
         # },
         "overrides": {},
     },
