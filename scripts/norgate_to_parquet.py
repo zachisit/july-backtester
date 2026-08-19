@@ -73,15 +73,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Characters illegal in Windows filenames (and generally problematic on any OS)
-_ILLEGAL_FILENAME_CHARS = r'\/:*?"<>|'
-
-
-def _sanitize_filename(symbol: str) -> str:
-    """Replace characters that are illegal in Windows filenames with underscores."""
-    for ch in _ILLEGAL_FILENAME_CHARS:
-        symbol = symbol.replace(ch, "_")
-    return symbol
+from helpers.filename_utils import sanitize_symbol_for_filename as _sanitize_filename
 
 
 def get_watchlist_symbols(watchlist_name: str) -> list[str]:
