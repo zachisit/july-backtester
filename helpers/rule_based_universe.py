@@ -64,14 +64,12 @@ __all__ = [
     "resolve_rule_portfolio",
     "ticker_collisions",
     "normalise_universe_ticker",
-    "load_sec_registrant_index",
     "load_leveraged_inverse_etn_list",
     "is_leveraged_inverse_or_etn",
 ]
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DEFAULT_CACHE = os.path.join(_ROOT, "universe_cache", "universe_metrics.parquet")
-_DEFAULT_SEC_INDEX = os.path.join(_ROOT, "universe_cache", "sec_operating_company_tickers.json")
 _DEFAULT_LEV_INV_ETN_LIST = os.path.join(
     _ROOT, "universe_cache", "leveraged_inverse_etn_tickers.json"
 )
@@ -84,7 +82,6 @@ DEFAULTS = {
     "universe_min_bars": 252,             # ~1y of history before eligibility
     "universe_top_n": None,               # None = uncapped; int = top N by adv20
     "universe_exclude_leveraged_inverse_etn": True,  # see is_leveraged_inverse_or_etn()
-    "universe_sec_registrant_path": None,  # None = default committed snapshot
     "universe_leveraged_inverse_etn_path": None,  # None = default committed curated list
 }
 
@@ -197,34 +194,6 @@ def is_leveraged_inverse_or_etn(ticker: str, lev_inv_etn_set: frozenset | None) 
     return ticker.upper() in lev_inv_etn_set
 
 
-@lru_cache(maxsize=4)
-def _load_sec_index_cached(path: str) -> dict | None:
-    if not path or not os.path.exists(path):
-        return None
-    with open(path, encoding="utf-8") as f:
-        raw = json.load(f)
-    return {str(k).upper(): str(v) for k, v in raw.get("tickers", {}).items()}
-
-
-def _sec_index_path(config: dict | None) -> str:
-    if config and config.get("universe_sec_registrant_path"):
-        p = os.path.expanduser(os.path.expandvars(str(config["universe_sec_registrant_path"])))
-        return p if os.path.isabs(p) else os.path.join(_ROOT, p)
-    return _DEFAULT_SEC_INDEX
-
-
-def load_sec_registrant_index(config: dict | None = None) -> dict | None:
-    """Load the {ticker: SEC-filed title} snapshot, or ``None`` if absent.
-
-    No longer used by the leveraged/inverse/ETN filter (see
-    :func:`load_leveraged_inverse_etn_list`) -- retained for symbology and
-    ticker-alias work, per Zach's 2026-08-17 comment that "the SEC snapshot
-    still earns its place for the symbology and alias work; it just isn't
-    the source for this question."
-    """
-    return _load_sec_index_cached(_sec_index_path(config))
-
-
 def _cfg(config: dict | None, key: str):
     if config and key in config and config[key] is not None:
         return config[key]
@@ -274,10 +243,10 @@ def _eligible_rows(cache: pd.DataFrame, month: str, config: dict | None) -> pd.D
     if _cfg(config, "universe_exclude_leveraged_inverse_etn"):
         lev_inv_etn_set = load_leveraged_inverse_etn_list(config)
         if lev_inv_etn_set is not None and not rows.empty:
-            exclude = rows["ticker"].apply(
-                lambda tk: is_leveraged_inverse_or_etn(tk, lev_inv_etn_set)
-            )
-            rows = rows[~exclude]
+            # Vectorised equivalent of is_leveraged_inverse_or_etn() over the
+            # column: the curated set is uppercase, so upper-then-isin matches
+            # the per-ticker helper without a Python-level apply per row.
+            rows = rows[~rows["ticker"].str.upper().isin(lev_inv_etn_set)]
     return rows.sort_values("adv20", ascending=False)
 
 

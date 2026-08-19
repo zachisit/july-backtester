@@ -53,12 +53,12 @@ def cache_path(tmp_path):
     rbu._load_cache_cached.cache_clear()
     # Threshold/schedule/collision tests are orthogonal to the instrument-type
     # filter and use synthetic tickers (LIVE, THIN, WB, ...) that aren't real
-    # leveraged/inverse/ETN tickers. Point at a path that doesn't exist so the
-    # filter is a documented no-op here rather than silently excluding
-    # everything -- TestInstrumentTypeFilter below exercises the filter itself.
+    # leveraged/inverse/ETN tickers. Point the curated-list path at a file that
+    # doesn't exist so the filter is a documented no-op here rather than
+    # silently loading the real committed list -- TestInstrumentTypeFilter
+    # below exercises the filter itself.
     return {
         "universe_cache_path": str(p),
-        "universe_sec_registrant_path": str(tmp_path / "no_sec_index_here.json"),
         "universe_leveraged_inverse_etn_path": str(tmp_path / "no_lev_inv_etn_list_here.json"),
     }
 
@@ -180,7 +180,10 @@ class TestCollisionReporting:
         rbu._load_cache_cached.cache_clear()
         cfg = {
             "universe_cache_path": str(p),
-            "universe_sec_registrant_path": str(tmp_path / "no_sec_index_here.json"),
+            # Isolate from the instrument-type filter: point its curated-list
+            # path at a missing file so it's a no-op (the real key, not the
+            # SEC path, is what gates the filter).
+            "universe_leveraged_inverse_etn_path": str(tmp_path / "no_lev_inv_etn_list_here.json"),
         }
         assert rbu.universe_on("2010-01-15", cfg) == ["DUP"]      # deduped
         coll = rbu.ticker_collisions("2010-01-01", "2010-12-31", cfg)
