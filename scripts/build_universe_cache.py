@@ -50,6 +50,10 @@ import numpy as np
 import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+
+from helpers.rule_based_universe import normalise_universe_ticker  # noqa: E402
+
 DEFAULT_CORPUS = os.path.join(ROOT, "parquet_data", "data")
 DEFAULT_OUT = os.path.join(ROOT, "universe_cache", "universe_metrics.parquet")
 
@@ -59,7 +63,12 @@ WATCH = ("GS", "WFC", "BAC", "JPM")  # known scattered-corrupt bars — reported
 
 def _security_and_ticker(path: str) -> tuple[str, str]:
     stem = os.path.basename(path)[:-8]
-    return stem, re.sub(r"-\d{6}$", "", stem)
+    base = re.sub(r"-\d{6}$", "", stem)
+    # Dot->hyphen share-class normalisation (BRK.B -> BRK-B) and any explicit
+    # rename alias (TFCFA -> FOXA) so the cache's `ticker` column matches what
+    # PIT rosters and price providers use -- see rule_based_universe.py's
+    # RULE_TICKER_ALIASES for why this can't be pure punctuation normalisation.
+    return stem, normalise_universe_ticker(base)
 
 
 def _monthly_metrics(df: pd.DataFrame) -> pd.DataFrame | None:

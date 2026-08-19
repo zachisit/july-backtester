@@ -51,7 +51,16 @@ def cache_path(tmp_path):
     p = tmp_path / "universe_metrics.parquet"
     _cache(rows).to_parquet(p, index=False)
     rbu._load_cache_cached.cache_clear()
-    return {"universe_cache_path": str(p)}
+    # Threshold/schedule/collision tests are orthogonal to the instrument-type
+    # filter and use synthetic tickers (LIVE, THIN, WB, ...) that aren't real
+    # leveraged/inverse/ETN tickers. Point the curated-list path at a file that
+    # doesn't exist so the filter is a documented no-op here rather than
+    # silently loading the real committed list -- TestInstrumentTypeFilter
+    # below exercises the filter itself.
+    return {
+        "universe_cache_path": str(p),
+        "universe_leveraged_inverse_etn_path": str(tmp_path / "no_lev_inv_etn_list_here.json"),
+    }
 
 
 class TestThresholds:
@@ -169,7 +178,13 @@ class TestCollisionReporting:
         p = tmp_path / "c.parquet"
         _cache(rows).to_parquet(p, index=False)
         rbu._load_cache_cached.cache_clear()
-        cfg = {"universe_cache_path": str(p)}
+        cfg = {
+            "universe_cache_path": str(p),
+            # Isolate from the instrument-type filter: point its curated-list
+            # path at a missing file so it's a no-op (the real key, not the
+            # SEC path, is what gates the filter).
+            "universe_leveraged_inverse_etn_path": str(tmp_path / "no_lev_inv_etn_list_here.json"),
+        }
         assert rbu.universe_on("2010-01-15", cfg) == ["DUP"]      # deduped
         coll = rbu.ticker_collisions("2010-01-01", "2010-12-31", cfg)
         assert len(coll) == 1
@@ -181,3 +196,133 @@ class TestMissingCache:
         rbu._load_cache_cached.cache_clear()
         with pytest.raises(FileNotFoundError, match="build_universe_cache"):
             rbu.universe_on("2010-01-01", {"universe_cache_path": str(tmp_path / "nope.parquet")})
+
+
+class TestTickerNormalisation:
+    def test_dot_becomes_hyphen(self):
+        assert rbu.normalise_universe_ticker("BRK.B") == "BRK-B"
+
+    def test_already_hyphenated_is_unchanged(self):
+        assert rbu.normalise_universe_ticker("BRK-B") == "BRK-B"
+
+    def test_lowercase_is_upcased(self):
+        assert rbu.normalise_universe_ticker("aapl") == "AAPL"
+
+    def test_explicit_alias_applied(self):
+        # Norgate stores the pre-2019 21st Century Fox entity as TFCFA; PIT
+        # rosters record the same membership slot as FOXA (issue #70 defect 2).
+        assert rbu.normalise_universe_ticker("TFCFA") == "FOXA"
+
+    def test_unaliased_ticker_passes_through(self):
+        assert rbu.normalise_universe_ticker("MSFT") == "MSFT"
+
+
+class TestInstrumentTypeFilter:
+    """issue #70 defect 1, revised scope: the universe is broker-constrained,
+    not index-shaped -- Zach's tradeable set is "US common stock (ADRs
+    included) + any ETF Vanguard permits buying long", so plain ETFs stay IN
+    and only leveraged/inverse ETFs and ETNs are excluded.
+
+    Round 3 (this version): the filter matches against a curated ticker set
+    (universe_cache/leveraged_inverse_etn_tickers.json) instead of SEC-filed
+    titles. Round 2's title match (commit 224fd9f) does not work on the real
+    target tickers -- TQQQ/SOXL/FAS/SQQQ are absent from the SEC registrant
+    index entirely ('40 Act funds, not Exchange Act registrants), and ETNs
+    like VXX/DJP are titled only by their issuing bank -- Zach found this via
+    his own real-cache measurement, not review. See the module-level comment
+    in helpers/rule_based_universe.py for the full history.
+    """
+
+    def _set(self, *tickers):
+        return frozenset(t.upper() for t in tickers)
+
+    def test_no_set_configured_is_a_no_op(self):
+        assert rbu.is_leveraged_inverse_or_etn("ANYTHING", None) is False
+
+    def test_absent_from_set_never_excluded(self):
+        # Core invariant carried forward from round 2: absence never
+        # excludes -- an unknown ticker could be a plain ETF (which belongs)
+        # or a delisted operating company (which must be kept), and this
+        # filter can't tell them apart, so it doesn't try.
+        s = self._set("TQQQ")
+        assert rbu.is_leveraged_inverse_or_etn("IWM", s) is False
+        assert rbu.is_leveraged_inverse_or_etn("LEH", s) is False
+
+    def test_real_operating_company_not_excluded(self):
+        assert rbu.is_leveraged_inverse_or_etn("AAPL", self._set("TQQQ")) is False
+
+    def test_plain_index_etf_not_excluded(self):
+        s = self._set("TQQQ", "SQQQ", "SOXL", "VXX")
+        assert rbu.is_leveraged_inverse_or_etn("SPY", s) is False
+        assert rbu.is_leveraged_inverse_or_etn("QQQ", s) is False
+        assert rbu.is_leveraged_inverse_or_etn("IWM", s) is False
+        assert rbu.is_leveraged_inverse_or_etn("GLD", s) is False
+
+    def test_ticker_in_set_excluded(self):
+        assert rbu.is_leveraged_inverse_or_etn("TQQQ", self._set("TQQQ")) is True
+
+    def test_membership_check_is_case_insensitive(self):
+        assert rbu.is_leveraged_inverse_or_etn("tqqq", self._set("TQQQ")) is True
+        assert rbu.is_leveraged_inverse_or_etn("TQQQ", self._set("tqqq")) is True
+
+    def test_real_committed_list_excludes_leveraged_inverse_and_etn(self):
+        # Resolves through the actual committed curated list -- no synthetic
+        # in-test fixture -- specifically because a synthetic fixture is what
+        # let round 2's SEC-title mechanism ship broken: it passed every test
+        # (all built on fabricated titles) while failing on the real tickers.
+        lev_inv_etn_set = rbu.load_leveraged_inverse_etn_list()
+        assert lev_inv_etn_set is not None
+        for ticker in ("TQQQ", "SQQQ", "SOXL", "VXX"):
+            assert rbu.is_leveraged_inverse_or_etn(ticker, lev_inv_etn_set) is True
+
+    def test_real_committed_list_keeps_plain_stocks_and_etfs(self):
+        lev_inv_etn_set = rbu.load_leveraged_inverse_etn_list()
+        assert lev_inv_etn_set is not None
+        for ticker in ("SPY", "GLD", "AAPL", "LEH"):
+            assert rbu.is_leveraged_inverse_or_etn(ticker, lev_inv_etn_set) is False
+
+    def test_eligible_rows_keeps_plain_etf_and_delisted_company_absent_from_list(self, tmp_path):
+        # End-to-end reproduction of the requirement change: a plain ETF
+        # (IWM) and a delisted operating company absent from the curated
+        # list (modeled on Lehman Brothers) are both kept.
+        rows = [
+            ["LEH-200809", "LEH", "2008-06", 60.0, 5e7, 3000, 21],
+            ["IWM", "IWM", "2008-06", 60.0, 5e7, 3000, 21],
+        ]
+        cache_p = tmp_path / "cache.parquet"
+        _cache(rows).to_parquet(cache_p, index=False)
+        list_p = tmp_path / "lev_inv_etn.json"
+        list_p.write_text('{"tickers": ["TQQQ"]}', encoding="utf-8")
+        rbu._load_cache_cached.cache_clear()
+        rbu._load_lev_inv_etn_set_cached.cache_clear()
+        cfg = {"universe_cache_path": str(cache_p), "universe_leveraged_inverse_etn_path": str(list_p)}
+        assert rbu.universe_on("2008-06-15", cfg) == ["IWM", "LEH"]
+
+    def test_eligible_rows_excludes_leveraged_etf_when_configured(self, tmp_path):
+        rows = [
+            ["REALCO", "REALCO", "2020-01", 50.0, 5e7, 3000, 21],
+            ["LEVCO", "LEVCO", "2020-01", 50.0, 5e7, 3000, 21],
+        ]
+        cache_p = tmp_path / "cache.parquet"
+        _cache(rows).to_parquet(cache_p, index=False)
+        list_p = tmp_path / "lev_inv_etn.json"
+        list_p.write_text('{"tickers": ["LEVCO"]}', encoding="utf-8")
+        rbu._load_cache_cached.cache_clear()
+        rbu._load_lev_inv_etn_set_cached.cache_clear()
+        cfg = {"universe_cache_path": str(cache_p), "universe_leveraged_inverse_etn_path": str(list_p)}
+        assert rbu.universe_on("2020-01-15", cfg) == ["REALCO"]
+
+    def test_filter_disabled_by_config_keeps_everything(self, tmp_path):
+        rows = [["LEVCO", "LEVCO", "2020-01", 50.0, 5e7, 3000, 21]]
+        cache_p = tmp_path / "cache.parquet"
+        _cache(rows).to_parquet(cache_p, index=False)
+        list_p = tmp_path / "lev_inv_etn.json"
+        list_p.write_text('{"tickers": ["LEVCO"]}', encoding="utf-8")
+        rbu._load_cache_cached.cache_clear()
+        rbu._load_lev_inv_etn_set_cached.cache_clear()
+        cfg = {
+            "universe_cache_path": str(cache_p),
+            "universe_leveraged_inverse_etn_path": str(list_p),
+            "universe_exclude_leveraged_inverse_etn": False,
+        }
+        assert rbu.universe_on("2020-01-15", cfg) == ["LEVCO"]

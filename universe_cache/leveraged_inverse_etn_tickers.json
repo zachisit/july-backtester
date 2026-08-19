@@ -1,0 +1,32 @@
+{
+  "_purpose": "Curated exclusion list for the rule-based universe's instrument-type filter (issue #70 / PR #281, round 3, 2026-08-17). Replaces the SEC-title mechanism (helpers.rule_based_universe.is_leveraged_inverse_or_etn) entirely -- TQQQ/SOXL/FAS/SQQQ are '40 Act investment companies absent from the SEC registrant index, and ETNs like VXX/DJP are titled by their issuing bank (e.g. 'BARCLAYS BANK PLC'), so no title match reaches either category.",
+  "_source": "Manually curated. No authoritative machine-readable ticker list exists -- Vanguard's policy pages publish restricted categories, not tickers, and third-party category pages (ETFdb, etf.com) are JS-rendered / bot-blocked and could not be scraped in this environment. Compiled from known issuer product families: ProShares Ultra/UltraShort/UltraPro/Short (equity index, sector, bond, currency, commodity, volatility, crypto), Direxion Daily Bull/Bear 2X/3X Shares (incl. single-stock), GraniteShares single-stock leveraged ETFs, Volatility Shares leveraged crypto/VIX ETFs, MicroSectors leveraged ETNs, iPath/Barclays ETNs, VelocityShares/Credit Suisse ETNs (incl. delisted), UBS ETRACS ETNs.",
+  "_compiled_at": "2026-08-17",
+  "_caveat": "This is a maintained approximation, not a derived fact -- see the module docstring on helpers.rule_based_universe and the issue #70 / PR #281 comment history (Zach's 2026-08-16/17 corrections: ALL ETNs are restricted, not just leveraged/inverse ones; there is no published Vanguard ticker list). Coverage is strongest for the names that actually clear real liquidity floors (Zach's 2026-08-17 measurement against the real cache: 16 leveraged/inverse names survive a top-500 universe -- AGQ, NVDL, QID, QLD, SCO, SH, SOXL, SOXS, SPXL, SPXS, SPXU, SQQQ, TNA, TQQQ, TSLL, UPRO -- all present below) and weakest for small, delisted, or very new single-stock leveraged products. scripts/detect_leveraged_etf_by_beta.py is the intended completeness check: it flags candidates from returns alone (no vendor list needed, works on delisted names) so gaps here surface as beta outliers rather than silently passing through. Extend this file when that script flags something real; do not treat this list as exhaustive. Note (2026-08-17, self-review): EVIX/EXIV (unverifiable VIX-related tickers) and MLPY (unverifiable ETRACS ticker) were removed post-commit f3ab519 -- low confidence they were real/correct, and a wrong entry here risks wrongly excluding an unrelated real security, which is worse than a false negative (missing a real leveraged product just means it passes through unfiltered, same as any other absent ticker).",
+  "tickers": [
+    "AAPU", "AGQ", "AMDL", "AMZU",
+    "BAL", "BDCL", "BERZ", "BITI", "BITU", "BITX", "BULZ",
+    "CEFL", "CONL", "CURE",
+    "DDM", "DFEN", "DGAZ", "DGLD", "DIG", "DJP", "DOG", "DPST", "DRIP", "DRN", "DRV", "DSLV", "DUG", "DUST", "DWTI", "DXD",
+    "EDC", "EDZ", "EET", "EEV", "EPV", "ERO", "ERX", "ERY", "ETHU", "EURL", "EWV", "EZJ",
+    "FAS", "FAZ", "FNGD", "FNGU", "FXP",
+    "GAZ", "GGLL", "GLL", "GRN", "GUSH",
+    "JDST", "JJA", "JJC", "JJG", "JJM", "JJN", "JJU", "JNUG", "JO",
+    "KORU",
+    "LABD", "LABU",
+    "METU", "MORL", "MSFU", "MVV", "MYY", "MZZ",
+    "NAIL", "NIB", "NUGT", "NVDD", "NVDL", "NVDU",
+    "OIL",
+    "PSQ", "PST",
+    "QID", "QLD",
+    "REW", "RETL", "ROM", "RWM", "RXD", "RXL",
+    "SCC", "SCO", "SDOW", "SDP", "SDS", "SGG", "SH", "SIJ", "SKF", "SMN", "SOXL", "SOXS", "SPDN", "SPUU", "SPXL", "SPXS", "SPXU", "SQQQ", "SRS", "SRTY", "SSG", "SSO", "SVIX", "SVXY", "SZK",
+    "TBT", "TECL", "TECS", "TMF", "TMV", "TNA", "TQQQ", "TSLL", "TSLR", "TVIX", "TWM", "TYD", "TYO", "TZA",
+    "UBT", "UCC", "UCO", "UDOW", "UGAZ", "UGE", "UGL", "UGLD", "UPRO", "UPV", "UPW", "URE", "URTY", "USD", "USLV", "UST", "UVIX", "UVXY", "UWM", "UWTI", "UXI", "UYG", "UYM",
+    "VXX", "VXZ",
+    "WEBL", "WEBS",
+    "XIV", "XPP",
+    "YANG", "YINN",
+    "ZIV", "ZSL"
+  ]
+}
