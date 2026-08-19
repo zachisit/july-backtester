@@ -251,8 +251,8 @@ printed extreme. The level is **static — it does not trail**.
 - **Fill assumption**: like every daily-bar stop in the engine, a stopped trade fills *at* the
   stop level; a bar that opens through the stop is not refilled at the open unless
   `intrabar_resolution` is enabled. On strategies where the stop is dormant for a session this
-  flatters results — see `custom_strategies/private/research_context/scripts/eth_btc_fade_stop_test.py`
-  for a gap-aware cross-check harness.
+  flatters results — a gap-aware cross-check (comparing at-level fills against sub-bar open fills)
+  is the way to quantify the overstatement before trusting a `signal_bar` backtest.
 - **Protective-side guard**: unlike `percentage`/`atr` (distance-from-entry, always on the
   protective side), a structural level is decoupled from the fill, so under `execution_time="open"`
   a next-open that gaps *through* the extreme leaves the stop on the WRONG side of entry (long: a

@@ -154,9 +154,12 @@ def _walk_back(prev_dates, date, n):
     """Step ``n`` trading bars back from ``date`` using a prev-date mapping.
 
     ``n=0`` returns ``date`` unchanged. Returns ``pd.NaT`` if the chain runs off the
-    start of the series, which callers treat as "no stop for this trade".
+    start of the series, which callers treat as "no stop for this trade". A negative
+    ``n`` is clamped to ``0`` (there is no "forward" walk — anchoring past the signal
+    bar would be look-ahead), so a stray negative ``bars_back`` anchors to the signal
+    bar rather than silently doing something else.
     """
-    n = int(n or 0)
+    n = max(0, int(n or 0))
     for _ in range(n):
         if pd.isna(date):
             return pd.NaT
