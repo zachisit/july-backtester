@@ -47,6 +47,22 @@ tools/watchlists
 # Claude AI internal config
 .claude/
 
+# --- Unified market-data pipeline ---
+# Ignore the bulk price data (2.8GB+) AND the generated pipeline metadata that
+# pairs with it (classification CSVs, manifest/summary JSON). These regenerate
+# from scripts/build_merged_dataset.py and belong with the data, not the public
+# repo. KEEP the code (src/), authored docs (*.md), and audit reports (*.md).
+data/market_data/merged/
+data/market_data/polygon_raw/
+data/market_data/polygon_normalized/
+data/market_data/polygon_patch/
+data/market_data/logs/
+data/market_data/metadata/*.csv
+data/market_data/metadata/*.json
+data/market_data/audit/*.csv
+data/market_data/audit/*.txt
+data_cache/
+
 # Private strategies (belt & suspenders - submodule handles this, but safety first)
 # This prevents accidental commits if someone copies files instead of using the submodule
 custom_strategies/private/*.py
@@ -56,3 +72,17 @@ custom_strategies/private/**/*.py
 
 # Local 1-min FX cache built by scripts/fetch_fx_minute.py (multi-GB)
 fx_minute_cache/
+
+# Binary data files — belong in private data submodule (july-backtester-norgate-data)
+data/nq100_membership.parquet
+data/*.parquet
+
+# Live paper-trading runtime state (never commit live cash/positions/signals)
+paper_state/state/*
+!paper_state/state/.gitkeep
+paper_state/signals/*
+!paper_state/signals/.gitkeep
+paper_state/stock_level/*
+!paper_state/stock_level/.gitkeep
+paper_state/target_books/*
+!paper_state/target_books/.gitkeep
