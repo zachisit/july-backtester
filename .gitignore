@@ -56,3 +56,6 @@ custom_strategies/private/**/*.py
 
 # Local 1-min FX cache built by scripts/fetch_fx_minute.py (multi-GB)
 fx_minute_cache/
+
+# Generated rule-based universe cache (scripts/build_universe_cache.py) — 62MB, rebuildable
+universe_cache/*.parquet
