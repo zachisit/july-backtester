@@ -326,3 +326,65 @@ class TestInstrumentTypeFilter:
             "universe_exclude_leveraged_inverse_etn": False,
         }
         assert rbu.universe_on("2020-01-15", cfg) == ["LEVCO"]
+
+
+class TestWithinMonthLookAhead:
+    """The cache stores each month's LAST bar (issue #70 follow-up).
+
+    Resolving a date against its OWN month therefore reads bars that had not
+    printed yet. The real-corpus case: Lehman closed $16.13 on 2008-09-02 with
+    ~$1bn ADV, but September's month-end close is $0.22, so a 0-lag rule
+    excludes it on September 2nd -- deleting a security precisely because it
+    was about to collapse. `universe_lag_months=1` resolves against the most
+    recent COMPLETED month instead, which is what universe_on's docstring
+    promises.
+    """
+
+    @pytest.fixture
+    def crash_cache(self, tmp_path):
+        # CRASH is a healthy $50 name that collapses to $2 during 2008-09.
+        rows = [
+            ["CRASH", "CRASH", "2008-08", 50.0, 9e7, 3000, 21],
+            ["CRASH", "CRASH", "2008-09", 2.0, 9e7, 3021, 21],
+            ["STEADY", "STEADY", "2008-08", 50.0, 9e7, 3000, 21],
+            ["STEADY", "STEADY", "2008-09", 50.0, 9e7, 3021, 21],
+        ]
+        p = tmp_path / "crash.parquet"
+        _cache(rows).to_parquet(p, index=False)
+        rbu._load_cache_cached.cache_clear()
+        return str(p)
+
+    def _cfg(self, path, lag):
+        return {
+            "universe_cache_path": path,
+            "universe_min_price": 10.0,
+            "universe_min_dollar_volume": 2e7,
+            "universe_min_bars": 252,
+            "universe_lag_months": lag,
+            "universe_leveraged_inverse_etn_path": "/nonexistent.json",
+        }
+
+    def test_zero_lag_leaks_the_month_end_close_backwards(self, crash_cache):
+        """Documents the shipped behaviour: the crash is known on the 2nd."""
+        assert "CRASH" not in rbu.universe_on("2008-09-02", self._cfg(crash_cache, 0))
+
+    def test_lag_one_uses_only_bars_that_had_printed(self, crash_cache):
+        """With a 1-month lag the name is present until the crash is history."""
+        assert "CRASH" in rbu.universe_on("2008-09-02", self._cfg(crash_cache, 1))
+        # ...and is correctly gone once September is a completed month.
+        assert "CRASH" not in rbu.universe_on("2008-10-02", self._cfg(crash_cache, 1))
+
+    def test_lag_does_not_disturb_a_name_that_never_flips(self, crash_cache):
+        for lag in (0, 1):
+            assert "STEADY" in rbu.universe_on("2008-09-02", self._cfg(crash_cache, lag))
+
+    def test_schedule_snapshot_is_lagged_too(self, crash_cache):
+        sched = rbu.build_membership_schedule(
+            "2008-08-01", "2008-09-30", self._cfg(crash_cache, 1)
+        )
+        assert "CRASH" in rbu.members_on(sched, "2008-09-15")
+
+    def test_shift_month_crosses_the_year_boundary(self):
+        assert rbu._shift_month("2008-01", 1) == "2007-12"
+        assert rbu._shift_month("2008-01", 13) == "2006-12"
+        assert rbu._shift_month("2008-09", 0) == "2008-09"

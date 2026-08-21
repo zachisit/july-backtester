@@ -82,6 +82,15 @@ DEFAULTS = {
     "universe_min_bars": 252,             # ~1y of history before eligibility
     "universe_top_n": None,               # None = uncapped; int = top N by adv20
     "universe_exclude_leveraged_inverse_etn": True,  # see is_leveraged_inverse_or_etn()
+    # Months to lag metric resolution. The cache stores each month's LAST bar, so
+    # resolving a date against its OWN month reads bars that had not printed yet
+    # (Lehman closed $16.13 on 2008-09-02 but September's month-end close is $0.22,
+    # so a 0-lag rule excludes it on Sept 2nd -- a ~30-day leak, in the direction
+    # that silently deletes securities that are ABOUT to crash). 1 = resolve against
+    # the most recent COMPLETED month, which is what universe_on's docstring promises.
+    # Default stays 0 to preserve the behaviour PR #281 shipped; research callers that
+    # must be leak-free should set 1 explicitly. See issue #70.
+    "universe_lag_months": 0,
     "universe_leveraged_inverse_etn_path": None,  # None = default committed curated list
 }
 
@@ -230,6 +239,20 @@ def _month_of(date: str) -> str:
     return str(date)[:7]
 
 
+def _shift_month(month: str, lag: int) -> str:
+    """``"2008-09"`` shifted back *lag* months. lag<=0 is a no-op."""
+    if not lag:
+        return month
+    y, m = int(month[:4]), int(month[5:7])
+    total = y * 12 + (m - 1) - int(lag)
+    return f"{total // 12:04d}-{total % 12 + 1:02d}"
+
+
+def _resolve_month(date: str, config: dict | None) -> str:
+    """Cache month whose metrics may legitimately be read as of *date*."""
+    return _shift_month(_month_of(date), int(_cfg(config, "universe_lag_months")))
+
+
 def _eligible_rows(cache: pd.DataFrame, month: str, config: dict | None) -> pd.DataFrame:
     """Rows for *month* passing every threshold, most liquid first."""
     rows = cache[cache["month"] == month]
@@ -257,7 +280,7 @@ def universe_on(date: str, config: dict | None = None) -> list[str]:
     depends only on bars that had already printed.
     """
     cache = load_cache(config)
-    rows = _eligible_rows(cache, _month_of(date), config)
+    rows = _eligible_rows(cache, _resolve_month(date, config), config)
     if rows.empty:
         return []
     top_n = _cfg(config, "universe_top_n")
@@ -286,9 +309,10 @@ def tickers_union_for_period(
     fetch list; per-bar membership is enforced separately via the schedule.
     """
     cache = load_cache(config)
+    lag = int(_cfg(config, "universe_lag_months"))
     union: set[str] = set()
     for month in _months_between(start_date, end_date, cache):
-        rows = _eligible_rows(cache, month, config)
+        rows = _eligible_rows(cache, _shift_month(month, lag), config)
         if rows.empty:
             continue
         rows = rows.drop_duplicates(subset="ticker", keep="first")
@@ -312,10 +336,13 @@ def build_membership_schedule(
     """
     cache = load_cache(config)
     months = _months_between(start_date, end_date, cache)
+    lag = int(_cfg(config, "universe_lag_months"))
     schedule: list[tuple[str, frozenset]] = []
     prev: frozenset | None = None
     for i, month in enumerate(months):
-        rows = _eligible_rows(cache, month, config)
+        # Calendar month `month` is governed by metrics from `month - lag`, so a
+        # snapshot effective on the 1st uses only bars that had already printed.
+        rows = _eligible_rows(cache, _shift_month(month, lag), config)
         rows = rows.drop_duplicates(subset="ticker", keep="first")
         top_n = _cfg(config, "universe_top_n")
         if top_n:
