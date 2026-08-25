@@ -1,6 +1,6 @@
 # tests/test_rule_based_universe.py
 """
-Tests for the rule-based point-in-time universe (issue #70).
+Tests for the rule-based point-in-time universe (zachisit/july-backtester-private-strategies#70).
 
 Built on a synthetic corpus written to ``tmp_path`` — no dependency on the real
 36k-security Parquet submodule, so these run anywhere.
@@ -111,7 +111,7 @@ class TestSpanIndex:
         assert {"ticker", "delisted", "first_bar", "last_bar", "n_bars"} <= set(idx.columns)
 
     def test_spans_are_real_dates_not_1970(self, corpus):
-        """The #68 trap: Datetime is not column 0, so locating it by position
+        """The zachisit/july-backtester-private-strategies#68 trap: Datetime is not column 0, so locating it by position
         reads float OHLC as nanosecond timestamps and silently yields 1970."""
         idx = build_span_index(str(corpus))
         assert idx["first_bar"].min().year >= 2000
