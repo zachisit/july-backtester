@@ -16,6 +16,8 @@ import pytest
 
 from helpers.rule_based_universe import (
     COMMON_ETFS,
+    ETF_TICKERS,
+    etf_report,
     DEFAULTS,
     build_span_index,
     is_rule_spec,
@@ -229,7 +231,54 @@ class TestDefaults:
                     "universe_min_bars", "universe_top_n", "universe_adv_window"):
             assert key in DEFAULTS
 
-    def test_etf_list_is_advisory_not_default(self):
-        """ETFs are investable — excluding them must be an explicit choice."""
+    def test_etfs_excluded_by_default(self):
+        """'Run stocks' is the common intent, and an unfiltered liquidity-ranked
+        universe measured 13-19% ETFs (top-500) / 21-26% (top-100) post-2010."""
+        assert DEFAULTS["universe_exclude_etfs"] is True
         assert DEFAULTS["universe_exclude_symbols"] == ()
-        assert "SPY" in COMMON_ETFS
+
+    def test_etf_list_spans_categories(self):
+        """A broad-market-only list misses the ETFs that actually pollute:
+        commodity, currency, bond, leveraged and inverse products all rank."""
+        for sym in ("SPY", "QQQ", "GLD", "TLT", "UUP", "TQQQ", "SQQQ",
+                    "SH", "EWJ", "XLF", "HYG", "ARKK", "UVXY"):
+            assert sym in ETF_TICKERS, f"{sym} missing from ETF_TICKERS"
+        assert len(ETF_TICKERS) > 200
+
+
+class TestEtfHandling:
+
+    def test_etf_is_excluded_by_default(self, corpus):
+        _write(corpus, "SPY", "2000-01-03", "2024-12-31", price=200, volume=80_000_000)
+        assert "SPY" not in resolve_universe("2015-06-30", _cfg(corpus))
+
+    def test_etf_kept_when_disabled(self, corpus):
+        _write(corpus, "SPY", "2000-01-03", "2024-12-31", price=200, volume=80_000_000)
+        u = resolve_universe("2015-06-30", _cfg(corpus, universe_exclude_etfs=False))
+        assert "SPY" in u
+
+    def test_etf_would_otherwise_dominate_top_n(self, corpus):
+        """Without the filter SPY out-ranks every stock in the fixture — which is
+        exactly what happens on the real corpus."""
+        _write(corpus, "SPY", "2000-01-03", "2024-12-31", price=200, volume=80_000_000)
+        with_etf = resolve_universe(
+            "2015-06-30", _cfg(corpus, universe_top_n=1, universe_exclude_etfs=False))
+        without = resolve_universe("2015-06-30", _cfg(corpus, universe_top_n=1))
+        assert with_etf == ["SPY"]
+        assert without == ["AAA"]
+
+    def test_delisted_etf_variant_also_excluded(self, corpus):
+        """Matching is on the bare ticker, so a closed ETF is excluded too."""
+        _write(corpus, "TVIX-202007", "2010-01-04", "2020-07-01",
+               price=100, volume=50_000_000)
+        assert "TVIX-202007" not in resolve_universe("2015-06-30", _cfg(corpus))
+
+    def test_etf_report_counts_and_percentages(self, corpus):
+        rep = etf_report(["AAPL", "SPY", "MSFT", "QQQ", "GLD"])
+        assert rep["n_etfs"] == 3 and rep["n_total"] == 5
+        assert rep["etfs"] == ["GLD", "QQQ", "SPY"]
+        assert rep["pct"] == pytest.approx(60.0)
+
+    def test_etf_report_handles_delisted_ids_and_empty(self):
+        assert etf_report(["TVIX-202007", "AAPL"])["n_etfs"] == 1
+        assert etf_report([]) == {"etfs": [], "n_etfs": 0, "n_total": 0, "pct": 0.0}

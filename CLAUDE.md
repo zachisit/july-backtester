@@ -144,7 +144,22 @@ capped to `universe_top_n` by dollar volume.
 
 **What it is NOT:** the S&P 500, Russell, or any index. If a thesis depends on index membership *itself* — reconstitution flow, inclusion effects, benchmark-relative mandates — this does not substitute. **Results produced on this universe must say so.**
 
-**ETF caveat:** SPY/QQQ/IWM rank top on dollar volume in every era and are *not* excluded by default (they are genuinely investable). For single-name research pass `universe_exclude_symbols=COMMON_ETFS` — otherwise a stock-selection strategy can quietly hold the index it is benchmarked against.
+**ETFs are excluded by default** (`universe_exclude_etfs: True`). An unfiltered liquidity-ranked universe is materially ETFs — measured on the real corpus:
+
+| As of | top-100 | top-500 |
+|---|---|---|
+| 2004 | 4.0% | 2.6% |
+| 2010 | 24.0% | 13.6% |
+| 2020 | 26.0% | 19.0% |
+| 2024 | 21.0% | 16.6% |
+
+A stock-selection strategy holding SPY is partly holding the benchmark it's measured against, and no metric reveals it. Set `universe_exclude_etfs: False` to keep them.
+
+**Why a list and not a classifier.** The corpus carries no `securitytype` field. A statistical classifier was tried and **does not work** — recorded so it isn't re-attempted. R² of daily returns vs SPY, on 89 known ETFs vs 52 known stocks: threshold 0.80 catches 34.8% of ETFs at 0% false positives; threshold 0.50 catches 65.2% at **25%** false positives. It fails because commodity/currency/bond ETFs aren't equity baskets at all (GLD 0.018, SLV 0.0005, UUP 0.003, TLT 0.12). Counting idiosyncratic 5σ jumps separates better (ETF median 0, stock median 2 — no earnings) but still misclassifies ~25% of stocks. Neither is precise enough to silently drop names.
+
+**Why a list is nevertheless sufficient.** The screen is dollar-volume ranked, so the problem is self-limiting: not "how many ETFs exist" (hundreds) but "how many are liquid enough to hold a top-N slot" (~20 in a top-100). `ETF_TICKERS` (~230 names) spans broad/sector/style/bond/commodity/currency/country/leveraged/inverse/volatility/thematic and takes the measured contamination above to **0%**. Matching is on the bare ticker, so a closed ETF (`TVIX-202007`) is excluded too.
+
+It is curated, not exhaustive — a new or obscure ETF can pass. **`etf_report(universe)`** returns `{etfs, n_etfs, n_total, pct}` so that gap is visible rather than assumed away.
 
 **Tests:** `tests/test_rule_based_universe.py` — 31 tests on a synthetic corpus (no submodule dependency): security identity incl. share-class-vs-delisting (`BRK-A` vs `BRK-199001`), the 1970 trap, mixed tz-aware/naive files, each screen, ticker-reuse resolution, and survivorship present-then-absent.
 

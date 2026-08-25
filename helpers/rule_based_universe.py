@@ -75,23 +75,84 @@ DEFAULTS = {
     "universe_adv_window": 20,
     "universe_exclude_prefixes": ("$", "#"),
     "universe_exclude_symbols": (),
+    # Default ON: "run stocks" is the common intent, and a liquidity-ranked
+    # universe is 13-17% ETFs (top-500) / 21-26% (top-100) from 2010 onward if
+    # you don't filter. A stock-selection strategy holding SPY is partly just
+    # holding the benchmark, and no metric reveals it. Set False to keep them.
+    "universe_exclude_etfs": True,
 }
 
-#: Broad-market and sector ETFs rank near the top on dollar volume in every era
-#: (SPY, QQQ and IWM lead the 2004-2024 top-500 in that order). They are
-#: genuinely investable, so this is NOT a default exclusion — but a
-#: *stock-selection* strategy run on a universe containing SPY can quietly end
-#: up holding the index it is being benchmarked against, which flatters it in a
-#: way nothing in the metrics reveals. Pass this as ``universe_exclude_symbols``
-#: for single-name research.
+#: Liquid US-listed ETFs / ETNs, by era and category. Used when
+#: ``universe_exclude_etfs`` is on (the default).
 #:
-#: This is a starting list, not an exhaustive ETF classification — the corpus
-#: carries no security-type flag, so there is no reliable programmatic test.
-COMMON_ETFS = (
-    "SPY", "QQQ", "IWM", "DIA", "EEM", "EFA", "GLD", "SLV", "TLT", "IEF",
-    "HYG", "LQD", "VTI", "VOO", "IVV", "XLF", "XLE", "XLK", "XLV", "XLI",
-    "XLY", "XLP", "XLU", "XLB", "XLRE", "XLC", "VNQ", "USO", "UNG",
-)
+#: WHY A LIST AND NOT A CLASSIFIER
+#: -------------------------------
+#: The corpus is a flat export of three Norgate databases and carries no
+#: ``securitytype`` field, so ETFs are indistinguishable from equities by
+#: metadata. A statistical classifier was tried and does not work — recorded
+#: here so it is not re-attempted:
+#:
+#:   R^2 of daily returns vs SPY, on 89 known ETFs vs 52 known stocks (2019):
+#:       threshold 0.80 -> caught 34.8% of ETFs, 0.0% false positives
+#:       threshold 0.50 -> caught 65.2% of ETFs, 25.0% false positives
+#:
+#: It fails because commodity, currency and bond ETFs are not equity baskets at
+#: all: GLD 0.018, SLV 0.0005, UUP 0.003, LQD 0.003, TLT 0.12. A count of
+#: idiosyncratic 5-sigma jumps separates better (ETF median 0, stock median 2 —
+#: ETFs have no earnings) but still misclassifies ~25% of stocks. Neither is
+#: precise enough to silently drop names from a universe.
+#:
+#: WHY A LIST IS NEVERTHELESS ENOUGH
+#: ---------------------------------
+#: The screen is dollar-volume ranked, so the problem is self-limiting: the
+#: question is not how many ETFs exist (hundreds) but how many are liquid enough
+#: to occupy a top-N slot. Measured on the real corpus, this list accounts for
+#: 13-17% of a top-500 and 21-26% of a top-100 from 2010 onward (2.6-4.0% in
+#: 2004, when ETFs barely existed).
+#:
+#: It is a curated list, not an exhaustive classification. A newly launched or
+#: obscure ETF can pass it. ``etf_report()`` exists so that gap is visible
+#: rather than assumed away — check what a universe still contains before
+#: trusting a single-name result.
+ETF_TICKERS = frozenset("""
+SPY QQQ IWM DIA VTI VOO IVV VEA VWO EFA EEM IEFA IEMG ACWI SCHB ITOT SPTM VT
+XLF XLE XLK XLV XLI XLY XLP XLU XLB XLRE XLC XBI XOP XME XRT XHB XLG XSD XTL
+VGT VHT VFH VDE VNQ VPU VAW VIS VCR VDC IYR IYF IYW IYH IYE IYJ IYK IYC IYT
+SMH SOXX SOXL SOXS IGV HACK SKYY ARKK ARKG ARKW ARKQ ARKF FINX BOTZ ROBO
+TLT IEF SHY AGG BND LQD HYG JNK TIP MUB EMB BNDX VCIT VCSH VGSH VGIT MBB BIV
+BSV SHV BIL SJNK SRLN BKLN PCY EMLC IGSB IGIB USIG SPTL SPTS SPSB SPIB
+GLD SLV IAU GDX GDXJ USO UNG DBA DBC DBO UGA PPLT PALL SIVR SGOL CPER OIH
+FXE FXY FXB FXA FXF FXC UUP UDN CYB
+EWJ EWZ EWG EWU EWC EWA EWW EWY EWT EWH EWS EWI EWP EWQ EWL EWD EWN EWK
+EWO EWM EZA EPI INDA FXI MCHI ASHR KWEB EIDO THD TUR RSX GREK ARGT EPOL ILF
+VUG VTV VBR VBK VOE VOT MTUM QUAL USMV VLUE SIZE IWF IWD IWN IWO IWP IWS IWB
+IWV IJH IJR MDY SLY SPYG SPYV RSP QQQE EQAL OEF SCHX SCHA SCHG SCHV
+TQQQ SQQQ SPXL SPXS TNA TZA FAS FAZ ERX ERY LABU LABD NUGT DUST JNUG JDST
+UPRO SPXU UDOW SDOW UVXY SVXY VXX VIXY TVIX ZIV XIV UWM TWM QLD SSO DDM
+SH PSQ DOG RWM SDS QID DXD EUM EFZ EFU SKF SRS
+DVY VYM SDY NOBL SCHD HDV VIG DGRO SPHD PFF PGX PSK VRP
+JETS TAN ICLN PBW QCLN LIT REMX URA NLR MOO WOOD CUT PHO FIW GRID PBD
+""".split())
+
+#: Back-compat alias for the original short list.
+COMMON_ETFS = ETF_TICKERS
+
+
+def etf_report(universe) -> dict:
+    """Which members of *universe* are recognised ETFs.
+
+    Returns ``{"etfs": [...], "n_etfs": int, "n_total": int, "pct": float}``.
+
+    Use this to audit what a universe still contains. The ETF list is curated,
+    not exhaustive, so a low count is evidence of a clean universe *only* to the
+    extent the list covers what is actually there.
+    """
+    etfs = sorted(s for s in universe if parse_security(s)[0].upper() in ETF_TICKERS)
+    n = len(universe)
+    return {
+        "etfs": etfs, "n_etfs": len(etfs), "n_total": n,
+        "pct": (len(etfs) / n * 100.0) if n else 0.0,
+    }
 
 #: The corpus is not all equities. ``$`` marks index series ($NYA, $DJITR,
 #: $SP900TR — 1,160 of them) and ``#`` marks market-breadth / advance-decline
@@ -193,6 +254,23 @@ def _read_span(path: str) -> tuple[pd.Timestamp, pd.Timestamp, int] | None:
     if lo is None or hi is None:
         return None
     return lo, hi, md.num_rows
+
+
+def default_cache_path(data_dir: str) -> str:
+    """Where to cache the span index for *data_dir*.
+
+    The filename carries a hash of the absolute corpus path. Caching as a plain
+    ``.span_index.parquet`` next to the corpus looks tidy but silently collides
+    whenever two different corpora share a parent directory — one corpus then
+    resolves against the other's index and returns a universe that has nothing
+    to do with its own data, with no error. (Caught by the test suite: pytest
+    gives every test its own ``tmp_path`` but they share a parent.)
+    """
+    import hashlib
+
+    abs_dir = os.path.abspath(data_dir)
+    digest = hashlib.sha1(abs_dir.encode()).hexdigest()[:10]
+    return os.path.join(os.path.dirname(abs_dir), f".span_index_{digest}.parquet")
 
 
 def build_span_index(data_dir: str, cache_path: str | None = None,
@@ -316,8 +394,7 @@ def resolve_universe(as_of, config: dict | None = None,
         )
 
     if span_index is None:
-        cache = os.path.join(os.path.dirname(data_dir), ".span_index.parquet")
-        span_index = build_span_index(data_dir, cache_path=cache)
+        span_index = build_span_index(data_dir, cache_path=default_cache_path(data_dir))
 
     # --- Stage 0: drop non-investable series ($ indices, # breadth) ---------
     exclude_prefixes = config.get(
@@ -336,10 +413,17 @@ def resolve_universe(as_of, config: dict | None = None,
             "universe_exclude_symbols", DEFAULTS["universe_exclude_symbols"]
         )
     }
+    if config.get("universe_exclude_etfs", DEFAULTS["universe_exclude_etfs"]):
+        exclude_symbols |= set(ETF_TICKERS)
+
     if exclude_symbols:
+        before = len(span_index)
         span_index = span_index[
             ~span_index["ticker"].str.upper().isin(exclude_symbols)
         ]
+        logger.info("rule universe: excluded %d securities by symbol "
+                    "(ETF list is curated, not exhaustive — see etf_report)",
+                    before - len(span_index))
 
     # --- Stage 1: cheap span filter (was it trading, and long enough?) -------
     alive = span_index[
