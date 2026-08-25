@@ -10,7 +10,7 @@ import pandas as pd
 from config import CONFIG
 from services import get_data_service
 from helpers.indicators import calculate_sma, calculate_rsi, calculate_atr
-from helpers.registry import get_active_strategies
+from helpers.registry import get_active_strategies, is_portfolio_level
 from helpers.portfolio_simulations import run_portfolio_simulation
 from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary, generate_sensitivity_report
 from helpers.llm_verdict import generate_llm_verdict
@@ -217,39 +217,104 @@ def run_single_simulation(args):
         elif stop_config['type'] == 'atr':
             strat_name = f"{name} w/ {stop_config['multiplier']}x ATR({stop_config['period']}) SL"
 
-        base_signals_with_dfs = {}
-        for symbol, df in portfolio_data.items():
+        def _per_symbol_signals(portfolio_data, logic_func, dependencies,
+                                strategy_params, name):
+            """The original per-symbol path, unchanged.
+
+            Extracted verbatim so the cross-sectional branch sits alongside it
+            rather than inside it — the golden-master suite covers this path and
+            its behaviour must stay byte-identical.
+            """
+            base_signals_with_dfs = {}
+            for symbol, df in portfolio_data.items():
+                kwargs = {}
+
+                # Always inject the ticker being processed so per-symbol /
+                # event-driven strategies (e.g. one keyed on a per-ticker
+                # earnings-date table) can identify which symbol's DataFrame
+                # they are evaluating. Backward-compatible: existing strategies
+                # take (df, **kwargs) and ignore unknown keys.
+                kwargs["symbol"] = symbol
+
+                # Dynamic dependency injection
+                for dep_key in dependencies:
+                    dep_symbol = dependency_map_global.get(dep_key)
+                    if dep_symbol and dep_symbol in comparison_dfs_global:
+                        dep_df = comparison_dfs_global[dep_symbol]
+                        kwargs[f'{dep_key}_df'] = dep_df.reindex(df.index, method='ffill')
+
+                if strategy_params:
+                    kwargs.update(strategy_params)
+
+                if len(dependencies) > 0 and any(dep + '_df' not in kwargs for dep in dependencies):
+                    tqdm.write(f"\n-> WARNING for '{symbol}': Skipping strategy '{name}' due to missing dependency data.")
+                    base_signals_with_dfs[symbol] = df.copy().assign(Signal=0)
+                    continue
+
+                # - If there are dependencies, kwargs contains spy_df etc.
+                # - If there are params, kwargs contains them.
+                # - If there are neither, kwargs is empty, which is fine.
+                base_signals_with_dfs[symbol] = logic_func(df.copy(), **kwargs)
+
+            # The simulator now handles stop-loss logic internally.
+            return {symbol: df['Signal'] for symbol, df in base_signals_with_dfs.items()}
+
+        if is_portfolio_level(logic_func):
+            # --- CROSS-SECTIONAL PATH ---
+            # The strategy is called ONCE with every symbol, so it can rank the
+            # universe against itself. Execution is unchanged: the signals it
+            # returns go through the same run_portfolio_simulation as every
+            # per-symbol strategy, inheriting sizing, costs, stops and the
+            # trade log rather than reimplementing them.
             kwargs = {}
-
-            # Always inject the ticker being processed so per-symbol /
-            # event-driven strategies (e.g. one keyed on a per-ticker
-            # earnings-date table) can identify which symbol's DataFrame
-            # they are evaluating. Backward-compatible: existing strategies
-            # take (df, **kwargs) and ignore unknown keys.
-            kwargs["symbol"] = symbol
-
-            # Dynamic dependency injection
             for dep_key in dependencies:
                 dep_symbol = dependency_map_global.get(dep_key)
                 if dep_symbol and dep_symbol in comparison_dfs_global:
-                    dep_df = comparison_dfs_global[dep_symbol]
-                    kwargs[f'{dep_key}_df'] = dep_df.reindex(df.index, method='ffill')
-
+                    # Passed whole — there is no single symbol index to align
+                    # to here, so the strategy reindexes as it needs.
+                    kwargs[f'{dep_key}_df'] = comparison_dfs_global[dep_symbol]
             if strategy_params:
                 kwargs.update(strategy_params)
 
             if len(dependencies) > 0 and any(dep + '_df' not in kwargs for dep in dependencies):
-                tqdm.write(f"\n-> WARNING for '{symbol}': Skipping strategy '{name}' due to missing dependency data.")
-                base_signals_with_dfs[symbol] = df.copy().assign(Signal=0)
-                continue
-
-            # - If there are dependencies, kwargs contains spy_df etc.
-            # - If there are params, kwargs contains them.
-            # - If there are neither, kwargs is empty, which is fine.
-            base_signals_with_dfs[symbol] = logic_func(df.copy(), **kwargs)
-
-        # The simulator now handles stop-loss logic internally.
-        final_signals = {symbol: df['Signal'] for symbol, df in base_signals_with_dfs.items()}
+                tqdm.write(f"\n-> WARNING: Skipping strategy '{name}' due to missing dependency data.")
+                final_signals = {s: pd.Series(0, index=d.index)
+                                 for s, d in portfolio_data.items()}
+            else:
+                raw_signals = logic_func(
+                    {s: d.copy() for s, d in portfolio_data.items()}, **kwargs
+                )
+                if not isinstance(raw_signals, dict):
+                    raise TypeError(
+                        f"Portfolio-level strategy '{name}' must return "
+                        f"{{symbol: Signal Series}} or {{symbol: DataFrame}}, "
+                        f"got {type(raw_signals).__name__}."
+                    )
+                # Accept {symbol: Series} or {symbol: DataFrame-with-Signal},
+                # matching what per-symbol strategies already return.
+                final_signals = {}
+                for symbol, df in portfolio_data.items():
+                    sig = raw_signals.get(symbol)
+                    if sig is None:
+                        # Not selected by the strategy -> flat for the whole run.
+                        final_signals[symbol] = pd.Series(0, index=df.index)
+                        continue
+                    if isinstance(sig, pd.DataFrame):
+                        if 'Signal' not in sig.columns:
+                            raise KeyError(
+                                f"Portfolio-level strategy '{name}' returned a "
+                                f"DataFrame for '{symbol}' without a 'Signal' column."
+                            )
+                        sig = sig['Signal']
+                    # Align to the symbol's own bars so a strategy that built
+                    # signals on a shared calendar cannot silently misalign.
+                    final_signals[symbol] = (
+                        pd.Series(sig).reindex(df.index).fillna(0)
+                    )
+        else:
+            final_signals = _per_symbol_signals(
+                portfolio_data, logic_func, dependencies, strategy_params, name
+            )
 
         # --- PIT SIGNAL GATING ---
         # When the portfolio was built from a ``pit:`` universe, apply two filters:

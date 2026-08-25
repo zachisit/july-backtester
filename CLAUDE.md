@@ -144,7 +144,45 @@ def my_strategy(df, **kwargs):
 
 **If the strategy needs SPY or VIX data:** declare `dependencies=["spy"]` or `dependencies=["vix"]`. The engine injects `spy_df` / `vix_df` into `**kwargs` automatically. No wrapper function needed — the decorated function IS the wrapper.
 
-**Active strategies public API:** `from helpers.registry import get_active_strategies` — returns `{name: {logic, dependencies, params}}`. This is what `main.py` uses instead of the old `STRATEGIES` dict.
+**Active strategies public API:** `from helpers.registry import get_active_strategies` — returns `{name: {logic, dependencies, params, portfolio_level}}`. This is what `main.py` uses instead of the old `STRATEGIES` dict.
+
+## Cross-Sectional Strategies (`@register_portfolio_strategy`)
+
+`register_strategy` calls its function **once per symbol** with that symbol's DataFrame, so a strategy can never compare symbols against each other. Anything that ranks a universe — "hold the top 5 of 100 by 60-day relative strength", sector rotation, pairs, dollar-neutral baskets — is inexpressible in that signature.
+
+The workaround used to be a standalone script with its own execution loop, duplicating sizing, slippage, commission, borrow cost and equity accounting **outside** the engine and outside `tests/test_engine_characterization.py`. Those duplicates drift.
+
+```python
+from helpers.registry import register_portfolio_strategy
+
+@register_portfolio_strategy(
+    name="Top-5 60d Momentum Rotation",
+    dependencies=[],                       # "spy" / "vix" injected as spy_df / vix_df
+    params={"lookback": 60, "top_n": 5},
+)
+def top_n_momentum(portfolio_data, **kwargs):
+    """portfolio_data: {symbol: OHLCV df}  ->  {symbol: Signal Series}"""
+    closes = pd.DataFrame({s: d["Close"] for s, d in portfolio_data.items()})
+    ranks = closes.pct_change(kwargs["lookback"]).rank(axis=1, ascending=False)
+    held = ranks.le(kwargs["top_n"])
+    return {s: held[s].map({True: 1, False: -1}) for s in closes.columns}
+```
+
+**Contract:**
+- Called **once per simulation** with the whole `{symbol: DataFrame}` mapping.
+- Returns `{symbol: Signal Series}` **or** `{symbol: DataFrame-with-Signal-column}`.
+- Signal convention is unchanged (`1` long, `-1` flat, `0` no change, `-2` short).
+- A symbol **omitted** from the returned mapping is treated as flat for the whole run — it is not dropped, so the simulator always sees the complete universe.
+- Returned series are reindexed onto each symbol's own bars, so a strategy that built signals on a shared calendar cannot silently misalign.
+- `symbol` is **not** injected (the function already has every symbol); declared dependencies are passed **whole**, not reindexed, since there is no single symbol index to align to.
+
+**Execution is unchanged.** The returned signals go through the same `run_portfolio_simulation` as every per-symbol strategy, inheriting sizing, costs, stops, borrow cost, PIT gating and the trade log. Only signal *generation* differs.
+
+**Implementation:** `helpers/registry.py` (`register_portfolio_strategy`, `is_portfolio_level`) and the dispatch branch in `main.py::run_single_simulation`. The flag lives on the **function** (`fn._portfolio_level`), not only in the registry entry, because the task tuple carries just the logic callable into worker processes — functions pickle by qualified name, so the attribute is restored when the worker imports the plugin. The per-symbol path was extracted verbatim into `_per_symbol_signals()` and is byte-identical; the golden-master suite covers it.
+
+**Reference plugin:** `custom_strategies/cross_sectional_momentum.py` — top-N trailing momentum with a rank-buffer hysteresis band and a 200d trend gate. It is infrastructure demonstration, **not** a proposed edge: measured against equal-weight buy-and-hold of the same universe it underperforms, which is the benchmark any rotation variant must actually clear.
+
+**Tests:** `tests/test_cross_sectional_strategies.py` — 16 tests: registration mechanics, both-kinds coexistence, the return-shape contract (Series / DataFrame / omitted symbol / partial index), warm-up flatness, and truncation-invariance proving no look-ahead (the easy mistake with `rank(axis=1)` is ranking against a future row).
 
 **Strategy selection filter:** `CONFIG["strategies"]` controls which registered plugins are returned by `get_active_strategies()`. Set to `"all"` (default) to run everything, or a list of exact names to run a subset. Any requested name not found in the registry logs a `[WARNING]` and is skipped — a typo will not crash the run. Implemented via lazy `from config import CONFIG` inside `get_active_strategies()` to avoid a circular import.
 

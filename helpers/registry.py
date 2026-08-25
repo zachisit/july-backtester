@@ -147,14 +147,110 @@ def register_strategy(
         params = {}
 
     def decorator(fn: Callable) -> Callable:
+        fn._portfolio_level = False  # noqa: SLF001 — see register_portfolio_strategy
         _REGISTRY[name] = {
             "logic":        fn,
             "dependencies": list(dependencies),
             "params":       dict(params),
+            "portfolio_level": False,
         }
         return fn
 
     return decorator
+
+
+def register_portfolio_strategy(
+    name: str,
+    dependencies: list[str] | None = None,
+    params: dict | None = None,
+) -> Callable:
+    """Register a **cross-sectional** strategy that sees every symbol at once.
+
+    ``register_strategy`` calls its function once per symbol with that symbol's
+    DataFrame, so a strategy can never compare symbols against each other.
+    Anything that ranks a universe — "hold the top 5 of 100 by 60-day relative
+    strength", sector rotation, pairs, dollar-neutral baskets — is inexpressible
+    in that signature.
+
+    The historical workaround was to write a standalone script with its own
+    execution loop, duplicating sizing, slippage, commission, borrow cost and
+    equity accounting outside the engine and outside the golden-master suite
+    that protects it. Those duplicates drift: one such copy mixed two short-sale
+    cash conventions and inflated its equity curve ~1,140x while its per-trade
+    P&L stayed correct, so nothing in its own test suite caught it.
+
+    This decorator closes that gap. Signal *generation* is genuinely different
+    for cross-sectional strategies; execution is not, and should not be
+    reimplemented.
+
+    Contract
+    --------
+    The decorated function is called **once per simulation** with the whole
+    portfolio::
+
+        def my_rotation(portfolio_data: dict[str, pd.DataFrame], **kwargs)
+                -> dict[str, pd.Series]
+
+    ``portfolio_data`` maps symbol -> OHLCV DataFrame. Return a mapping of
+    symbol -> ``Signal`` Series indexed like that symbol's DataFrame, using the
+    same convention as per-symbol strategies (``1`` enter/hold long, ``-1``
+    exit/flat, ``0`` no change, ``-2`` enter short). Symbols omitted from the
+    returned mapping are treated as flat for the whole run.
+
+    Alternatively return ``{symbol: DataFrame}`` where each frame carries a
+    ``Signal`` column — the engine accepts either, matching what per-symbol
+    strategies already return.
+
+    The returned signals are handed to the same ``run_portfolio_simulation`` as
+    every other strategy, so sizing, costs, stops, borrow cost, PIT gating and
+    the trade log are all inherited rather than reimplemented.
+
+    Injected kwargs are the same as ``register_strategy`` except ``symbol``,
+    which is meaningless here — the function already has every symbol. Declared
+    ``dependencies`` ("spy", "vix") are injected as ``spy_df`` / ``vix_df``.
+
+    Examples
+    --------
+    ::
+
+        @register_portfolio_strategy(
+            name="Top-5 60d Momentum Rotation",
+            params={"lookback": 60, "top_n": 5},
+        )
+        def top_n_momentum(portfolio_data, **kwargs):
+            lookback, top_n = kwargs["lookback"], kwargs["top_n"]
+            closes = pd.DataFrame({s: d["Close"] for s, d in portfolio_data.items()})
+            ranks = closes.pct_change(lookback).rank(axis=1, ascending=False)
+            held = ranks.le(top_n)
+            return {s: held[s].map({True: 1, False: -1}) for s in closes.columns}
+    """
+    if dependencies is None:
+        dependencies = []
+    if params is None:
+        params = {}
+
+    def decorator(fn: Callable) -> Callable:
+        fn._portfolio_level = True  # noqa: SLF001
+        _REGISTRY[name] = {
+            "logic":        fn,
+            "dependencies": list(dependencies),
+            "params":       dict(params),
+            "portfolio_level": True,
+        }
+        return fn
+
+    return decorator
+
+
+def is_portfolio_level(fn: Callable) -> bool:
+    """True if *fn* was registered with :func:`register_portfolio_strategy`.
+
+    Read off the function rather than the registry entry so the worker
+    processes can tell the two kinds apart: only the logic callable is carried
+    in the task tuple, and functions pickle by qualified name, so the attribute
+    is restored when the worker imports the plugin module.
+    """
+    return bool(getattr(fn, "_portfolio_level", False))
 
 
 # ---------------------------------------------------------------------------
