@@ -721,6 +721,21 @@ def main():
              file_path = os.path.join("tickers_to_scan", value)
              with open(file_path, 'rb') as f:
                  symbols = orjson.loads(f.read())
+        elif isinstance(value, str) and value.lower().startswith("rule:"):
+            # Rule-based point-in-time universe (#70). Needs no index-membership
+            # data: the investable set is derived from observable liquidity as of
+            # start_date over the delisted-inclusive Parquet corpus, so it is
+            # survivorship-free by construction.
+            from helpers.rule_based_universe import resolve_rule_portfolio
+            try:
+                symbols = resolve_rule_portfolio(value, CONFIG["start_date"], CONFIG)
+                logger.info(
+                    f"  -> Resolved {len(symbols)} securities from '{value}' "
+                    f"as of {CONFIG['start_date']} (survivorship-free; NOT an index)"
+                )
+            except Exception as e:
+                logger.error(f"  -> ERROR resolving rule universe '{value}': {e}")
+                continue
         elif isinstance(value, str) and value.startswith("pit:"):
             from helpers.point_in_time import tickers_union_for_period as _pit_union, build_membership_schedule as _pit_schedule_build
             _pit_index_name = value.split(":", 1)[1]

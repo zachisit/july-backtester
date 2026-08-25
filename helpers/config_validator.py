@@ -33,6 +33,14 @@ KNOWN_KEYS: set[str] = {
     "data_provider",
     "polygon_api_secret_name",  # PR #187: added — was triggering "unknown key" warning
     "csv_data_dir",
+    # --- Rule-based point-in-time universe (issue #70) ---
+    "universe_min_price",
+    "universe_min_dollar_volume",
+    "universe_min_bars",
+    "universe_top_n",
+    "universe_adv_window",
+    "universe_exclude_prefixes",
+    "universe_exclude_symbols",
     "parquet_data_dir",
     # SECTION 2: Backtest Period & Capital
     "start_date",

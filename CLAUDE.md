@@ -33,6 +33,7 @@ helpers/ml_export.py               # ML trade feature export (export_trade_featu
 helpers/sensitivity.py             # Parameter sensitivity sweep (build_param_grid, label_for_params, is_sweep_enabled)
 helpers/regime.py                  # VIX regime heatmap (build_regime_heatmap, print_regime_heatmap, classify_vix_regime)
 helpers/point_in_time.py           # Point-in-time index universe resolver for portfolios like "pit:nq100" and "pit:sp500"
+helpers/rule_based_universe.py     # Survivorship-free universe from the delisted-inclusive Parquet corpus ("rule:top500") — needs no index membership
 helpers/init_wizard.py             # First-time setup wizard invoked via python main.py --init
 helpers/correlation.py             # Strategy correlation matrix (run_correlation_analysis, compute_avg_correlations)
 helpers/caching.py                 # Local Parquet cache (24h TTL)
@@ -111,6 +112,41 @@ scripts/build_research_index.py    # Consolidates all output/runs/ summaries + l
 **Dynamic benchmark columns:** `helpers/summary.py` uses `_build_benchmark_columns(benchmark_returns)` to generate column names, display names, format specs, and short names dynamically from the `benchmark_returns` dict passed to summary functions. This allows summary reports to display arbitrary benchmark tickers (not just hardcoded SPY/QQQ). All 4 summary functions (`generate_per_portfolio_summary`, `generate_single_asset_summary_report`, `generate_final_summary`, `generate_portfolio_summary_report`) accept a `benchmark_returns` dict parameter (e.g., `{"SPY": 0.12, "QQQ": 0.15, "XLF": 0.08}`) and dynamically build result keys like `vs_spy_benchmark`, `vs_qqq_benchmark`, `vs_xlf_benchmark`. The first benchmark appears in Table 1 (Core Performance), remaining benchmarks appear in Table 2 (Extended Metrics). Filtering logic supports backward compatibility: the first two benchmarks respect `min_performance_vs_spy` and `min_performance_vs_qqq` config keys; additional benchmarks default to `-9999.0` threshold (show all).
 
 **Datetime index normalization (Phase 4 of #55):** All data providers return `pd.DatetimeIndex` regardless of timeframe. Daily data (`timeframe="D"`) is normalized to midnight timestamps (00:00:00 UTC) via `.normalize()` to ensure consistent datetime handling across timeframes. Intraday data (`timeframe="H"` or `"MIN"`) preserves hour/minute precision. Trade logs store `EntryDate` and `ExitDate` as ISO 8601 strings (`.isoformat()`) supporting both date-only (`"2024-01-15"`) and datetime (`"2024-01-15T10:30:00"`) formats. WFA functions convert these strings to `pd.Timestamp` for chronological comparisons, ensuring robust datetime handling for mixed daily/intraday backtests.
+
+## Rule-Based Point-in-Time Universe (`"rule:..."`)
+
+A survivorship-free investable set derived from **observable liquidity**, requiring **no index-membership data**. Membership history is the vendor-locked part of PIT (`norgatedata.index_constituent_timeseries()` needs a Windows-only Norgate Data Updater); this sidesteps it.
+
+```python
+"portfolios": {"US Liquid 500": "rule:us_liquid_500"}   # or "rule:top250"
+```
+
+```
+universe(D) = { s : s has bars on D
+                and close(s, D)             >= universe_min_price
+                and dollar_volume_20d(s, D) >= universe_min_dollar_volume
+                and history(s, D)           >= universe_min_bars }
+```
+capped to `universe_top_n` by dollar volume.
+
+**Why it is survivorship-free:** the Parquet corpus carries **36,684 securities, 20,911 of them delisted**, named `TICKER-YYYYMM` — Bear Stearns is `BSC-200805`, Lehman `LEHMQ-201203`, Enron `ENRNQ-200411`. They are present with the dates they failed and drop out on their real last bar. Verified: `BSC-200805` **is** in the 2007-06-29 universe and **is not** in the 2008-12-31 one. The later-delisted share of a top-500 universe decays 45.0% (2004) → 32.8% (2008) → 20.2% (2015) → 1.0% (2024) — the correct signature.
+
+**Why there is no look-ahead:** every screen reads only bars `<= D`.
+
+**Config keys:** `universe_min_price` (5.0), `universe_min_dollar_volume` (1e6), `universe_min_bars` (252), `universe_top_n` (None), `universe_adv_window` (20), `universe_exclude_prefixes` (`("$", "#")`), `universe_exclude_symbols` (`()`).
+
+**Three traps this handles, each of which silently corrupts results:**
+1. **`Datetime` is not column 0** (order is `Open, High, Low, Close, Volume, Datetime` — it is the pandas index). Locating it by position reads float OHLC as nanosecond timestamps and yields **1970** dates. It is located by *name*.
+2. **`$` and `#` prefixes are not investable.** 1,160 index series (`$NYA`, `$DJITR`) and 455 breadth series (`#NYSEAD`) carry price and volume columns, so no liquidity screen rejects them — and they out-rank everything on notional dollar volume. Before this filter a top-100 universe came back as *almost entirely indices*. Excluded by default.
+3. **Ticker reuse.** `WB` is Wachovia (`WB-200812`) until 2008 and Weibo (`WB`) from 2014; `V` was Vivendi (`V-200608`) before Visa (`V`). Resolution is by **security ID**, never bare ticker — which also sidesteps `parquet_service`'s ambiguous `_multi_` bare-ticker fallback, since `WB-200812.parquet` matches exactly.
+
+**Performance:** a metadata-only span index over all 36,684 securities builds in **~8.5s**, cached to `parquet_data/.span_index.parquet`; universe resolution is then ~10s per date.
+
+**What it is NOT:** the S&P 500, Russell, or any index. If a thesis depends on index membership *itself* — reconstitution flow, inclusion effects, benchmark-relative mandates — this does not substitute. **Results produced on this universe must say so.**
+
+**ETF caveat:** SPY/QQQ/IWM rank top on dollar volume in every era and are *not* excluded by default (they are genuinely investable). For single-name research pass `universe_exclude_symbols=COMMON_ETFS` — otherwise a stock-selection strategy can quietly hold the index it is benchmarked against.
+
+**Tests:** `tests/test_rule_based_universe.py` — 31 tests on a synthetic corpus (no submodule dependency): security identity incl. share-class-vs-delisting (`BRK-A` vs `BRK-199001`), the 1970 trap, mixed tz-aware/naive files, each screen, ticker-reuse resolution, and survivorship present-then-absent.
 
 ## Adding a Strategy (Plugin System)
 
