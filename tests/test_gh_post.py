@@ -14,6 +14,7 @@ No network. Every test drives pure functions or patched subprocess calls.
 """
 
 import ast
+import io
 import json
 import logging  # noqa: F401  (kept for parity with sibling suites)
 import os
@@ -186,6 +187,70 @@ class TestReadSource:
     def test_rejects_missing_file(self):
         with pytest.raises(SystemExit):
             gh_post.read_source("/nonexistent/nope.md")
+
+
+class TestSourceEncoding:
+    """The two ways a Windows-drafted body file differs from what read_source
+    assumed, both reachable through ordinary PowerShell.
+
+    `>` and Out-File default to UTF-8 **with a BOM**; Set-Content/Add-Content
+    default to the ANSI codepage (cp1252). This repo's contributors are on
+    Windows, so these are the default drafting paths, not exotic ones.
+    """
+
+    def test_cp1252_file_fails_with_an_actionable_message(self, tmp_path):
+        """Was a raw UnicodeDecodeError traceback. Every other failure in this
+        tool is an actionable die(); a traceback reads as "the tool is broken"
+        and sends people back to the unsafe `gh --body`."""
+        f = tmp_path / "b.md"
+        f.write_bytes("The fix — see helpers/wfa.py".encode("cp1252"))
+        with pytest.raises(SystemExit) as e:
+            gh_post.read_source(str(f))
+        assert e.value.code == 1
+
+    def test_cp1252_message_names_the_actual_cause(self, tmp_path, capsys):
+        f = tmp_path / "b.md"
+        f.write_bytes("curly “quotes”".encode("cp1252"))
+        with pytest.raises(SystemExit):
+            gh_post.read_source(str(f))
+        err = capsys.readouterr().err
+        assert "UTF-8" in err and "Set-Content" in err
+
+    def test_bom_does_not_defeat_the_at_path_guard(self, tmp_path):
+        """The one that matters: a UTF-8 BOM meant the body no longer started
+        with '@', so the guard against failure story 2 never fired and the
+        literal path posted - through the tool built to prevent exactly that."""
+        f = tmp_path / "b.md"
+        f.write_bytes(b"\xef\xbb\xbf@C:/Users/shard/AppData/Local/Temp/gh_106.md")
+        with pytest.raises(SystemExit) as e:
+            gh_post.read_source(str(f))
+        assert e.value.code == 1
+
+    def test_bom_is_not_posted_into_the_comment(self, tmp_path):
+        """GitHub stores the BOM verbatim - probed against the live API - so an
+        unstripped BOM becomes an invisible leading character in the comment,
+        and verify() reports 'verified' because both sides carry it."""
+        f = tmp_path / "b.md"
+        f.write_bytes("\ufeffReal review content.".encode("utf-8"))
+        assert gh_post.read_source(str(f)) == "Real review content."
+
+    def test_utf8_content_is_still_read_exactly(self, tmp_path):
+        body = "### ✅ Done — see `helpers/wfa.py`\n\ttrailing tab\t"
+        f = tmp_path / "b.md"
+        f.write_text(body, encoding="utf-8")
+        assert gh_post.read_source(str(f)) == body
+
+    def test_stdin_is_decoded_as_utf8_not_the_console_codepage(self,
+                                                              monkeypatch):
+        """`--file -` read sys.stdin, which on Windows decodes a pipe with the
+        console codepage. Same defect as the gh read-back, other direction."""
+        body = "piped ✅ body — with an em dash"
+
+        class _Stdin:
+            buffer = io.BytesIO(body.encode("utf-8"))
+
+        monkeypatch.setattr(gh_post.sys, "stdin", _Stdin())
+        assert gh_post.read_source("-") == body
 
 
 class TestNoInlineBodyOption:
@@ -388,6 +453,85 @@ class TestVerifiedPostFlow:
         f.write_text("hello", encoding="utf-8")
         self._patch(monkeypatch, "hello", url="https://example.com/no-id-here")
         assert gh_post.main(["comment", "--repo", "o/r", "--number", "1",
+                             "--file", str(f)]) == gh_post.MISMATCH_EXIT
+
+
+class TestCreateAndEditBodyAreVerifiedToo:
+    """Half the tool's surface was unverified by the suite.
+
+    Gutting `cmd_create` or `cmd_edit_body` to a bare `return 0` - posting
+    nothing and reporting "verified", the worst behaviour this tool can have -
+    left all 64 tests green. `cmd_comment` and `cmd_review` killed the same
+    mutation, so the gap was in coverage, not in the implementation.
+
+    That is the GH-4 defect ("the suite had the defect it exists to prevent")
+    still standing on the two paths QA did not revisit.
+    """
+
+    def _patch(self, monkeypatch, landed, url="https://x/issues/7"):
+        monkeypatch.setattr(gh_post, "gh", lambda *a: url)
+        monkeypatch.setattr(gh_post, "fetch_issue_body", lambda r, n: landed)
+
+    def test_create_verifies_the_body(self, monkeypatch, tmp_path):
+        f = tmp_path / "b.md"
+        f.write_text("issue body", encoding="utf-8")
+        self._patch(monkeypatch, "issue body")
+        assert gh_post.main(["create", "--repo", "o/r", "--title", "t",
+                             "--file", str(f)]) == 0
+
+    def test_create_catches_a_mangled_body(self, monkeypatch, tmp_path):
+        f = tmp_path / "b.md"
+        f.write_text("see `helpers/wfa.py`", encoding="utf-8")
+        self._patch(monkeypatch, "see ")
+        assert gh_post.main(["create", "--repo", "o/r", "--title", "t",
+                             "--file", str(f)]) == gh_post.MISMATCH_EXIT
+
+    def test_create_with_an_unparseable_url_is_not_success(self, monkeypatch,
+                                                           tmp_path):
+        f = tmp_path / "b.md"
+        f.write_text("issue body", encoding="utf-8")
+        self._patch(monkeypatch, "issue body", url="https://x/no-number")
+        assert gh_post.main(["create", "--repo", "o/r", "--title", "t",
+                             "--file", str(f)]) == gh_post.MISMATCH_EXIT
+
+    def test_create_readback_failure_does_not_exit_one(self, monkeypatch,
+                                                       tmp_path):
+        """Exit 1 means "nothing posted", which invites a re-run and a
+        duplicate issue. GH-3, on the path GH-3 did not cover."""
+        f = tmp_path / "b.md"
+        f.write_text("issue body", encoding="utf-8")
+        monkeypatch.setattr(gh_post, "gh", lambda *a: "https://x/issues/7")
+
+        def boom(repo, num):
+            raise gh_post.GhError("connection reset")
+        monkeypatch.setattr(gh_post, "fetch_issue_body", boom)
+        assert gh_post.main(["create", "--repo", "o/r", "--title", "t",
+                             "--file", str(f)]) == gh_post.MISMATCH_EXIT
+
+    def test_edit_body_verifies_the_body(self, monkeypatch, tmp_path):
+        f = tmp_path / "b.md"
+        f.write_text("edited body", encoding="utf-8")
+        self._patch(monkeypatch, "edited body")
+        assert gh_post.main(["edit-body", "--repo", "o/r", "--number", "7",
+                             "--file", str(f)]) == 0
+
+    def test_edit_body_catches_a_mangled_body(self, monkeypatch, tmp_path):
+        f = tmp_path / "b.md"
+        f.write_text("edited  \nhard break", encoding="utf-8")
+        self._patch(monkeypatch, "edited\nhard break")
+        assert gh_post.main(["edit-body", "--repo", "o/r", "--number", "7",
+                             "--file", str(f)]) == gh_post.MISMATCH_EXIT
+
+    def test_edit_body_readback_failure_does_not_exit_one(self, monkeypatch,
+                                                          tmp_path):
+        f = tmp_path / "b.md"
+        f.write_text("edited body", encoding="utf-8")
+        monkeypatch.setattr(gh_post, "gh", lambda *a: "")
+
+        def boom(repo, num):
+            raise gh_post.GhError("connection reset")
+        monkeypatch.setattr(gh_post, "fetch_issue_body", boom)
+        assert gh_post.main(["edit-body", "--repo", "o/r", "--number", "7",
                              "--file", str(f)]) == gh_post.MISMATCH_EXIT
 
 

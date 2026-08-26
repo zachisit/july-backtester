@@ -93,14 +93,43 @@ def normalise(text: str) -> str:
     return text
 
 
+_NOT_UTF8 = (
+    "{what} is not valid UTF-8 ({reason}, byte {pos}).\n"
+    "         Windows PowerShell's Set-Content/Add-Content write the ANSI\n"
+    "         codepage (cp1252 here), not UTF-8 - an em dash or a curly quote\n"
+    "         is enough to produce this. Re-save as UTF-8, e.g.\n"
+    "         Set-Content -Encoding utf8 body.md")
+
+
 def read_source(path: str) -> str:
+    # utf-8-SIG, not utf-8. PowerShell's `>` and Out-File default to UTF-8
+    # *with a BOM* on Windows, which is the ordinary way a contributor here
+    # drafts a comment. GitHub stores that BOM verbatim - probed live - so
+    # reading as plain utf-8 posts an invisible U+FEFF into the comment AND
+    # silently defeats the bare-@path guard below, because the body no longer
+    # starts with "@". That is failure story 2 walking through the guard built
+    # to stop it, by way of the default drafting path on the target platform.
     if path == "-":
-        body = sys.stdin.read()
+        buf = getattr(sys.stdin, "buffer", None)
+        if buf is None:                       # already-decoded stream (tests)
+            body = sys.stdin.read()
+        else:
+            try:
+                body = buf.read().decode("utf-8-sig")
+            except UnicodeDecodeError as exc:
+                die(_NOT_UTF8.format(what="stdin", reason=exc.reason,
+                                     pos=exc.start))
     else:
         p = Path(path)
         if not p.is_file():
             die(f"not a file: {path}")
-        body = p.read_text(encoding="utf-8")
+        try:
+            body = p.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError as exc:
+            # Everything else in this tool fails with an actionable die().
+            # This one raised a raw traceback, which reads as "the tool is
+            # broken" and sends people back to `gh --body`.
+            die(_NOT_UTF8.format(what=path, reason=exc.reason, pos=exc.start))
     if not body.strip():
         die("refusing to post an empty body")
     if _BARE_AT_PATH.fullmatch(body.strip()):
