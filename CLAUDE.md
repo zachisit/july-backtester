@@ -2,6 +2,8 @@
 
 > **RTK RULE — NON-NEGOTIABLE**: Every terminal command MUST be prefixed with `rtk`. No exceptions. This includes `rtk git`, `rtk grep`, `rtk pytest`, `rtk ls`, `rtk read`, etc. Bare `grep`, `git`, `pytest`, `find` etc. are FORBIDDEN in this project.
 
+> **GH POSTING RULE — NON-NEGOTIABLE**: Never pass comment/issue/review text as a shell argument. Use `rtk python scripts/gh_post.py` for every GitHub comment, review, issue creation, and issue-body edit. `gh issue comment --body "..."` and `gh api -f body=@file` are FORBIDDEN — both have silently destroyed real comments in this project. See [Posting to GitHub](#posting-to-github).
+
 ## What This Is
 Python backtesting engine for US equities. Tests 20+ technical strategies across single symbols or large portfolios (Nasdaq, S&P 500, etc.) with Monte Carlo robustness scoring.
 
@@ -49,7 +51,34 @@ tickers_to_scan/                   # JSON ticker lists (nasdaq_100.json, sp-500.
 scripts/                           # One-off diagnostic and utility scripts (NOT part of the pipeline)
 scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run with: python scripts/debug_data.py
 scripts/build_research_index.py    # Consolidates all output/runs/ summaries + llm_verdict.json into output/research_index.csv
+scripts/gh_post.py                 # REQUIRED for all GitHub comments/reviews/issues — posts then verifies content landed intact (see "Posting to GitHub")
 ```
+
+## Posting to GitHub
+
+**Always:**
+
+```bash
+rtk python scripts/gh_post.py comment   --repo O/R --number 302 --file reply.md
+rtk python scripts/gh_post.py review    --repo O/R --number 302 --file r.md [--event APPROVE]
+rtk python scripts/gh_post.py create    --repo O/R --title "..." --file body.md [--label backlog]
+rtk python scripts/gh_post.py edit-body --repo O/R --number 109 --file body.md
+```
+
+Write the body to a file first (the scratchpad is fine), then pass `--file`. Exit `0` = posted **and verified**; exit `2` = posted but the content does not match what you wrote — go fix or delete it.
+
+**Never:**
+
+| Forbidden | Why |
+|---|---|
+| `gh issue comment --body "...\`path\`..."` | The shell runs command substitution **before `gh` sees it**. Backticks and `$(...)` are executed. This stripped file paths out of a real comment on #292 and created a stray file named `cash` |
+| `gh api -f body=@file` | `-f` sends the value **literally** — it posted `@C:/Users/.../gh_comment_106.md` as a comment body and the real reply was never sent |
+
+Both failures are **silent**: `gh` exits 0 and prints a URL. Nothing tells you the content was destroyed. That is why the tool verifies by reading the comment back rather than trusting the exit code.
+
+`--body-file` alone is *not* sufficient as a rule — the second failure above came from someone already trying to pass a file. Use the script; it removes the inline-body option entirely and checks the result.
+
+**Cross-repo refs:** a bare `#123` in a private-repo comment resolves against the *private* repo. When referring to a public issue from the private repo (or vice versa) always write it fully qualified: `zachisit/july-backtester#302`.
 
 ## Scripts Directory
 
