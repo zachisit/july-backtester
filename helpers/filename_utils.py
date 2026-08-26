@@ -22,12 +22,20 @@ _SEMANTIC_OPERATORS = [
 # Windows reserved device names — cannot be used as filenames even with extensions.
 _WINDOWS_RESERVED = {
     "CON", "PRN", "AUX", "NUL",
+    "CONIN$", "CONOUT$",
     *[f"COM{i}" for i in range(1, 10)],
     *[f"LPT{i}" for i in range(1, 10)],
 }
 
+# CON and PRN are REAL TICKERS with data in the Norgate corpus
+# (CON-199804.parquet, PRN-200207.parquet - both delisted, i.e. exactly the
+# survivorship-critical names). That corpus predates this guard and cannot be
+# regenerated (the Norgate subscription has lapsed), so every READER must also
+# try the unguarded spelling or those symbols silently resolve to None and drop
+# out of backtests. Hence `guard_reserved=False` and :func:`filename_candidates`.
 
-def sanitize_symbol_for_filename(symbol: str) -> str:
+
+def sanitize_symbol_for_filename(symbol: str, *, guard_reserved: bool = True) -> str:
     """Return *symbol* safe for use as a filename on Windows and POSIX systems.
 
     First maps comparison operators to distinct tokens so that comparison
@@ -66,7 +74,43 @@ def sanitize_symbol_for_filename(symbol: str) -> str:
         symbol = symbol.replace(op, token)
     for ch in _ILLEGAL_CHARS:
         symbol = symbol.replace(ch, "_")
-    stem = symbol.split(".")[0].upper()
-    if stem in _WINDOWS_RESERVED:
-        symbol = "_" + symbol
+    # Control characters are illegal on Windows and NUL is illegal on POSIX too
+    # (open() raises). The old caching.py whitelist scrubbed these; the shared
+    # blacklist did not, so this restores that site's guarantee.
+    symbol = "".join("_" if ord(c) < 32 else c for c in symbol)
+    # Windows silently strips trailing dots and spaces from a name component,
+    # so "CON " resolves to the CON device and "ABC." to "ABC" - both defeat
+    # the reserved check below and can collide with a neighbouring name.
+    symbol = symbol.rstrip(" .")
+    if not symbol:
+        # Everything scrubbed away. Returning "" yields a hidden ".parquet"
+        # with no stem, and every such symbol collides on one file.
+        return "_EMPTY_"
+    if guard_reserved:
+        stem = symbol.split(".")[0].upper()
+        if stem in _WINDOWS_RESERVED:
+            symbol = "_" + symbol
     return symbol
+
+
+def filename_candidates(symbol: str) -> list[str]:
+    """Every sanitized spelling *symbol* may be stored under, best first.
+
+    READ paths must use this, not :func:`sanitize_symbol_for_filename` alone.
+
+    The Windows reserved-name guard is a **write-side** concern: it stops this
+    code creating an unwritable ``NUL.parquet``. But data written before the
+    guard existed - notably the frozen Norgate corpus, which holds the real
+    delisted tickers ``CON-199804.parquet`` and ``PRN-200207.parquet`` and can
+    never be re-exported - uses the unguarded spelling. A reader that only looks
+    for ``_CON`` finds nothing, returns ``None``, and the symbol drops out of
+    the backtest with a single warning in a run of thousands. Silently losing
+    delisted names is precisely the survivorship bias that corpus exists to
+    prevent.
+
+    Returns ``[guarded]`` for ordinary symbols (no behaviour change) and
+    ``[guarded, legacy]`` only for the handful of reserved-name tickers.
+    """
+    guarded = sanitize_symbol_for_filename(symbol)
+    legacy = sanitize_symbol_for_filename(symbol, guard_reserved=False)
+    return [guarded] if guarded == legacy else [guarded, legacy]

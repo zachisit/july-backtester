@@ -6,7 +6,10 @@ and common ticker symbol patterns.
 """
 
 import pytest
-from helpers.filename_utils import sanitize_symbol_for_filename
+from helpers.filename_utils import (
+    filename_candidates,
+    sanitize_symbol_for_filename,
+)
 
 
 class TestIllegalChars:
@@ -191,3 +194,147 @@ class TestResidualLiteralTokenCollision:
             sanitize_symbol_for_filename("ADX<20")
         assert sanitize_symbol_for_filename("ADX>=20") != \
             sanitize_symbol_for_filename("ADX>20")
+
+
+class TestReservedNameGuardDoesNotOrphanRealData:
+    """QA finding F1 on #193 - the one that would have shipped data loss.
+
+    The reserved-name guard prefixes "_", and every READER was looking up only
+    the prefixed spelling. But `CON` and `PRN` are REAL TICKERS with files in
+    the frozen Norgate corpus:
+
+        CON-199804.parquet      PRN-200207.parquet
+
+    Both DELISTED - i.e. exactly the survivorship-critical names that corpus
+    exists to preserve. Verified present in the real 36,684-file corpus, which
+    cannot be regenerated (the Norgate subscription has lapsed). Pre-fix, both
+    resolved to None and dropped out of backtests with one warning in a run of
+    thousands of symbols.
+    """
+
+    def test_write_side_guard_is_unchanged(self):
+        """The guard must still fire - we are not reverting it, only making
+        readers tolerant. NUL.parquet must never be created."""
+        assert sanitize_symbol_for_filename("NUL") == "_NUL"
+        assert sanitize_symbol_for_filename("CON") == "_CON"
+        assert sanitize_symbol_for_filename("com1") == "_com1"
+
+    def test_candidates_offer_the_legacy_spelling_for_reserved_names(self):
+        assert filename_candidates("CON") == ["_CON", "CON"]
+        assert filename_candidates("PRN") == ["_PRN", "PRN"]
+
+    def test_candidates_are_a_single_entry_for_ordinary_symbols(self):
+        """No behaviour change and no extra stat() calls for the 36,682 other
+        securities in the corpus."""
+        assert filename_candidates("AAPL") == ["AAPL"]
+        assert filename_candidates("I:VIX") == ["I_VIX"]
+        assert filename_candidates("BRK.B") == ["BRK.B"]
+
+    def test_parquet_reader_finds_the_real_delisted_corpus_files(self, tmp_path):
+        """The regression itself, using the exact filenames from the corpus."""
+        from services.parquet_service import _find_parquet
+        for fname in ["CON-199804.parquet", "PRN-200207.parquet", "AAPL.parquet"]:
+            (tmp_path / fname).touch()
+        assert _find_parquet("CON", str(tmp_path)).endswith("CON-199804.parquet")
+        assert _find_parquet("PRN", str(tmp_path)).endswith("PRN-200207.parquet")
+        assert _find_parquet("AAPL", str(tmp_path)).endswith("AAPL.parquet")
+
+    def test_parquet_reader_prefers_the_guarded_spelling_when_both_exist(self, tmp_path):
+        from services.parquet_service import _find_parquet
+        (tmp_path / "_CON.parquet").touch()
+        (tmp_path / "CON.parquet").touch()
+        assert _find_parquet("CON", str(tmp_path)).endswith("_CON.parquet")
+
+    def test_csv_reader_finds_a_legacy_unguarded_file(self, tmp_path):
+        """PRN.csv is a perfectly legal filename on macOS/Linux, where this
+        project actually runs."""
+        from services.csv_service import _find_csv
+        (tmp_path / "PRN.csv").touch()
+        assert _find_csv("PRN", str(tmp_path)).endswith("PRN.csv")
+
+    def test_unknown_symbol_still_returns_none(self, tmp_path):
+        from services.parquet_service import _find_parquet
+        assert _find_parquet("NOSUCH", str(tmp_path)) is None
+
+
+class TestDegenerateAndIllegalInputs:
+    """QA finding F3 - guard gaps the reserved-name check did not cover.
+
+    The old caching.py sanitizer was a strict whitelist and scrubbed all of
+    these; the consolidated blacklist did not, so for that call site they were
+    a regression rather than merely a gap.
+    """
+
+    def test_control_characters_are_scrubbed(self):
+        """NUL is illegal on POSIX too - open() raises rather than returning."""
+        assert sanitize_symbol_for_filename("A\x00B") == "A_B"
+        assert sanitize_symbol_for_filename("A\x1fB") == "A_B"
+        assert "\x00" not in sanitize_symbol_for_filename("\x00\x01\x02")
+
+    def test_trailing_space_no_longer_defeats_the_reserved_check(self):
+        """Windows strips trailing spaces, so "CON " resolves to the CON
+        device - the guard has to see through it."""
+        assert sanitize_symbol_for_filename("CON ") == "_CON"
+        assert sanitize_symbol_for_filename("con.") == "_con"
+
+    def test_trailing_dots_and_spaces_are_stripped(self):
+        assert sanitize_symbol_for_filename("ABC.") == "ABC"
+        assert sanitize_symbol_for_filename("ABC ") == "ABC"
+        assert sanitize_symbol_for_filename("ABC . . ") == "ABC"
+
+    def test_empty_input_gets_a_usable_stem(self):
+        """"" would yield a hidden ".parquet" with no stem, and every such
+        symbol would collide on that one file."""
+        assert sanitize_symbol_for_filename("") == "_EMPTY_"
+        assert sanitize_symbol_for_filename("   ") == "_EMPTY_"
+        assert sanitize_symbol_for_filename("...") == "_EMPTY_"
+
+    def test_conin_and_conout_are_reserved(self):
+        assert sanitize_symbol_for_filename("CONIN$") == "_CONIN$"
+        assert sanitize_symbol_for_filename("CONOUT$") == "_CONOUT$"
+
+    def test_still_idempotent_after_the_new_passes(self):
+        """sanitize(sanitize(x)) == sanitize(x) - a value sanitized twice across
+        call sites must not drift."""
+        for probe in ["A\x00B", "CON ", "ABC.", "", "$I:TNX", "ADX>20", "..."]:
+            once = sanitize_symbol_for_filename(probe)
+            assert sanitize_symbol_for_filename(once) == once, probe
+
+
+class TestCachingCallSiteIsPinned:
+    """QA finding F5 - no test imported helpers.caching at all, so reverting it
+    to its old whitelist sanitizer passed the entire suite. The consolidation at
+    call site #1 of 5 was unverifiable by CI."""
+
+    def test_cache_roundtrip_for_an_index_ticker(self, tmp_path, monkeypatch):
+        """Behavioural pin: write then read through the real cache functions
+        for a symbol whose name needs sanitizing. Reverting caching.py to its
+        old whitelist previously passed the entire suite."""
+        import pandas as pd
+        import helpers.caching as caching
+        monkeypatch.setattr(caching, "CACHE_DIR", str(tmp_path))
+
+        df = pd.DataFrame(
+            {"Open": [1.0], "High": [1.0], "Low": [1.0], "Close": [1.0],
+             "Volume": [1.0]},
+            index=pd.to_datetime(["2020-01-01"]))
+        caching.set_cached_data(df, "I:VIX", "2020-01-01", "2020-01-02", "D", 1)
+
+        written = [p.name for p in tmp_path.iterdir()]
+        assert written, "nothing was written to the cache"
+        assert any(n.startswith("I_VIX_") for n in written), written
+
+        back = caching.get_cached_data("I:VIX", "2020-01-01", "2020-01-02", "D", 1)
+        assert back is not None, "cache write/read used different filenames"
+
+    def test_cache_key_reflects_the_shared_sanitizer_not_the_old_whitelist(self):
+        """The old caching.py scrub was a strict whitelist that collapsed `$`
+        and `^`; the shared blacklist preserves them."""
+        assert sanitize_symbol_for_filename("I:VIX") == "I_VIX"
+        assert sanitize_symbol_for_filename("$VIX") == "$VIX"   # old: "_VIX"
+
+    def test_index_tickers_stay_distinct_in_cache_keys(self):
+        """The old whitelist collapsed $VIX and ^VIX to the same "_VIX" key -
+        two different series sharing one cache file."""
+        assert sanitize_symbol_for_filename("$VIX") != \
+            sanitize_symbol_for_filename("^VIX")
