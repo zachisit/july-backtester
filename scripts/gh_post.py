@@ -87,10 +87,37 @@ def die(msg: str, code: int = 1):
     sys.exit(code)
 
 
+GH_MISSING = (
+    "the GitHub CLI ('gh') is not installed or not on PATH.\n"
+    "         install:  https://cli.github.com  "
+    "(brew install gh / winget install GitHub.cli / apt install gh)\n"
+    "         then run: gh auth login"
+)
+
+GH_UNAUTH = (
+    "the GitHub CLI is installed but not authenticated for this host.\n"
+    "         run: gh auth login"
+)
+
+
 def gh(*args: str) -> str:
-    r = subprocess.run(["gh", *args], capture_output=True, text=True)
+    try:
+        r = subprocess.run(["gh", *args], capture_output=True, text=True)
+    except FileNotFoundError:
+        # Contributors outside this machine will not have the local `rtk`
+        # wrapper and may not have `gh` either. A raw traceback here reads as
+        # "the tool is broken" and sends people straight back to the unsafe
+        # `--body` invocation, which is the opposite of the point.
+        die(GH_MISSING)
+    except OSError as exc:
+        die(f"could not run 'gh': {exc}")
     if r.returncode != 0:
-        die(f"gh {' '.join(args[:3])}... failed: {r.stderr.strip()[:400]}")
+        err = r.stderr.strip()
+        low = err.lower()
+        if "auth" in low and ("login" in low or "token" in low or
+                              "credential" in low):
+            die(GH_UNAUTH)
+        die(f"gh {' '.join(args[:3])}... failed: {err[:400]}")
     return r.stdout.strip()
 
 

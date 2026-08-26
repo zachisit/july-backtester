@@ -2,7 +2,7 @@
 
 > **RTK RULE — NON-NEGOTIABLE**: Every terminal command MUST be prefixed with `rtk`. No exceptions. This includes `rtk git`, `rtk grep`, `rtk pytest`, `rtk ls`, `rtk read`, etc. Bare `grep`, `git`, `pytest`, `find` etc. are FORBIDDEN in this project.
 
-> **GH POSTING RULE — NON-NEGOTIABLE**: Never pass comment/issue/review text as a shell argument. Use `rtk python scripts/gh_post.py` for every GitHub comment, review, issue creation, and issue-body edit. `gh issue comment --body "..."` and `gh api -f body=@file` are FORBIDDEN — both have silently destroyed real comments in this project. See [Posting to GitHub](#posting-to-github).
+> **GH POSTING RULE — NON-NEGOTIABLE**: Never pass comment/issue/review text as a shell argument. Use `python scripts/gh_post.py` for every GitHub comment, review, issue creation, and issue-body edit. `gh issue comment --body "..."` and `gh api -f body=@file` are FORBIDDEN — both have silently destroyed real comments in this project. See [Posting to GitHub](#posting-to-github).
 
 ## What This Is
 Python backtesting engine for US equities. Tests 20+ technical strategies across single symbols or large portfolios (Nasdaq, S&P 500, etc.) with Monte Carlo robustness scoring.
@@ -59,11 +59,13 @@ scripts/gh_post.py                 # REQUIRED for all GitHub comments/reviews/is
 **Always:**
 
 ```bash
-rtk python scripts/gh_post.py comment   --repo O/R --number 302 --file reply.md
-rtk python scripts/gh_post.py review    --repo O/R --number 302 --file r.md [--event APPROVE]
-rtk python scripts/gh_post.py create    --repo O/R --title "..." --file body.md [--label backlog]
-rtk python scripts/gh_post.py edit-body --repo O/R --number 109 --file body.md
+python scripts/gh_post.py comment   --repo O/R --number 302 --file reply.md
+python scripts/gh_post.py review    --repo O/R --number 302 --file r.md [--event APPROVE]
+python scripts/gh_post.py create    --repo O/R --title "..." --file body.md [--label backlog]
+python scripts/gh_post.py edit-body --repo O/R --number 109 --file body.md
 ```
+
+> **Portability:** the script is **stdlib-only** and has **no `rtk` dependency** — it runs under any Python 3 with no venv and no pip install, so remote contributors are not blocked. Its only external requirement is the GitHub CLI (`gh`), and if that is missing or unauthenticated it says so with install/login instructions rather than a traceback. If you work on this machine, prefix `rtk` per the RTK rule above; everyone else runs it as written.
 
 Write the body to a file first (the scratchpad is fine), then pass `--file`. Exit `0` = posted **and verified**; exit `2` = posted but the content does not match what you wrote — go fix or delete it.
 

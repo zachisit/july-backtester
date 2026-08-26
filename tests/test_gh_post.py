@@ -171,3 +171,86 @@ class TestVerifiedPostFlow:
         self._patch(monkeypatch, "hello", url="https://example.com/no-id-here")
         assert gh_post.main(["comment", "--repo", "o/r", "--number", "1",
                              "--file", str(f)]) == gh_post.MISMATCH_EXIT
+
+
+class TestPortabilityForContributorsWithoutLocalTooling:
+    """This repo's own conventions (the `rtk` command prefix, a specific venv)
+    are one machine's setup. Most contributors are remote and have none of it.
+
+    A tool that dies with a raw traceback on their machine reads as "broken"
+    and sends them straight back to the unsafe `gh --body` invocation - the
+    exact thing it exists to prevent. So the environment failures must be
+    actionable, not tracebacks.
+    """
+
+    def test_no_rtk_dependency_anywhere_in_the_module(self):
+        """The tool must run as plain `python scripts/gh_post.py`."""
+        src = open(gh_post.__file__, encoding="utf-8").read()
+        code = "\n".join(l for l in src.splitlines()
+                         if not l.strip().startswith("#"))
+        assert "rtk " not in code
+
+    def test_missing_gh_binary_gives_install_instructions(self, monkeypatch,
+                                                          capsys):
+        def boom(*a, **k):
+            raise FileNotFoundError(2, "No such file or directory", "gh")
+        monkeypatch.setattr(gh_post.subprocess, "run", boom)
+        with pytest.raises(SystemExit) as e:
+            gh_post.gh("issue", "comment")
+        assert e.value.code == 1
+        err = capsys.readouterr().err
+        assert "not installed" in err
+        assert "cli.github.com" in err          # where to get it
+        assert "gh auth login" in err           # what to do next
+        assert "Traceback" not in err
+
+    def test_unauthenticated_gh_is_named_as_such(self, monkeypatch, capsys):
+        """`gh` present but not logged in is a different fix from `gh` absent."""
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = ("error: not logged into any GitHub hosts. "
+                      "Run gh auth login to authenticate.")
+        monkeypatch.setattr(gh_post.subprocess, "run", lambda *a, **k: R())
+        with pytest.raises(SystemExit):
+            gh_post.gh("issue", "comment")
+        err = capsys.readouterr().err
+        assert "not authenticated" in err
+        assert "gh auth login" in err
+
+    def test_other_os_errors_are_not_swallowed(self, monkeypatch, capsys):
+        def boom(*a, **k):
+            raise PermissionError(13, "Permission denied", "gh")
+        monkeypatch.setattr(gh_post.subprocess, "run", boom)
+        with pytest.raises(SystemExit):
+            gh_post.gh("issue", "comment")
+        assert "could not run 'gh'" in capsys.readouterr().err
+
+    def test_ordinary_api_errors_still_surface_their_message(self, monkeypatch,
+                                                             capsys):
+        """A 404 must not be misreported as an auth problem."""
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = "gh: Not Found (HTTP 404)"
+        monkeypatch.setattr(gh_post.subprocess, "run", lambda *a, **k: R())
+        with pytest.raises(SystemExit):
+            gh_post.gh("api", "repos/o/r/issues/999")
+        err = capsys.readouterr().err
+        assert "404" in err
+        assert "not authenticated" not in err
+
+    def test_runs_on_stdlib_only(self):
+        """No third-party imports - a contributor must not need this repo's
+        venv, or any pip install, to post a comment."""
+        import ast
+        tree = ast.parse(open(gh_post.__file__, encoding="utf-8").read())
+        mods = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                mods.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+                mods.add(node.module.split(".")[0])
+        allowed = {"argparse", "json", "re", "subprocess", "sys", "tempfile",
+                   "pathlib", "difflib", "__future__"}
+        assert mods <= allowed, f"non-stdlib imports: {mods - allowed}"
