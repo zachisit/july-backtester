@@ -4,15 +4,14 @@ import pandas as pd
 import os
 from config import CONFIG
 import numpy as np
+from helpers.aws_utils import upload_file_to_s3
+from helpers.correlation import compute_avg_correlations, DEFAULT_THRESHOLD
 
 # Default drawdown filter shared by all four summary functions, so the value
 # cannot drift between copies again (issue #319 was one copy defaulting to
 # -9999.0). 1.0 = allow up to 100% max drawdown. max_drawdown is a positive
 # fraction, so `max_drawdown <= 1.0` admits every ordinary equity strategy.
 _DEFAULT_MAX_ACCEPTABLE_DD = 1.0
-
-from helpers.aws_utils import upload_file_to_s3
-from helpers.correlation import compute_avg_correlations, DEFAULT_THRESHOLD
 
 # ---------------------------------------------------------------------------
 # Benchmark Column Builder

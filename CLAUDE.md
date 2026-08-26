@@ -316,7 +316,20 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 
 **Plan history caps**: Polygon limits available history based on plan tier. A starter plan capped at ~2021; a paid plan extends that (confirmed: ~2016 on current plan). The `Actual Data Period` line in the run summary shows the true start Polygon returned — if it lags the configured `start_date`, the plan tier is the constraint. There is no pagination bug in `polygon_service.py` — the single page with 50,000-bar limit returns all available bars correctly.
 
-**Cache validation bug (issue #123)**: The local Parquet cache keys data by *requested* date range, not actual returned range. If Polygon returns plan-capped data (e.g. 2016–now) for a 2004 request, the cache stores that truncated result under a key named `SPY_2004-01-01_..._day_1.parquet`. After a plan upgrade, subsequent runs still serve the old capped data from cache — silently — until the cache entry is manually deleted or expires. **Fix**: add start-date validation in the `helpers/caching.py` read path; if `df.index.min()` lags the requested start by >30 days, treat as a cache miss and re-fetch. See issue #123 for the full implementation spec.
+**Cache request-lag: what it means, and why it is NOT invalidated (issues #123, #315)**: The local Parquet cache keys data by *requested* date range, not actual returned range. If Polygon returns plan-capped data (e.g. 2016–now) for a 2004 request, the cache stores that truncated result under a key named `SPY_2004-01-01_..._day_1.parquet`.
+
+A cached frame that **starts later than the requested start** has two indistinguishable causes, and the cache alone cannot tell them apart:
+
+1. the symbol **listed after** `start_date` — an IPO, where re-fetching returns the identical first bar; or
+2. provider **plan-capping**.
+
+The #123 fix invalidated on request-lag (`df.index.min()` lagging the request by >30 days → treat as a miss). That was **removed in #315**, because cause 1 is overwhelmingly the common one: the heuristic mis-fired on *every* late-listed symbol, forcing a full API re-fetch of it on **every run** — the cache never hit for any IPO in the universe.
+
+**Current behaviour** (`helpers/caching.py` read path): request-lag does **not** invalidate. A large lag is logged at `INFO` so plan-capping stays visible without thrashing the cache. A genuine plan upgrade is recovered by the **24h TTL**, or immediately by deleting `data_cache/`.
+
+**The residual**: within 24h of a plan upgrade, capped data is still served, and only an INFO line says so. That is the accepted trade against re-fetching every late-listed symbol on every run. If you have just upgraded a plan and want the new history now, clear the cache directory rather than waiting out the TTL.
+
+A separate integrity guard *does* invalidate: a cache file whose index is not a `DatetimeIndex` is discarded and re-fetched (this was an accident of the pre-#315 try/except; #315 made it explicit).
 
 **Index history cap is separate and tighter than the equities cap (issue #261)**: `I:VIX` and `I:TNX` (the two comparison-ticker dependencies most strategies rely on for regime gates) only return data from **2023-02-14 onward** on the current plan — confirmed for both symbols directly against the API, independent of the equities ~5yr rolling cap described above. Requesting an earlier `start_date` returns an empty result (HTTP 200, zero bars), not an error. Because `spy_df`/`vix_df` are injected as `None` when the fetch fails, and the None-guards added for issue-empty-comparison-tickers make `None` a *silent no-op* rather than a crash, any strategy whose regime/filter logic ANDs on `vix_df` (e.g. `MA Confluence (Full Stack) w/ Regime Filter`) will fail its gate closed for the whole requested window — **zero trades, no error, no warning** prior to this fix. `main.py`'s comparison-ticker fetch loop now logs an explicit warning when a failed fetch backs an active dependency (see the `dep_keys` check next to the `Failed to fetch data for comparison ticker` warning), but the underlying data-availability gap is a Polygon plan-tier limit, not a bug in this codebase — **use `data_provider = "yahoo"` (`^VIX`/`^TNX`, full history) for any backtest whose window starts before 2023-02-14 and depends on VIX/TNX-gated strategies.**
 

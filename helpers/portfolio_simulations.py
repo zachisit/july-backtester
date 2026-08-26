@@ -985,6 +985,23 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         shares = _inst.round_units(inst_se, alloc / _s_per_contract_margin) if _s_per_contract_margin > 0 else 0.0
                     if shares < 1:
                         continue
+                    # Portfolio-heat gate (#324 QA / issue #331). The equity short
+                    # branch below gained this in #312; the futures branch did not,
+                    # so a futures short was admitted regardless of book heat AND
+                    # registered no 'risk', contributing 0 to every later entry's
+                    # gate. Prefer the real per-contract risk (_s_ir is the stop
+                    # distance in points) over the target_risk_per_trade proxy the
+                    # equity path must use, since futures set their stop before sizing.
+                    _fs_stop_dist_pts = _s_ir if (_s_ir and _s_ir > 0) else None
+                    if _fs_stop_dist_pts is not None:
+                        _fs_new_risk = _fs_stop_dist_pts * inst_se.point_value * shares
+                    else:
+                        _fs_new_risk = (_inst.notional(inst_se, shares, _s_entry_fill)
+                                        * CONFIG.get("target_risk_per_trade", 0.02))
+                    _fs_max_heat = CONFIG.get("max_portfolio_heat", 1.0)
+                    if not check_portfolio_heat({**positions, **short_positions},
+                                                _fs_new_risk, total_equity, _fs_max_heat):
+                        continue
                     _s_margin = _inst.margin_required(inst_se, shares, _s_entry_fill)
                     commission = _inst.commission(inst_se, shares)
                     if _s_margin + commission > cash - reserved_margin:
@@ -999,6 +1016,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         'trail_target': _s_target, 'atr_locked': _s_atr,
                         'trail_anchor': _s_trail_anchor,
                         'trail_armed': False, 'initial_risk': _s_ir, 'features': _s_features,
+                        'risk': _fs_new_risk,  # registered for the portfolio-heat pot (#324 QA)
                     }
                 else:
                     # Equity cash_full short. Mirror the long entry's four cost
@@ -1288,7 +1306,16 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 _stop_dist = sizing_kwargs.get("stop_distance_pct") or CONFIG.get("target_risk_per_trade", 0.02)
                 new_position_risk = _inst.notional(inst, shares, entry_price) * _stop_dist
                 max_heat = CONFIG.get("max_portfolio_heat", 1.0)
-                if not check_portfolio_heat(positions, new_position_risk, total_equity, max_heat):
+                # Gate against BOTH open longs and open shorts. Before #312 an
+                # equity short carried no 'risk' key, so passing `positions`
+                # alone here was inert. #312 registers short risk -- and only
+                # the short-entry gate (see the {**positions, **short_positions}
+                # call above) was updated to read it. That left the cap
+                # breachable through the long side, with admit/reject depending
+                # on entry ORDER and DIRECTION: 2.0% of risk against a 1.5% cap
+                # was rejected entering short and admitted entering long.
+                if not check_portfolio_heat({**positions, **short_positions},
+                                            new_position_risk, total_equity, max_heat):
                     continue
 
                 # Cash constraint (equity full-notional pre-clamp; futures clamp on margin below)

@@ -811,9 +811,27 @@ def weekday_overnight_logic(df):
     risk). Uses the day-of-week index to determine the signal.
 
     The exit is derived from the actual CALENDAR GAPS in the index rather than
-    from a fixed Friday-is-day-4 assumption (issue #314), so it stays flat across
-    weekends AND exchange holidays (Good Friday, Thanksgiving, …). A "gap" is any
-    interval > 2 calendar days between consecutive bars.
+    from a fixed Friday-is-day-4 assumption (issue #314). A "gap" is any interval
+    **> 2 calendar days** between consecutive bars.
+
+    That threshold means the strategy is flat across every WEEKEND, and across a
+    holiday only when the holiday *lengthens a weekend*. A lone midweek holiday
+    produces a gap of exactly 2 calendar days and is therefore HELD:
+
+    ======================  ==========  ========
+    Holiday                 gap         behaviour
+    ======================  ==========  ========
+    Good Friday             4 days      flat  (abuts the weekend)
+    Memorial / Labor Day    3 days      flat  (abuts the weekend)
+    Thanksgiving (Thu)      Wed -> Fri  HELD  (2-day gap)
+    July 4th on a Wednesday Tue -> Thu  HELD  (2-day gap)
+    ======================  ==========  ========
+
+    This is a deliberate choice, not an oversight: a 2-day gap carries roughly a
+    weeknight's worth of extra exposure, and `tests/test_weekday_overnight.py`
+    pins the midweek-holiday hold explicitly. Raise the threshold to ``>= 2`` if
+    single-day holiday closures should also be avoided — that is a strategy
+    decision, and it would also flatten across every normal weeknight.
 
     It is also EXECUTION-AWARE, because a signal on session S fills at a different
     bar depending on ``execution_time``:
@@ -827,8 +845,9 @@ def weekday_overnight_logic(df):
       at that pre-gap session's open and the position is flat across the gap.
 
     Either way the position holds every weeknight overnight and is flat across
-    every weekend/holiday gap. The final bar(s) with no future bar to hold into
-    are flattened (you cannot manage a position past the end of the data).
+    every gap longer than 2 calendar days (see the table above). The final bar(s)
+    with no future bar to hold into are flattened (you cannot manage a position
+    past the end of the data).
 
     Parameters
     ----------
