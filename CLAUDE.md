@@ -48,6 +48,7 @@ services/csv_service.py            # Local CSV files ({csv_data_dir}/{SYMBOL}.cs
 tickers_to_scan/                   # JSON ticker lists (nasdaq_100.json, sp-500.json, etc.)
 scripts/                           # One-off diagnostic and utility scripts (NOT part of the pipeline)
 scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run with: python scripts/debug_data.py
+scripts/build_research_index.py    # Consolidates all output/runs/ summaries + llm_verdict.json into output/research_index.csv
 ```
 
 ## Scripts Directory
@@ -221,6 +222,50 @@ The engine is instrument-aware: **`helpers/instruments.py`** resolves a per-symb
   - Futures data resolution is dynamic (`services/futures_service._resolution`): `MIN×5→"5min"`, `H×2→"2hour"`, `D→"1session"`.
   - `continuous_contract.rolls_spanned(entry, exit, roll_dates)` flags a held position crossing a roll (long-horizon guard).
 - **Regression guard:** `tests/test_engine_characterization.py` (golden master) + `test_instruments.py`, `test_futures_engine.py`, `test_futures_service.py`, `test_continuous_contract.py`, `test_scaled_exits.py`, `test_intrabar.py`, `test_intrabar_wiring.py`, `test_data_quality_calendar.py`, `test_futures_234.py`.
+
+## Structural Stop — `signal_bar` (SECTION 9)
+
+`{"type": "signal_bar", "buffer": 0.005}` places the initial stop at the **signal bar's own
+extreme** instead of a distance measured from the entry fill: long stops at `signal_bar.Low *
+(1 - buffer)`, short stops at `signal_bar.High * (1 + buffer)`. `buffer` is a fraction
+(default `0.0`); it pads the level so noise doesn't graze a stop sitting exactly on the
+printed extreme. The level is **static — it does not trail**.
+
+- **Helper**: `helpers/instruments.signal_bar_stop_level(bar_high, bar_low, buffer, side)`.
+  Returns `None` for a missing/zero/negative/NaN extreme, which the engine treats as "no stop".
+- **`bars_back`** (default `0`) walks the anchor further back through
+  `prev_trading_dates` via the module-level `_walk_back()` helper: `1` anchors to the bar
+  *before* the trigger. Many setups are specified that way — the trigger bar is the reversal,
+  and the level worth defending is the last bar of the move that preceded it. Walking off the
+  start of the series yields `NaT` → no stop for that trade.
+- **Wiring**: both entry paths in `helpers/portfolio_simulations.py` resolve the signal bar
+  from the loop's existing `signal_date` / `sig_date` variable — the bar *before* the fill under
+  `execution_time="open"`, the fill bar itself under `"close"`. This differs from the `atr`
+  branch, which hard-codes `prev_trading_dates[entry_exec_date]` and therefore assumes
+  `execution_time="open"`. No look-ahead either way: the level is known at entry.
+- **Next-Day Activation interaction (important for short holds):** a position is not
+  stop-checked until the bar *after* entry. Under `execution_time="open"` a one-session trade
+  (enter next open, exit the open after) is therefore unprotected for its entire holding
+  session — the stop can only alter the exit bar's fill. To express "stop active during the
+  session I hold", pair `signal_bar` with `execution_time="close"`. Multi-session holds are
+  unaffected.
+- **Fill assumption**: like every daily-bar stop in the engine, a stopped trade fills *at* the
+  stop level; a bar that opens through the stop is not refilled at the open unless
+  `intrabar_resolution` is enabled. On strategies where the stop is dormant for a session this
+  flatters results — a gap-aware cross-check (comparing at-level fills against sub-bar open fills)
+  is the way to quantify the overstatement before trusting a `signal_bar` backtest.
+- **Protective-side guard**: unlike `percentage`/`atr` (distance-from-entry, always on the
+  protective side), a structural level is decoupled from the fill, so under `execution_time="open"`
+  a next-open that gaps *through* the extreme leaves the stop on the WRONG side of entry (long: a
+  level above the fill; short: below it). Both entry branches therefore only arm the stop when it is
+  actually protective (`_lvl < entry_price` long / `_lvl > ep` short); otherwise they fall through
+  to no stop. Without this an inverted stop fires the next bar and fills at the phantom level *in the
+  trade's favor* — a spurious profitable "Stop Loss" that flatters P&L/win-rate and poisons
+  `InitialRisk`/`RMultiple`. Pairing with `intrabar_resolution` reduces the phantom-fill magnitude
+  but does not replace the guard.
+- **Tests**: `tests/test_signal_bar_stop.py` — 22 tests: helper arithmetic and guards, long/short
+  fire-and-hold cases, buffer widening, `InitialRisk` measured from the signal-bar extreme, a
+  no-trail regression, and gap-through-entry cases that assert the protective-side guard.
 
 ## Data Providers
 

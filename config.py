@@ -98,6 +98,14 @@ CONFIG = {
     # ============================================================
     # {"type": "none"} | {"type": "percentage", "value": 0.05}
     # | {"type": "atr", "multiplier": 2.0}
+    # | {"type": "signal_bar", "buffer": 0.005, "bars_back": 0}
+    #     Structural stop at the SIGNAL bar's extreme rather than a distance from
+    #     entry: long stops under that bar's Low, short stops above its High.
+    #     "buffer" (fraction, default 0.0) pads the level away from the printed
+    #     extreme so noise doesn't graze it. Static — it does not trail.
+    #     "bars_back" (default 0) walks the anchor further back: 1 = the bar
+    #     BEFORE the trigger, for setups that defend the level preceding the
+    #     reversal bar rather than the reversal bar itself.
     "stop_loss_configs": [
         {"type": "none"},
     ],
@@ -364,4 +372,30 @@ CONFIG = {
     # 0.0 = disabled (default). Set below the instrument's initial_margin_pct, e.g.
     # 0.07 with a 0.10 initial. Equities (cash_full) are never margin-called.
     "maintenance_margin_pct": 0.0,
+
+    # ============================================================
+    # SECTION 30: CROSS-SECTIONAL ROTATION (issue #294)
+    # ============================================================
+    # First-class rotation mechanism (helpers/rotation.py). A rotation strategy
+    # is "a ranking function + this config": the framework owns top-N selection,
+    # weighting, rebalance/trim/add mechanics and all cost/accounting (reusing
+    # helpers/instruments.py); the plugin supplies only the ranking (the alpha).
+    # DISABLED by default -> existing runs are completely unaffected.
+    "rotation": {
+        "enabled": False,          # master switch for the rotation capability
+        "rank_strategy": None,     # name of a @register_rotation plugin to run
+        "top_n": 5,                # number of names held at once
+        "rebalance_days": 21,      # forced rebalance interval (trading days)
+        "weighting": "equal",      # "equal" (1/top_n) | "fixed_alloc" (allocation_per_trade)
+        "sell_buffer_rank": 0,     # hysteresis: keep a holding while its rank
+                                   #   <= top_n + sell_buffer_rank (reduces churn)
+        "drift_trim_pct": 0.0,     # trim a position only when its weight drifts
+                                   #   more than this fraction above target (0 = always)
+    },
+
+    # Scale-invariant RELATIVE position cap (issue #293): the largest fraction of
+    # equity any single rotation position may hold. 1.0 = no binding cap. There is
+    # deliberately NO absolute-dollar cap default — a dollar cap is scale-dependent
+    # and silently changes behaviour when initial_capital changes.
+    "max_position_pct": 1.0,
 }

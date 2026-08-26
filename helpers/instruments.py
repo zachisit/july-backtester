@@ -400,3 +400,30 @@ def atr_stop_distance_pct(atr: float, multiplier: float, price: float) -> float:
     """ATR stop distance as a fraction of ``price`` — used by risk-parity sizing.
     Returns ``0.0`` when ``price <= 0``."""
     return (atr * multiplier) / price if price > 0 else 0.0
+
+
+def signal_bar_stop_level(bar_high: float, bar_low: float,
+                          buffer: float = 0.0, side: str = "long") -> float | None:
+    """Stop placed at the *signal bar's* extreme, optionally padded by ``buffer``.
+
+    This is a structural stop: rather than measuring a distance from the entry fill
+    (``percentage``/``points``) or from volatility (``atr``), it anchors to a level the
+    market actually printed on the bar that produced the signal.
+
+    - long  -> ``bar_low  * (1 - buffer)``   (stop under the signal bar's low)
+    - short -> ``bar_high * (1 + buffer)``   (stop above the signal bar's high)
+
+    ``buffer`` is a fraction (``0.005`` = 0.5%) and exists because a stop sitting
+    exactly on the printed extreme is grazed by noise; padding it is the difference
+    between testing the idea and testing the tick.
+
+    Returns ``None`` when the required extreme is missing or non-positive, which the
+    engine treats the same as "no stop for this trade".
+    """
+    extreme = bar_low if side == "long" else bar_high
+    # NaN fails `> 0`, so this one guard covers missing, zero, negative and NaN
+    # without pulling pandas into this module.
+    if extreme is None or not (extreme > 0):
+        return None
+    sign = -1.0 if side == "long" else 1.0
+    return float(extreme * (1.0 + sign * buffer))

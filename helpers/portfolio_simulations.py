@@ -150,6 +150,23 @@ def _prearm_decision(high, low, stop_level, target, window_bars, side="long"):
     return ("hold", None)
 
 
+def _walk_back(prev_dates, date, n):
+    """Step ``n`` trading bars back from ``date`` using a prev-date mapping.
+
+    ``n=0`` returns ``date`` unchanged. Returns ``pd.NaT`` if the chain runs off the
+    start of the series, which callers treat as "no stop for this trade". A negative
+    ``n`` is clamped to ``0`` (there is no "forward" walk — anchoring past the signal
+    bar would be look-ahead), so a stray negative ``bars_back`` anchors to the signal
+    bar rather than silently doing something else.
+    """
+    n = max(0, int(n or 0))
+    for _ in range(n):
+        if pd.isna(date):
+            return pd.NaT
+        date = prev_dates.get(date, pd.NaT)
+    return date
+
+
 def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config, size_mults=None, delisting_dates=None, intrabar_data=None):
     """
     Runs a portfolio simulation with integrated stop-loss handling and logs
@@ -825,6 +842,22 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if pd.notna(_ab) and pd.notna(_cb):
                             _s_stop = _inst.atr_stop_level(_cb, _ab, stop_config.get("multiplier", 3.0),
                                                            side="short", point_cap=stop_config.get("point_cap"))
+                elif _sc_type == 'signal_bar':
+                    # Mirror of the long-side branch: stop ABOVE the signal bar's high.
+                    # `sig_date` is already the true signal bar for both execution_time modes.
+                    _sb_date = _walk_back(prev_trading_dates[symbol], sig_date,
+                                          stop_config.get("bars_back", 0))
+                    if pd.notna(_sb_date) and _sb_date in df.index:
+                        _sb = df.loc[_sb_date]
+                        _lvl = _inst.signal_bar_stop_level(
+                            _sb.get('High'), _sb.get('Low'),
+                            stop_config.get("buffer", 0.0), side="short")
+                        # Protective-side guard (mirror of the long branch): only arm the
+                        # stop if it sits ABOVE the short fill `ep`. A next-open that gaps
+                        # UP through the signal-bar high leaves the level below entry — not
+                        # a stop; unguarded it covers next bar in the trade's FAVOR.
+                        if _lvl is not None and _lvl > ep:
+                            _s_stop = _lvl
                 elif _sc_type == 'trailing_atr':
                     _dbe = prev_trading_dates[symbol].get(date)
                     _ab = df.loc[_dbe].get('ATR_14') if (pd.notna(_dbe) and _dbe in df.index) else np.nan
@@ -1291,6 +1324,35 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                     close_before_entry, atr_before_entry,
                                     stop_config.get("multiplier", 3.0), side="long",
                                     point_cap=stop_config.get("point_cap"))
+
+                    elif _stype == 'signal_bar':
+                        # Structural stop anchored to the SIGNAL bar's low, not to the entry
+                        # price. `signal_date` is the bar that produced the signal — the bar
+                        # before the fill under execution_time="open", the fill bar itself
+                        # under "close". Either way the level is known at entry, so there is
+                        # no look-ahead; unlike the 'atr' branch this reads the signal bar
+                        # directly instead of assuming the open-fill offset.
+                        #
+                        # bars_back>0 walks the anchor further back: "stop beyond the bar
+                        # BEFORE the trigger" is how a lot of setups are actually specified
+                        # (the trigger bar is the reversal; the level to defend is the last
+                        # bar of the move that preceded it).
+                        _sb_date = _walk_back(prev_trading_dates[symbol], signal_date,
+                                              stop_config.get("bars_back", 0))
+                        if pd.notna(_sb_date) and _sb_date in df.index:
+                            _sb = df.loc[_sb_date]
+                            _lvl = _inst.signal_bar_stop_level(
+                                _sb.get('High'), _sb.get('Low'),
+                                stop_config.get("buffer", 0.0), side="long")
+                            # Protective-side guard: only arm the stop if it sits BELOW the
+                            # actual long fill. Under execution_time="open" the fill is the
+                            # next bar's open, which can gap DOWN through the signal-bar low;
+                            # a structural level above entry is not a stop at all — left
+                            # unguarded it fires next bar and fills at the phantom level
+                            # (in the trade's FAVOR), booking a spurious "Stop Loss" profit
+                            # and a 1%-proxy InitialRisk. Fall through to no stop instead.
+                            if _lvl is not None and _lvl < entry_price:
+                                stop_loss_level = _lvl
 
                     elif _stype == 'trailing_atr':
                         # Sleeve A mechanic. Lock ATR at the breakout (signal) bar and keep it
