@@ -31,7 +31,9 @@ readings of the same code disagreed until someone printed a number:
   has already been divided by it while the 2024 EPS has not.
 * ``price_adjustment="none"`` -> prices are **as traded**. Only splits executing
   *inside* the window matter; a future split is irrelevant because neither side
-  reflects it yet.
+  reflects it yet. This convention therefore **requires** an ``as_of`` date -
+  that is the only thing separating the two cases, so omitting it raises rather
+  than silently adjusting for nothing.
 
 Both models are correct - for their setting. Nothing in the codebase asserted the
 relationship, so the disagreement was unresolvable by reading. Hence
@@ -55,6 +57,7 @@ absolute price floors need to know this; see :func:`validate_fundamentals_basis`
 from __future__ import annotations
 
 import logging
+import math
 
 import pandas as pd
 
@@ -63,6 +66,13 @@ logger = logging.getLogger(__name__)
 #: Price conventions this module understands.
 ADJUSTED_TO_TODAY = "total_return"   # vendor rebases full history to current shares
 AS_TRADED = "none"                   # nominal prices, never restated
+
+
+def _naive(ts):
+    """Drop tz so vendor split dates (naive calendar dates) compare against
+    provider timestamps (this project normalises indices to UTC-aware)."""
+    ts = pd.Timestamp(ts)
+    return ts.tz_localize(None) if ts.tzinfo is not None else ts
 
 
 def split_adjustment_factor(splits, period_end, *, as_of=None,
@@ -75,11 +85,14 @@ def split_adjustment_factor(splits, period_end, *, as_of=None,
         ``ratio`` is ``split_to / split_from`` - 10.0 for a 10-for-1.
     period_end : timestamp-like
         End of the fiscal period the per-share figure was reported for.
-    as_of : timestamp-like, optional
-        The evaluation date. Only consulted under :data:`AS_TRADED`, where a
-        split that has not executed yet must not be applied. Ignored (and not
-        required) under :data:`ADJUSTED_TO_TODAY`, where the price side already
-        carries every split regardless of when it happened.
+    as_of : timestamp-like
+        The evaluation date. **Required under** :data:`AS_TRADED`, where a split
+        that has not executed yet must not be applied - there is no safe default,
+        because without an evaluation date no split can be classified as
+        executed-yet, and silently treating them all as future would skip
+        in-window splits that unambiguously matter. Ignored (and not required)
+        under :data:`ADJUSTED_TO_TODAY`, where the price side already carries
+        every split regardless of when it happened.
     price_adjustment : str
         :data:`ADJUSTED_TO_TODAY` or :data:`AS_TRADED`.
 
@@ -87,36 +100,72 @@ def split_adjustment_factor(splits, period_end, *, as_of=None,
     -------
     float
         Cumulative factor, ``1.0`` when no split applies.
+
+    Raises
+    ------
+    ValueError
+        Unknown *price_adjustment*; *as_of* omitted under :data:`AS_TRADED`; or a
+        split ratio that is not a positive finite number.
     """
     if price_adjustment not in (ADJUSTED_TO_TODAY, AS_TRADED):
         raise ValueError(
             f"unknown price_adjustment {price_adjustment!r}; expected "
             f"{ADJUSTED_TO_TODAY!r} or {AS_TRADED!r}"
         )
-    if not splits:
+    if price_adjustment == AS_TRADED and as_of is None:
+        # Returning 1.0 here would be the exact silent-wrong-answer this module
+        # exists to prevent: an in-window split left unadjusted, no log, no error.
+        raise ValueError(
+            "as_of is required under price_adjustment='none' (AS_TRADED): without "
+            "an evaluation date no split can be classified as already executed"
+        )
+    splits = list(splits or ())   # materialise: a generator would be spent after
+    if not splits:                # the first call from adjust_per_share()
         return 1.0
 
-    period_end = pd.Timestamp(period_end)
-    as_of = pd.Timestamp(as_of) if as_of is not None else None
+    period_end = _naive(period_end)
+    as_of = _naive(as_of) if as_of is not None else None
 
     factor = 1.0
     for raw_date, ratio in splits:
-        exec_date = pd.Timestamp(raw_date)
+        r = float(ratio)
+        if not math.isfinite(r) or r <= 0:
+            # Vendor feeds carry zeros and nulls for mislabelled distributions.
+            # A ratio of 0 would divide EPS to inf -> P/E of 0 -> straight to the
+            # top of a lowest-P/E ranking. Reverse splits (0 < r < 1) are valid.
+            raise ValueError(
+                f"split ratio must be a positive finite number, got {ratio!r} "
+                f"on {raw_date!r}"
+            )
+        exec_date = _naive(raw_date)
         if exec_date <= period_end:
-            # Already reflected in the as-filed figure.
+            # Already reflected in the as-filed figure. A split executing ON the
+            # period end counts as inside it: the as-filed weighted-average share
+            # count for that period already reflects it.
             continue
         if price_adjustment == AS_TRADED:
             # Prices are nominal, so a split only creates a mismatch once it has
-            # actually executed. A future split affects neither side yet.
-            if as_of is None or exec_date > as_of:
+            # actually executed. A future split affects neither side yet. A split
+            # executing exactly ON as_of has executed, so it applies.
+            if exec_date > as_of:
                 continue
-        factor *= float(ratio)
+        factor *= r
     return factor
 
 
 def adjust_per_share(values: pd.Series, period_ends, splits, *, as_of=None,
                      price_adjustment: str = ADJUSTED_TO_TODAY) -> pd.Series:
-    """Vectorised :func:`split_adjustment_factor` over a series of per-share values."""
+    """Vectorised :func:`split_adjustment_factor` over a series of per-share values.
+
+    *period_ends* must align positionally with *values*; a length mismatch raises.
+    """
+    splits = list(splits or ())   # one-shot iterables are consumed by the first
+    period_ends = list(period_ends)   # call below, silently leaving the rest at 1.0
+    if len(period_ends) != len(values):
+        raise ValueError(
+            f"period_ends has {len(period_ends)} entries but values has "
+            f"{len(values)}; they must align positionally"
+        )
     factors = [
         split_adjustment_factor(splits, pe, as_of=as_of,
                                 price_adjustment=price_adjustment)
@@ -153,8 +202,9 @@ def validate_fundamentals_basis(config: dict, *, uses_per_share_ratio: bool = Tr
             warnings.append(
                 "INFO: price_adjustment='none' -> prices are as-traded. Only "
                 "splits executing INSIDE the evaluation window create a basis "
-                "mismatch; pass as_of to split_adjustment_factor so future "
-                "splits are correctly ignored."
+                "mismatch, and those still MUST be adjusted for. as_of is "
+                "REQUIRED by split_adjustment_factor under this convention - it "
+                "is what separates an already-executed split from a future one."
             )
 
     if uses_absolute_price_floor and adjustment == ADJUSTED_TO_TODAY:
@@ -167,5 +217,7 @@ def validate_fundamentals_basis(config: dict, *, uses_per_share_ratio: bool = Tr
         )
 
     for msg in warnings:
-        logger.info(msg)
+        # The look-ahead message is the only real defect this can report; logging
+        # it at INFO under a default WARNING-level root logger made it invisible.
+        (logger.warning if msg.startswith("WARNING") else logger.info)(msg)
     return warnings

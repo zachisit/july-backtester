@@ -72,9 +72,10 @@ def trailing_mean(series: pd.Series, window: int, *, exclude_current: bool = Tru
         the current bar (e.g. a trend line).
     min_periods : int, optional
         Defaults to ``window`` - a full window is required, so the warm-up is
-        ``NaN`` rather than an average of one or two bars. ``min_periods=1``
-        would make the first bar average against itself, which manufactures a
-        spurious spike at the start of *every* symbol.
+        ``NaN`` rather than an average of one or two bars. Counted in *prior*
+        bars under ``exclude_current``: ``min_periods=1`` means "at least one
+        preceding bar", so index 0 is still ``NaN`` and no bar can ever average
+        against itself.
 
     Returns
     -------
@@ -83,8 +84,13 @@ def trailing_mean(series: pd.Series, window: int, *, exclude_current: bool = Tru
     """
     if window < 1:
         raise ValueError(f"window must be >= 1, got {window}")
+    if min_periods is None:
+        min_periods = window
+    elif min_periods < 1:
+        # `min_periods or window` would silently swallow 0 as "unset".
+        raise ValueError(f"min_periods must be >= 1, got {min_periods}")
     base = series.shift(1) if exclude_current else series
-    return base.rolling(window, min_periods=min_periods or window).mean()
+    return base.rolling(window, min_periods=min_periods).mean()
 
 
 def spike_ratio(series: pd.Series, window: int, *,
@@ -97,10 +103,17 @@ def spike_ratio(series: pd.Series, window: int, *,
 
     rather than::
 
-        df["Volume"] > 2.5 * df["Volume"].rolling(20).mean()   # actually ~2.63x
+        df["Volume"] > 2.5 * df["Volume"].rolling(20).mean()   # actually ~2.71x
 
-    Returns ``NaN`` where the baseline is ``NaN`` or zero, rather than ``inf``,
-    so a zero-volume warm-up cannot register as an infinite spike.
+    The inclusive form's true multiple against the prior ``N-1`` bars is
+    ``k(N-1)/(N-k)`` - for ``N=20, k=2.5`` that is **2.714**, and for the
+    ``N=10, k=2.5`` case in the module docstring, exactly 3.0. Note it is *not*
+    ``kN/(N-1)``; the current bar sits on both sides of the inequality, so
+    solving for it changes the denominator as well as the numerator.
+
+    Returns ``NaN`` where the baseline is ``NaN`` or **non-positive**, rather
+    than ``inf`` or a sign-flipped ratio, so a zero-volume warm-up cannot
+    register as an infinite spike.
     """
     base = trailing_mean(series, window, exclude_current=True, min_periods=min_periods)
     return (series / base.where(base > 0))

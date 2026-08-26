@@ -8,6 +8,8 @@ unchanged by a split") rather than behaviour checks - behaviour-only tests are
 what let this class through repeatedly in the first place.
 """
 
+import logging
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -114,7 +116,10 @@ class TestSplitAdjustment:
         a = split_adjustment_factor(*args, price_adjustment=ADJUSTED_TO_TODAY)
         b = split_adjustment_factor(*args, as_of="2024-09-30",
                                     price_adjustment=AS_TRADED)
-        assert a != b
+        # Pin both values, not just `a != b` — inequality alone passes even if the
+        # AS_TRADED branch returned 0.0, 3.7, or any other wrong number.
+        assert a == pytest.approx(10.0)
+        assert b == pytest.approx(1.0)
 
     def test_in_window_split_applies_under_both(self):
         """A split between period end and evaluation date is a real mismatch
@@ -193,3 +198,146 @@ class TestValidator:
     def test_silent_when_no_fundamentals_used(self):
         assert validate_fundamentals_basis(
             {"price_adjustment": ADJUSTED_TO_TODAY}, uses_per_share_ratio=False) == []
+
+
+# ---------------------------------------------------------------------------
+# Branches a QA pass found unpinned: both date-boundary operators survived
+# mutation (<= -> < and > -> >=) with the whole suite still green, and the
+# as_of=None path under AS_TRADED had no coverage at all — which is how it
+# shipped returning a silent 1.0.
+# ---------------------------------------------------------------------------
+
+class TestSplitBoundariesAndGuards:
+
+    def test_split_executing_on_period_end_is_already_reflected(self):
+        """Pins `exec_date <= period_end`. The as-filed weighted-average share
+        count for a period already reflects a split on its final day."""
+        assert split_adjustment_factor(
+            [("2024-09-30", 10.0)], "2024-09-30") == pytest.approx(1.0)
+
+    def test_split_executing_one_day_after_period_end_applies(self):
+        """The other side of the same boundary."""
+        assert split_adjustment_factor(
+            [("2024-10-01", 10.0)], "2024-09-30") == pytest.approx(10.0)
+
+    def test_split_executing_exactly_on_as_of_has_executed(self):
+        """Pins `exec_date > as_of`. A split is effective on its execution date,
+        so as_of == exec_date must apply it, not skip it."""
+        assert split_adjustment_factor(
+            [("2024-06-10", 10.0)], "2024-04-30", as_of="2024-06-10",
+            price_adjustment=AS_TRADED) == pytest.approx(10.0)
+
+    def test_split_executing_one_day_after_as_of_has_not(self):
+        assert split_adjustment_factor(
+            [("2024-06-11", 10.0)], "2024-04-30", as_of="2024-06-10",
+            price_adjustment=AS_TRADED) == pytest.approx(1.0)
+
+    def test_as_traded_without_as_of_raises_rather_than_silently_skipping(self):
+        """The defect this class exists for. Returning 1.0 here left a real
+        in-window split unadjusted with no error and no log line — the same
+        silent-wrong-answer shape the module was written to prevent."""
+        with pytest.raises(ValueError, match="as_of is required"):
+            split_adjustment_factor([("2024-06-10", 10.0)], "2024-04-30",
+                                    price_adjustment=AS_TRADED)
+
+    def test_as_of_not_required_under_rebasing(self):
+        """Only AS_TRADED needs it; the rebased price side carries every split."""
+        assert split_adjustment_factor(
+            SPLIT_2026, "2024-09-30",
+            price_adjustment=ADJUSTED_TO_TODAY) == pytest.approx(10.0)
+
+    def test_reverse_split_is_valid_and_shrinks_the_factor(self):
+        """A 1-for-10 is a ratio of 0.1, not an error. EPS scales up, not down."""
+        f = split_adjustment_factor([("2025-01-01", 0.1)], "2024-09-30")
+        assert f == pytest.approx(0.1)
+        eps = pd.Series([2.0])
+        out = adjust_per_share(eps, ["2024-09-30"], [("2025-01-01", 0.1)])
+        assert out.iloc[0] == pytest.approx(20.0)
+
+    @pytest.mark.parametrize("bad", [0.0, -2.0, float("nan"), float("inf")])
+    def test_non_positive_or_infinite_ratio_raises(self, bad):
+        """A vendor zero used to divide EPS to inf, giving a P/E of 0 — which
+        sends the affected name to the TOP of a lowest-P/E ranking."""
+        with pytest.raises(ValueError, match="positive finite"):
+            split_adjustment_factor([("2025-01-01", bad)], "2024-09-30")
+
+    def test_tz_aware_period_end_does_not_raise(self):
+        """Provider indices in this project are UTC-aware; vendor split dates are
+        naive calendar strings. Comparing them used to raise TypeError."""
+        f = split_adjustment_factor(
+            SPLIT_2026, pd.Timestamp("2024-09-30", tz="UTC"))
+        assert f == pytest.approx(10.0)
+
+    def test_generator_of_splits_is_not_exhausted_after_the_first_period(self):
+        """adjust_per_share calls the factor function once per period end; a
+        one-shot iterable used to be spent after the first, leaving every later
+        period silently unadjusted."""
+        gen = (x for x in [("2026-06-12", 10.0)])
+        out = adjust_per_share(pd.Series([1.0, 2.0]),
+                               ["2024-01-31", "2024-04-30"], gen)
+        assert list(out) == pytest.approx([0.1, 0.2])
+
+    def test_adjust_per_share_length_mismatch_raises(self):
+        with pytest.raises(ValueError, match="align positionally"):
+            adjust_per_share(pd.Series([1.0, 2.0]), ["2024-01-31"], SPLIT_2026)
+
+
+class TestTrailingMeanGuards:
+
+    def test_explicit_min_periods_counts_prior_bars(self):
+        """min_periods=1 means one PRIOR bar, so index 0 stays NaN — no bar can
+        average against itself even with a relaxed warm-up."""
+        s = pd.Series([10.0, 20.0, 30.0, 40.0])
+        out = trailing_mean(s, 3, min_periods=1)
+        assert np.isnan(out.iloc[0])
+        assert out.iloc[1] == pytest.approx(10.0)
+        assert out.iloc[2] == pytest.approx(15.0)
+
+    def test_min_periods_zero_rejected_not_silently_treated_as_unset(self):
+        """`min_periods or window` swallowed 0 as falsy, silently applying the
+        full window instead of the value the caller asked for."""
+        with pytest.raises(ValueError, match="min_periods must be >= 1"):
+            trailing_mean(pd.Series([1.0, 2.0, 3.0]), 3, min_periods=0)
+
+    def test_negative_baseline_yields_nan_not_a_sign_flipped_ratio(self):
+        out = spike_ratio(pd.Series([-5.0, -5.0, -5.0, 10.0]), 3)
+        assert out.isna().all()
+
+    def test_inclusive_multiple_is_k_times_n_minus_1_over_n_minus_k(self):
+        """Pins the docstring arithmetic. For N=20, k=2.5 the inclusive form is
+        2.714x the prior 19 bars — NOT kN/(N-1) = 2.632, a correction that omits
+        the current bar's effect on the denominator."""
+        n, k = 20, 2.5
+        true_multiple = k * (n - 1) / (n - k)
+        assert true_multiple == pytest.approx(2.7142857, abs=1e-6)
+
+        # A bar at exactly that multiple sits exactly on the inclusive threshold.
+        s = pd.Series([1.0] * (n - 1) + [true_multiple])
+        inclusive_mean = s.rolling(n).mean().iloc[-1]
+        assert s.iloc[-1] / inclusive_mean == pytest.approx(k)
+
+        # ...while spike_ratio reports the honest number.
+        assert spike_ratio(s, n - 1).iloc[-1] == pytest.approx(true_multiple)
+
+
+class TestValidatorLogLevel:
+    """The look-ahead message is the only genuine defect this validator reports,
+    and its return value is freely ignorable - so the log line IS the enforcement.
+    Emitting it at INFO under a default WARNING-level root logger made it
+    invisible exactly when it mattered."""
+
+    def test_lookahead_message_is_logged_at_warning(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="helpers.corporate_actions"):
+            validate_fundamentals_basis(
+                {"price_adjustment": ADJUSTED_TO_TODAY},
+                uses_absolute_price_floor=True,
+            )
+        warned = [r for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any("NOT scale-invariant" in r.getMessage() for r in warned)
+
+    def test_informational_messages_stay_below_warning(self, caplog):
+        """Only the real defect escalates; the basis reminders are not alarms."""
+        with caplog.at_level(logging.DEBUG, logger="helpers.corporate_actions"):
+            validate_fundamentals_basis({"price_adjustment": ADJUSTED_TO_TODAY})
+        assert caplog.records
+        assert all(r.levelno < logging.WARNING for r in caplog.records)
