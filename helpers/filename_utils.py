@@ -45,6 +45,22 @@ def sanitize_symbol_for_filename(symbol: str) -> str:
     ``$`` and ``.`` are intentionally left intact — both are valid in filenames
     on all supported platforms and appear in real ticker symbols (``$VIX``,
     ``$I:TNX`` → ``$I_TNX``).
+
+    KNOWN RESIDUAL COLLISION
+    ------------------------
+    The operator substitution is **not escaped**, so a label that already
+    contains a literal token collides with the operator it stands for::
+
+        sanitize_symbol_for_filename("ADX_gt_20")  ->  "ADX_gt_20"
+        sanitize_symbol_for_filename("ADX>20")     ->  "ADX_gt_20"   # same
+
+    This is deliberately narrower than the defect it replaced, which collapsed
+    *every* ``>``/``<`` to ``_`` and so fired on any comparison sweep; this one
+    needs a hand-authored label containing the exact substring. Fixing it
+    properly requires an escape scheme (e.g. tokens ``~gt~`` with literal ``~``
+    doubled), which changes the filename format and renames existing sweep
+    outputs — hence tracked separately rather than bundled here. Pinned by
+    strict xfails in ``tests/test_filename_utils.py`` so it cannot rot.
     """
     for op, token in _SEMANTIC_OPERATORS:
         symbol = symbol.replace(op, token)

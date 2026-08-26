@@ -148,3 +148,46 @@ class TestComparisonOperators:
     def test_plain_label_without_operator_unchanged(self):
         # No-op path: a label with no comparison operator is untouched by the prepass.
         assert sanitize_symbol_for_filename("SMA_50_200") == "SMA_50_200"
+
+
+class TestResidualLiteralTokenCollision:
+    """@shardul0701's non-blocking finding on #193.
+
+    The operator prepass trades the original "any `>`/`<` collapses to `_`"
+    collision for a much narrower one: a label that ALREADY contains a literal
+    `_gt_` / `_lt_` / `_gte_` / `_lte_` collides with the corresponding operator
+    label, because the substitution is not escaped.
+
+    Left unfixed deliberately. A correct fix needs an escape scheme (e.g. tokens
+    `~gt~` with literal `~` doubled to `~~`), which CHANGES THE FILENAME FORMAT
+    and would rename every existing sweep output - disproportionate for a
+    collision that requires a hand-authored label containing the exact
+    substring, versus the original which fired on any comparison sweep.
+
+    Pinned as strict xfail rather than left as prose: the moment an escape
+    scheme lands, these flip to failures and force the tests to be updated. A
+    known collision in a collision-fixing utility should not be able to rot.
+    """
+
+    @pytest.mark.xfail(reason=(
+        "known residual: literal '_gt_' collides with the '>' substitution; "
+        "fixing needs an escape scheme that changes the filename format"),
+        strict=True)
+    def test_literal_token_is_distinct_from_the_operator(self):
+        assert sanitize_symbol_for_filename("ADX_gt_20") != \
+            sanitize_symbol_for_filename("ADX>20")
+
+    @pytest.mark.xfail(reason="same residual, two-char operator form",
+                       strict=True)
+    def test_literal_two_char_token_is_distinct_from_the_operator(self):
+        assert sanitize_symbol_for_filename("ADX_lte_20") != \
+            sanitize_symbol_for_filename("ADX<=20")
+
+    def test_the_collision_is_narrower_than_the_bug_it_replaced(self):
+        """The original defect fired on ANY comparison sweep - the pair below is
+        the exact case Suriya blocked on. That is fixed and stays fixed; only
+        the hand-authored-literal case remains."""
+        assert sanitize_symbol_for_filename("ADX>20") != \
+            sanitize_symbol_for_filename("ADX<20")
+        assert sanitize_symbol_for_filename("ADX>=20") != \
+            sanitize_symbol_for_filename("ADX>20")
