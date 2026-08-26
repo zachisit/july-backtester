@@ -283,15 +283,6 @@ class TestStats:
         assert np.isnan(d["sharpe"])
         assert np.isnan(d["sharpe_rf0"])
 
-    @pytest.mark.xfail(reason=(
-        "BUG in stats(): `ex` is assigned twice - first with bars_per_year, then "
-        "overwritten with a hardcoded 252 - while `sd_ex` still comes from the "
-        "FIRST. So for bars_per_year != 252 the Sharpe numerator and denominator "
-        "use different risk-free bases. On a 1260-bar-per-year curve this flips "
-        "the sign: -0.229 as implemented vs +0.312 consistent. Correct at the "
-        "252 default, so it only fires on intraday curves. `vol_pct` likewise "
-        "hardcodes 252 and ignores bars_per_year."),
-        strict=True)
     def test_sharpe_is_self_consistent_at_non_daily_bars_per_year(self):
         rng = np.random.default_rng(3)
         eq = _curve(100000 * np.cumprod(1 + rng.normal(0.0004, 0.01, 500)))

@@ -42,8 +42,6 @@ def stats(eq: pd.Series, rf: float, bars_per_year: int = 252) -> dict:
     ex = r - rf_per_bar
     sd_ex = ex.std(ddof=1)
     sd = r.std(ddof=1)
-    rf_bar = (1 + rf) ** (1 / 252) - 1          # matches helpers/simulations.py
-    ex = r - rf_bar
     cagr = (eq.iloc[-1] / eq.iloc[0]) ** (1 / yrs) - 1 if yrs > 0 else np.nan
     return {
         "start": eq.index[0].date(), "end": eq.index[-1].date(), "bars": len(eq),
@@ -52,7 +50,7 @@ def stats(eq: pd.Series, rf: float, bars_per_year: int = 252) -> dict:
         "cagr_pct": cagr * 100,
         "sharpe": float(ex.mean() / sd_ex * np.sqrt(bars_per_year)) if sd_ex > 0 else np.nan,
         "sharpe_rf0": float(r.mean() / sd * np.sqrt(bars_per_year)) if sd > 0 else np.nan,
-        "vol_pct": float(sd * np.sqrt(252) * 100),
+        "vol_pct": float(sd * np.sqrt(bars_per_year) * 100),
         "max_dd_pct": float(dd.min() * 100),
         "calmar": float(cagr / abs(dd.min())) if dd.min() < 0 else np.nan,
         "worst_day_pct": float(r.min() * 100), "best_day_pct": float(r.max() * 100),
