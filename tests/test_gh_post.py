@@ -252,6 +252,51 @@ class TestSourceEncoding:
         monkeypatch.setattr(gh_post.sys, "stdin", _Stdin())
         assert gh_post.read_source("-") == body
 
+    # read_source has two doors, and until now only one of them was guarded
+    # against a BOM. Mutating the stdin branch's `utf-8-sig` to `utf-8`, or
+    # deleting its UnicodeDecodeError handler, left the whole suite green -
+    # the fixes were present but nothing held them in place. `type draft.md |
+    # gh_post ... --file -` is an ordinary PowerShell path and `>`/Out-File
+    # produce BOMs, so this is the same failure story as the file tests above,
+    # walking in through the other door.
+
+    def test_stdin_bom_does_not_defeat_the_at_path_guard(self, monkeypatch):
+        """Mirror of test_bom_does_not_defeat_the_at_path_guard, via stdin.
+        With a plain utf-8 decode the body starts with U+FEFF rather than '@',
+        the guard never fires, and the literal path posts."""
+
+        class _Stdin:
+            buffer = io.BytesIO(
+                b"\xef\xbb\xbf@C:/Users/shard/AppData/Local/Temp/gh_106.md")
+
+        monkeypatch.setattr(gh_post.sys, "stdin", _Stdin())
+        with pytest.raises(SystemExit) as e:
+            gh_post.read_source("-")
+        assert e.value.code == 1
+
+    def test_stdin_bom_is_not_posted_into_the_comment(self, monkeypatch):
+        """Mirror of test_bom_is_not_posted_into_the_comment, via stdin."""
+
+        class _Stdin:
+            buffer = io.BytesIO("\ufeffReal review content.".encode("utf-8"))
+
+        monkeypatch.setattr(gh_post.sys, "stdin", _Stdin())
+        assert gh_post.read_source("-") == "Real review content."
+
+    def test_stdin_cp1252_fails_with_an_actionable_message(self, monkeypatch,
+                                                           capsys):
+        """Mirror of test_cp1252_message_names_the_actual_cause, via stdin.
+        Without the handler this is a raw UnicodeDecodeError traceback."""
+
+        class _Stdin:
+            buffer = io.BytesIO("curly “quotes”".encode("cp1252"))
+
+        monkeypatch.setattr(gh_post.sys, "stdin", _Stdin())
+        with pytest.raises(SystemExit) as e:
+            gh_post.read_source("-")
+        assert e.value.code == 1
+        assert "UTF-8" in capsys.readouterr().err
+
 
 class TestNoInlineBodyOption:
     """Failure mode 1 is removed structurally: no flag accepts body text as a
@@ -310,6 +355,25 @@ class TestTempFileHygiene:
         on POSIX. Worth knowing if the implementation ever stops using mkstemp."""
         with gh_post._TmpBody("secret draft") as path:
             assert os.stat(path).st_mode & 0o077 == 0
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows confinement property")
+    def test_temp_file_is_confined_to_the_per_user_temp_dir(self):
+        """Windows companion to the test above, which can only skip here.
+
+        Without this, the confinement claim is asserted on ubuntu CI and on
+        nobody's development machine - and since CI is ubuntu-only (#307), a
+        Windows-side regression in where the draft lands has nothing holding
+        it. st_mode cannot express the property on Windows, but the thing that
+        actually confines the file can be checked directly: it must sit in the
+        per-user temp dir, which is ACL-restricted to this user, and not in a
+        machine-wide location like C:\\Windows\\Temp.
+        """
+        import tempfile
+        with gh_post._TmpBody("secret draft") as path:
+            tmpdir = os.path.realpath(tempfile.gettempdir())
+            home = os.path.realpath(os.path.expanduser("~"))
+            assert os.path.realpath(os.path.dirname(path)) == tmpdir
+            assert os.path.commonpath([tmpdir, home]) == home
 
     def test_content_is_written_verbatim(self):
         """newline='' - no translation. A body with CRLF must reach gh as CRLF,
