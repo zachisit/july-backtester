@@ -14,6 +14,7 @@ No network. Every test drives pure functions or patched subprocess calls.
 """
 
 import ast
+import json
 import logging  # noqa: F401  (kept for parity with sibling suites)
 import os
 import sys
@@ -160,6 +161,22 @@ class TestReadSource:
         f.write_text(prose, encoding="utf-8")
         assert gh_post.read_source(str(f)) == prose
 
+    @pytest.mark.parametrize("ping", [
+        "@zachisit",                    # "who owns this?" - a whole valid comment
+        "@shardul0701\n",
+        "@zachisit/reviewers",          # team mention, GitHub's own syntax
+        "@Suriya-002",
+    ])
+    def test_a_bare_handle_is_not_a_path(self, tmp_path, ping):
+        """`@\\S+\\Z` refused these: a one-word ping IS a real comment people
+        post, and a team mention has no spaces either. The discriminator is not
+        "contains whitespace", it is "looks like a path" - a leading separator,
+        or a drive letter / backslash / extension dot. GitHub handles and team
+        names permit none of those, so the two sets do not overlap."""
+        f = tmp_path / "b.md"
+        f.write_text(ping, encoding="utf-8")
+        assert gh_post.read_source(str(f)) == ping
+
     def test_rejects_empty_body(self, tmp_path):
         f = tmp_path / "b.md"
         f.write_text("   \n\n", encoding="utf-8")
@@ -217,7 +234,15 @@ class TestTempFileHygiene:
             pass
         assert not os.path.exists(path)
 
+    @pytest.mark.skipif(os.name == "nt", reason=(
+        "POSIX mode bits do not exist on Windows: os.chmod only toggles the "
+        "read-only flag and os.stat always reports 0o666, so this assertion is "
+        "unconditionally false there. Confinement on Windows comes from the ACL "
+        "on the per-user %LOCALAPPDATA%\\Temp, which st_mode cannot see."))
     def test_temp_file_is_not_world_readable(self):
+        """Note this passes by INHERITANCE, not by intent: _TmpBody never calls
+        chmod. NamedTemporaryFile -> mkstemp opens O_CREAT|O_EXCL with mode 0600
+        on POSIX. Worth knowing if the implementation ever stops using mkstemp."""
         with gh_post._TmpBody("secret draft") as path:
             assert os.stat(path).st_mode & 0o077 == 0
 
@@ -227,6 +252,81 @@ class TestTempFileHygiene:
         body = "a\r\nb\n"
         with gh_post._TmpBody(body) as path:
             assert open(path, encoding="utf-8", newline="").read() == body
+
+
+class TestGhOutputIsDecodedAsUtf8:
+    """`text=True` alone decodes the child's stdout with
+    locale.getpreferredencoding(), which is **cp1252 on Windows**.
+
+    gh always emits UTF-8, so on Windows the read-back of a comment containing
+    an emoji or an em dash comes back as mojibake and `verify()` reports
+    MISMATCH on a comment that posted perfectly. Measured against the live API:
+    54 of the 100 most recent comment bodies in this repo contain characters
+    that do not exist in cp1252. Some UTF-8 byte sequences land on cp1252's
+    undefined bytes (0x81/0x8D/0x8F/0x90/0x9D) and raise UnicodeDecodeError
+    instead, which escapes `except GhError` in cmd_comment as a raw traceback.
+
+    Neither shows up in a mocked suite: every other test here patches `gh` or
+    drives pure functions, so nothing exercises the decode. The unicode case in
+    TestNormaliseIsVerbatim asserts emoji safety one layer above where emoji
+    actually break.
+    """
+
+    def test_gh_pins_utf8_rather_than_the_locale_codepage(self, monkeypatch):
+        seen = {}
+
+        class R:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        def fake(cmd, **kw):
+            seen.update(kw)
+            return R()
+
+        monkeypatch.setattr(gh_post.subprocess, "run", fake)
+        gh_post.gh("api", "user")
+        assert seen.get("encoding") == "utf-8", (
+            "gh() must pin encoding='utf-8'; text=True alone uses the locale "
+            "codepage and mangles non-latin-1 comment bodies on Windows")
+
+    def test_real_utf8_child_process_round_trips(self, monkeypatch):
+        """Not a mock: a real child process writing real UTF-8 bytes, which is
+        what `gh` is. Fails on Windows without the explicit encoding."""
+        real_run = gh_post.subprocess.run
+        payload = "### ✅ Milestone 1 — Complete \U0001f600"
+
+        def fake(cmd, **kw):
+            return real_run(
+                [sys.executable, "-c",
+                 "import sys;sys.stdout.buffer.write("
+                 f"{payload.encode('utf-8')!r})"], **kw)
+
+        monkeypatch.setattr(gh_post.subprocess, "run", fake)
+        assert gh_post.gh("api", "whatever") == payload
+
+    def test_fetch_comment_body_survives_an_emoji_body(self, monkeypatch):
+        """The end-to-end shape of the live failure: a real comment body with
+        an emoji and an em dash must come back identical, not as mojibake.
+
+        ensure_ascii=False is load-bearing. The first draft of this test used
+        the json.dumps default, which escapes non-ASCII to \\uXXXX - so the
+        bytes on the wire were pure ASCII, cp1252 decoded them identically, and
+        the test SURVIVED its own mutation. gh does not escape: it returns the
+        API's raw UTF-8. Ask for the bytes that actually break.
+        """
+        body = "### ✅ Milestone 1 — Complete"
+        real_run = gh_post.subprocess.run
+
+        def fake(cmd, **kw):
+            doc = json.dumps({"body": body},
+                             ensure_ascii=False).encode("utf-8")
+            return real_run(
+                [sys.executable, "-c",
+                 f"import sys;sys.stdout.buffer.write({doc!r})"], **kw)
+
+        monkeypatch.setattr(gh_post.subprocess, "run", fake)
+        assert gh_post.fetch_comment_body("o/r", "1") == body
 
 
 class TestPostedButUnverified:

@@ -55,8 +55,11 @@ from pathlib import Path
 MISMATCH_EXIT = 2
 
 # A bare @path - the shape of failure 2. A real path has no spaces, so this
-# does not fire on `@shardul0701 LGTM, merging.`
-_BARE_AT_PATH = re.compile(r"@\S+\Z")
+# does not fire on `@shardul0701 LGTM, merging.`; and it must additionally look
+# like a path, so a one-word `@zachisit` ping or an `@org/team` mention posted
+# on its own is not refused either. Handles and team names cannot contain a
+# drive letter, a backslash, or a dot, and do not start with a separator.
+_BARE_AT_PATH = re.compile(r"@(?:[/\\]\S*|\S*[\\:.]\S*)")
 
 
 def normalise(text: str) -> str:
@@ -143,7 +146,14 @@ _NOT_LOGGED_IN = re.compile(r"\bgh auth login\b|not logged in|no such host")
 def gh(*args: str) -> str:
     """Run `gh`. Raises GhError on failure; never exits."""
     try:
-        r = subprocess.run(["gh", *args], capture_output=True, text=True)
+        # encoding= is load-bearing, not decoration. `text=True` alone decodes
+        # with locale.getpreferredencoding(), which is cp1252 on Windows - so a
+        # comment containing an emoji or an em dash reads back as mojibake and
+        # verify() reports MISMATCH on a comment that posted perfectly. That is
+        # the failure this tool is least able to afford: a false alarm trains
+        # people to ignore exit 2. gh always emits UTF-8.
+        r = subprocess.run(["gh", *args], capture_output=True, text=True,
+                           encoding="utf-8")
     except FileNotFoundError:
         # Contributors outside this machine will not have the local `rtk`
         # wrapper and may not have `gh` either. A raw traceback here reads as
