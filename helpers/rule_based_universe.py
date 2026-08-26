@@ -503,3 +503,108 @@ def resolve_rule_portfolio(spec: str, as_of, config: dict | None = None) -> list
     merged = dict(config or {})
     merged.update(parse_rule_spec(spec))
     return resolve_universe(as_of, merged)
+
+
+# ---------------------------------------------------------------------------
+# Periodic re-basing (review finding on PR #292)
+# ---------------------------------------------------------------------------
+#
+# `resolve_universe(as_of, ...)` is genuinely date-varying, but resolving it
+# ONCE at start_date and treating the result as static for the whole backtest
+# reintroduces a selection bias of the same shape as the survivorship bug this
+# module exists to remove - just pointing the other way.
+#
+# A 2004-2024 run frozen at 2004-01-02 never trades NVDA, TSLA, META or GOOGL,
+# because none of them were top-500-by-liquidity names in 2004. The universe
+# can only shrink as securities delist; nothing can ever enter it.
+#
+# Per-bar resolution is not affordable: `resolve_universe` costs ~10s/date
+# because it reopens real Parquet files, so ~5,000 trading days is ~14 hours
+# just to build the schedule. `pit:`'s per-bar mask is cheap only because it is
+# driven by pre-existing membership YAML rather than by reading price data.
+#
+# Periodic re-basing is the tractable middle: resolve at N evenly-spaced dates,
+# union them for the data fetch, and emit a membership schedule in EXACTLY the
+# shape `helpers.point_in_time.build_membership_schedule` produces - so it is
+# consumed by the existing `pit_members_on()` / per-bar mask machinery with no
+# engine changes. Annual over 20 years is ~21 calls, not ~5,000.
+
+REBASE_FREQUENCIES = {
+    "annual": 12,
+    "quarterly": 3,
+    "monthly": 1,
+}
+
+
+def rebase_dates(start_date, end_date, frequency: str = "annual") -> list[str]:
+    """Evenly-spaced re-basing dates across ``[start_date, end_date]``.
+
+    Always includes *start_date*. ``frequency="none"`` yields only that, which
+    reproduces the pre-fix frozen-at-start_date behaviour exactly.
+    """
+    start = _naive(pd.Timestamp(start_date))
+    end = _naive(pd.Timestamp(end_date))
+    if end < start:
+        raise ValueError(f"end_date {end_date} precedes start_date {start_date}")
+
+    freq = (frequency or "annual").lower()
+    if freq == "none":
+        return [str(start.date())]
+    if freq not in REBASE_FREQUENCIES:
+        raise ValueError(
+            f"unknown universe_rebase {frequency!r}; expected 'none' or one of "
+            f"{sorted(REBASE_FREQUENCIES)}"
+        )
+
+    step = REBASE_FREQUENCIES[freq]
+    dates, cursor = [], start
+    while cursor <= end:
+        dates.append(str(cursor.date()))
+        cursor = cursor + pd.DateOffset(months=step)
+    return dates
+
+
+def build_rule_schedule(spec: str, start_date, end_date, config: dict | None = None,
+                        frequency: str | None = None, progress=None):
+    """Resolve a ``rule:`` spec periodically across a backtest window.
+
+    Returns ``(union, schedule)`` - the same pair shape the ``pit:`` dispatch
+    produces, so the caller can hand *schedule* straight to the existing
+    ``pit_members_on()`` masking without any engine change.
+
+    * ``union``    - every security investable at ANY re-base date, for the
+      data fetch. A name must be fetched to be tradeable later.
+    * ``schedule`` - ``[(date_str, frozenset), ...]``, sorted, first entry at
+      *start_date*. Consecutive identical snapshots are collapsed.
+
+    ``frequency=None`` reads ``config["universe_rebase"]`` (default
+    ``"annual"``). ``"none"`` reproduces the single-resolution behaviour.
+    """
+    config = dict(config or {})
+    if frequency is None:
+        frequency = config.get("universe_rebase", "annual")
+
+    dates = rebase_dates(start_date, end_date, frequency)
+    merged = dict(config)
+    merged.update(parse_rule_spec(spec))
+
+    # Build the span index once and reuse it: it is the expensive part, and
+    # re-deriving it per re-base date would multiply the cost by len(dates).
+    span_index = build_span_index(
+        merged.get("parquet_data_dir", DEFAULTS.get("parquet_data_dir")),
+        merged.get("universe_span_cache"),
+    )
+
+    union: set[str] = set()
+    schedule: list[tuple[str, frozenset]] = []
+    for i, d in enumerate(dates):
+        members = frozenset(resolve_universe(d, merged, span_index=span_index))
+        union |= members
+        if not schedule or schedule[-1][1] != members:
+            schedule.append((d, members))
+        if progress:
+            progress(i + 1, len(dates), d, len(members))
+
+    if not schedule:                      # empty corpus - keep the shape valid
+        schedule = [(str(_naive(pd.Timestamp(start_date)).date()), frozenset())]
+    return sorted(union), schedule

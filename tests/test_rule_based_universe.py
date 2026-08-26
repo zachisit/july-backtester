@@ -282,3 +282,182 @@ class TestEtfHandling:
     def test_etf_report_handles_delisted_ids_and_empty(self):
         assert etf_report(["TVIX-202007", "AAPL"])["n_etfs"] == 1
         assert etf_report([]) == {"etfs": [], "n_etfs": 0, "n_total": 0, "pct": 0.0}
+
+
+# ---------------------------------------------------------------------------
+# Periodic re-basing — @shardul0701's review finding on PR #292
+# ---------------------------------------------------------------------------
+
+from helpers.rule_based_universe import (  # noqa: E402
+    REBASE_FREQUENCIES,
+    build_rule_schedule,
+    rebase_dates,
+)
+
+
+class TestRebaseDates:
+
+    def test_annual_over_twenty_years_is_21_calls_not_5000(self):
+        """The whole reason for periodic re-basing: per-bar is ~5,000 resolutions
+        at ~10s each (~14h just to build the schedule). Annual is tractable."""
+        d = rebase_dates("2004-01-02", "2024-01-02", "annual")
+        assert len(d) == 21
+        assert d[0] == "2004-01-02"
+        assert d[-1] == "2024-01-02"
+
+    def test_quarterly_is_denser(self):
+        assert len(rebase_dates("2004-01-02", "2024-01-02", "quarterly")) == 81
+
+    def test_start_date_is_always_included(self):
+        for freq in list(REBASE_FREQUENCIES) + ["none"]:
+            assert rebase_dates("2010-03-15", "2012-03-15", freq)[0] == "2010-03-15"
+
+    def test_none_reproduces_the_frozen_behaviour(self):
+        """The pre-fix behaviour must remain reachable, and must be exactly one
+        resolution at start_date - not an approximation of it."""
+        assert rebase_dates("2004-01-02", "2024-01-02", "none") == ["2004-01-02"]
+
+    def test_dates_never_exceed_end_date(self):
+        for d in rebase_dates("2004-01-02", "2007-06-01", "quarterly"):
+            assert d <= "2007-06-01"
+
+    def test_same_start_and_end_yields_one_date(self):
+        assert rebase_dates("2020-01-02", "2020-01-02", "annual") == ["2020-01-02"]
+
+    def test_reversed_window_raises(self):
+        with pytest.raises(ValueError, match="precedes start_date"):
+            rebase_dates("2024-01-02", "2004-01-02", "annual")
+
+    def test_unknown_frequency_raises(self):
+        with pytest.raises(ValueError, match="unknown universe_rebase"):
+            rebase_dates("2004-01-02", "2024-01-02", "weekly")
+
+
+class TestBuildRuleScheduleClosesTheStartDateBias:
+    """THE invariant. Resolving once at start_date and freezing the result is a
+    selection bias of the same shape as the survivorship bug this module exists
+    to remove, pointing the other way: the universe can only shrink, so a name
+    that becomes investable later can never be traded.
+
+    @shardul0701's reproduction, as a test: OLDCO trades from 2004; NEWCO IPOs
+    in 2015. A frozen universe never sees NEWCO. On the real corpus that is
+    most mega-caps - NVDA, TSLA, META and GOOGL were not 2004 top-500-liquidity
+    names.
+    """
+
+    @staticmethod
+    def _fake_resolver(monkeypatch, membership_by_year):
+        """Patch resolve_universe so the test drives the schedule logic, not I/O."""
+        import helpers.rule_based_universe as rbu
+
+        monkeypatch.setattr(rbu, "build_span_index", lambda *a, **k: None)
+
+        def fake(as_of, config=None, span_index=None):
+            year = int(str(as_of)[:4])
+            return list(membership_by_year(year))
+        monkeypatch.setattr(rbu, "resolve_universe", fake)
+
+    def test_union_includes_a_security_that_qualifies_later(self, monkeypatch):
+        self._fake_resolver(
+            monkeypatch,
+            lambda y: ["OLDCO"] if y < 2015 else ["NEWCO", "OLDCO"])
+        union, _ = build_rule_schedule(
+            "rule:top10", "2004-01-02", "2020-01-02", {}, frequency="annual")
+        assert "NEWCO" in union, "a later-qualifying security must be fetchable"
+        assert "OLDCO" in union
+
+    def test_frozen_resolution_would_have_missed_it(self, monkeypatch):
+        """Pins the bug itself, so the fix cannot silently regress."""
+        self._fake_resolver(
+            monkeypatch,
+            lambda y: ["OLDCO"] if y < 2015 else ["NEWCO", "OLDCO"])
+        frozen, _ = build_rule_schedule(
+            "rule:top10", "2004-01-02", "2020-01-02", {}, frequency="none")
+        assert frozen == ["OLDCO"]          # the old behaviour, reproduced
+        rebased, _ = build_rule_schedule(
+            "rule:top10", "2004-01-02", "2020-01-02", {}, frequency="annual")
+        assert set(rebased) - set(frozen) == {"NEWCO"}
+
+    def test_schedule_gates_the_security_before_it_qualifies(self, monkeypatch):
+        """Union alone is not enough - fetching NEWCO from 2004 would let a
+        strategy trade it years before it was investable. The schedule is what
+        keeps the union causal."""
+        from helpers.point_in_time import pit_members_on
+        self._fake_resolver(
+            monkeypatch,
+            lambda y: ["OLDCO"] if y < 2015 else ["NEWCO", "OLDCO"])
+        _, schedule = build_rule_schedule(
+            "rule:top10", "2004-01-02", "2020-01-02", {}, frequency="annual")
+        assert "NEWCO" not in pit_members_on(schedule, "2008-06-01")
+        assert "NEWCO" in pit_members_on(schedule, "2018-06-01")
+        assert "OLDCO" in pit_members_on(schedule, "2008-06-01")
+
+    def test_schedule_shape_matches_the_pit_producer(self, monkeypatch):
+        """It must be consumable by the existing pit_members_on() masking with
+        no engine change - that is what makes this a wiring fix, not a rewrite."""
+        self._fake_resolver(monkeypatch, lambda y: ["AAA", "BBB"])
+        _, schedule = build_rule_schedule(
+            "rule:top10", "2004-01-02", "2010-01-02", {}, frequency="annual")
+        assert isinstance(schedule, list)
+        for entry in schedule:
+            assert isinstance(entry, tuple) and len(entry) == 2
+            date_str, members = entry
+            assert isinstance(date_str, str) and len(date_str) == 10
+            assert isinstance(members, frozenset)
+        assert schedule[0][0] == "2004-01-02"
+        assert [e[0] for e in schedule] == sorted(e[0] for e in schedule)
+
+    def test_identical_consecutive_snapshots_are_collapsed(self, monkeypatch):
+        """A stable universe should not produce 21 duplicate entries."""
+        self._fake_resolver(monkeypatch, lambda y: ["AAA", "BBB"])
+        _, schedule = build_rule_schedule(
+            "rule:top10", "2004-01-02", "2024-01-02", {}, frequency="annual")
+        assert len(schedule) == 1
+
+    def test_delisting_removes_a_security_from_later_snapshots(self, monkeypatch):
+        self._fake_resolver(
+            monkeypatch,
+            lambda y: ["AAA", "DEADCO"] if y < 2009 else ["AAA"])
+        from helpers.point_in_time import pit_members_on
+        union, schedule = build_rule_schedule(
+            "rule:top10", "2004-01-02", "2014-01-02", {}, frequency="annual")
+        assert "DEADCO" in union                       # still needs fetching
+        assert "DEADCO" in pit_members_on(schedule, "2006-01-01")
+        assert "DEADCO" not in pit_members_on(schedule, "2012-01-01")
+
+    def test_frequency_defaults_to_config_then_annual(self, monkeypatch):
+        calls = []
+        import helpers.rule_based_universe as rbu
+        monkeypatch.setattr(rbu, "build_span_index", lambda *a, **k: None)
+
+        def fake(as_of, config=None, span_index=None):
+            calls.append(str(as_of))
+            return ["AAA"]
+        monkeypatch.setattr(rbu, "resolve_universe", fake)
+
+        build_rule_schedule("rule:top10", "2004-01-02", "2008-01-02", {})
+        assert len(calls) == 5                     # annual default
+
+        calls.clear()
+        build_rule_schedule("rule:top10", "2004-01-02", "2008-01-02",
+                            {"universe_rebase": "none"})
+        assert len(calls) == 1
+
+    def test_span_index_is_built_once_not_per_rebase_date(self, monkeypatch):
+        """Building it per date would multiply the expensive part by len(dates)."""
+        import helpers.rule_based_universe as rbu
+        builds = []
+        monkeypatch.setattr(rbu, "build_span_index",
+                            lambda *a, **k: builds.append(1))
+        monkeypatch.setattr(rbu, "resolve_universe",
+                            lambda as_of, config=None, span_index=None: ["AAA"])
+        build_rule_schedule("rule:top10", "2004-01-02", "2024-01-02", {},
+                            frequency="annual")
+        assert len(builds) == 1
+
+    def test_empty_corpus_still_returns_a_valid_shape(self, monkeypatch):
+        self._fake_resolver(monkeypatch, lambda y: [])
+        union, schedule = build_rule_schedule(
+            "rule:top10", "2004-01-02", "2010-01-02", {}, frequency="annual")
+        assert union == []
+        assert schedule and schedule[0][1] == frozenset()

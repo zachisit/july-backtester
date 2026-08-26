@@ -698,7 +698,10 @@ def main():
             value = "pit:nq100"
             logger.info(f"  -> '{portfolio_name}': normalised 'nq100_pit' → 'pit:nq100'")
 
-        _current_pit_schedule = None  # reset each portfolio; set only for pit: portfolios
+        # Reset each portfolio. Set for pit: portfolios (index membership) AND
+        # for rule: portfolios (periodic liquidity re-basing) — both emit the
+        # same [(date, frozenset)] shape, so both feed the masking below.
+        _current_membership_schedule = None
 
         # --- Data fetching for the current portfolio (no changes) ---
         # (Your existing code to get symbols and build `portfolio_data` is perfect)
@@ -723,15 +726,36 @@ def main():
                  symbols = orjson.loads(f.read())
         elif isinstance(value, str) and value.lower().startswith("rule:"):
             # Rule-based point-in-time universe (#70). Needs no index-membership
-            # data: the investable set is derived from observable liquidity as of
-            # start_date over the delisted-inclusive Parquet corpus, so it is
-            # survivorship-free by construction.
-            from helpers.rule_based_universe import resolve_rule_portfolio
+            # data: the investable set is derived from observable liquidity over
+            # the delisted-inclusive Parquet corpus, so it is survivorship-free
+            # by construction.
+            #
+            # Resolved PERIODICALLY, not once. Resolving only at start_date and
+            # freezing the result reintroduced a selection bias of the same shape
+            # as the survivorship bug this feature removes, pointing the other
+            # way: a 2004-2024 run would never trade NVDA, TSLA, META or GOOGL,
+            # because none were top-500-liquidity names in 2004. Yields the same
+            # (union, schedule) pair as the pit: branch below, so it reuses the
+            # existing per-bar membership masking with no engine change.
+            from helpers.rule_based_universe import build_rule_schedule
+            _rebase = CONFIG.get("universe_rebase", "annual")
             try:
-                symbols = resolve_rule_portfolio(value, CONFIG["start_date"], CONFIG)
+                symbols, _current_membership_schedule = build_rule_schedule(
+                    value, CONFIG["start_date"], CONFIG["end_date"], CONFIG,
+                    progress=lambda i, n, d, k: logger.info(
+                        f"     re-base {i}/{n} @ {d}: {k} securities"),
+                )
+                if _rebase == "none":
+                    _current_membership_schedule = None   # opt out of masking
+                    logger.warning(
+                        f"  -> universe_rebase='none': '{value}' is frozen at "
+                        f"{CONFIG['start_date']} for the whole run. Securities "
+                        f"that become investable later will NEVER be traded."
+                    )
                 logger.info(
                     f"  -> Resolved {len(symbols)} securities from '{value}' "
-                    f"as of {CONFIG['start_date']} (survivorship-free; NOT an index)"
+                    f"across {CONFIG['start_date']}..{CONFIG['end_date']} "
+                    f"(rebase={_rebase}, survivorship-free; NOT an index)"
                 )
             except Exception as e:
                 logger.error(f"  -> ERROR resolving rule universe '{value}': {e}")
@@ -741,7 +765,7 @@ def main():
             _pit_index_name = value.split(":", 1)[1]
             try:
                 symbols = _pit_union(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
-                _current_pit_schedule = _pit_schedule_build(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
+                _current_membership_schedule = _pit_schedule_build(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
             except Exception as e:
                 logger.error(f"  -> ERROR resolving PIT portfolio '{value}' for '{portfolio_name}': {e}")
                 continue
@@ -878,12 +902,18 @@ def main():
             else:
                 logger.info(f"  -> No delisted symbols found (or provider doesn't support delisting data).")
 
-        # --- PIT MEMBERSHIP MASKS (precomputed once per portfolio) ---
-        # For pit: portfolios, build a boolean Series per symbol marking which
-        # trading dates the symbol was an index member.  Workers apply this mask
-        # to gate entry signals and inject exit signals — zero per-simulation
-        # overhead beyond a vectorised lookup.
-        if _current_pit_schedule is not None:
+        # --- MEMBERSHIP MASKS (precomputed once per portfolio) ---
+        # Build a boolean Series per symbol marking which trading dates the
+        # symbol was a member of the tradeable universe.  Workers apply this
+        # mask to gate entry signals and inject exit signals — zero
+        # per-simulation overhead beyond a vectorised lookup.
+        #
+        # Two producers, one shape:
+        #   pit:  -> index membership from the PIT YAML
+        #   rule: -> periodic liquidity re-basing (annual by default)
+        # The rule: case is what stops a liquidity universe being frozen at
+        # start_date, which would bar every name that qualified later.
+        if _current_membership_schedule is not None:
             from helpers.point_in_time import pit_members_on as _pit_members_on
             from helpers.pit_enforcement import (
                 build_member_mask as _pit_build_member_mask,
@@ -895,7 +925,7 @@ def main():
                 _dates = _df.index
                 _date_strs = [str(d)[:10] for d in _dates]
                 _pit_member_masks[_sym] = pd.Series(
-                    [_sym in _pit_members_on(_current_pit_schedule, d) for d in _date_strs],
+                    [_sym in _pit_members_on(_current_membership_schedule, d) for d in _date_strs],
                     index=_dates,
                     dtype=bool,
                 )

@@ -42,6 +42,8 @@ KNOWN_KEYS: set[str] = {
     "universe_exclude_prefixes",
     "universe_exclude_symbols",
     "universe_exclude_etfs",
+    "universe_rebase",        # "annual" (default) | "quarterly" | "monthly" | "none"
+    "universe_span_cache",
     "parquet_data_dir",
     # SECTION 2: Backtest Period & Capital
     "start_date",

@@ -133,7 +133,20 @@ capped to `universe_top_n` by dollar volume.
 
 **Why there is no look-ahead:** every screen reads only bars `<= D`.
 
-**Config keys:** `universe_min_price` (5.0), `universe_min_dollar_volume` (1e6), `universe_min_bars` (252), `universe_top_n` (None), `universe_adv_window` (20), `universe_exclude_prefixes` (`("$", "#")`), `universe_exclude_symbols` (`()`).
+**The universe is re-based periodically, not resolved once.** `universe(D)` is date-varying, but resolving it a single time at `start_date` and freezing it introduces a **start-date selection bias** of the same shape as the survivorship bug this feature removes, pointing the other way — the set can only shrink as names delist, so nothing can ever enter it. A 2004–2024 run frozen at 2004 never trades NVDA, TSLA, META or GOOGL, because none were top-500-liquidity names in 2004.
+
+`build_rule_schedule(spec, start, end, config)` therefore resolves at evenly-spaced dates and returns `(union, schedule)` — the **same pair shape** the `pit:` branch produces, so it reuses the existing per-bar membership masking (`pit_members_on`) with no engine change. The union is what gets fetched; the schedule is what keeps it causal, gating a name out of the tradeable set before it qualified.
+
+| `universe_rebase` | Resolutions over 20y | Note |
+|---|---|---|
+| `"annual"` **(default)** | 21 | tractable; closes most of the gap |
+| `"quarterly"` | 81 | finer, ~4× the cost |
+| `"monthly"` | 241 | rarely worth it |
+| `"none"` | 1 | **frozen at `start_date` — logs a warning; the biased behaviour, kept reachable for A/B** |
+
+Per-bar resolution is deliberately *not* offered: `resolve_universe` costs ~10s/date because it reopens real Parquet files, so ~5,000 trading days is ~14 hours just to build the schedule. `pit:`'s per-bar mask is cheap only because it reads pre-existing membership YAML rather than price data. The span index is built **once** and reused across re-base dates — rebuilding it per date multiplies the expensive part by `len(dates)`.
+
+**Config keys:** `universe_min_price` (5.0), `universe_min_dollar_volume` (1e6), `universe_min_bars` (252), `universe_top_n` (None), `universe_adv_window` (20), `universe_exclude_prefixes` (`("$", "#")`), `universe_exclude_symbols` (`()`), `universe_rebase` (`"annual"`).
 
 **Three traps this handles, each of which silently corrupts results:**
 1. **`Datetime` is not column 0** (order is `Open, High, Low, Close, Volume, Datetime` — it is the pandas index). Locating it by position reads float OHLC as nanosecond timestamps and yields **1970** dates. It is located by *name*.
