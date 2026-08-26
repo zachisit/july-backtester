@@ -80,7 +80,21 @@ def normalise(text: str) -> str:
         leading / trailing newlines   identical
         NBSP, emoji, zero-width space identical
 
-    So each of those allowances defended against nothing while creating a real
+    @shardul0701 probed twelve further axes on review (NFD unicode, BOM,
+    U+2028/9, C0 controls, ZWJ + variation selectors, bidi overrides, bodies at
+    and past 65 536 chars, tab-only lines, no trailing newline) - all verbatim,
+    with exactly one exception:
+
+        NUL byte U+0000               ALTERED -> stored as the two chars "^@"
+
+    That exception needs no code here, and stating it is the point: it is a
+    change we WANT reported, not folded away. So the correct reading is not
+    "GitHub is verbatim, therefore comparison is safe" but "GitHub is verbatim
+    except for NUL, and NUL is real damage" - which lands on the same identity
+    function for a sounder reason. Anyone re-deriving this from the table above
+    should have the exception with it.
+
+    Each removed allowance had defended against nothing while creating a real
     false-negative hole: stripping trailing whitespace on BOTH sides meant that
     if transit damage removed it - which corrupts a diff inside a code fence so
     it no longer applies, and destroys markdown hard breaks - this tool said
