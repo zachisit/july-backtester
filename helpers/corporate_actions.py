@@ -75,6 +75,31 @@ def _naive(ts):
     return ts.tz_localize(None) if ts.tzinfo is not None else ts
 
 
+def _require_known_convention(value: str) -> str:
+    """Reject an unrecognised price convention.
+
+    Shared by both public entry points **on purpose**. They previously disagreed
+    on identical bad input - :func:`split_adjustment_factor` raised while
+    :func:`validate_fundamentals_basis` fell through an ``if/elif`` and returned
+    ``[]``, so a typo produced *zero* warnings from the one function whose job is
+    to state the requirement out loud.
+
+    That silence compounds: ``services/polygon_service.py`` tests the same value
+    with ``== "total_return"`` and falls back to ``"false"``, so a misspelling
+    also silently switches the vendor request to as-traded prices. Nothing
+    downstream notices, because ``helpers/config_validator.py`` only checks that
+    the key is *present*, not that its value is one this module understands.
+
+    Centralising the check is what makes drifting apart again impossible.
+    """
+    if value not in (ADJUSTED_TO_TODAY, AS_TRADED):
+        raise ValueError(
+            f"unknown price_adjustment {value!r}; expected "
+            f"{ADJUSTED_TO_TODAY!r} or {AS_TRADED!r}"
+        )
+    return value
+
+
 def split_adjustment_factor(splits, period_end, *, as_of=None,
                             price_adjustment: str = ADJUSTED_TO_TODAY) -> float:
     """Divide a per-share figure from *period_end* by this to match the price basis.
@@ -107,11 +132,7 @@ def split_adjustment_factor(splits, period_end, *, as_of=None,
         Unknown *price_adjustment*; *as_of* omitted under :data:`AS_TRADED`; or a
         split ratio that is not a positive finite number.
     """
-    if price_adjustment not in (ADJUSTED_TO_TODAY, AS_TRADED):
-        raise ValueError(
-            f"unknown price_adjustment {price_adjustment!r}; expected "
-            f"{ADJUSTED_TO_TODAY!r} or {AS_TRADED!r}"
-        )
+    _require_known_convention(price_adjustment)
     if price_adjustment == AS_TRADED and as_of is None:
         # Returning 1.0 here would be the exact silent-wrong-answer this module
         # exists to prevent: an in-window split left unadjusted, no log, no error.
@@ -184,9 +205,19 @@ def validate_fundamentals_basis(config: dict, *, uses_per_share_ratio: bool = Tr
     so the question is answered deliberately rather than assumed.
 
     Returns a list of warning strings (empty when nothing to flag).
+
+    Raises
+    ------
+    ValueError
+        ``config["price_adjustment"]`` is present but not a convention this
+        module understands. An *absent* key is fine and defaults to
+        :data:`ADJUSTED_TO_TODAY`; an unrecognised one is a typo whose most
+        likely outcome is silently receiving as-traded data from the vendor
+        while believing otherwise. See :func:`_require_known_convention`.
     """
     warnings: list[str] = []
     adjustment = config.get("price_adjustment", ADJUSTED_TO_TODAY)
+    _require_known_convention(adjustment)
 
     if uses_per_share_ratio:
         if adjustment == ADJUSTED_TO_TODAY:

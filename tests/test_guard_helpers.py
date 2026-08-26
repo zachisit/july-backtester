@@ -341,3 +341,64 @@ class TestValidatorLogLevel:
             validate_fundamentals_basis({"price_adjustment": ADJUSTED_TO_TODAY})
         assert caplog.records
         assert all(r.levelno < logging.WARNING for r in caplog.records)
+
+
+class TestUnknownConventionIsRejectedEverywhere:
+    """@shardul0701's review finding on #302.
+
+    `split_adjustment_factor` raised on an unrecognised `price_adjustment` while
+    `validate_fundamentals_basis` fell through its if/elif and returned `[]`. So
+    a typo produced ZERO warnings from the one function whose entire job is to
+    state the requirement rather than let it be assumed - F1's shape reached
+    through a different door.
+
+    It compounds downstream: `services/polygon_service.py` (3 sites) tests the
+    same value with `== "total_return"` and falls back to `"false"`, so the same
+    typo also silently requests as-traded prices from the vendor, while
+    `helpers/config_validator.py` only checks the key is present, not its value.
+    """
+
+    BAD = ["Total_Return", "TOTAL_RETURN", "total return", "adjusted", "", "nonsense"]
+
+    @pytest.mark.parametrize("bad", BAD)
+    def test_validator_rejects_unknown_convention(self, bad):
+        with pytest.raises(ValueError, match="unknown price_adjustment"):
+            validate_fundamentals_basis({"price_adjustment": bad})
+
+    @pytest.mark.parametrize("bad", BAD)
+    def test_factor_rejects_the_same_values(self, bad):
+        with pytest.raises(ValueError, match="unknown price_adjustment"):
+            split_adjustment_factor(SPLIT_2026, "2024-09-30", price_adjustment=bad)
+
+    @pytest.mark.parametrize("bad", BAD)
+    def test_the_two_functions_agree_on_bad_input(self, bad):
+        """THE invariant this fix exists for. The functions must not disagree
+        about what is acceptable - that divergence IS the bug, independently of
+        which behaviour is chosen."""
+        def outcome(fn):
+            try:
+                fn()
+                return "accepted"
+            except ValueError:
+                return "rejected"
+
+        assert outcome(lambda: validate_fundamentals_basis({"price_adjustment": bad})) == \
+               outcome(lambda: split_adjustment_factor(
+                   SPLIT_2026, "2024-09-30", price_adjustment=bad))
+
+    def test_typo_no_longer_silently_suppresses_the_lookahead_warning(self):
+        """The concrete regression: a misspelled convention used to return [],
+        swallowing even the absolute-price-floor warning."""
+        with pytest.raises(ValueError, match="unknown price_adjustment"):
+            validate_fundamentals_basis({"price_adjustment": "Total_Return"},
+                                        uses_absolute_price_floor=True)
+
+    def test_absent_key_still_defaults_and_warns(self):
+        """An ABSENT key is not a typo - it defaults to ADJUSTED_TO_TODAY and
+        must keep warning normally. Only unrecognised VALUES are rejected."""
+        w = validate_fundamentals_basis({})
+        assert any("after the backtest window" in m for m in w)
+
+    def test_both_known_conventions_still_accepted(self):
+        assert validate_fundamentals_basis({"price_adjustment": ADJUSTED_TO_TODAY})
+        assert validate_fundamentals_basis({"price_adjustment": AS_TRADED})
