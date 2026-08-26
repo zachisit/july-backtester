@@ -87,10 +87,18 @@ REGISTRY: StrategyRegistry = StrategyRegistry()
 # Decorator
 # ---------------------------------------------------------------------------
 
+# Strategy kinds. "signal" is the classic per-symbol plugin (returns a Signal
+# column); "rotation" is a cross-sectional ranking plugin (see helpers/rotation.py).
+SIGNAL = "signal"
+ROTATION = "rotation"
+
+
 def register_strategy(
     name: str,
     dependencies: list[str] | None = None,
     params: dict | None = None,
+    kind: str = SIGNAL,
+    regime_gate: Callable | None = None,
 ) -> Callable:
     """Decorator that registers a strategy function in the global registry.
 
@@ -117,6 +125,16 @@ def register_strategy(
         Static parameters stored alongside the strategy.  main.py merges
         these into **kwargs before calling the logic function so the function
         can access them via ``kwargs["key"]``.
+    kind : str, optional
+        ``"signal"`` (default) for the classic per-symbol plugin, or
+        ``"rotation"`` for a cross-sectional ranking plugin consumed by
+        :mod:`helpers.rotation`. The default keeps every existing plugin a
+        signal strategy with no change. Prefer the :func:`register_rotation`
+        sibling decorator for rotation plugins.
+    regime_gate : Callable, optional
+        Rotation-only. ``regime_gate(data, rebalance_date) -> bool`` — when it
+        returns ``False`` the rotation liquidates to cash for that rebalance.
+        Ignored for signal strategies.
 
     Examples
     --------
@@ -151,10 +169,56 @@ def register_strategy(
             "logic":        fn,
             "dependencies": list(dependencies),
             "params":       dict(params),
+            "kind":         kind,
+            "regime_gate":  regime_gate,
         }
         return fn
 
     return decorator
+
+
+def register_rotation(
+    name: str,
+    dependencies: list[str] | None = None,
+    params: dict | None = None,
+    regime_gate: Callable | None = None,
+) -> Callable:
+    """Register a cross-sectional **rotation** ranking plugin (issue #294).
+
+    The decorated function is a *ranking* function, not a per-symbol signal
+    function::
+
+        rank_fn(data: dict[str, pd.DataFrame], rebalance_date, **params) -> ranking
+
+    where ``ranking`` is an ordered list of symbols (best first) or a
+    ``{symbol: score}`` dict / Series. The framework (``helpers/rotation.py``)
+    owns top-N selection, weighting, rebalance / trim / add mechanics, sizing and
+    all cost / accounting — the plugin supplies only the alpha.
+
+    This is thin sugar over :func:`register_strategy` with ``kind="rotation"``.
+
+    Examples
+    --------
+    ::
+
+        from helpers.registry import register_rotation
+
+        @register_rotation(name="Momentum Rotation (90d)", params={"lookback": 90})
+        def momentum_rank(data, rebalance_date, lookback=90, **kwargs):
+            scores = {}
+            for sym, df in data.items():
+                window = df.loc[:rebalance_date]
+                if len(window) > lookback:
+                    scores[sym] = window["Close"].iloc[-1] / window["Close"].iloc[-lookback] - 1
+            return scores
+    """
+    return register_strategy(
+        name=name,
+        dependencies=dependencies,
+        params=params,
+        kind=ROTATION,
+        regime_gate=regime_gate,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -281,13 +345,21 @@ def get_active_strategies(directory: str = "custom_strategies") -> dict:
     if os.path.isdir(private_dir):
         load_strategies(private_dir)
 
+    # Signal-kind only: the legacy per-symbol pipeline (main.py) must never be
+    # handed a rotation plugin (different call signature). Rotation plugins are
+    # accessed via get_rotation_strategies(). Entries default to kind="signal",
+    # so every pre-#294 plugin is included exactly as before.
+    signal_registry = {
+        n: e for n, e in _REGISTRY.items() if e.get("kind", SIGNAL) == SIGNAL
+    }
+
     # Lazy import avoids a circular dependency at module load time
     # (config.py does not import from helpers/).
     from config import CONFIG  # noqa: PLC0415
     selection = CONFIG.get("strategies", "all")
 
     if selection == "all" or selection is None:
-        return dict(_REGISTRY)
+        return dict(signal_registry)
 
     # --- Filtered mode ---
     if not isinstance(selection, list):
@@ -296,12 +368,12 @@ def get_active_strategies(directory: str = "custom_strategies") -> dict:
             "Got %r — falling back to 'all'.",
             selection,
         )
-        return dict(_REGISTRY)
+        return dict(signal_registry)
 
     result = {}
     for name in selection:
-        if name in _REGISTRY:
-            result[name] = _REGISTRY[name]
+        if name in signal_registry:
+            result[name] = signal_registry[name]
         else:
             logger.warning(
                 "[WARNING] Strategy '%s' requested in config but no matching "
@@ -310,3 +382,24 @@ def get_active_strategies(directory: str = "custom_strategies") -> dict:
                 name,
             )
     return result
+
+
+def get_rotation_strategies(directory: str = "custom_strategies") -> dict:
+    """Return the registered **rotation** plugins as ``{name: config_dict}``.
+
+    Mirrors :func:`get_active_strategies` (loads *directory* + a ``private/``
+    submodule if present) but returns only ``kind == "rotation"`` entries. Each
+    value has the shape ``{"logic": rank_fn, "dependencies": list, "params":
+    dict, "kind": "rotation", "regime_gate": callable | None}``.
+
+    Not filtered by ``CONFIG["strategies"]`` — rotation selection is driven by
+    ``CONFIG["rotation"]["rank_strategy"]`` instead.
+    """
+    load_strategies(directory)
+    private_dir = os.path.join(directory, "private")
+    if os.path.isdir(private_dir):
+        load_strategies(private_dir)
+
+    return {
+        n: e for n, e in _REGISTRY.items() if e.get("kind", SIGNAL) == ROTATION
+    }
