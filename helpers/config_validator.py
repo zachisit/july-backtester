@@ -34,6 +34,7 @@ KNOWN_KEYS: set[str] = {
     "polygon_api_secret_name",  # PR #187: added — was triggering "unknown key" warning
     "csv_data_dir",
     "parquet_data_dir",
+    "merged_data_root",
     # SECTION 2: Backtest Period & Capital
     "start_date",
     "end_date",
@@ -120,7 +121,7 @@ KNOWN_KEYS: set[str] = {
     "fixed_contracts_per_trade",
     "risk_pct_per_trade",
     "max_contracts_cap",
-    # PIT screening
+    # PIT and merged-data screening
     "pit_enforce_daily",
     "pit_warmup_days",
     "pit_exit_buffer_days",
@@ -142,6 +143,10 @@ KNOWN_KEYS: set[str] = {
     "entry_priority",
     "entry_random_seed",
     "nq100_pit_path",
+    # Merged Norgate+Polygon provider (merged_data_root registered in SECTION 1)
+    "merged_quality_filter_enabled",
+    "merged_exclude_statuses",
+    "merged_min_avg_dollar_volume",
     # S3
     "s3_reports_bucket",
     "upload_to_s3",
