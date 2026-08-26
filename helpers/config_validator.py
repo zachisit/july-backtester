@@ -135,6 +135,9 @@ KNOWN_KEYS: set[str] = {
     "intrabar_parquet_source",
     # Futures maintenance margin
     "maintenance_margin_pct",
+    # SECTION 30: Cross-sectional rotation (issue #294)
+    "rotation",
+    "max_position_pct",
     # SECTION 27: Deterministic Entry Queue
     "entry_priority",
     "entry_random_seed",
