@@ -544,6 +544,9 @@ def main():
     ap.add_argument("--min-gain", type=float, default=DEFAULT_PARAMS["uptrend_min_gain"])
     ap.add_argument("--top", type=int, default=50)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--as-of", default=None,
+                    help="drop bars after this date (YYYY-MM-DD) — replay a historical scan, "
+                         "e.g. to test the scanner against a known pro call")
     args = ap.parse_args()
 
     if args.patterns != "ascending_triangle":
@@ -567,6 +570,14 @@ def main():
         data = fetch_yahoo(tickers + ["SPY"], period="5y" if args.timeframe == "W" else "2y")
     else:
         data = fetch_parquet(tickers + ["SPY"], lookback_bars=1300 if args.timeframe == "W" else 500)
+    if args.as_of:
+        def _truncate(df):
+            ts = pd.Timestamp(args.as_of)
+            if df.index.tz is not None:
+                ts = ts.tz_localize(df.index.tz)
+            return df[df.index <= ts]
+        data = {s: d for s, d in ((s, _truncate(d)) for s, d in data.items()) if len(d)}
+        log.info("Replaying as of %s", args.as_of)
     spy_close = data.pop("SPY", pd.DataFrame()).get("Close")
     log.info("Loaded data for %d symbols", len(data))
 
@@ -597,7 +608,7 @@ def main():
     )
     meta = {
         "pattern": "ascending_triangle",
-        "date": run_date,
+        "date": run_date if not args.as_of else f"{run_date} — REPLAY as of {args.as_of}",
         "universe": args.universe,
         "n_universe": len(tickers),
         "n_loaded": len(data),
