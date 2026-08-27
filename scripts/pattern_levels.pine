@@ -2,7 +2,9 @@
 // Pattern Trade Levels — companion to scripts/pattern_scan.py (issue #348).
 // Type in the boundary and pattern low from any chart pattern; draws
 // confirm (+3%), measured-move target, both stop conventions, and an R:R table.
-indicator("Pattern Trade Levels", overlay = true)
+// Levels are drawn as hand-built long-dash segments (Pine's style_dashed is a
+// fixed micro-dash; the drawing-tool look needs manual segments).
+indicator("Pattern Trade Levels", overlay = true, max_lines_count = 500, max_labels_count = 20)
 
 B        = input.float(40.39, "Boundary / breakout level (B)",            step = 0.01)
 L        = input.float(34.40, "Pattern low (L)",                          step = 0.01)
@@ -10,6 +12,10 @@ S        = input.float(0.0,   "Structural stop (last higher low, 0=off)", step =
 confPct  = input.float(3.0,   "Confirm / negation buffer %",              step = 0.1)
 useLog   = input.bool(true,   "Log measured move (BxB/L) — off = B+(B-L)")
 entryOpt = input.string("Confirm", "Entry for R:R", options = ["Confirm", "Boundary", "Current price"])
+dashOn   = input.int(6, "Dash length (bars)",  minval = 1, group = "Style")
+dashOff  = input.int(5, "Dash gap (bars)",     minval = 1, group = "Style")
+spanBack = input.int(260, "Extend left (bars)", minval = 20, group = "Style")
+spanFwd  = input.int(30, "Extend right (bars)", minval = 0, maxval = 400, group = "Style")
 
 confirm  = B * (1 + confPct / 100)          // daily close above = validated breakout
 negStop  = B * (1 - confPct / 100)          // close back below after breakout = failed
@@ -18,27 +24,34 @@ entry    = entryOpt == "Confirm" ? confirm : entryOpt == "Boundary" ? B : close
 stopUsed = S > 0 ? S : negStop
 rr       = entry - stopUsed > 0 ? (target - entry) / (entry - stopUsed) : na
 
-var line  lnB = na, var line lnC = na, var line lnT = na, var line lnN = na, var line lnS = na
-var label lbB = na, var label lbC = na, var label lbT = na, var label lbN = na, var label lbS = na
+var lvlLines  = array.new<line>()
+var lvlLabels = array.new<label>()
 
-f_lvl(line ln, label lb, float y, color col, string txt) =>
-    line.delete(ln), label.delete(lb)
-    l = line.new(bar_index - 1, y, bar_index, y, color = col, width = 1,
-                 style = line.style_dashed, extend = extend.both)
-    b = label.new(bar_index - 30, y, txt + "  " + str.tostring(y, format.mintick),
-                  color = color.new(color.black, 100), textcolor = col,
-                  style = label.style_none, size = size.normal)
-    [l, b]
+f_clear() =>
+    while array.size(lvlLines) > 0
+        line.delete(array.pop(lvlLines))
+    while array.size(lvlLabels) > 0
+        label.delete(array.pop(lvlLabels))
+
+f_lvl(float y, color col, string txt) =>
+    i = bar_index - spanBack
+    while i < bar_index + spanFwd
+        array.push(lvlLines, line.new(i, y, i + dashOn, y, color = col, width = 1,
+                                      style = line.style_solid))
+        i += dashOn + dashOff
+    array.push(lvlLabels, label.new(bar_index - 30, y,
+               txt + "  " + str.tostring(y, format.mintick),
+               color = color.new(color.black, 100), textcolor = col,
+               style = label.style_none, size = size.normal))
 
 if barstate.islast
-    [l1, b1] = f_lvl(lnB, lbB, B,       color.fuchsia, "boundary")
-    [l2, b2] = f_lvl(lnC, lbC, confirm, color.aqua,    "confirm +" + str.tostring(confPct, "#.#") + "%")
-    [l3, b3] = f_lvl(lnT, lbT, target,  color.lime,    "target")
-    [l4, b4] = f_lvl(lnN, lbN, negStop, color.orange,  "negation stop")
-    lnB := l1, lbB := b1, lnC := l2, lbC := b2, lnT := l3, lbT := b3, lnN := l4, lbN := b4
+    f_clear()
+    f_lvl(B,       color.fuchsia, "boundary")
+    f_lvl(confirm, color.aqua,    "confirm +" + str.tostring(confPct, "#.#") + "%")
+    f_lvl(target,  color.lime,    "target")
+    f_lvl(negStop, color.orange,  "negation stop")
     if S > 0
-        [l5, b5] = f_lvl(lnS, lbS, S, color.red, "structural stop")
-        lnS := l5, lbS := b5
+        f_lvl(S, color.red, "structural stop")
 
     var table t = table.new(position.top_right, 2, 5, bgcolor = color.new(color.black, 20))
     table.cell(t, 0, 0, "Entry (" + entryOpt + ")", text_color = color.gray,  text_size = size.small)
