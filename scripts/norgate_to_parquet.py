@@ -73,7 +73,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from helpers.filename_utils import sanitize_symbol_for_filename as _sanitize_filename
+from helpers.filename_utils import (
+    resolve_existing as _resolve_existing,
+    sanitize_symbol_for_filename as _sanitize_filename,
+)
 
 
 def get_watchlist_symbols(watchlist_name: str) -> list[str]:
@@ -243,7 +246,10 @@ def main():
     start_time = time.time()
 
     for i, symbol in enumerate(symbols, 1):
-        if args.skip_existing and (output_dir / f"{_sanitize_filename(symbol)}.parquet").exists():
+        # READ path: check every candidate spelling (#345). Against a corpus
+        # exported before the reserved-name guard, checking only "_CON.parquet"
+        # re-exports every reserved-name symbol and leaves both spellings on disk.
+        if args.skip_existing and _resolve_existing(output_dir, symbol) is not None:
             skip_count += 1
             continue
 

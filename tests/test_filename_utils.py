@@ -5,8 +5,11 @@ Covers: illegal character replacement, Windows reserved device names,
 and common ticker symbol patterns.
 """
 
+import os
+
 import pytest
 from helpers.filename_utils import (
+    resolve_existing,
     filename_candidates,
     sanitize_symbol_for_filename,
 )
@@ -338,3 +341,144 @@ class TestCachingCallSiteIsPinned:
         two different series sharing one cache file."""
         assert sanitize_symbol_for_filename("$VIX") != \
             sanitize_symbol_for_filename("^VIX")
+
+
+class TestReadPathsResolveEveryCandidateSpelling:
+    """Issue #345 — the contract was written down and three of five readers
+    violated it.
+
+    `filename_utils.py` says "READ paths must use this, not
+    sanitize_symbol_for_filename alone", because a corpus written before the
+    reserved-name guard stores `CON`/`PRN` unguarded. A reader checking only
+    `_CON` reports "missing" / "not cached" for a file that EXISTS — silently,
+    never raising — and those are precisely the delisted names the survivorship
+    work depends on.
+
+    @shardul0701's diagnosis of why it drifted is the part worth encoding:
+    *the unsafe call had the short obvious name and the safe one was opt-in.*
+    So `resolve_existing()` now does the whole candidate x case x template loop,
+    and these tests make a future violation detectable rather than silent.
+    """
+
+    def test_resolves_a_legacy_unguarded_parquet(self, tmp_path):
+        """The #345 case: a corpus written before the guard stores PRN
+        unguarded, and the guarded spelling `_PRN.parquet` does not exist."""
+        (tmp_path / "PRN.parquet").touch()
+        got = resolve_existing(tmp_path, "PRN")
+        assert got is not None, "legacy unguarded spelling not resolved"
+        assert os.path.basename(got) == "PRN.parquet"
+
+    def test_does_not_match_the_dated_delisted_form(self, tmp_path):
+        """Scope boundary, asserted rather than assumed: the `-YYYYMM` fallback
+        is `_find_parquet`'s job (it globs), not this helper's. Encoding it here
+        would give two places that know the corpus naming convention."""
+        (tmp_path / "PRN-200207.parquet").touch()
+        assert resolve_existing(tmp_path, "PRN") is None
+
+    def test_prefers_the_guarded_spelling_when_both_exist(self, tmp_path):
+        (tmp_path / "_CON.parquet").touch()
+        (tmp_path / "CON.parquet").touch()
+        assert resolve_existing(tmp_path, "CON").endswith("_CON.parquet")
+
+    def test_case_variants_are_tried(self, tmp_path, monkeypatch):
+        """Asserted on the paths PROBED, not on a filesystem hit.
+
+        A test that writes `aapl.parquet` and looks up `AAPL` is VACUOUS on
+        macOS and Windows, whose filesystems are case-insensitive — it passes
+        whether or not the code tries variants, and only has teeth on
+        case-sensitive Linux (i.e. CI). Same platform-dependent-vacuity class as
+        #307. Recording the probes works identically everywhere.
+        """
+        probed = []
+        real_isfile = os.path.isfile
+
+        def spy(path):
+            probed.append(os.path.basename(str(path)))
+            return False
+        monkeypatch.setattr(os.path, "isfile", spy)
+        resolve_existing(tmp_path, "AAPL")
+        monkeypatch.setattr(os.path, "isfile", real_isfile)
+
+        assert "AAPL.parquet" in probed
+        assert "aapl.parquet" in probed, (
+            "case variants are not probed; a corpus stored in a different case "
+            "would read as missing on a case-sensitive filesystem"
+        )
+
+    def test_reserved_name_probes_both_spellings(self, tmp_path, monkeypatch):
+        """The #345 case, likewise asserted on probes rather than on a hit."""
+        probed = []
+        monkeypatch.setattr(os.path, "isfile",
+                            lambda p: probed.append(os.path.basename(str(p))) or False)
+        resolve_existing(tmp_path, "CON")
+        assert "_CON.parquet" in probed          # guarded, tried first
+        assert "CON.parquet" in probed           # legacy — the #345 fix
+        assert probed.index("_CON.parquet") < probed.index("CON.parquet")
+
+    def test_template_supports_a_richer_filename(self, tmp_path):
+        """The cache keys by symbol AND date range, so a plain suffix is not
+        enough — that shape is why caching.py hand-rolled it and drifted."""
+        (tmp_path / "PRN_2020-01-01_2024-01-01_D_1.parquet").touch()
+        got = resolve_existing(tmp_path, "PRN",
+                               template="{name}_2020-01-01_2024-01-01_D_1.parquet")
+        assert got is not None
+
+    def test_absent_symbol_returns_none(self, tmp_path):
+        assert resolve_existing(tmp_path, "NOSUCH") is None
+
+    def test_ordinary_symbols_cost_no_extra_lookups(self, tmp_path):
+        """36,682 of 36,684 securities are not reserved names; they must not pay
+        for this."""
+        assert filename_candidates("AAPL") == ["AAPL"]
+
+
+class TestNoReadPathBuildsItsOwnFilename:
+    """The structural guard. Every violation of this contract is silent, so the
+    only durable protection is making the violation *detectable*.
+
+    Scans the read paths for the pattern that caused #345: composing a filename
+    from `sanitize_symbol_for_filename` and then testing it for existence.
+    """
+
+    READ_PATH_FILES = [
+        os.path.join("helpers", "caching.py"),
+        os.path.join("services", "parquet_service.py"),
+        os.path.join("services", "csv_service.py"),
+        os.path.join("scripts", "norgate_to_parquet.py"),
+        os.path.join("scripts", "validate_norgate_export.py"),
+    ]
+
+    @staticmethod
+    def _root():
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    @pytest.mark.parametrize("relpath", READ_PATH_FILES)
+    def test_existence_checks_do_not_use_the_bare_sanitizer(self, relpath):
+        """`.exists()` / `.isfile()` on a name built from the bare sanitizer is
+        the #345 defect. The safe forms are resolve_existing() or
+        filename_candidates()."""
+        path = os.path.join(self._root(), relpath)
+        src = open(path, encoding="utf-8").read()
+        offenders = []
+        for i, line in enumerate(src.splitlines(), 1):
+            if line.strip().startswith("#"):
+                continue
+            builds_name = "_sanitize_filename(" in line or \
+                          "sanitize_symbol_for_filename(" in line
+            tests_existence = ".exists()" in line or "os.path.isfile" in line \
+                or "os.path.exists" in line
+            if builds_name and tests_existence:
+                offenders.append((i, line.strip()[:90]))
+        assert not offenders, (
+            f"{relpath} tests a bare-sanitized name for existence — a corpus "
+            f"written before the reserved-name guard will read as MISSING:\n  "
+            + "\n  ".join(f"line {i}: {l}" for i, l in offenders)
+        )
+
+    @pytest.mark.parametrize("relpath", READ_PATH_FILES)
+    def test_every_read_path_imports_a_candidate_aware_helper(self, relpath):
+        src = open(os.path.join(self._root(), relpath), encoding="utf-8").read()
+        assert ("resolve_existing" in src or "filename_candidates" in src), (
+            f"{relpath} is a documented read path but imports neither "
+            f"resolve_existing nor filename_candidates"
+        )
