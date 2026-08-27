@@ -263,16 +263,23 @@ def detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=None):
     if not (last_close > sma50.iloc[-1] and sma50.iloc[-1] > sma50.iloc[-21]):
         return None
 
-    # live and actionable: near the trigger, not broken out
-    trigger = float(max(df["High"].iloc[i] for i in touches))
-    dist = (trigger - last_close) / trigger
-    if dist < -0.01 or dist > params["max_dist_to_trigger"]:
-        return None
-
     # measured move target: pattern height above the trigger
+    trigger = float(max(df["High"].iloc[i] for i in touches))
     base_low = float(df["Low"].iloc[base_start:].min())
     height = level - base_low
     target = trigger + height
+
+    # live and actionable: near the trigger, not broken out. The proximity
+    # gate scales with pattern size — a 5-month triangle's last rising low
+    # sits far deeper below its ceiling than a 3-week flag's (FCX ground
+    # truth: 7.8% below trigger on the TechCharts call date). Explicit
+    # --max-dist overrides the adaptive gate.
+    max_dist = params["max_dist_to_trigger"]
+    if max_dist is None:
+        max_dist = float(np.clip(0.5 * height / trigger, 0.03, 0.10))
+    dist = (trigger - last_close) / trigger
+    if dist < -0.01 or dist > max_dist:
+        return None
 
     # ------- ranking score -------
     touch_score = min(len(touches), 4) / 4.0 * 25.0
@@ -291,7 +298,7 @@ def detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=None):
             spy_ret = spy_aligned.iloc[-1] / spy_aligned.iloc[-w] - 1.0
             rs_excess = float(sym_ret - spy_ret)
             rs_score = 15.0 * float(np.clip(rs_excess / 0.20, 0, 1))
-    prox_score = 20.0 * float(np.clip(1.0 - max(dist, 0) / params["max_dist_to_trigger"], 0, 1))
+    prox_score = 20.0 * float(np.clip(1.0 - max(dist, 0) / max_dist, 0, 1))
     score = touch_score + tight_score + vol_score + rs_score + prox_score
 
     return {
@@ -504,7 +511,7 @@ DEFAULT_PARAMS = {
     "min_touches": 2,
     "uptrend_lookback": 60,
     "uptrend_min_gain": 0.12,
-    "max_dist_to_trigger": 0.06,
+    "max_dist_to_trigger": None,  # None = adaptive: clip(0.5*height/trigger, 3%, 10%)
     "min_adv": 25e6,
 }
 
@@ -540,7 +547,8 @@ def main():
     ap.add_argument("--min-base", type=int, default=None,
                     help="minimum base length in bars (e.g. 55 daily ~ 3 months)")
     ap.add_argument("--min-adv", type=float, default=DEFAULT_PARAMS["min_adv"])
-    ap.add_argument("--max-dist", type=float, default=DEFAULT_PARAMS["max_dist_to_trigger"])
+    ap.add_argument("--max-dist", type=float, default=None,
+                    help="fixed distance-to-trigger gate; default adapts to pattern height")
     ap.add_argument("--min-gain", type=float, default=DEFAULT_PARAMS["uptrend_min_gain"])
     ap.add_argument("--top", type=int, default=50)
     ap.add_argument("--out", default=None)
