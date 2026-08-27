@@ -53,27 +53,37 @@ def load_universe(universe_arg):
     return [t.strip().upper() for t in universe_arg.split(",") if t.strip()]
 
 
-def fetch_yahoo(tickers, period="2y"):
-    """Batch-download daily bars from Yahoo. Returns {symbol: OHLCV df}."""
+def fetch_yahoo(tickers, period="2y", chunk=300):
+    """Batch-download daily bars from Yahoo in chunks (universe scans run
+    thousands of tickers — one giant request is fragile). Returns
+    {symbol: OHLCV df}."""
     import yfinance as yf
 
-    raw = yf.download(
-        tickers,
-        period=period,
-        interval="1d",
-        group_by="ticker",
-        auto_adjust=True,
-        threads=True,
-        progress=False,
-    )
     out = {}
-    for sym in tickers:
+    for i in range(0, len(tickers), chunk):
+        batch = tickers[i : i + chunk]
         try:
-            df = raw[sym].dropna(subset=["Close"])
-        except KeyError:
+            raw = yf.download(
+                batch,
+                period=period,
+                interval="1d",
+                group_by="ticker",
+                auto_adjust=True,
+                threads=True,
+                progress=False,
+            )
+        except Exception as e:
+            log.warning("yahoo batch %d failed: %s", i, e)
             continue
-        if len(df) >= 260:
-            out[sym] = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+        for sym in batch:
+            try:
+                df = raw[sym].dropna(subset=["Close"])
+            except (KeyError, IndexError):
+                continue
+            if len(df) >= 260:
+                out[sym] = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+        if len(tickers) > chunk:
+            log.info("fetched %d/%d", min(i + chunk, len(tickers)), len(tickers))
     return out
 
 
@@ -680,7 +690,7 @@ def build_html(cands, meta, out_path):
   <div class="head">
     <span class="rank">#{rank}</span>
     <span class="sym">{c['symbol']}</span>
-    <span class="pat">{PATTERN_NAMES.get(c.get('pattern', ''), '')} ({c.get('tf', 'D')})</span>
+    <span class="pat">{PATTERN_NAMES.get(c.get('pattern', ''), '')} ({c.get('tf', 'D')}){''.join(' +' + PATTERN_NAMES.get(p, p) for p in c.get('also_patterns', []))}</span>
     <span class="score">score {c['score']}</span>
   </div>
   <table class="stats">
@@ -849,8 +859,17 @@ def main():
                 log.info("MATCH %-6s %-18s score %.1f  trigger %.2f  (%+.1f%% away)",
                          sym, pat, cand["score"], cand["trigger"], cand["dist_to_trigger_pct"])
 
+    # collapse duplicate cards: the same boundary often satisfies 2-3 pattern
+    # rules — keep the best-scoring card per symbol, list the other labels
     cands.sort(key=lambda c: c["score"], reverse=True)
-    cands = cands[: args.top]
+    merged = {}
+    for c in cands:
+        m = merged.get(c["symbol"])
+        if m is None:
+            merged[c["symbol"]] = c
+        elif abs(m["trigger"] - c["trigger"]) / m["trigger"] < 0.03:
+            m.setdefault("also_patterns", []).append(c["pattern"])
+    cands = sorted(merged.values(), key=lambda c: c["score"], reverse=True)[: args.top]
 
     data_end = max((df.index.max() for df in data.values()), default=None)
     run_date = datetime.now().strftime("%Y-%m-%d")
