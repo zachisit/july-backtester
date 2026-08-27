@@ -49,17 +49,21 @@ def _finviz_universe(spec):
     import urllib.parse
     import urllib.request
 
-    token = os.environ.get("FINVIZ_AUTH")
-    if not token:
-        env_path = os.path.join(PROJECT_ROOT, ".env")
-        if os.path.exists(env_path):
-            for line in open(env_path):
-                if line.strip().startswith("FINVIZ_AUTH="):
-                    token = line.strip().split("=", 1)[1].strip().strip("\"'")
-    if not token:
+    def _env(key):
+        val = os.environ.get(key)
+        if not val:
+            env_path = os.path.join(PROJECT_ROOT, ".env")
+            if os.path.exists(env_path):
+                for line in open(env_path):
+                    if line.strip().startswith(key + "="):
+                        val = line.strip().split("=", 1)[1].strip().strip("\"'")
+        return val
+
+    token = _env("FINVIZ_AUTH")
+    cookie = _env("FINVIZ_COOKIE")  # .ASPXAUTH value — session fallback when no API token
+    if not token and not cookie:
         raise SystemExit(
-            "FINVIZ_AUTH not set. Add FINVIZ_AUTH=<token> to .env — it's the auth= "
-            "value in the Elite screener's bottom-of-table 'export' link."
+            "Set FINVIZ_AUTH=<api token> or FINVIZ_COOKIE=<.ASPXAUTH cookie value> in .env."
         )
     if spec.startswith("http"):
         qs = urllib.parse.parse_qs(urllib.parse.urlparse(spec).query)
@@ -67,11 +71,16 @@ def _finviz_universe(spec):
         ft = qs.get("ft", [None])[0]
     else:
         filters, ft = spec, None
-    params = {"v": "111", "f": filters, "auth": token}
+    params = {"v": "111", "f": filters}
     if ft:
         params["ft"] = ft
+    if token:
+        params["auth"] = token
     url = "https://elite.finviz.com/export.ashx?" + urllib.parse.urlencode(params, safe="|,")
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    headers = {"User-Agent": "Mozilla/5.0"}
+    if cookie and not token:
+        headers["Cookie"] = f".ASPXAUTH={cookie}"
+    req = urllib.request.Request(url, headers=headers)
     txt = urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "replace")
     if txt.lstrip().startswith("<"):
         raise SystemExit("finviz export returned HTML, not CSV — auth token invalid/expired?")
