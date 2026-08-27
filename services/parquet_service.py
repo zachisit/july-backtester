@@ -25,21 +25,17 @@ import os
 
 import pandas as pd
 
+from helpers.filename_utils import (
+    filename_candidates as _filename_candidates,
+    sanitize_symbol_for_filename as _sanitize_filename,
+)
+from helpers.ticker_normalizer import normalize_ticker
+
 logger = logging.getLogger(__name__)
 
 # Project root = parent of this services/ package
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CANONICAL_COLS = ["Open", "High", "Low", "Close", "Volume"]
-
-# Characters illegal in Windows filenames (and generally problematic on any OS)
-_ILLEGAL_FILENAME_CHARS = r'\/:*?"<>|'
-
-
-def _sanitize_filename(symbol: str) -> str:
-    """Replace characters that are illegal in Windows filenames with underscores."""
-    for ch in _ILLEGAL_FILENAME_CHARS:
-        symbol = symbol.replace(ch, "_")
-    return symbol
 
 
 def _resolve_dir(config: dict) -> str:
@@ -62,32 +58,41 @@ def _find_parquet(symbol: str, parquet_dir: str) -> str | None:
         logger.warning(f"Parquet data directory does not exist: {parquet_dir}")
         return None
 
-    # Sanitize the symbol so I:VIX looks for I_VIX.parquet
-    safe = _sanitize_filename(symbol)
+    # Sanitize the symbol so I:VIX looks for I_VIX.parquet.
+    # Every spelling, not just the guarded one: the Windows reserved-name guard
+    # prefixes "_", but the frozen Norgate corpus stores the real delisted
+    # tickers CON and PRN unguarded (CON-199804.parquet, PRN-200207.parquet).
+    # Looking only for "_CON" returns None and drops the symbol silently.
+    spellings = _filename_candidates(symbol)
 
     # Try exact match first, then case-insensitive
-    for candidate in [f"{safe}.parquet", f"{safe.upper()}.parquet", f"{safe.lower()}.parquet"]:
-        path = os.path.join(parquet_dir, candidate)
-        if os.path.isfile(path):
-            return path
+    for safe in spellings:
+        for candidate in [f"{safe}.parquet", f"{safe.upper()}.parquet",
+                          f"{safe.lower()}.parquet"]:
+            path = os.path.join(parquet_dir, candidate)
+            if os.path.isfile(path):
+                return path
 
     # Brute-force case-insensitive scan
-    target = f"{safe.upper()}.parquet"
-    for fname in os.listdir(parquet_dir):
-        if fname.upper() == target:
-            return os.path.join(parquet_dir, fname)
+    listing = os.listdir(parquet_dir)
+    for safe in spellings:
+        target = f"{safe.upper()}.parquet"
+        for fname in listing:
+            if fname.upper() == target:
+                return os.path.join(parquet_dir, fname)
 
     # Fallback: Norgate date-suffixed files e.g. ALTR-201512.parquet
-    prefix = safe.upper() + "-"
-    dated = sorted(
-        fname for fname in os.listdir(parquet_dir)
-        if fname.upper().startswith(prefix) and fname.upper().endswith(".PARQUET")
-    )
-    if len(dated) == 1:
-        return os.path.join(parquet_dir, dated[0])
-    if len(dated) > 1:
-        # Signal to caller that multiple period files exist
-        return "_multi_|" + parquet_dir + "|" + safe
+    for safe in spellings:
+        prefix = safe.upper() + "-"
+        dated = sorted(
+            fname for fname in listing
+            if fname.upper().startswith(prefix) and fname.upper().endswith(".PARQUET")
+        )
+        if len(dated) == 1:
+            return os.path.join(parquet_dir, dated[0])
+        if len(dated) > 1:
+            # Signal to caller that multiple period files exist
+            return "_multi_|" + parquet_dir + "|" + safe
 
     return None
 
@@ -167,7 +172,13 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     UTC DatetimeIndex named 'Datetime', or None on any error / no data.
     """
     parquet_dir = _resolve_dir(config)
-    filepath = _find_parquet(symbol, parquet_dir)
+    # Prefer the user's literal sanitized filename (I:VIX -> I_VIX.parquet),
+    # then fall back to the provider-normalized convention (I:VIX -> VIX).
+    requested_symbol = symbol
+    filepath = _find_parquet(requested_symbol, parquet_dir)
+    symbol = normalize_ticker(requested_symbol, "parquet")
+    if filepath is None and symbol != requested_symbol:
+        filepath = _find_parquet(symbol, parquet_dir)
 
     if filepath is None:
         logger.warning(

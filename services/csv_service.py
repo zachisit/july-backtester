@@ -52,23 +52,10 @@ _COL_ALIASES: dict[str, str] = {
 }
 
 
-# Characters illegal in Windows filenames (and generally problematic on any OS)
-_ILLEGAL_FILENAME_CHARS = r'\/:*?"<>|'
-
-
-def _sanitize_filename(symbol: str) -> str:
-    """
-    Replace characters that are illegal in Windows filenames with underscores.
-
-    Examples
-    --------
-    ``"I:VIX"``   → ``"I_VIX"``
-    ``"$I:TNX"``  → ``"$I_TNX"``
-    ``"AAPL"``    → ``"AAPL"``   (unchanged)
-    """
-    for ch in _ILLEGAL_FILENAME_CHARS:
-        symbol = symbol.replace(ch, "_")
-    return symbol
+from helpers.filename_utils import (
+    filename_candidates as _filename_candidates,
+    sanitize_symbol_for_filename as _sanitize_filename,
+)
 
 
 def _resolve_dir(config: dict) -> str:
@@ -86,12 +73,17 @@ def _find_csv(symbol: str, csv_dir: str) -> str | None:
     ``I:VIX``) are replaced with underscores before constructing the path, so
     the expected file for ``I:VIX`` is ``I_VIX.csv``.
     """
-    safe = _sanitize_filename(symbol)
-    candidates = [
-        os.path.join(csv_dir, f"{safe.upper()}.csv"),
-        os.path.join(csv_dir, f"{safe.lower()}.csv"),
-        os.path.join(csv_dir, f"{safe}.csv"),
-    ]
+    # Every sanitized spelling, not just the guarded one. The Windows
+    # reserved-name guard prefixes "_", but a user's pre-existing PRN.csv is a
+    # perfectly legal filename on macOS/Linux; looking only for _PRN.csv would
+    # silently drop the symbol. See helpers.filename_utils.filename_candidates.
+    candidates = []
+    for safe in _filename_candidates(symbol):
+        candidates += [
+            os.path.join(csv_dir, f"{safe.upper()}.csv"),
+            os.path.join(csv_dir, f"{safe.lower()}.csv"),
+            os.path.join(csv_dir, f"{safe}.csv"),
+        ]
     for path in candidates:
         if os.path.isfile(path):
             return path

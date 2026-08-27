@@ -546,3 +546,41 @@ class TestSanitizedFilenames:
         result = get_price_data("I:VIX", "2023-01-01", "2023-12-31", config)
         assert isinstance(result, pd.DataFrame)
         assert not result.empty
+
+
+class TestDollarVixParquet:
+    """#110 — $VIX (dollar-sign prefix) must load correctly from parquet provider.
+
+    $VIX is the comparison_tickers symbol used when data_provider='parquet'.
+    The $ is a legal filename character, so $VIX.parquet is the expected file.
+    """
+
+    def test_sanitize_dollar_vix_unchanged(self):
+        """$ is legal in filenames — $VIX must not be mangled to _VIX."""
+        assert _sanitize_filename("$VIX") == "$VIX"
+
+    def test_sanitize_dollar_spx_unchanged(self):
+        assert _sanitize_filename("$SPX") == "$SPX"
+
+    def test_find_parquet_dollar_vix(self, tmp_path):
+        """_find_parquet('$VIX', ...) must locate $VIX.parquet."""
+        (tmp_path / "$VIX.parquet").write_bytes(b"fake")
+        result = _find_parquet("$VIX", str(tmp_path))
+        assert result is not None
+        assert result.endswith("$VIX.parquet")
+
+    def test_get_price_data_dollar_vix(self, tmp_path):
+        """get_price_data('$VIX', ...) must load data from $VIX.parquet without error."""
+        df = _make_ohlcv_df(20)
+        df.to_parquet(tmp_path / "$VIX.parquet")
+        config = _config_for(tmp_path)
+        result = get_price_data("$VIX", "2023-01-01", "2023-12-31", config)
+        assert isinstance(result, pd.DataFrame)
+        assert not result.empty
+        assert list(result.columns) == ["Open", "High", "Low", "Close", "Volume"]
+
+    def test_get_price_data_dollar_vix_no_file_returns_none(self, tmp_path):
+        """Missing $VIX.parquet must return None, not raise."""
+        config = _config_for(tmp_path)
+        result = get_price_data("$VIX", "2023-01-01", "2023-12-31", config)
+        assert result is None
