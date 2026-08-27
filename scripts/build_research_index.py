@@ -18,7 +18,6 @@ Run from the project root:
     rtk python scripts/build_research_index.py --runs-only myrun other-run
 """
 
-import ast
 import csv
 import json
 import os
@@ -198,7 +197,10 @@ def collect_csv_rows(prefix_filter: list[str] | None = None) -> list[dict]:
 
 def main():
     prefix_filter = None
-    if len(sys.argv) > 2 and sys.argv[1] == "--runs-only":
+    if len(sys.argv) > 1 and sys.argv[1] == "--runs-only":
+        if len(sys.argv) < 3:
+            print("error: --runs-only requires at least one run-id prefix", file=sys.stderr)
+            sys.exit(1)
         prefix_filter = sys.argv[2:]
         print(f"Filtering to run prefixes: {prefix_filter}")
 

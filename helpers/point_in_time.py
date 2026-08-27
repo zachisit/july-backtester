@@ -73,6 +73,14 @@ PIT_TICKER_NORMALISATION = {
     # --- Nasdaq-100 renames / mergers ---
     "AEOS": "AEO", "IVGN": "LIFE", "JDSU": "VIAV", "KFT": "MDLZ", "UAUA": "UAL",
     "VIP": "VEON", "YHOO": "AABA",
+    # --- Added from the #107 roster look-ahead audit ---
+    # These roster tickers resolved to NO price series before the alias, i.e.
+    # they were silently dropped from PIT backtests. Each target was verified to
+    # carry the security's full history in the corpus:
+    #   SIVB  -> SIVBQ (SVB Financial; corpus keys the collapse "Q" ticker, hist. from 1990)
+    #   CTRP  -> TCOM  (Ctrip -> Trip.com, renamed 2019; corpus TCOM from 2003)
+    #   RIMM  -> BB    (Research In Motion -> BlackBerry, renamed 2013; corpus BB from 1999)
+    "SIVB": "SIVBQ", "CTRP": "TCOM", "RIMM": "BB",
 }
 
 
