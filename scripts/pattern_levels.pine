@@ -24,7 +24,7 @@ var label lbB = na, var label lbC = na, var label lbT = na, var label lbN = na, 
 f_lvl(line ln, label lb, float y, color col, string txt) =>
     line.delete(ln), label.delete(lb)
     l = line.new(bar_index - 1, y, bar_index, y, color = col, width = 1,
-                 style = line.style_dotted, extend = extend.both)
+                 style = line.style_dashed, extend = extend.both)
     b = label.new(bar_index - 30, y, txt + "  " + str.tostring(y, format.mintick),
                   color = color.new(color.black, 100), textcolor = col,
                   style = label.style_none, size = size.normal)
