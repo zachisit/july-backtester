@@ -1175,7 +1175,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     if stop_type == "percentage":
                         sizing_kwargs["stop_distance_pct"] = stop_config.get("value", 0.05)
                     elif stop_type == "atr":
-                        _day_before = prev_trading_dates[symbol].get(entry_exec_date)
+                        # Signal bar, not prev(fill bar) -- see the `atr` stop
+                        # anchor below. A FOURTH instance of the same defect,
+                        # in risk_parity sizing; caught by the AST regression
+                        # guard in tests/test_heat_gate_symmetry.py rather than
+                        # by inspection, which is why that guard scans for the
+                        # pattern instead of listing known sites.
+                        _day_before = signal_date
                         if _day_before is not None and _day_before in df.index and "ATR_14" in df.columns:
                             _atr = df.loc[_day_before, 'ATR_14']
                             _close = df.loc[_day_before, 'Close']
@@ -1206,7 +1212,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     _rp_stop_dist_pts = None
                     _stype_sz = stop_config.get("type", "none")
                     if _stype_sz == "trailing_atr":
-                        _dbe_sz = prev_trading_dates[symbol].get(entry_exec_date)
+                        # Signal bar, not prev(fill bar) -- see the `atr` stop
+                        # anchor below. Wrong under execution_time="close", and
+                        # here it sets the SHARE COUNT.
+                        _dbe_sz = signal_date
                         if pd.notna(_dbe_sz) and _dbe_sz in df.index:
                             _atr_sz = df.loc[_dbe_sz].get('ATR_14')
                             if pd.notna(_atr_sz):
@@ -1223,7 +1232,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         # distance than the one the position is actually stopped at.
                         _rp_stop_dist_pts = stop_config.get("value", 0.05) * raw_entry_price
                     elif _stype_sz == "atr":
-                        _dbe_sz = prev_trading_dates[symbol].get(entry_exec_date)
+                        # Signal bar, not prev(fill bar) -- as above.
+                        _dbe_sz = signal_date
                         if pd.notna(_dbe_sz) and _dbe_sz in df.index:
                             _atr_sz = df.loc[_dbe_sz].get('ATR_14')
                             if pd.notna(_atr_sz):
@@ -1467,8 +1477,20 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             instruments[symbol], _stop_anchor, stop_config, side="long")
 
                     elif _stype == 'atr':
-                        # Get the data from the day BEFORE entry (the signal day)
-                        day_before_entry = prev_trading_dates[symbol].get(entry_exec_date)
+                        # Anchor to the SIGNAL bar. `signal_date` is already
+                        # execution-aware (:1147): the bar before the fill under
+                        # execution_time="open", the fill bar itself under "close".
+                        #
+                        # This previously read prev_trading_dates[entry_exec_date],
+                        # which is only the signal bar under "open" -- under
+                        # "close" entry_exec_date == signal_date, so it read one
+                        # bar too EARLY. Same defect class as #310, but this one
+                        # moves P&L rather than exported features: it sets the
+                        # exit level and InitialRisk, hence every R-multiple,
+                        # expectancy and SQN downstream. Measured 10x difference
+                        # in stop distance (97.00 vs 70.00) on identical inputs,
+                        # from the execution mode alone.
+                        day_before_entry = signal_date
 
                         if pd.notna(day_before_entry) and day_before_entry in df.index:
                             day_before_data = df.loc[day_before_entry]
@@ -1521,7 +1543,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         # propagates into the target:
                         #   eff_stop_dist = min(stop_mult*atr, point_cap)
                         #   target_dist   = eff_stop_dist * (t1_mult / stop_mult)
-                        _dbe = prev_trading_dates[symbol].get(entry_exec_date)
+                        # Signal bar ("the breakout bar"), not prev(fill bar).
+                        # A FIFTH instance of the #310 defect class -- this one
+                        # was documented in CLAUDE.md as "assumes
+                        # execution_time='open'", which is exactly what made it
+                        # invisible: a known limitation nobody had ticketed.
+                        # Under "close" it locked the ATR of the bar BEFORE the
+                        # breakout, and that value is fixed for the whole trade
+                        # (stop, target and trail all derive from it).
+                        _dbe = signal_date
                         _atr_b = df.loc[_dbe].get('ATR_14') if (pd.notna(_dbe) and _dbe in df.index) else np.nan
                         if pd.notna(_atr_b):
                             _atr_locked = float(_atr_b)

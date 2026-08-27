@@ -164,3 +164,120 @@ class TestWeekdayOvernightDocstringMatchesBehaviour:
             "docstring again claims blanket holiday flatness, which the > 2 "
             "day gap threshold does not deliver for midweek closures"
         )
+
+
+class TestPositionsAndShortsStayDisjoint:
+    """@shardul0701's finding on #344: F1's fix is only safe because of #313.
+
+    `check_portfolio_heat` sums over `.values()` of a SINGLE dict, so
+    `{**positions, **short_positions}` merges **by symbol** — a symbol present in
+    both contributes once, and the short leg REPLACES the long leg rather than
+    adding to it:
+
+        long AAPL risk 3%  +  short AAPL risk 4%
+        sum over the merged dict                  = 4%   <- long leg dropped
+        true combined exposure                    = 7%
+
+    So on a tree where a symbol can be long and short at once, the merged-book
+    gate stops over-counting and starts UNDER-counting — it fails OPEN, which is
+    strictly worse than the bug it fixes, and silently.
+
+    It is safe here because #313's guard (`if symbol in positions or symbol in
+    short_positions: continue`) keeps the two dicts disjoint. That invariant is
+    load-bearing for the heat gate and was previously undocumented and
+    unasserted, so relaxing the guard later — to allow a deliberately hedged
+    book, say — would silently re-open this with no failing test.
+    """
+
+    def test_merged_dict_drops_a_leg_when_a_symbol_is_in_both(self):
+        """The hazard itself, stated so the dependency is visible in code."""
+        longs = {"AAPL": {"risk": 3000.0}}
+        shorts = {"AAPL": {"risk": 4000.0}}
+        merged = {**longs, **shorts}
+        assert list(merged.keys()) == ["AAPL"]
+        assert merged["AAPL"]["risk"] == 4000.0          # long leg gone
+        assert sum(p["risk"] for p in merged.values()) == 4000.0
+        assert 3000.0 + 4000.0 == 7000.0                  # true exposure
+
+    def test_that_hazard_would_make_the_gate_fail_open(self):
+        """Under-counting admits an entry the true exposure would reject —
+        worse than the over-count F1 fixed."""
+        merged = {**{"AAPL": {"risk": 3000.0}}, **{"AAPL": {"risk": 4000.0}}}
+        true_book = {"L": {"risk": 3000.0}, "S": {"risk": 4000.0}}
+        assert check_portfolio_heat(merged, 1000.0, 100_000.0, 0.05) is True
+        assert check_portfolio_heat(true_book, 1000.0, 100_000.0, 0.05) is False
+
+    def test_long_entry_is_guarded_against_symbols_held_short(self):
+        """#313's guard is what keeps the dicts disjoint. If this assertion
+        fails, the F1 heat fix above becomes unsafe — they are coupled."""
+        src = open(SIM, encoding="utf-8").read()
+        assert "if symbol in positions or symbol in short_positions" in src, (
+            "the long-entry guard (#313) is gone — with it, a symbol can be "
+            "long and short at once and the merged-book heat gate silently "
+            "under-counts. Do not relax this without reworking the gate to sum "
+            "the two books separately."
+        )
+
+    def test_short_entry_is_guarded_too(self):
+        src = open(SIM, encoding="utf-8").read()
+        assert re.search(r"symbol in positions or symbol in short_positions", src)
+
+
+class TestAtrAnchorsToTheSignalBarInBothExecutionModes:
+    """@shardul0701's remaining finding on #324: the #310 defect class survived
+    in three branches the epic did not touch.
+
+    `entry_exec_date = date` unconditionally, while `signal_date` is the bar
+    before the fill under `execution_time="open"` and the fill bar itself under
+    `"close"`. Three sites hard-coded `prev_trading_dates[entry_exec_date]`,
+    which is the signal bar ONLY under "open" — under "close" it reads one bar
+    too early. Measured: a 10x difference in stop distance (97.00 vs 70.00) on
+    identical inputs, from the execution mode alone.
+
+    Not look-ahead — the data is strictly in the past — but the wrong bar, and
+    unlike #310 it moves P&L: the level sets the exit price and `InitialRisk`,
+    hence every R-multiple, expectancy and SQN downstream, and two of the three
+    sites set the SHARE COUNT.
+
+    Already documented in CLAUDE.md:243-245 as a known divergence; it just never
+    became a ticket. And no test in the suite set `execution_time="close"` with
+    an ATR stop, so nothing locked in the wrong behaviour.
+    """
+
+    @pytest.mark.parametrize("site", [
+        "day_before_entry = signal_date",     # atr stop level
+    ])
+    def test_atr_stop_level_anchors_to_signal_date(self, site):
+        src = open(SIM, encoding="utf-8").read()
+        assert site in src
+
+    def test_both_risk_sizing_branches_anchor_to_signal_date(self):
+        """trailing_atr and atr sizing — these set the share count."""
+        src = open(SIM, encoding="utf-8").read()
+        assert src.count("_dbe_sz = signal_date") == 2, (
+            "expected both the trailing_atr and atr sizing branches to anchor "
+            "to signal_date"
+        )
+
+    def test_no_atr_branch_still_hardcodes_prev_of_the_fill_bar(self):
+        """The regression guard. `prev_trading_dates[...].get(entry_exec_date)`
+        is correct ONLY under execution_time='open'; any ATR/sizing branch using
+        it is wrong in close mode."""
+        src = open(SIM, encoding="utf-8").read()
+        tree = ast.parse(src)
+        offenders = []
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Assign):
+                continue
+            seg = ast.get_source_segment(src, node) or ""
+            if "prev_trading_dates" in seg and "entry_exec_date" in seg:
+                offenders.append((node.lineno, seg.strip()[:70]))
+        # The stop-loss *trailing* update and the MTM paths legitimately use the
+        # fill bar; only the three ATR anchor/sizing sites were wrong, and those
+        # now use signal_date. Assert none of the remaining ones read ATR_14.
+        for lineno, seg in offenders:
+            following = src.splitlines()[lineno:lineno + 6]
+            assert not any("ATR_14" in l for l in following), (
+                f"line {lineno} anchors an ATR read to prev(fill bar): {seg!r} — "
+                f"wrong under execution_time='close'"
+            )
