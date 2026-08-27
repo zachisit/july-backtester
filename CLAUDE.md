@@ -215,7 +215,7 @@ The engine is instrument-aware: **`helpers/instruments.py`** resolves a per-symb
 - **Data path:** `services/futures_service.py` (Polygon dedicated `/futures/v1/aggs`), plus CSV/Parquet for pre-built continuous series; `services/__init__.py` dispatches futures tickers to the futures endpoint. `helpers/continuous_contract.py` builds back-adjusted continuous series (panama/ratio + volume-roll). `helpers/data_quality.py` missing-bar check is calendar-aware (skipped for `CME_ETH`).
 - **Config:** SECTION 27 `instruments` (asset-class defaults, per-root point-value/tick tables, per-symbol overrides), SECTION 28 `intrabar_resolution`/`intrabar_timeframe`/`intrabar_multiplier`, SECTION 29 `maintenance_margin_pct`.
 - **Exit configs (v1.11.0, issue #234):**
-  - `{"type":"trailing_atr","stop_mult":..,"trail_mult":..,"t1_mult":..,"point_cap":N,"floor":"breakeven"}` — Sleeve A mechanic: ATR **locked at the breakout bar** (the signal bar — resolved from `signal_date`, correct under both `execution_time` modes; it previously used `prev_trading_dates[entry_exec_date]` and was wrong under `"close"`); initial stop `entry - min(stop_mult*atr, point_cap)`; arms the trail when price reaches `entry + eff_stop_dist*(t1_mult/stop_mult)` (target is R:R off the *capped* stop); post-arm ratchets `running-max High - trail_mult*atr_locked` (trail leg uncapped), floored at literal entry. **Bidirectional** — `side="long"`/`"short"` mirror in `_update_trailing_atr_stop`; the short entry/cover loops wire the full stop/target/trail + margin-call + real InitialRisk/RMultiple, and open shorts are marked-to-market at end-of-backtest.
+  - `{"type":"trailing_atr","stop_mult":..,"trail_mult":..,"t1_mult":..,"point_cap":N,"floor":"breakeven"}` — Sleeve A mechanic: ATR **locked at the breakout bar** (the signal bar — resolved from `signal_date` on the long path and `sig_date` on the short, correct under both `execution_time` modes and in both directions; both previously anchored to the bar before the fill and were wrong under `"close"`); initial stop `entry - min(stop_mult*atr, point_cap)`; arms the trail when price reaches `entry + eff_stop_dist*(t1_mult/stop_mult)` (target is R:R off the *capped* stop); post-arm ratchets `running-max High - trail_mult*atr_locked` (trail leg uncapped), floored at literal entry. **Bidirectional** — `side="long"`/`"short"` mirror in `_update_trailing_atr_stop`; the short entry/cover loops wire the full stop/target/trail + margin-call + real InitialRisk/RMultiple, and open shorts are marked-to-market at end-of-backtest.
     - Known conservative assumptions (issue #234 review): on a bar hitting both init-stop and target, the engine resolves stop-first (pre-arm); maintenance-margin uses entry-price notional (calls marginally early).
   - `{"type":"atr","multiplier":..,"point_cap":N}` — ATR stop distance clipped at `N` points per trade (`instruments.atr_stop_level(point_cap=)`).
   - `maintenance_margin_pct` (SECTION 29): per-bar force-liquidation of a futures position when `margin + unrealized_pnl < notional*pct`, logged `ExitReason "Margin Call"`. `0.0` = disabled.
@@ -240,15 +240,19 @@ printed extreme. The level is **static — it does not trail**.
   start of the series yields `NaT` → no stop for that trade.
 - **Wiring**: both entry paths in `helpers/portfolio_simulations.py` resolve the signal bar
   from the loop's existing `signal_date` / `sig_date` variable — the bar *before* the fill under
-  `execution_time="open"`, the fill bar itself under `"close"`. **The `atr` and
-  `trailing_atr` branches now do the same** — they previously hard-coded
-  `prev_trading_dates[entry_exec_date]`, which is the signal bar only under
-  `execution_time="open"`; under `"close"` it read one bar too early (a measured 10x
-  difference in stop distance on identical inputs). Fixed at five sites: the `atr` stop
-  level, `atr`/`trailing_atr`/`risk_parity` sizing, and the `trailing_atr` locked ATR.
-  Provably a no-op under `"open"`, where `prev_trading_dates[entry_exec_date] ==
-  signal_date` by construction — the golden master is unchanged. No look-ahead either
-  way: the level is known at entry.
+  `execution_time="open"`, the fill bar itself under `"close"`. **Every `atr` /
+  `trailing_atr` anchor on BOTH entry paths now does the same** — they previously
+  hard-coded the bar before the fill (`prev_trading_dates[entry_exec_date]` on the long
+  path, `prev_trading_dates[date]` on the short one), which is the signal bar only under
+  `execution_time="open"`; under `"close"` they read one bar too early (a measured 10x
+  difference in stop distance on identical inputs). Fixed at **seven** sites — long: the
+  `atr` stop level, `atr`/`trailing_atr`/`risk_parity` sizing, the `trailing_atr` locked
+  ATR; short: the `atr` stop level and the `trailing_atr` locked ATR. The first fix
+  covered only the long five, because the guard that was supposed to prove completeness
+  keyed on `entry_exec_date` — a name the short block does not use — and so was blind to
+  half the file. Provably a no-op under `"open"`, where the two expressions coincide by
+  construction; the golden master is unchanged. No look-ahead either way: the level is
+  known at entry.
 - **Next-Day Activation interaction (important for short holds):** a position is not
   stop-checked until the bar *after* entry. Under `execution_time="open"` a one-session trade
   (enter next open, exit the open after) is therefore unprotected for its entire holding

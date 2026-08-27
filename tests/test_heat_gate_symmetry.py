@@ -260,18 +260,34 @@ class TestAtrAnchorsToTheSignalBarInBothExecutionModes:
         )
 
     def test_no_atr_branch_still_hardcodes_prev_of_the_fill_bar(self):
-        """The regression guard. `prev_trading_dates[...].get(entry_exec_date)`
-        is correct ONLY under execution_time='open'; any ATR/sizing branch using
-        it is wrong in close mode."""
+        """The regression guard, generalised.
+
+        The first version keyed on `prev_trading_dates` AND `entry_exec_date`.
+        That name exists only on the LONG entry path -- the short block calls
+        the fill bar `date` -- so the guard was structurally blind to half the
+        file it guards, and reported a clean sweep while two short-side ATR
+        anchors were still wrong. Caught by @shardul0701 on #344, not by this.
+
+        Now it flags any assignment that indexes `prev_trading_dates` with
+        ANYTHING other than an execution-aware variable, whenever an ATR read
+        follows. The execution-aware names are `signal_date` (long) and
+        `sig_date` (short); both carry the `execution_time` ternary.
+        """
         src = open(SIM, encoding="utf-8").read()
         tree = ast.parse(src)
+        EXEC_AWARE = ("signal_date", "sig_date")
         offenders = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Assign):
                 continue
             seg = ast.get_source_segment(src, node) or ""
-            if "prev_trading_dates" in seg and "entry_exec_date" in seg:
-                offenders.append((node.lineno, seg.strip()[:70]))
+            if "prev_trading_dates" not in seg:
+                continue
+            # An execution-aware lookup is fine -- that is how signal_date and
+            # sig_date are themselves defined.
+            if any(name in seg for name in EXEC_AWARE):
+                continue
+            offenders.append((node.lineno, seg.strip()[:70]))
         # The stop-loss *trailing* update and the MTM paths legitimately use the
         # fill bar; only the three ATR anchor/sizing sites were wrong, and those
         # now use signal_date. Assert none of the remaining ones read ATR_14.
@@ -281,3 +297,68 @@ class TestAtrAnchorsToTheSignalBarInBothExecutionModes:
                 f"line {lineno} anchors an ATR read to prev(fill bar): {seg!r} — "
                 f"wrong under execution_time='close'"
             )
+
+
+class TestWeekdayOvernightGapArithmeticIsPinned:
+    """@shardul0701's finding 2 on #344: my correction to the F3 docstring
+    introduced a NEW false claim, in the PR whose purpose was fixing false
+    claims.
+
+    I wrote that changing `> 2` to `>= 2` "would also flatten across every
+    normal weeknight". A weeknight gap is **1** calendar day and `1 >= 2` is
+    False, so it changes nothing about weeknights — it flips exactly the 2-day
+    midweek-holiday rows, which is precisely what the preceding sentence said
+    the change would be *for*. The stated consequence was the only argument
+    given against making it, and it was wrong.
+
+    I also wrote "Memorial / Labor Day  3 days". Both are MONDAY closures, so
+    the gap is Fri -> Tue = **4** days. 3 is the plain-weekend value.
+
+    Prose about arithmetic keeps being wrong here, so the arithmetic is now
+    asserted rather than described.
+    """
+
+    # (label, calendar-day gap between consecutive SESSIONS)
+    CASES = [
+        ("normal weeknight  Tue->Wed", 1, False),
+        ("normal weekend    Fri->Mon", 3, True),
+        ("Good Friday       Thu->Mon", 4, True),
+        ("Memorial/Labor    Fri->Tue", 4, True),
+        ("Thanksgiving      Wed->Fri", 2, False),
+        ("July 4th on Thu   Wed->Fri", 2, False),
+    ]
+
+    @pytest.mark.parametrize("label,gap,flat", CASES)
+    def test_the_documented_table_matches_the_threshold(self, label, gap, flat):
+        """Every row of the docstring table, checked against `> 2`."""
+        assert (gap > 2) is flat, label
+
+    def test_ge_two_changes_only_the_midweek_holiday_rows(self):
+        """The claim I got wrong, now pinned in both directions."""
+        flipped = [l for l, gap, _ in self.CASES if (gap >= 2) != (gap > 2)]
+        assert flipped == ["Thanksgiving      Wed->Fri", "July 4th on Thu   Wed->Fri"]
+
+    def test_ge_two_does_not_touch_normal_weeknights(self):
+        """The specific false claim: a weeknight gap is 1, and 1 >= 2 is False."""
+        weeknight_gap = 1
+        assert (weeknight_gap >= 2) is False
+        assert (weeknight_gap > 2) is False
+
+    def test_monday_closures_are_a_four_day_gap_not_three(self):
+        """Memorial and Labor Day close a MONDAY, so Fri -> Tue is 4 days.
+        3 is the plain-weekend value, and writing it was the same
+        assert-by-prose defect F3 exists to fix."""
+        from helpers.indicators import weekday_overnight_logic
+        doc = weekday_overnight_logic.__doc__
+        assert "Memorial/Labor   Fri->Tue      4" in doc or \
+               re.search(r"Memorial/Labor\s+Fri->Tue\s+4", doc), (
+            "docstring still records a Monday closure as a 3-day gap"
+        )
+
+    def test_docstring_no_longer_claims_ge2_affects_weeknights(self):
+        from helpers.indicators import weekday_overnight_logic
+        doc = weekday_overnight_logic.__doc__
+        assert "flatten across every normal weeknight" not in doc, (
+            "the >= 2 consequence is stated wrongly again: weeknights are a "
+            "1-day gap and are unaffected"
+        )

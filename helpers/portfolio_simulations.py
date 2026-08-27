@@ -872,7 +872,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 if _sc_type in ('percentage', 'points'):
                     _s_stop = _inst.stop_level(inst_se, ep, stop_config, side="short")
                 elif _sc_type == 'atr':
-                    _dbe = prev_trading_dates[symbol].get(date)
+                    # Signal bar, not prev(fill bar). `sig_date` (L861) already
+                    # carries the execution_time ternary -- the `signal_bar`
+                    # branch below uses it and says so. Sites 6 and 7 of the
+                    # #310 class; the long-path fix missed them because the
+                    # short block names the fill bar `date`, not
+                    # `entry_exec_date`.
+                    _dbe = sig_date
                     if pd.notna(_dbe) and _dbe in df.index:
                         _ab, _cb = df.loc[_dbe].get('ATR_14'), df.loc[_dbe].get('Close')
                         if pd.notna(_ab) and pd.notna(_cb):
@@ -895,7 +901,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if _lvl is not None and _lvl > ep:
                             _s_stop = _lvl
                 elif _sc_type == 'trailing_atr':
-                    _dbe = prev_trading_dates[symbol].get(date)
+                    # Signal bar -- as above. This is the LOCKED ATR, fixed for
+                    # the whole trade, so stop/target/trail all inherited the
+                    # wrong bar under execution_time="close".
+                    _dbe = sig_date
                     _ab = df.loc[_dbe].get('ATR_14') if (pd.notna(_dbe) and _dbe in df.index) else np.nan
                     if pd.notna(_ab):
                         _s_atr = float(_ab)
