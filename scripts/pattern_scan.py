@@ -37,12 +37,61 @@ log = logging.getLogger("pattern_scan")
 PARQUET_DIR = os.path.join(PROJECT_ROOT, "parquet_data", "data")
 
 
+def _finviz_universe(spec):
+    """Ticker list from the finviz Elite screener export.
+
+    `spec` is either a full elite.finviz.com/screener URL (the f=... filter
+    string is extracted, including the | OR syntax) or a bare filter string
+    like "geo_usa,ta_pattern_multipletop". Requires FINVIZ_AUTH in the
+    environment or .env — the auth= value from the Elite export link.
+    """
+    import csv
+    import urllib.parse
+    import urllib.request
+
+    token = os.environ.get("FINVIZ_AUTH")
+    if not token:
+        env_path = os.path.join(PROJECT_ROOT, ".env")
+        if os.path.exists(env_path):
+            for line in open(env_path):
+                if line.strip().startswith("FINVIZ_AUTH="):
+                    token = line.strip().split("=", 1)[1].strip().strip("\"'")
+    if not token:
+        raise SystemExit(
+            "FINVIZ_AUTH not set. Add FINVIZ_AUTH=<token> to .env — it's the auth= "
+            "value in the Elite screener's bottom-of-table 'export' link."
+        )
+    if spec.startswith("http"):
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(spec).query)
+        filters = qs.get("f", [""])[0]
+        ft = qs.get("ft", [None])[0]
+    else:
+        filters, ft = spec, None
+    params = {"v": "111", "f": filters, "auth": token}
+    if ft:
+        params["ft"] = ft
+    url = "https://elite.finviz.com/export.ashx?" + urllib.parse.urlencode(params, safe="|,")
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    txt = urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "replace")
+    if txt.lstrip().startswith("<"):
+        raise SystemExit("finviz export returned HTML, not CSV — auth token invalid/expired?")
+    rows = list(csv.DictReader(io.StringIO(txt)))
+    tickers = [r["Ticker"].strip() for r in rows if r.get("Ticker", "").strip()]
+    log.info("finviz export: %d tickers for f=%s", len(tickers), filters)
+    return tickers
+
+
 def load_universe(universe_arg):
     """Resolve a universe argument to a ticker list.
 
-    Accepts a JSON filename in tickers_to_scan/, a path to a JSON file, or a
-    comma-separated ticker string.
+    Accepts a JSON filename in tickers_to_scan/, a path to a JSON file, a
+    comma-separated ticker string, a finviz Elite screener URL, or
+    "finviz:<filter-string>".
     """
+    if universe_arg.startswith("finviz:"):
+        return _finviz_universe(universe_arg[len("finviz:"):])
+    if universe_arg.startswith("http") and "finviz.com" in universe_arg:
+        return _finviz_universe(universe_arg)
     candidate = os.path.join(PROJECT_ROOT, "tickers_to_scan", universe_arg)
     if os.path.exists(candidate):
         with open(candidate) as f:
