@@ -133,12 +133,20 @@ def find_pivots(df, k=4, atr=None, min_prominence_atr=0.3):
 
 
 def find_ceiling(df, piv_hi, atr, base_max=140, base_min=15, last_touch_within=30,
-                 min_touches=2, tol_pct_floor=0.012):
+                 min_touches=2, tol_pct_floor=0.012, breakout_grace=1.007,
+                 live_price=None):
     """Cluster recent pivot highs into a flat resistance level.
 
     Returns (level, touch_indices) for the best cluster, or (None, None).
     Best = most touches, then longest span. The base must not contain a
-    sustained close above the level (not already broken out).
+    sustained close above the level (not already broken out); `breakout_grace`
+    sets that veto (1.03 for rectangle/H&S — Roy-style confirm is boundary
+    x1.03, so closes inside that zone are still pre-confirmation).
+
+    `live_price`: a level being retested RIGHT NOW never has a recent pivot
+    touch — pivot confirmation needs k right-side bars, so the live approach
+    can't count. If the current price sits at/near the level (within -3%
+    above to +10% below), the recency test is waived: proximity IS liveness.
     """
     n = len(df)
     closes = df["Close"].values
@@ -153,18 +161,48 @@ def find_ceiling(df, piv_hi, atr, base_max=140, base_min=15, last_touch_within=3
         span = max(touches) - min(touches)
         if span < base_min:
             continue
-        if max(touches) < n - last_touch_within:
-            continue
         level = float(np.mean([df["High"].iloc[i] for i in touches]))
-        # not already broken out: no close in the base > level by more than ~0.7%
+        if max(touches) < n - last_touch_within:
+            live = (live_price is not None
+                    and -0.03 <= (level - live_price) / level <= 0.10)
+            if not live:
+                continue
         base_closes = closes[min(touches) : n]
-        if (base_closes > level * 1.007).any():
+        if (base_closes > level * breakout_grace).any():
             continue
         key = (len(touches), span)
         if best is None or key > best[0]:
             best = (key, level, sorted(touches))
     if best is None:
         return None, None
+    return best[1], best[2]
+
+
+def find_floor(df, piv_lo, atr, window_start, min_touches=2, tol_pct_floor=0.012,
+               hold_grace=0.95):
+    """Cluster pivot lows inside the base into a flat support level (rectangle
+    bottom). Mirror of find_ceiling. Returns (level, touch_indices) or None.
+    Closes may pierce the floor by up to (1 - hold_grace) — long rectangles
+    routinely wick through their lower boundary.
+    """
+    n = len(df)
+    closes = df["Close"].values
+    cand = [i for i in piv_lo if i >= window_start - 5]
+    best = None
+    for anchor in cand:
+        lvl_anchor = df["Low"].iloc[anchor]
+        tol = max(tol_pct_floor * lvl_anchor, 0.6 * (atr[anchor] if not np.isnan(atr[anchor]) else 0))
+        touches = [i for i in cand if abs(df["Low"].iloc[i] - lvl_anchor) <= tol]
+        if len(touches) < min_touches:
+            continue
+        level = float(np.mean([df["Low"].iloc[i] for i in touches]))
+        if (closes[min(touches):n] < level * hold_grace).any():
+            continue
+        key = (len(touches), max(touches) - min(touches))
+        if best is None or key > best[0]:
+            best = (key, level, sorted(touches))
+    if best is None:
+        return None
     return best[1], best[2]
 
 
@@ -237,7 +275,7 @@ def detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=None):
         df, piv_hi, atr,
         base_max=params["base_max"], base_min=params["base_min"],
         last_touch_within=params["last_touch_within"],
-        min_touches=params["min_touches"],
+        min_touches=params["min_touches"], live_price=last_close,
     )
     if level is None:
         return None
@@ -276,7 +314,7 @@ def detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=None):
     # --max-dist overrides the adaptive gate.
     max_dist = params["max_dist_to_trigger"]
     if max_dist is None:
-        max_dist = float(np.clip(0.5 * height / trigger, 0.03, 0.10))
+        max_dist = float(np.clip(0.5 * height / trigger, 0.03, params["max_dist_cap"]))
     dist = (trigger - last_close) / trigger
     if dist < -0.01 or dist > max_dist:
         return None
@@ -303,10 +341,12 @@ def detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=None):
 
     return {
         "symbol": sym,
+        "pattern": "ascending_triangle",
         "tf": params.get("tf", "D"),
         "score": round(score, 1),
         "level": level,
         "trigger": trigger,
+        "confirm": level * 1.03,
         "target": target,
         "upside_pct": (target / trigger - 1.0) * 100,
         "dist_to_trigger_pct": dist * 100,
@@ -324,6 +364,175 @@ def detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=None):
         "last_close": last_close,
         "df": df,
     }
+
+
+def _common_gates(df, params, adv_dollar):
+    """Shared preamble for every detector: history, ATR, liquidity, pivots.
+    Returns a dict of primitives or None."""
+    n = len(df)
+    if n < params["min_bars"]:
+        return None
+    atr = compute_atr(df).values
+    close = df["Close"]
+    last_close = float(close.iloc[-1])
+    if np.isnan(atr[-1]) or last_close <= 0:
+        return None
+    if adv_dollar is None:
+        adv_dollar = float((close * df["Volume"]).tail(20).mean())
+    if adv_dollar < params["min_adv"]:
+        return None
+    piv_hi, piv_lo = find_pivots(df, k=params["pivot_k"], atr=atr)
+    return {"n": n, "atr": atr, "close": close, "last_close": last_close,
+            "adv": adv_dollar, "piv_hi": piv_hi, "piv_lo": piv_lo}
+
+
+def _consolidation_common(sym, df, spy_close, params, C, level, touches, base_low,
+                          pattern, extra):
+    """Proximity gate, Roy-convention levels, and scoring shared by the
+    rectangle and H&S-bottom rules. Returns the candidate dict or None.
+
+    Roy conventions (reverse-engineered from published calls, all six Aug-22
+    ideas + TechCharts FCX): confirm = boundary x 1.03; target = log-scale
+    measured move, boundary x (boundary / pattern low).
+    """
+    n, close, last_close = C["n"], C["close"], C["last_close"]
+    base_start = touches[0]
+    trigger = float(max(df["High"].iloc[i] for i in touches))
+    height = level - base_low
+    max_dist = params["max_dist_to_trigger"]
+    if max_dist is None:
+        max_dist = float(np.clip(0.5 * height / trigger, 0.03, params["max_dist_cap"]))
+    dist = (trigger - last_close) / trigger
+    # allow closes up to the +3% confirm zone (Roy flags names sitting there)
+    if dist < -0.03 or dist > max_dist:
+        return None
+
+    target = level * (level / base_low)
+
+    touch_score = min(len(touches) + len(extra.get("floor_touches", [])), 6) / 6.0 * 25.0
+    last_atr = C["atr"][-1]
+    range10 = float(df["High"].tail(10).max() - df["Low"].tail(10).min())
+    tight_score = 20.0 * float(np.clip(1.0 - range10 / (3.0 * last_atr), 0, 1))
+    base_vol = df["Volume"].iloc[base_start:].mean()
+    vol_ratio = float(df["Volume"].tail(10).mean() / base_vol) if base_vol > 0 else 1.0
+    vol_score = 20.0 * float(np.clip((1.2 - vol_ratio) / 0.7, 0, 1))
+    rs_score, rs_excess = 0.0, None
+    if spy_close is not None:
+        spy_aligned = spy_close.reindex(df.index).ffill()
+        w = min(120, n - 1)
+        if not np.isnan(spy_aligned.iloc[-w]):
+            rs_excess = float(last_close / close.iloc[-w] - spy_aligned.iloc[-1] / spy_aligned.iloc[-w])
+            rs_score = 15.0 * float(np.clip(rs_excess / 0.20, 0, 1))
+    prox_score = 20.0 * float(np.clip(1.0 - max(dist, 0) / max_dist, 0, 1))
+    score = touch_score + tight_score + vol_score + rs_score + prox_score
+
+    cand = {
+        "symbol": sym,
+        "pattern": pattern,
+        "tf": params.get("tf", "D"),
+        "score": round(score, 1),
+        "level": level,
+        "trigger": trigger,
+        "confirm": level * 1.03,
+        "target": target,
+        "upside_pct": (target / trigger - 1.0) * 100,
+        "dist_to_trigger_pct": dist * 100,
+        "touches": touches,
+        "n_touches": len(touches),
+        "base_start": base_start,
+        "base_days": n - 1 - base_start,
+        "gain_into_base_pct": float(close.iloc[base_start] / close.iloc[max(base_start - params["uptrend_lookback"], 0)] - 1) * 100,
+        "vol_ratio": vol_ratio,
+        "rs_excess_pct": None if rs_excess is None else rs_excess * 100,
+        "adv_dollar": C["adv"],
+        "last_close": last_close,
+        "df": df,
+    }
+    cand.update(extra)
+    return cand
+
+
+def detect_rectangle(sym, df, spy_close, params, adv_dollar=None):
+    """Flat ceiling + flat floor holding for months (Roy: 6-22 month
+    rectangles). No trend-context gate — his rectangles are both continuation
+    and reversal structures; the human classifies from the chart."""
+    C = _common_gates(df, params, adv_dollar)
+    if C is None:
+        return None
+    level, touches = find_ceiling(
+        df, C["piv_hi"], C["atr"],
+        base_max=params["base_max_long"], base_min=params["base_min_long"],
+        last_touch_within=params["last_touch_within"],
+        min_touches=params["min_touches"], breakout_grace=1.03,
+        live_price=C["last_close"],
+    )
+    if level is None:
+        return None
+    floor = find_floor(df, C["piv_lo"], C["atr"], touches[0], min_touches=2)
+    if floor is None:
+        return None
+    floor_level, floor_touches = floor
+    if floor_level >= level or (level - floor_level) / level < 0.07:
+        return None
+    base_low = float(df["Low"].iloc[touches[0]:].min())
+    return _consolidation_common(
+        sym, df, spy_close, params, C, level, touches, base_low,
+        "rectangle", {"floor_level": floor_level, "floor_touches": floor_touches},
+    )
+
+
+def detect_hs_bottom(sym, df, spy_close, params, adv_dollar=None):
+    """Horizontal neckline + a head (lowest low) in the middle of the base
+    with distinctly higher lows either side (shoulders). Bullish reversal —
+    the >=12% head depth below the neckline encodes the prior decline, so no
+    separate trend gate."""
+    C = _common_gates(df, params, adv_dollar)
+    if C is None:
+        return None
+    level, touches = find_ceiling(
+        df, C["piv_hi"], C["atr"],
+        base_max=params["base_max_long"], base_min=params["base_min_long"],
+        last_touch_within=params["last_touch_within"],
+        min_touches=params["min_touches"], breakout_grace=1.03,
+        live_price=C["last_close"],
+    )
+    if level is None:
+        return None
+    n = C["n"]
+    base_start = touches[0]
+    lows = df["Low"].values
+    span = n - base_start
+    head_idx = base_start + int(np.argmin(lows[base_start:n]))
+    head_low = float(lows[head_idx])
+    if 1.0 - head_low / level < 0.12:
+        return None
+    edge = max(3, int(0.15 * span))
+    if not (base_start + edge < head_idx < n - edge):
+        return None
+    gap = max(3, int(0.10 * span))
+    left_min = float(lows[base_start : head_idx - gap + 1].min()) if head_idx - gap > base_start else None
+    right_min = float(lows[head_idx + gap : n].min()) if head_idx + gap < n else None
+    if left_min is None or right_min is None:
+        return None
+    if left_min < head_low * 1.03 or right_min < head_low * 1.03:
+        return None  # head must be distinctly the lowest point
+    return _consolidation_common(
+        sym, df, spy_close, params, C, level, touches, head_low,
+        "hs_bottom", {"head_idx": head_idx, "head_low": head_low},
+    )
+
+
+DETECTORS = {
+    "ascending_triangle": detect_ascending_triangle,
+    "rectangle": detect_rectangle,
+    "hs_bottom": detect_hs_bottom,
+}
+
+PATTERN_NAMES = {
+    "ascending_triangle": "Ascending Triangle",
+    "rectangle": "Rectangle",
+    "hs_bottom": "H&S Bottom",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -385,26 +594,46 @@ def render_chart(cand, show_bars=170):
         if t >= off:
             ax.plot(t - off, df["High"].iloc[t], marker="v", color=CEIL_COLOR, markersize=5)
 
-    # rising-lows trendline from first anchor, extrapolated to right edge
-    slope, intercept = cand["support"]
-    a0 = cand["support_anchors"][0]
-    xs = np.arange(max(a0, off), n + 3)
-    ax.plot(xs - off, slope * xs + intercept, color=SUP_COLOR, linewidth=1.4)
-    for t in cand["support_touches"]:
-        if t >= off:
-            ax.plot(t - off, df["Low"].iloc[t], marker="^", color=SUP_COLOR, markersize=5)
+    # pattern-specific structure below the ceiling
+    if "support" in cand:  # ascending triangle: rising-lows trendline
+        slope, intercept = cand["support"]
+        a0 = cand["support_anchors"][0]
+        xs = np.arange(max(a0, off), n + 3)
+        ax.plot(xs - off, slope * xs + intercept, color=SUP_COLOR, linewidth=1.4)
+        for t in cand["support_touches"]:
+            if t >= off:
+                ax.plot(t - off, df["Low"].iloc[t], marker="^", color=SUP_COLOR, markersize=5)
+    if "floor_level" in cand:  # rectangle: flat lower boundary
+        first_f = max(cand["floor_touches"][0] - off, 0)
+        ax.hlines(cand["floor_level"], first_f, len(sub) - 1 + 3, color=SUP_COLOR, linewidth=1.4)
+        for t in cand["floor_touches"]:
+            if t >= off:
+                ax.plot(t - off, df["Low"].iloc[t], marker="^", color=SUP_COLOR, markersize=5)
+    if "head_idx" in cand:  # H&S bottom: mark the head
+        h = cand["head_idx"]
+        if h >= off:
+            ax.plot(h - off, cand["head_low"], marker="^", color=TARGET_COLOR, markersize=7)
+            ax.annotate("H", (h - off, cand["head_low"]), xytext=(0, -14),
+                        textcoords="offset points", ha="center", color=TARGET_COLOR, fontsize=8)
 
-    # trigger + measured target
-    ax.axhline(cand["target"], color=TARGET_COLOR, linewidth=1.1, linestyle="--", alpha=0.9)
+    # trigger + measured target (far targets annotated, not drawn, so the
+    # candles aren't squished — NUTX-style log targets can be 2.5x price)
+    hi = float(sub["High"].max())
+    draw_target = cand["target"] <= hi * 1.35
     xr = len(sub) + 3
-    ax.text(xr, cand["level"], f" trigger {cand['trigger']:.2f}", color=CEIL_COLOR,
-            fontsize=8, va="center")
-    ax.text(xr, cand["target"], f" target {cand['target']:.2f} (+{cand['upside_pct']:.1f}%)",
-            color=TARGET_COLOR, fontsize=8, va="center")
+    if draw_target:
+        ax.axhline(cand["target"], color=TARGET_COLOR, linewidth=1.1, linestyle="--", alpha=0.9)
+        ax.text(xr, cand["target"], f" target {cand['target']:.2f} (+{cand['upside_pct']:.1f}%)",
+                color=TARGET_COLOR, fontsize=8, va="center")
+    else:
+        ax.text(0.995, 0.975, f"target {cand['target']:.2f} (+{cand['upside_pct']:.1f}%) ↑ off-scale",
+                transform=ax.transAxes, ha="right", va="top", color=TARGET_COLOR, fontsize=8)
+    ax.text(xr, cand["level"], f" trigger {cand['trigger']:.2f}\n confirm {cand['confirm']:.2f}",
+            color=CEIL_COLOR, fontsize=8, va="center")
 
     ax.set_xlim(-2, len(sub) + 16)
     ymin = float(sub["Low"].min()) * 0.985
-    ymax = max(float(sub["High"].max()), cand["target"]) * 1.015
+    ymax = (max(hi, cand["target"]) if draw_target else hi) * 1.015
     ax.set_ylim(ymin, ymax)
     plt.setp(ax.get_xticklabels(), visible=False)
 
@@ -422,8 +651,9 @@ def render_chart(cand, show_bars=170):
     axv.set_xticklabels([sub.index[i].strftime(fmt) for i in ticks], color=TEXT)
 
     unit = "w" if cand.get("tf") == "W" else "d"
+    pname = PATTERN_NAMES.get(cand.get("pattern", "ascending_triangle"), cand.get("pattern"))
     ax.set_title(
-        f"{cand['symbol']}  —  Ascending Triangle (continuation, {cand.get('tf', 'D')})   "
+        f"{cand['symbol']}  —  {pname} ({cand.get('tf', 'D')})   "
         f"score {cand['score']}   base {cand['base_days']}{unit}   "
         f"{cand['n_touches']} touches   ADV ${cand['adv_dollar'] / 1e6:,.0f}M",
         color=TEXT, fontsize=10, loc="left",
@@ -450,11 +680,12 @@ def build_html(cands, meta, out_path):
   <div class="head">
     <span class="rank">#{rank}</span>
     <span class="sym">{c['symbol']}</span>
+    <span class="pat">{PATTERN_NAMES.get(c.get('pattern', ''), '')} ({c.get('tf', 'D')})</span>
     <span class="score">score {c['score']}</span>
   </div>
   <table class="stats">
     <tr><td>Last</td><td>{c['last_close']:.2f}</td>
-        <td>Trigger</td><td>{c['trigger']:.2f} ({c['dist_to_trigger_pct']:+.1f}% away)</td>
+        <td>Trigger / Confirm</td><td>{c['trigger']:.2f} / {c['confirm']:.2f} ({c['dist_to_trigger_pct']:+.1f}% away)</td>
         <td>Target</td><td>{c['target']:.2f} (+{c['upside_pct']:.1f}%)</td></tr>
     <tr><td>Base</td><td>{c['base_days']}{'w' if c.get('tf') == 'W' else 'd'} / {c['n_touches']} touches</td>
         <td>Vol 10d/base</td><td>{c['vol_ratio']:.2f}×</td>
@@ -477,13 +708,14 @@ h1 {{ font-size: 20px; margin-bottom: 2px; }}
 .head {{ display:flex; gap:14px; align-items:baseline; margin-bottom:6px; }}
 .rank {{ color:#8892a8; font-size:13px; }}
 .sym {{ font-size:19px; font-weight:600; color:#fff; }}
+.pat {{ color:{CEIL_COLOR}; font-size:13px; }}
 .score {{ color:{TARGET_COLOR}; font-size:13px; }}
 .stats {{ border-collapse:collapse; font-size:12px; margin-bottom:8px; }}
 .stats td {{ padding:1px 14px 1px 0; }}
 .stats td:nth-child(odd) {{ color:#8892a8; }}
 img {{ width:100%; border-radius:4px; }}
 </style></head><body>
-<h1>Ascending Triangle — Continuation Scan</h1>
+<h1>Chart Pattern Scan — {meta['pattern']}</h1>
 <div class="meta">{meta['date']} · universe: {meta['universe']} ({meta['n_universe']} symbols,
 {meta['n_loaded']} with data) · source: {meta['source']} · data through {meta['data_end']} ·
 {len(cands)} candidates · min ADV ${meta['min_adv'] / 1e6:.0f}M ·
@@ -511,7 +743,10 @@ DEFAULT_PARAMS = {
     "min_touches": 2,
     "uptrend_lookback": 60,
     "uptrend_min_gain": 0.12,
-    "max_dist_to_trigger": None,  # None = adaptive: clip(0.5*height/trigger, 3%, 10%)
+    "max_dist_to_trigger": None,  # None = adaptive: clip(0.5*height/trigger, 3%, cap)
+    "max_dist_cap": 0.10,
+    "base_max_long": 280,   # rectangle / H&S bottom: Roy's run 3-22 months
+    "base_min_long": 40,
     "min_adv": 25e6,
 }
 
@@ -526,6 +761,9 @@ WEEKLY_PARAMS = {
     "last_touch_within": 8,
     "uptrend_lookback": 26,
     "uptrend_min_gain": 0.15,
+    "max_dist_cap": 0.12,   # long weekly ranges oscillate deeper below the boundary
+    "base_max_long": 210,   # up to ~4y of weekly bars (TALO's neckline spans years)
+    "base_min_long": 20,
 }
 
 
@@ -541,7 +779,8 @@ def main():
     ap = argparse.ArgumentParser(description="Chart pattern scanner (issue #348)")
     ap.add_argument("--universe", default="nasdaq_100.json")
     ap.add_argument("--source", choices=["yahoo", "parquet"], default="parquet")
-    ap.add_argument("--patterns", default="ascending_triangle")
+    ap.add_argument("--patterns", default="all",
+                    help="comma list of %s, or 'all'" % "/".join(DETECTORS))
     ap.add_argument("--timeframe", choices=["D", "W"], default="D",
                     help="W resamples daily bars to weekly before detection")
     ap.add_argument("--min-base", type=int, default=None,
@@ -557,8 +796,12 @@ def main():
                          "e.g. to test the scanner against a known pro call")
     args = ap.parse_args()
 
-    if args.patterns != "ascending_triangle":
-        log.error("MVP supports --patterns ascending_triangle only (issue #348 scope).")
+    patterns = [p.strip() for p in args.patterns.split(",") if p.strip()]
+    if args.patterns == "all":
+        patterns = list(DETECTORS)
+    unknown = [p for p in patterns if p not in DETECTORS]
+    if unknown:
+        log.error("Unknown pattern(s) %s — available: %s", unknown, list(DETECTORS))
         sys.exit(1)
 
     params = dict(DEFAULT_PARAMS)
@@ -575,9 +818,9 @@ def main():
     log.info("Universe: %d symbols", len(tickers))
 
     if args.source == "yahoo":
-        data = fetch_yahoo(tickers + ["SPY"], period="5y" if args.timeframe == "W" else "2y")
+        data = fetch_yahoo(tickers + ["SPY"], period="10y" if args.timeframe == "W" else "3y")
     else:
-        data = fetch_parquet(tickers + ["SPY"], lookback_bars=1300 if args.timeframe == "W" else 500)
+        data = fetch_parquet(tickers + ["SPY"], lookback_bars=2600 if args.timeframe == "W" else 800)
     if args.as_of:
         def _truncate(df):
             ts = pd.Timestamp(args.as_of)
@@ -591,19 +834,20 @@ def main():
 
     cands = []
     for sym, df in sorted(data.items()):
-        try:
-            adv = None
-            if args.timeframe == "W":
-                adv = float((df["Close"] * df["Volume"]).tail(20).mean())  # from daily bars
-                df = resample_weekly(df)
-            cand = detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=adv)
-        except Exception as e:  # one bad symbol must not kill the scan
-            log.warning("%s: detection error: %s", sym, e)
-            continue
-        if cand is not None:
-            cands.append(cand)
-            log.info("MATCH %-6s score %.1f  trigger %.2f  (%+.1f%% away)",
-                     sym, cand["score"], cand["trigger"], cand["dist_to_trigger_pct"])
+        adv = None
+        if args.timeframe == "W":
+            adv = float((df["Close"] * df["Volume"]).tail(20).mean())  # from daily bars
+            df = resample_weekly(df)
+        for pat in patterns:
+            try:
+                cand = DETECTORS[pat](sym, df, spy_close, params, adv_dollar=adv)
+            except Exception as e:  # one bad symbol must not kill the scan
+                log.warning("%s/%s: detection error: %s", sym, pat, e)
+                continue
+            if cand is not None:
+                cands.append(cand)
+                log.info("MATCH %-6s %-18s score %.1f  trigger %.2f  (%+.1f%% away)",
+                         sym, pat, cand["score"], cand["trigger"], cand["dist_to_trigger_pct"])
 
     cands.sort(key=lambda c: c["score"], reverse=True)
     cands = cands[: args.top]
@@ -611,11 +855,12 @@ def main():
     data_end = max((df.index.max() for df in data.values()), default=None)
     run_date = datetime.now().strftime("%Y-%m-%d")
     suffix = "" if args.timeframe == "D" else f"_{args.timeframe}"
+    base_name = patterns[0] if len(patterns) == 1 else "scan"
     out_path = args.out or os.path.join(
-        PROJECT_ROOT, "output", "scans", run_date, f"ascending_triangle{suffix}.html"
+        PROJECT_ROOT, "output", "scans", run_date, f"{base_name}{suffix}.html"
     )
     meta = {
-        "pattern": "ascending_triangle",
+        "pattern": ", ".join(PATTERN_NAMES[p] for p in patterns),
         "date": run_date if not args.as_of else f"{run_date} — REPLAY as of {args.as_of}",
         "universe": args.universe,
         "n_universe": len(tickers),
