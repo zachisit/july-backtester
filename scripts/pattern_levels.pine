@@ -6,8 +6,8 @@
 // fixed micro-dash; the drawing-tool look needs manual segments).
 indicator("Pattern Trade Levels", overlay = true, max_lines_count = 500, max_labels_count = 20)
 
-B        = input.float(40.39, "Boundary / breakout level (B)",            step = 0.01)
-L        = input.float(34.40, "Pattern low (L)",                          step = 0.01)
+B        = input.float(0.0,   "Boundary / breakout level (B)",            step = 0.01)
+L        = input.float(0.0,   "Pattern low (L)",                          step = 0.01)
 S        = input.float(0.0,   "Structural stop (last higher low, 0=off)", step = 0.01)
 confPct  = input.float(3.0,   "Confirm / negation buffer %",              step = 0.1)
 useLog   = input.bool(true,   "Log measured move (BxB/L) — off = B+(B-L)")
@@ -46,6 +46,7 @@ f_lvl(float y, color col, string txt) =>
 
 if barstate.islast
     f_clear()
+if barstate.islast and B > 0 and L > 0 and L < B
     f_lvl(B,       color.fuchsia, "boundary")
     f_lvl(confirm, color.aqua,    "confirm +" + str.tostring(confPct, "#.#") + "%")
     f_lvl(target,  color.lime,    "target")
