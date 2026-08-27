@@ -204,6 +204,24 @@ def validate_config(config: dict) -> list[str]:
             warnings.append(msg)
             logger.warning(msg)
 
+    # Value-level check for universe_rebase. Registering the key in KNOWN_KEYS
+    # without its DOMAIN left a gap: a plausible typo like "yearly" passes
+    # validation, then raises ValueError inside build_rule_schedule, which
+    # main.py's `except Exception: continue` turns into one ERROR line and a
+    # SILENTLY DROPPED PORTFOLIO. Catching it here fails at startup instead,
+    # where it is attributable. Same precedent as smoothness_profile above.
+    ur = config.get("universe_rebase")
+    if ur is not None:
+        from helpers.rule_based_universe import REBASE_FREQUENCIES
+        valid_ur = {"none", *REBASE_FREQUENCIES.keys()}
+        if str(ur).lower() not in valid_ur:
+            options = "', '".join(sorted(valid_ur))
+            msg = (f"WARNING: universe_rebase '{ur}' is not a known frequency "
+                   f"(expected one of '{options}') -- any rule: portfolio will "
+                   f"be DROPPED at run time with a single ERROR line")
+            warnings.append(msg)
+            logger.warning(msg)
+
     return warnings
 
 

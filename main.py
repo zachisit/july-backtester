@@ -738,7 +738,13 @@ def main():
             # (union, schedule) pair as the pit: branch below, so it reuses the
             # existing per-bar membership masking with no engine change.
             from helpers.rule_based_universe import build_rule_schedule
-            _rebase = CONFIG.get("universe_rebase", "annual")
+            # .lower() because rebase_dates() lowercases before dispatching, so
+            # "None"/"NONE" already FREEZE the universe. Comparing verbatim here
+            # meant those spellings froze it while skipping the warning AND
+            # leaving the mask built from the frozen snapshot rather than
+            # disabled -- i.e. it failed in exactly the case the warning exists
+            # for: a user who deliberately opted into freezing.
+            _rebase = str(CONFIG.get("universe_rebase", "annual") or "annual").lower()
             try:
                 symbols, _current_membership_schedule = build_rule_schedule(
                     value, CONFIG["start_date"], CONFIG["end_date"], CONFIG,

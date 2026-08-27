@@ -461,3 +461,72 @@ class TestBuildRuleScheduleClosesTheStartDateBias:
             "rule:top10", "2004-01-02", "2010-01-02", {}, frequency="annual")
         assert union == []
         assert schedule and schedule[0][1] == frozenset()
+
+
+class TestUniverseRebaseValueHandling:
+    """@shardul0701's two findings on the #292 approval.
+
+    Both are the same shape: a value that LOOKS handled and isn't, failing in
+    the case where the user most needs to be told.
+    """
+
+    def test_case_variants_all_freeze_the_universe(self):
+        """`rebase_dates` lowercases, so "None"/"NONE" already freeze. The
+        dispatch in main.py compared verbatim, so those spellings froze the
+        universe while SKIPPING the warning - and left the membership mask built
+        from the frozen snapshot rather than disabled."""
+        for spelling in ("none", "None", "NONE", "nOnE"):
+            assert rebase_dates("2004-01-02", "2024-01-02", spelling) == \
+                ["2004-01-02"], spelling
+
+    def test_case_variants_of_a_real_frequency_also_work(self):
+        for spelling in ("annual", "Annual", "ANNUAL"):
+            assert len(rebase_dates("2004-01-02", "2024-01-02", spelling)) == 21
+
+    def test_main_dispatch_lowercases_before_comparing(self):
+        """Source pin: the warning and the mask-disable both hang off this
+        comparison, so a verbatim compare silently mishandles "None"."""
+        import os
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        src = open(os.path.join(root, "main.py"), encoding="utf-8").read()
+        assert '_rebase = str(CONFIG.get("universe_rebase", "annual") or "annual").lower()' in src, (
+            "main.py must lowercase universe_rebase before comparing it to "
+            '"none" - otherwise "None" freezes the universe with no warning'
+        )
+
+    @pytest.mark.parametrize("bad", ["yearly", "ANNUALLY", "weekly", "1y", ""])
+    def test_an_invalid_frequency_is_caught_at_config_validation(self, bad):
+        """It was in KNOWN_KEYS but its DOMAIN was unregistered, so a typo passed
+        validation and then raised inside build_rule_schedule - which main.py's
+        `except Exception: continue` turned into one ERROR line and a silently
+        dropped portfolio. Now it fails at startup, where it is attributable."""
+        from helpers.config_validator import validate_config
+        w = validate_config({"universe_rebase": bad})
+        assert any("universe_rebase" in m for m in w), (
+            f"{bad!r} passed config validation; it will drop the portfolio at "
+            f"run time instead"
+        )
+
+    @pytest.mark.parametrize("good", ["none", "None", "annual", "QUARTERLY", "monthly"])
+    def test_valid_frequencies_pass_validation(self, good):
+        from helpers.config_validator import validate_config
+        w = validate_config({"universe_rebase": good})
+        assert not any("universe_rebase" in m for m in w), (
+            f"{good!r} is valid but was flagged"
+        )
+
+    def test_absent_key_is_not_flagged(self):
+        from helpers.config_validator import validate_config
+        assert not any("universe_rebase" in m for m in validate_config({}))
+
+    def test_the_validator_and_the_resolver_agree_on_the_domain(self):
+        """THE invariant: anything validation accepts, rebase_dates must handle,
+        and vice versa. Two independently-maintained lists is how this gap
+        appeared in the first place."""
+        from helpers.config_validator import validate_config
+        from helpers.rule_based_universe import REBASE_FREQUENCIES
+        domain = {"none", *REBASE_FREQUENCIES.keys()}
+        for value in domain:
+            assert not any("universe_rebase" in m
+                           for m in validate_config({"universe_rebase": value}))
+            rebase_dates("2020-01-01", "2021-01-01", value)   # must not raise
