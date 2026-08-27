@@ -210,13 +210,14 @@ def find_rising_support(df, piv_lo, base_start, tol_atr, min_touches=2):
 # ---------------------------------------------------------------------------
 
 
-def detect_ascending_triangle(sym, df, spy_close, params):
+def detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=None):
     """Full rule: ceiling + rising lows + uptrend context + proximity + liquidity.
 
+    `adv_dollar` may be precomputed from daily bars (weekly resample path).
     Returns a candidate dict or None.
     """
     n = len(df)
-    if n < 260:
+    if n < params["min_bars"]:
         return None
     atr = compute_atr(df).values
     close = df["Close"]
@@ -226,7 +227,8 @@ def detect_ascending_triangle(sym, df, spy_close, params):
         return None
 
     # liquidity floor (dollar ADV)
-    adv_dollar = float((close * df["Volume"]).tail(20).mean())
+    if adv_dollar is None:
+        adv_dollar = float((close * df["Volume"]).tail(20).mean())
     if adv_dollar < params["min_adv"]:
         return None
 
@@ -294,6 +296,7 @@ def detect_ascending_triangle(sym, df, spy_close, params):
 
     return {
         "symbol": sym,
+        "tf": params.get("tf", "D"),
         "score": round(score, 1),
         "level": level,
         "trigger": trigger,
@@ -403,14 +406,18 @@ def render_chart(cand, show_bars=170):
     axv.set_yticks([])
 
     # month tick labels on bar index axis (no weekend gaps)
-    months = pd.Series(sub.index.strftime("%b"), index=x)
+    months = pd.Series(sub.index.strftime("%b %y"), index=x)
     ticks = [i for i in x[1:] if months[i] != months[i - 1]]
+    if len(ticks) > 16:  # weekly charts span years — thin the labels
+        ticks = ticks[:: max(1, len(ticks) // 12)]
+    fmt = "%b %y" if cand.get("tf") == "W" else "%b"
     axv.set_xticks(ticks)
-    axv.set_xticklabels([sub.index[i].strftime("%b") for i in ticks], color=TEXT)
+    axv.set_xticklabels([sub.index[i].strftime(fmt) for i in ticks], color=TEXT)
 
+    unit = "w" if cand.get("tf") == "W" else "d"
     ax.set_title(
-        f"{cand['symbol']}  —  Ascending Triangle (continuation)   "
-        f"score {cand['score']}   base {cand['base_days']}d   "
+        f"{cand['symbol']}  —  Ascending Triangle (continuation, {cand.get('tf', 'D')})   "
+        f"score {cand['score']}   base {cand['base_days']}{unit}   "
         f"{cand['n_touches']} touches   ADV ${cand['adv_dollar'] / 1e6:,.0f}M",
         color=TEXT, fontsize=10, loc="left",
     )
@@ -442,7 +449,7 @@ def build_html(cands, meta, out_path):
     <tr><td>Last</td><td>{c['last_close']:.2f}</td>
         <td>Trigger</td><td>{c['trigger']:.2f} ({c['dist_to_trigger_pct']:+.1f}% away)</td>
         <td>Target</td><td>{c['target']:.2f} (+{c['upside_pct']:.1f}%)</td></tr>
-    <tr><td>Base</td><td>{c['base_days']}d / {c['n_touches']} touches</td>
+    <tr><td>Base</td><td>{c['base_days']}{'w' if c.get('tf') == 'W' else 'd'} / {c['n_touches']} touches</td>
         <td>Vol 10d/base</td><td>{c['vol_ratio']:.2f}×</td>
         <td>Gain into base</td><td>{c['gain_into_base_pct']:+.1f}%</td></tr>
     <tr><td>RS vs SPY (120d)</td><td>{rs}</td>
@@ -488,6 +495,8 @@ style="color:{SUP_COLOR}">issue #348</a></div>
 # ---------------------------------------------------------------------------
 
 DEFAULT_PARAMS = {
+    "tf": "D",
+    "min_bars": 260,
     "pivot_k": 4,
     "base_max": 140,
     "base_min": 15,
@@ -499,12 +508,37 @@ DEFAULT_PARAMS = {
     "min_adv": 25e6,
 }
 
+# Weekly bars: same rule, coarser clock. base_min 10w ~ 2.5 months keeps the
+# multi-month character (Roy-style triangles) structural rather than incidental.
+WEEKLY_PARAMS = {
+    "tf": "W",
+    "min_bars": 80,
+    "pivot_k": 3,
+    "base_max": 60,
+    "base_min": 10,
+    "last_touch_within": 8,
+    "uptrend_lookback": 26,
+    "uptrend_min_gain": 0.15,
+}
+
+
+def resample_weekly(df):
+    return (
+        df.resample("W-FRI")
+        .agg({"Open": "first", "High": "max", "Low": "min", "Close": "last", "Volume": "sum"})
+        .dropna(subset=["Close"])
+    )
+
 
 def main():
     ap = argparse.ArgumentParser(description="Chart pattern scanner (issue #348)")
     ap.add_argument("--universe", default="nasdaq_100.json")
     ap.add_argument("--source", choices=["yahoo", "parquet"], default="parquet")
     ap.add_argument("--patterns", default="ascending_triangle")
+    ap.add_argument("--timeframe", choices=["D", "W"], default="D",
+                    help="W resamples daily bars to weekly before detection")
+    ap.add_argument("--min-base", type=int, default=None,
+                    help="minimum base length in bars (e.g. 55 daily ~ 3 months)")
     ap.add_argument("--min-adv", type=float, default=DEFAULT_PARAMS["min_adv"])
     ap.add_argument("--max-dist", type=float, default=DEFAULT_PARAMS["max_dist_to_trigger"])
     ap.add_argument("--min-gain", type=float, default=DEFAULT_PARAMS["uptrend_min_gain"])
@@ -517,25 +551,33 @@ def main():
         sys.exit(1)
 
     params = dict(DEFAULT_PARAMS)
+    if args.timeframe == "W":
+        params.update(WEEKLY_PARAMS)
     params["min_adv"] = args.min_adv
     params["max_dist_to_trigger"] = args.max_dist
-    params["uptrend_min_gain"] = args.min_gain
+    if args.min_gain != DEFAULT_PARAMS["uptrend_min_gain"]:
+        params["uptrend_min_gain"] = args.min_gain
+    if args.min_base is not None:
+        params["base_min"] = args.min_base
 
     tickers = load_universe(args.universe)
     log.info("Universe: %d symbols", len(tickers))
 
     if args.source == "yahoo":
-        data = fetch_yahoo(tickers + ["SPY"])
+        data = fetch_yahoo(tickers + ["SPY"], period="5y" if args.timeframe == "W" else "2y")
     else:
-        data = fetch_parquet(tickers + ["SPY"])
+        data = fetch_parquet(tickers + ["SPY"], lookback_bars=1300 if args.timeframe == "W" else 500)
     spy_close = data.pop("SPY", pd.DataFrame()).get("Close")
     log.info("Loaded data for %d symbols", len(data))
 
-    funnel = {"liquidity+ceiling": 0, "support": 0, "context+proximity": 0}
     cands = []
     for sym, df in sorted(data.items()):
         try:
-            cand = detect_ascending_triangle(sym, df, spy_close, params)
+            adv = None
+            if args.timeframe == "W":
+                adv = float((df["Close"] * df["Volume"]).tail(20).mean())  # from daily bars
+                df = resample_weekly(df)
+            cand = detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=adv)
         except Exception as e:  # one bad symbol must not kill the scan
             log.warning("%s: detection error: %s", sym, e)
             continue
@@ -549,8 +591,9 @@ def main():
 
     data_end = max((df.index.max() for df in data.values()), default=None)
     run_date = datetime.now().strftime("%Y-%m-%d")
+    suffix = "" if args.timeframe == "D" else f"_{args.timeframe}"
     out_path = args.out or os.path.join(
-        PROJECT_ROOT, "output", "scans", run_date, "ascending_triangle.html"
+        PROJECT_ROOT, "output", "scans", run_date, f"ascending_triangle{suffix}.html"
     )
     meta = {
         "pattern": "ascending_triangle",
