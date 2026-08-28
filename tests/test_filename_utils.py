@@ -174,6 +174,11 @@ class TestWindowsReservedNames:
         "CONIN$", "CONOUT$",
         "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        # Windows reads the ISO/IEC 8859-1 superscript digits AS digits.
+        # Missing from the implementation AND from this literal until the set
+        # was checked against the Win32 spec instead of against itself — which
+        # is the failure mode a set-equality test is structurally blind to.
+        "COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³",
     }
 
     @pytest.mark.parametrize("name", sorted(_WIN32_RESERVED_LITERAL))
@@ -1074,6 +1079,93 @@ class TestReadPathsFindALegacyUnguardedFile:
         assert parquet_service._find_parquet("CON", str(tmp_path)) is None
 
 
+class TestProviderEntryPointsReturnLegacyNamedData:
+    """END TO END, through the function `main.py` actually calls.
+
+    Every reserved-name pin in this file targets the RESOLVER layer --
+    `_find_parquet`, `_find_csv`, `resolve_existing`, `get_cached_data`. The
+    provider ENTRY points one frame up were never tested with a reserved name,
+    and a QA sweep weaponised that twice: a sanitized-name equality gate in
+    `parquet_service.get_price_data` and a listing-based fast-path precheck in
+    `csv_service.get_price_data` each dropped CON/PRN silently while the FULL
+    suite stayed green.
+
+    Neither is reachable by the AST backstop, and that is not a fixable gap:
+    the scanner models probe VERBS, and a string-equality filter on an
+    already-resolved path is not a probe. The guard for this class has to be
+    behavioural, asserted at the layer the application uses.
+    """
+
+    @staticmethod
+    def _frame():
+        return pd.DataFrame(
+            {"Open": [1.0, 2.0], "High": [1.0, 2.0], "Low": [1.0, 2.0],
+             "Close": [1.0, 2.0], "Volume": [100, 200]},
+            index=pd.DatetimeIndex(
+                [pd.Timestamp("2024-01-02"), pd.Timestamp("2024-01-03")],
+                name="Datetime"))
+
+    def test_parquet_provider_returns_a_legacy_unguarded_reserved_name(
+            self, tmp_path):
+        from services import parquet_service
+
+        self._frame().to_parquet(tmp_path / "CON.parquet")
+        got = parquet_service.get_price_data(
+            "CON", "2024-01-01", "2024-06-01",
+            {"parquet_data_dir": str(tmp_path)})
+        assert got is not None and not got.empty, (
+            "the parquet PROVIDER dropped a reserved-name symbol whose only "
+            "file uses the legacy unguarded spelling — #345 through the front "
+            "door")
+
+    def test_parquet_provider_returns_the_dated_delisted_form(self, tmp_path):
+        """The real corpus stores delisted reserved names DATED
+        (`PRN-200207.parquet`). That fallback had no coverage through the
+        provider entry point at all."""
+        from services import parquet_service
+
+        self._frame().to_parquet(tmp_path / "PRN-200207.parquet")
+        got = parquet_service.get_price_data(
+            "PRN", "2024-01-01", "2024-06-01",
+            {"parquet_data_dir": str(tmp_path)})
+        assert got is not None and not got.empty, (
+            "the parquet provider dropped the DATED delisted form — the shape "
+            "the frozen corpus actually stores")
+
+    def test_parquet_provider_still_returns_an_ordinary_symbol(self, tmp_path):
+        from services import parquet_service
+
+        self._frame().to_parquet(tmp_path / "AAPL.parquet")
+        assert parquet_service.get_price_data(
+            "AAPL", "2024-01-01", "2024-06-01",
+            {"parquet_data_dir": str(tmp_path)}) is not None
+
+    def test_csv_provider_returns_a_legacy_unguarded_reserved_name(
+            self, tmp_path):
+        from services import csv_service
+
+        (tmp_path / "CON.csv").write_text(
+            "Date,Open,High,Low,Close,Volume\n"
+            "2024-01-02,1,1,1,1,100\n2024-01-03,2,2,2,2,200\n",
+            encoding="utf-8")
+        got = csv_service.get_price_data(
+            "CON", "2024-01-01", "2024-06-01",
+            {"csv_data_dir": str(tmp_path)})
+        assert got is not None and not got.empty, (
+            "the CSV PROVIDER dropped a reserved-name symbol whose only file "
+            "uses the legacy unguarded spelling — #345 through the front door")
+
+    def test_csv_provider_still_returns_an_ordinary_symbol(self, tmp_path):
+        from services import csv_service
+
+        (tmp_path / "AAPL.csv").write_text(
+            "Date,Open,High,Low,Close,Volume\n2024-01-02,1,1,1,1,100\n",
+            encoding="utf-8")
+        assert csv_service.get_price_data(
+            "AAPL", "2024-01-01", "2024-06-01",
+            {"csv_data_dir": str(tmp_path)}) is not None
+
+
 class TestNotFoundWarningReportsWhatWasActuallyProbed:
     """@shardul0701's finding: the CSV not-found warning recomposed its own
     path list from the bare sanitizer instead of reporting the resolver's
@@ -1269,7 +1361,11 @@ class TestNoReadPathBuildsItsOwnFilename:
     PATH_ARG_WRITES = {"to_parquet", "to_csv", "to_json", "to_pickle",
                        "to_feather", "to_hdf", "to_excel", "savefig"}
     # the RECEIVER is the path: `p.write_text(...)`, `p.touch()`
-    RECEIVER_WRITES = {"write_text", "write_bytes", "touch", "mkdir"}
+    # NOTE: `mkdir` is deliberately NOT here. It creates a DIRECTORY, so it
+    # cannot vouch for a probe of a file inside that directory — and letting it
+    # do so was the headline over-suppression this rule already had to fix once,
+    # one level down.
+    RECEIVER_WRITES = {"write_text", "write_bytes", "touch"}
     # `fh.write(x)` / `json.dump(obj, fh)` target a HANDLE, not a path — they
     # mark nothing, or a path passed as data would read as written.
     WRITE_FUNCS = PATH_ARG_WRITES | RECEIVER_WRITES
@@ -1283,6 +1379,9 @@ class TestNoReadPathBuildsItsOwnFilename:
                   # `.stat()` spelling was caught: whether a violation is found
                   # was a verb lottery.
                   "read_bytes", "read_text", "read_hdf", "read_excel",
+                  # readers a parquet corpus actually attracts
+                  "ParquetFile", "HDFStore", "copyfile", "copy2", "copy",
+                  "move", "load", "ZipFile", "read_metadata", "samefile",
                   # An os.access() spelling of main()'s skip check reverted the
                   # #345 fix with the ENTIRE suite still green -- verified. The
                   # verb set is the backstop's whole surface, so a gap in it is
@@ -1407,6 +1506,47 @@ class TestNoReadPathBuildsItsOwnFilename:
             # is about, so it is deleted rather than reworded.
         return out
 
+    @staticmethod
+    def _record_write(written, identity, lineno):
+        """Record that *identity* was written at *lineno*.
+
+        LAST write wins, not the first: `setdefault` pinned the earliest line
+        forever, so a write / re-taint / probe sequence stayed suppressed even
+        though the probed path was never the one written.
+
+        A computed slot (`d[*]`) is NEVER recorded. `_COMPUTED_KEY_RULE` answers
+        the undecidable "is this the same slot" with "assume not" — but on the
+        suppression side that default flips to HIDING findings, so a
+        computed-slot write must not vouch for any probe.
+        """
+        if not identity or identity.endswith("[*]") or "[*]" in identity:
+            return
+        prev = written.get(identity)
+        if prev is None or lineno > prev:
+            written[identity] = lineno
+
+    @staticmethod
+    def _was_written(identity, tainted, written, aliases, probe_line):
+        """True when *identity* holds a path this scope created above the probe.
+
+        Three conditions, each closing a reproduced hole:
+          * the write is above the probe (`<=`, so a write and its verification
+            on ONE physical line still counts)
+          * the write POSTDATES the taint that is being reported. Without this,
+            write / rebind-to-a-new-bare-path / probe stayed suppressed even
+            though the probed value was never written.
+          * an alias counts: `q = p; df.to_parquet(q); exists(p)` writes the
+            same file, and treating it as unwritten was a false positive on
+            ordinary code.
+        """
+        names = {identity} | aliases.get(identity, set())
+        taint_line = tainted.get(identity, 0)
+        for nm in names:
+            w = written.get(nm)
+            if w is not None and taint_line <= w <= probe_line:
+                return True
+        return False
+
     @classmethod
     def _scope_nodes(cls, body):
         """A scope's own nodes, NOT descending into nested defs.
@@ -1457,6 +1597,18 @@ class TestNoReadPathBuildsItsOwnFilename:
         fns = {f.name: f for f in ast.walk(tree)
                if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
         tainting, changed = set(), True
+        # `name = lambda ...: <bare path>` is a function for our purposes. It is
+        # also how a SAFE helper gets shadowed — un-blessing the name is only
+        # half the fix; without this the shadow is neither safe nor tainting,
+        # so its callers were still clean.
+        for n in ast.walk(tree):
+            if not isinstance(n, ast.Assign) or not isinstance(n.value, ast.Lambda):
+                continue
+            body = n.value.body
+            c = set(cls._calls(body))
+            if (c & sanitizers) and not (c & safe_names):
+                for t in n.targets:
+                    tainting.update(cls._target_names(t))
         while changed:
             changed = False
             for name, f in fns.items():
@@ -1552,18 +1704,42 @@ class TestNoReadPathBuildsItsOwnFilename:
         # `import helpers.filename_utils as fu` then
         # `scrub = fu.sanitize_symbol_for_filename` — the sanitizer bound via
         # an ATTRIBUTE, which the ImportFrom walk above cannot see.
-        for n in ast.walk(tree):
-            if isinstance(n, ast.Assign) and isinstance(n.value, ast.Attribute) \
-                    and n.value.attr in cls.SANITIZERS:
-                for t in n.targets:
-                    sanitizers.update(cls._target_names(t))
-        # A module that DEFINES its own `resolve_existing` shadows the real
-        # one; treating the local as safe launders every caller. The genuine
+        # FIXPOINT, because one extra hop defeated the single-pass version:
+        # `scrub = fu.sanitize_symbol_for_filename` then `scrub2 = scrub`, and
+        # `getattr(fu, "sanitize_symbol_for_filename")`.
+        for _ in range(6):
+            before = set(sanitizers)
+            for n in ast.walk(tree):
+                if not isinstance(n, ast.Assign):
+                    continue
+                v = n.value
+                hit = False
+                if isinstance(v, ast.Attribute) and v.attr in sanitizers:
+                    hit = True
+                elif isinstance(v, ast.Name) and v.id in sanitizers:
+                    hit = True
+                elif (isinstance(v, ast.Call) and isinstance(v.func, ast.Name)
+                        and v.func.id == "getattr" and len(v.args) > 1
+                        and isinstance(v.args[1], ast.Constant)
+                        and v.args[1].value in sanitizers):
+                    hit = True
+                if hit:
+                    for t in n.targets:
+                        sanitizers.update(cls._target_names(t))
+            if set(sanitizers) == before:
+                break
+        # A module that REBINDS a safe helper name shadows the real one, and
+        # treating the local as safe launders every caller. Any binding form --
+        # def, lambda, plain assignment -- not just FunctionDef. The genuine
         # helpers are imported by read paths, never defined in them.
         for n in ast.walk(tree):
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) \
                     and n.name in safe_names:
                 safe_names.discard(n.name)
+            elif isinstance(n, ast.Assign):
+                for t in n.targets:
+                    for nm in cls._target_names(t):
+                        safe_names.discard(nm)
 
         tainting_fns = cls._tainting_functions(tree, sanitizers, safe_names)
 
@@ -1578,6 +1754,20 @@ class TestNoReadPathBuildsItsOwnFilename:
             # pre-existing corpus, so flagging it is a false positive on
             # correct code.
             written = {}
+            # Pure aliases (`q = p`), symmetric: a write through either name
+            # writes the same file.
+            aliases = {}
+            for node in stmts:
+                tgts, val = cls._assign_parts(node)
+                if val is None or not isinstance(node, ast.Assign):
+                    continue
+                src_id = cls._dotted(val)
+                if not src_id or "[*]" in src_id:
+                    continue
+                for t in tgts:
+                    for nm in cls._target_names(t):
+                        aliases.setdefault(nm, set()).add(src_id)
+                        aliases.setdefault(src_id, set()).add(nm)
             for node in stmts:
                 tgts, val = cls._assign_parts(node)
                 if val is not None and (set(cls._calls(val)) & cls.LISTING_FUNCS):
@@ -1593,12 +1783,18 @@ class TestNoReadPathBuildsItsOwnFilename:
                         targets += [k.value for k in node.keywords
                                     if k.arg in ("path", "path_or_buf", "fname")]
                         for a in targets:
-                            for nm in cls._names(a):
-                                written.setdefault(nm, node.lineno)
+                            # EXACT identity only. Collecting every name INSIDE
+                            # the expression meant writing `p + '.tmp'` (the
+                            # atomic-rename idiom) or `join(backup_dir, p)`
+                            # vouched for a probe of `p` itself — which is
+                            # precisely a #345 pre-existence lookup. A
+                            # suppression rule must never generalise.
+                            cls._record_write(written, cls._dotted(a),
+                                              node.lineno)
                     elif node.func.attr in cls.RECEIVER_WRITES:
-                        recv = cls._dotted(node.func.value)
-                        if recv:
-                            written.setdefault(recv, node.lineno)
+                        cls._record_write(written,
+                                          cls._dotted(node.func.value),
+                                          node.lineno)
                 # open(): as a builtin `open(p, 'w')` or as `Path.open('w')`,
                 # with the mode positional OR keyword.
                 is_builtin_open = (isinstance(node, ast.Call)
@@ -1619,30 +1815,75 @@ class TestNoReadPathBuildsItsOwnFilename:
                             isinstance(mode.value, str) and \
                             not mode.value.startswith("r"):
                         if is_builtin_open and node.args:
-                            for nm in cls._names(node.args[0]):
-                                written.setdefault(nm, node.lineno)
+                            cls._record_write(written,
+                                              cls._dotted(node.args[0]),
+                                              node.lineno)
                         elif is_path_open:
-                            recv = cls._dotted(node.func.value)
-                            if recv:
-                                written.setdefault(recv, node.lineno)
+                            cls._record_write(written,
+                                              cls._dotted(node.func.value),
+                                              node.lineno)
+
+            _taint_memo = {}
 
             def taints(val):
-                # A TERNARY with a bare arm is not laundered by a safe arm.
-                # `bare if c else _resolve_existing(...)` had a SAFE call in
-                # its calls set, so the short-circuit below cleared it -- the
-                # same short-circuit that deliberately blesses caching.py's
-                # `resolve_existing(...) or join(...)`. An `or`-fallback is
-                # genuinely safe (the bare arm is only reached after the safe
-                # one proved nothing exists); a ternary picks an arm, so a bare
-                # arm can be the live value. BoolOp vs IfExp separates them.
-                # ANY IfExp inside the value, not just one at the top. The
-                # first version special-cased `bare if c else safe` only when
-                # the ternary was the whole expression, so one wrapper --
-                # `(... ) or 'x'`, `str(...)` -- laundered it again.
-                for sub in ast.walk(val):
-                    if isinstance(sub, ast.IfExp):
-                        if taints(sub.body) or taints(sub.orelse):
+                # Memoised: the structural recursion below is exponential on
+                # nested ternaries otherwise (measured: 51s at depth 20).
+                key = id(val)
+                if key in _taint_memo:
+                    return _taint_memo[key]
+                _taint_memo[key] = False        # cycle guard
+                _taint_memo[key] = _taints(val)
+                return _taint_memo[key]
+
+            def _taints(val):
+                # WHICH ARM IS LIVE decides whether a safe call launders a bare
+                # one. `safe or bare` is genuinely safe -- the bare arm is only
+                # reached after the safe one proved nothing exists, which is
+                # caching.py's shape. But `bare or safe` always yields the bare
+                # path (a join() is never falsy) and `safe and bare` yields the
+                # bare path whenever resolve succeeds. Treating any SAFE call
+                # anywhere as blessing was direction-blind.
+                if isinstance(val, ast.BoolOp):
+                    if isinstance(val.op, ast.Or):
+                        return taints(val.values[0])
+                    return taints(val.values[-1])
+                # A ternary picks an arm, so either arm tainting taints.
+                if isinstance(val, ast.IfExp):
+                    return taints(val.body) or taints(val.orelse)
+                # A tuple value assigned to a tuple target is element-wise; one
+                # safe element used to bless every name in the target.
+                if isinstance(val, ast.Tuple):
+                    return any(taints(e) for e in val.elts)
+                # A ternary anywhere OUTSIDE a safe call taints if either arm
+                # does — `str(bare if c else safe)` is the bare path wrapped.
+                # But do NOT descend into a safe call's ARGUMENTS: there the
+                # value is the resolver's result, a ternary among its args says
+                # nothing about it, and descending false-flagged correct code.
+                # `val` may itself BE the safe call, in which case there is
+                # nothing outside it to inspect.
+                if isinstance(val, ast.Call):
+                    _fn = val.func
+                    _nm = (_fn.attr if isinstance(_fn, ast.Attribute)
+                           else _fn.id if isinstance(_fn, ast.Name) else "")
+                    if _nm in safe_names:
+                        return False
+                stack, seen = [val], set()
+                while stack:
+                    nd = stack.pop()
+                    if id(nd) in seen:
+                        continue
+                    seen.add(id(nd))
+                    if isinstance(nd, ast.IfExp):
+                        if taints(nd.body) or taints(nd.orelse):
                             return True
+                    for ch in ast.iter_child_nodes(nd):
+                        if isinstance(ch, ast.Call):
+                            fn = ch.func
+                            nm = (fn.attr if isinstance(fn, ast.Attribute)
+                                  else fn.id if isinstance(fn, ast.Name) else "")
+                            if nm in safe_names:
+                                continue
+                        stack.append(ch)
                 c = set(cls._calls(val))
                 if c & safe_names:
                     return False
@@ -1655,6 +1896,12 @@ class TestNoReadPathBuildsItsOwnFilename:
 
             for _ in range(6):          # fixpoint: loop-carried bindings settle
                 before = (dict(tainted), set(safe))
+                # The memo MUST be cleared each round. taints() reads `tainted`,
+                # which grows across rounds, so a False cached before a name
+                # became tainted would stick — it silently un-caught the
+                # comprehension and csv-service-as-a-method shapes until the
+                # suite failed on them.
+                _taint_memo.clear()
                 # `acc.append(x)` / `acc.extend([...])` -- container mutation
                 # carries taint without any assignment node. Missing this is
                 # what let a mutated csv_service (which accumulates into a list
@@ -1768,7 +2015,8 @@ class TestNoReadPathBuildsItsOwnFilename:
                     # same post-write suppression as the main probe block —
                     # this block was added later and did not consult it, so
                     # `to_parquet(p)` then `all(map(isfile,[p]))` false-flagged
-                    if hit and all(written.get(r, node.lineno + 1) < node.lineno
+                    if hit and all(cls._was_written(r, tainted, written,
+                                                    aliases, node.lineno)
                                    for r in hit):
                         continue
                     if hit and not (refs & safe):
@@ -1824,9 +2072,9 @@ class TestNoReadPathBuildsItsOwnFilename:
                 _recv = (cls._dotted(node.func.value)
                          if isinstance(node.func, ast.Attribute) else None)
                 _checked = set(hit) | ({_recv} if _recv in tainted else set())
-                if _checked and all(
-                        written.get(r, node.lineno + 1) < node.lineno
-                        for r in _checked):
+                if _checked and all(cls._was_written(r, tainted, written,
+                                                     aliases, node.lineno)
+                                    for r in _checked):
                     continue
                 if hit and not (refs & safe):
                     v = sorted(hit)[0]

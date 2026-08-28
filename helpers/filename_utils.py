@@ -25,6 +25,13 @@ _WINDOWS_RESERVED = {
     "CONIN$", "CONOUT$",
     *[f"COM{i}" for i in range(1, 10)],
     *[f"LPT{i}" for i in range(1, 10)],
+    # Windows treats the ISO/IEC 8859-1 superscript digits as digits, so
+    # COM¹/COM²/COM³ and LPT¹/LPT²/LPT³ are reserved too — `echo test > COM¹`
+    # fails to create a file. Documented in "Naming Files, Paths, and
+    # Namespaces"; missing here until a QA sweep checked the set against the
+    # spec rather than against itself.
+    *[f"COM{d}" for d in ("¹", "²", "³")],
+    *[f"LPT{d}" for d in ("¹", "²", "³")],
 }
 
 # CON and PRN are REAL TICKERS with data in the Norgate corpus
