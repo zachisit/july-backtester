@@ -50,13 +50,38 @@ def _derive_read_paths(root=None):
                 tree = ast.parse(open(path, encoding="utf-8").read())
             except (SyntaxError, UnicodeDecodeError, OSError):
                 continue
-            for n in ast.walk(tree):
-                if isinstance(n, ast.ImportFrom) and n.module \
-                        and "filename_utils" in n.module:
-                    if {a.name for a in n.names} & _SANITIZER_IMPORTS:
-                        found.append(os.path.relpath(path, root))
-                        break
+            if _imports_filename_utils(tree):
+                found.append(os.path.relpath(path, root))
     return sorted(set(found))
+
+
+def _imports_filename_utils(tree):
+    """True if *tree* imports the filename helpers by ANY of the six forms.
+
+    @shardul0701 found the original matched only `ImportFrom` with the module
+    path spelled out, so three ordinary forms were missed:
+
+        import helpers.filename_utils as fu       MISSED
+        from helpers import filename_utils        MISSED
+        import helpers.filename_utils             MISSED
+
+    A sixth read path written any of those ways extended coverage by nothing and
+    the guard never noticed — the exact failure this contract exists to prevent.
+    """
+    for n in ast.walk(tree):
+        # from helpers.filename_utils import X  /  from .filename_utils import X
+        if isinstance(n, ast.ImportFrom):
+            if n.module and "filename_utils" in n.module:
+                if {a.name for a in n.names} & _SANITIZER_IMPORTS:
+                    return True
+            # from helpers import filename_utils
+            if any(a.name == "filename_utils" for a in n.names):
+                return True
+        # import helpers.filename_utils [as fu]
+        if isinstance(n, ast.Import):
+            if any("filename_utils" in a.name for a in n.names):
+                return True
+    return False
 
 
 class TestIllegalChars:
@@ -470,6 +495,20 @@ class TestReadPathsResolveEveryCandidateSpelling:
     def test_absent_symbol_returns_none(self, tmp_path):
         assert resolve_existing(tmp_path, "NOSUCH") is None
 
+    def test_template_with_a_second_field_does_not_raise(self, tmp_path):
+        """`template.format(name=...)` raised KeyError on any template carrying
+        a second brace field. Safe today (caching.py interpolates its dates
+        first) but a needless footgun in the helper that is meant to be the
+        obvious safe call. @shardul0701."""
+        assert resolve_existing(
+            tmp_path, "X", template="{name}_{a}.parquet") is None
+
+    def test_template_with_a_second_field_still_resolves_a_real_file(self, tmp_path):
+        """...and the literal braces are preserved, not silently eaten."""
+        (tmp_path / "CON_{a}.parquet").write_bytes(b"x")
+        got = resolve_existing(tmp_path, "CON", template="{name}_{a}.parquet")
+        assert got is not None and os.path.basename(got) == "CON_{a}.parquet"
+
     def test_ordinary_symbols_get_exactly_one_candidate_spelling(self, tmp_path):
         """36,682 of 36,684 securities are not reserved names, so the guard must
         not invent a second *spelling* for them."""
@@ -747,18 +786,50 @@ class TestReadPathListIsDerived:
             assert expected.replace("/", os.sep) in derived, \
                 f"{expected} vanished from the derived read-path set"
 
-    def test_a_new_read_path_is_picked_up_automatically(self, tmp_path):
+    # All six ways to import the module. The original test exercised only the
+    # first, so it read as proving the property while covering one sixth of it.
+    IMPORT_FORMS = {
+        "from_module_import_name":
+            "from helpers.filename_utils import sanitize_symbol_for_filename\n",
+        "relative_from_import":
+            "from .filename_utils import sanitize_symbol_for_filename\n",
+        "function_body_import":
+            "def f():\n"
+            "    from helpers.filename_utils import sanitize_symbol_for_filename\n",
+        "import_module_as_alias":
+            "import helpers.filename_utils as fu\n",
+        "from_package_import_module":
+            "from helpers import filename_utils\n",
+        "plain_import_module":
+            "import helpers.filename_utils\n",
+    }
+
+    @pytest.mark.parametrize("form", sorted(IMPORT_FORMS))
+    def test_a_new_read_path_is_picked_up_automatically(self, form, tmp_path):
         """The property that matters: adding a sixth importer extends coverage
-        without anyone editing a list."""
+        without anyone editing a list — however it spells the import."""
         pkg = tmp_path / "svc"
         pkg.mkdir()
         (pkg / "new_reader.py").write_text(
-            "from helpers.filename_utils import sanitize_symbol_for_filename\n"
-            "def read(s, d):\n"
-            "    return sanitize_symbol_for_filename(s)\n",
+            self.IMPORT_FORMS[form] + "def read(s, d):\n    return s\n",
             encoding="utf-8")
         found = _derive_read_paths(root=str(tmp_path))
-        assert os.path.join("svc", "new_reader.py") in found
+        assert os.path.join("svc", "new_reader.py") in found, (
+            f"a read path importing via {form!r} extends coverage by nothing "
+            f"and the guard never notices")
+
+    def test_a_module_importing_nothing_relevant_is_not_a_read_path(self, tmp_path):
+        """The counter-case, or the derivation could pass by returning
+        everything."""
+        (tmp_path / "unrelated.py").write_text(
+            "import os\ndef f():\n    return os.getcwd()\n", encoding="utf-8")
+        assert _derive_read_paths(root=str(tmp_path)) == []
+
+    def test_coverage_is_the_five_known_read_paths(self):
+        """Pin the NUMBER. I published '234 modules' on this PR; the real
+        coverage is 5, and 234 came from a walk over a polluted working tree.
+        An inflated coverage claim is the same failure the contract is about."""
+        assert len(_derive_read_paths()) == 5, _derive_read_paths()
 
 
 class TestNoReadPathBuildsItsOwnFilename:
@@ -789,6 +860,18 @@ class TestNoReadPathBuildsItsOwnFilename:
     # Directory listings are existence tests wearing different clothes;
     # parquet_service.py already uses the listdir idiom.
     LISTING_FUNCS = {"glob", "iglob", "listdir", "scandir"}
+    # THE CONTRACT IS NOT VERB-SCOPED. @shardul0701's widest finding: a reader
+    # that just opens the path and catches the error has the identical failure
+    # — CON/PRN drop out silently — and never calls exists() at all:
+    #
+    #     p = os.path.join(D, _sanitize_filename(s) + ".parquet")
+    #     try: return pd.read_parquet(p)
+    #     except FileNotFoundError: return None
+    #
+    # A new read path is at least as likely to be written this way.
+    READ_FUNCS = {"read_parquet", "read_csv", "read_json", "read_pickle",
+                  "read_feather", "read_table", "open", "stat", "lstat",
+                  "getmtime", "getsize"}
 
     _NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 
@@ -820,6 +903,17 @@ class TestNoReadPathBuildsItsOwnFilename:
                 out.extend(cls._target_names(e))
         elif isinstance(t, ast.Starred):
             out.extend(cls._target_names(t.value))
+        elif isinstance(t, (ast.Attribute, ast.Subscript)):
+            # `self.safe = _sanitize_filename(s)` / `d['safe'] = ...` bound
+            # nothing at all before, so the taint vanished. Attribute the taint
+            # to the BASE name (`self`, `d`). Deliberately an over-approximation
+            # — a guard should err toward catching — and verified against the
+            # real read paths for false positives.
+            base = t
+            while isinstance(base, (ast.Attribute, ast.Subscript)):
+                base = base.value
+            if isinstance(base, ast.Name):
+                out.append(base.id)
         return out
 
     @classmethod
@@ -838,7 +932,11 @@ class TestNoReadPathBuildsItsOwnFilename:
             for child in ast.iter_child_nodes(node):
                 if not isinstance(child, cls._NESTED):
                     stack.append(child)
-        return out
+        # SOURCE ORDER matters: a safe binding rebound to a bare-sanitized
+        # fallback must end up tainted, which is only well-defined if
+        # assignments are processed in the order they are written.
+        return sorted(out, key=lambda n: (getattr(n, "lineno", 0),
+                                          getattr(n, "col_offset", 0)))
 
     @classmethod
     def _scopes(cls, tree):
@@ -926,6 +1024,16 @@ class TestNoReadPathBuildsItsOwnFilename:
         tainting_fns = cls._tainting_functions(tree)
         out = []
 
+        # `from os.path import exists as _e` renames the probe out of every
+        # name set above; collect the local aliases so `_e(p)` still counts.
+        probe_aliases = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.ImportFrom):
+                for a in n.names:
+                    if a.name in (cls.EXIST_ATTRS | cls.LISTING_FUNCS
+                                  | cls.READ_FUNCS):
+                        probe_aliases.add(a.asname or a.name)
+
         for scope_name, stmts in cls._scopes(tree):
             tainted, safe = {}, set()
 
@@ -933,7 +1041,11 @@ class TestNoReadPathBuildsItsOwnFilename:
                 c = set(cls._calls(val))
                 if c & cls.SAFE:
                     return False
+                # A sanitizer passed as a VALUE rather than called —
+                # `list(map(_sanitize_filename, syms))` — still produces
+                # sanitized names.
                 return bool((c & cls.SANITIZERS) or (c & tainting_fns)
+                            or (cls._names(val) & cls.SANITIZERS)
                             or (cls._names(val) & set(tainted)))
 
             for _ in range(6):          # fixpoint: loop-carried bindings settle
@@ -976,24 +1088,39 @@ class TestNoReadPathBuildsItsOwnFilename:
                             safe.add(nm)
                             tainted.pop(nm, None)
                     elif taints(val):
+                        # LAST WRITE WINS, in source order. Safety used to be
+                        # permanent within a scope, which made the
+                        # safe-primary / bare-fallback rebinding invisible:
+                        #     p = _resolve_existing(D, s)
+                        #     p = os.path.join(D, _sanitize_filename(s))
+                        #     if os.path.exists(p): ...
+                        # caching.py is unaffected — its safe and fallback are
+                        # ONE `or` expression, so the statement still calls a
+                        # SAFE helper and stays safe.
                         for nm in names:
-                            if nm not in safe:
-                                tainted[nm] = lineno
+                            safe.discard(nm)
+                            tainted[nm] = lineno
                 if (dict(tainted), set(safe)) == before:
                     break
 
+            probe_names = (cls.EXIST_ATTRS | cls.LISTING_FUNCS | cls.READ_FUNCS
+                           | probe_aliases)
             for node in stmts:
                 if not isinstance(node, ast.Call):
                     continue
                 f = node.func
                 fname = (f.attr if isinstance(f, ast.Attribute)
                          else f.id if isinstance(f, ast.Name) else "")
-                if fname not in cls.EXIST_ATTRS and fname not in cls.LISTING_FUNCS:
+                if fname not in probe_names:
                     continue
                 inner = set(cls._calls(node))
                 if inner & cls.SAFE:
                     continue
-                if inner & cls.SANITIZERS:
+                # A tainting function called INLINE inside the probe. The
+                # cross-function shape that was pinned assigned `p = build(s)`
+                # first; inlining it walked straight through, because this block
+                # never consulted tainting_fns even though it was computed.
+                if (inner & cls.SANITIZERS) or (inner & tainting_fns):
                     out.append((scope_name, node.lineno, node.lineno, "<inline>"))
                     continue
                 refs = cls._names(node)
@@ -1030,9 +1157,16 @@ class TestNoReadPathBuildsItsOwnFilename:
 
     # -- the contract ---------------------------------------------------------
 
-    def test_no_module_in_the_repo_violates_the_contract(self):
-        """Every derived read path, plus every other non-test module — a
-        violation anywhere is a violation."""
+    def test_no_derived_read_path_violates_the_contract(self):
+        """Every module that imports a filename helper — currently 5.
+
+        @shardul0701 corrected the previous docstring (and a claim I made on the
+        PR): this scans the DERIVED read paths, not "every non-test module". The
+        repo has 103 non-test modules; the other 98 import no sanitizer, so they
+        cannot violate a contract about sanitizer-built paths — but the number
+        that describes this test's coverage is 5, and an inflated one is the
+        same "reads as protected" failure the contract is about.
+        """
         root = self._root()
         offenders = []
         for rel in _derive_read_paths():
@@ -1095,6 +1229,38 @@ class TestNoReadPathBuildsItsOwnFilename:
             "    return acc\n"
             "def f(s):\n    for path in build(s):\n"
             "        if os.path.isfile(path): return path\n",
+        # --- @shardul0701's second blind-spot sweep -------------------------
+        "inline_tainting_call_in_probe":
+            "def build(s):\n    return os.path.join(D,_sanitize_filename(s))\n"
+            "def f(s):\n    if os.path.exists(build(s)): return 1\n",
+        "safe_then_rebound_bare":
+            "def f(s):\n    p=_resolve_existing(D,s)\n"
+            "    p=os.path.join(D,_sanitize_filename(s))\n"
+            "    if os.path.exists(p): return 1\n",
+        "attribute_target":
+            "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
+            "        if os.path.exists(os.path.join(D,self.safe)): return 1\n",
+        "dict_subscript_target":
+            "def f(s):\n    d={}\n    d['safe']=_sanitize_filename(s)\n"
+            "    if os.path.exists(os.path.join(D,d['safe'])): return 1\n",
+        # the widest one: reading IS a probe
+        "direct_read_no_exists_test":
+            "def f(s):\n    p=os.path.join(D,_sanitize_filename(s)+'.parquet')\n"
+            "    try:\n        return pd.read_parquet(p)\n"
+            "    except FileNotFoundError:\n        return None\n",
+        "open_probe":
+            "def f(s):\n    p=os.path.join(D,_sanitize_filename(s))\n"
+            "    try:\n        return open(p)\n    except OSError:\n        return None\n",
+        "os_stat_probe":
+            "def f(s):\n    p=os.path.join(D,_sanitize_filename(s))\n"
+            "    try:\n        os.stat(p)\n    except OSError:\n        return None\n",
+        "aliased_exists_import":
+            "from os.path import exists as _e\n"
+            "def f(s):\n    p=os.path.join(D,_sanitize_filename(s))\n"
+            "    if _e(p): return 1\n",
+        "map_over_sanitizer":
+            "def f(syms):\n    ps=list(map(_sanitize_filename,syms))\n"
+            "    for p in ps:\n        if os.path.isfile(D+p): return p\n",
     }
 
     SAFE_SHAPES = {

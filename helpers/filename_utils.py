@@ -157,7 +157,13 @@ def resolve_existing(directory, symbol: str, template: str = "{name}.parquet",
             if spelling in seen:
                 continue
             seen.add(spelling)
-            path = os.path.join(str(directory), template.format(name=spelling))
+            # .replace rather than .format: a template carrying any second
+            # field -- "{name}_{a}.parquet" -- raised KeyError('a'). Safe today
+            # (caching.py interpolates its dates before passing the template),
+            # but a needless footgun in a helper whose whole point is to be the
+            # obvious safe call. @shardul0701.
+            path = os.path.join(str(directory),
+                                template.replace("{name}", spelling))
             if os.path.isfile(path):
                 return path
     return None
