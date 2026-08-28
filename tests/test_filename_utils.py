@@ -980,14 +980,14 @@ class TestNoReadPathBuildsItsOwnFilename:
             dotted = cls._dotted(t)
             if dotted:
                 out.append(dotted)
-            else:
-                # computed key -- no stable member identity; stay conservative
-                # and taint the base rather than lose the write entirely.
-                base = t
-                while isinstance(base, (ast.Attribute, ast.Subscript)):
-                    base = base.value
-                if isinstance(base, ast.Name):
-                    out.append(base.id)
+            # No `else`. It used to fall back to tainting the base name for a
+            # computed key, but _dotted now spells those `d[*]`, so the branch
+            # was only reachable for a chain not rooted in a Name -- g()['safe'],
+            # (a or b)['x'] -- where the base walk lands on the same non-Name
+            # root and contributes nothing. @shardul0701 enumerated it:
+            # unreachable-with-effect, and its comment described a fallback that
+            # no longer existed. Stale prose in a guard is the failure this file
+            # is about, so it is deleted rather than reworded.
         return out
 
     @classmethod
@@ -1339,6 +1339,12 @@ class TestNoReadPathBuildsItsOwnFilename:
         "computed_key_target":
             "def f(s,d,k):\n    d[k]=_sanitize_filename(s)\n"
             "    return os.path.exists(d[k])\n",
+        "computed_write_computed_other_key":
+            "def f(s,d,k,j):\n    d[k]=_sanitize_filename(s)\n"
+            "    return os.path.exists(d[j])\n",
+        "nested_container_computed_key":
+            "class C:\n    def f(self,s,k):\n        self.m[k]=_sanitize_filename(s)\n"
+            "        return os.path.exists(self.m[k])\n",
         "member_aliased_into_plain_name":
             "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
             "        n=self.safe\n"
@@ -1475,4 +1481,40 @@ class TestNoReadPathBuildsItsOwnFilename:
                "    def read(self):\n"
                "        p=os.path.join(D,self.safe+'.parquet')\n"
                "        if os.path.exists(p): return 1\n")
+        assert self.scan(src)
+
+    # The two remaining subscript combinations. Both reduce to ONE undecidable
+    # question -- does the computed key equal the constant one -- and the
+    # scanner answers "assume not" in both directions.
+    #
+    # @shardul0701 offered a recovery for the first: have a constant-key write
+    # also register `container[*]`. Declined, and the reason is the point.
+    # It doesn't remove the undecidability, it relocates it -- a constant write
+    # followed by an unrelated COMPUTED read of the same container would then
+    # false-positive. Answering one question two different ways depending on
+    # which side is computed is harder to defend, and harder for the next
+    # person to predict, than answering it consistently and recording that.
+
+    @pytest.mark.xfail(reason=(
+        "const-key write / computed-key read: the write spells d['safe'] and "
+        "the read spells d[*], so they do not match. Undecidable without "
+        "knowing k at runtime. Recovering it (constant writes also register "
+        "container[*]) would relocate the false positive to const-write / "
+        "unrelated-computed-read rather than remove it"),
+        strict=True)
+    def test_const_write_computed_read_is_a_known_miss(self):
+        src = ("def f(s,d,k):\n    d['safe']=_sanitize_filename(s)\n"
+               "    return os.path.exists(d[k])\n")
+        assert self.scan(src)
+
+    @pytest.mark.xfail(reason=(
+        "computed-key write / const-key read: a real defect when k == 'safe', "
+        "and STRUCTURALLY IDENTICAL to the correct-code shape "
+        "computed_key_write_then_unrelated_const_read in SAFE_SHAPES. Only the "
+        "runtime value of k separates them, so this is not fixable, only "
+        "chosen -- the choice is to keep the false positive out"),
+        strict=True)
+    def test_computed_write_const_read_is_a_known_miss(self):
+        src = ("def f(s,d,k):\n    d[k]=_sanitize_filename(s)\n"
+               "    return os.path.exists(d['safe'])\n")
         assert self.scan(src)
