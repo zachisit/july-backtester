@@ -124,7 +124,8 @@ def resolve_existing(directory, symbol: str, template: str = "{name}.parquet",
     :func:`filename_candidates` (guarded first, then the legacy unguarded form),
     each in exact / upper / lower case, and returns the first that exists.
 
-    *template* is formatted with ``name=<spelling>``, so callers with a richer
+    *template* has every ``{name}`` occurrence REPLACED with the spelling (not
+    ``str.format`` — any other brace field is left literal), so callers with a richer
     filename than ``SYMBOL.ext`` can use it too::
 
         resolve_existing(d, "CON")                                  # CON.parquet

@@ -74,6 +74,9 @@ def _imports_filename_utils(tree):
             if n.module and "filename_utils" in n.module:
                 if {a.name for a in n.names} & _SANITIZER_IMPORTS:
                     return True
+                # from helpers.filename_utils import *
+                if any(a.name == "*" for a in n.names):
+                    return True
             # from helpers import filename_utils
             if any(a.name == "filename_utils" for a in n.names):
                 return True
@@ -646,6 +649,67 @@ class TestReadPathsFindALegacyUnguardedFile:
         assert ok is True
         assert not called, "fetched data for a symbol already on disk"
 
+    def test_main_skip_existing_honours_a_legacy_reserved_name(
+            self, tmp_path, monkeypatch, capsys):
+        """`main()`'s own skip check, which had NO behavioural test.
+
+        Found by the final QA round: reverting this call site to an
+        `os.access(<guarded spelling>)` probe reintroduced the full #345 defect
+        -- CON re-exported, both spellings left on disk -- and the ENTIRE test
+        file still passed, because only the AST backstop covered it and
+        `os.access` was outside its verb set. A single structural check is not
+        coverage; the behavioural test is what makes the call site real.
+        """
+        import sys
+        import types
+        import scripts.norgate_to_parquet as n2p
+
+        self._write_parquet(tmp_path / "CON.parquet")
+
+        exported = []
+        stub = types.ModuleType("services.norgate_service")
+
+        def _boom(symbol, *a, **k):
+            exported.append(symbol)
+            raise AssertionError(
+                f"re-exported {symbol!r}, which is already present under its "
+                f"legacy unguarded spelling — this is #345")
+
+        stub.get_price_data = _boom
+        # main() imports norgatedata for its availability check; the package is
+        # not installable here (no subscription), so it is stubbed rather than
+        # skipped -- a skipped test on the one call site that had no coverage
+        # would leave exactly the hole this test exists to close.
+        nd = types.ModuleType("norgatedata")
+        nd.status = lambda: "OK"
+        nd.database_symbols = lambda db: ["CON"]
+        nd.StockPriceAdjustmentType = types.SimpleNamespace(TOTALRETURN=1)
+        nd.PaddingType = types.SimpleNamespace(
+            NONE=0, ALLMARKETDAYS=1, ALLWEEKDAYS=2, ALLCALENDARDAYS=3)
+        prev_svc = sys.modules.get("services.norgate_service")
+        prev_nd = sys.modules.get("norgatedata")
+        sys.modules["services.norgate_service"] = stub
+        sys.modules["norgatedata"] = nd
+        monkeypatch.setattr(
+            sys, "argv",
+            ["norgate_to_parquet.py", "--tickers", "CON",
+             "--output-dir", str(tmp_path), "--skip-existing"])
+        try:
+            n2p.main()
+        finally:
+            for key, prev in (("services.norgate_service", prev_svc),
+                              ("norgatedata", prev_nd)):
+                if prev is None:
+                    sys.modules.pop(key, None)
+                else:
+                    sys.modules[key] = prev
+
+        assert not exported, exported
+        # and the guarded spelling must NOT have been created alongside it
+        assert not (tmp_path / "_CON.parquet").exists(), (
+            "wrote _CON.parquet next to the legacy CON.parquet — both "
+            "spellings now on disk, which is the failure this fix prevents")
+
     # ---- scripts/validate_norgate_export.py ---------------------------------
 
     def test_validator_does_not_report_a_legacy_name_as_missing(
@@ -671,6 +735,19 @@ class TestReadPathsFindALegacyUnguardedFile:
             else:
                 sys.modules["norgatedata"] = prev
 
+        # POSITIVE assertions first. Asserting only `"MISSING" not in out` was
+        # vacuous: the final QA round gutted validate() to a bare `return` --
+        # checking nothing, printing nothing -- and this test still passed. It
+        # also could not detect its own fixture rotting; renaming DATABASES[0]
+        # makes the stub answer [] for every database, so CON is never checked,
+        # and the negative assertion holds just as well.
+        assert f"[{_FIRST_DB}]" in out, (
+            f"validator never ran the {_FIRST_DB!r} block — the stub's database "
+            f"name has drifted from scripts.validate_norgate_export.DATABASES, "
+            f"so this test is checking nothing:\n{out}")
+        assert "Local parquet   : 1" in out, (
+            "validator did not count the legacy CON.parquet as present:\n" + out)
+        assert "TOTAL missing   : 0" in out, out
         assert "MISSING" not in out, (
             "validator reported a symbol as missing from a corpus that has it "
             "under the legacy unguarded spelling:\n" + out
@@ -887,9 +964,19 @@ class TestNoReadPathBuildsItsOwnFilename:
     #     except FileNotFoundError: return None
     #
     # A new read path is at least as likely to be written this way.
+    # Verbs that CREATE the file. A probe on a path this scope just wrote is
+    # verification of its own write, not a lookup of a pre-existing corpus.
+    WRITE_FUNCS = {"to_parquet", "to_csv", "to_json", "to_pickle", "to_feather",
+                   "write", "write_text", "write_bytes", "savefig", "dump",
+                   "mkdir", "touch"}
     READ_FUNCS = {"read_parquet", "read_csv", "read_json", "read_pickle",
                   "read_feather", "read_table", "open", "stat", "lstat",
-                  "getmtime", "getsize"}
+                  "getmtime", "getsize",
+                  # An os.access() spelling of main()'s skip check reverted the
+                  # #345 fix with the ENTIRE suite still green -- verified. The
+                  # verb set is the backstop's whole surface, so a gap in it is
+                  # a gap in the contract.
+                  "access", "lexists", "getatime", "getctime"}
 
     _NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 
@@ -1039,11 +1126,13 @@ class TestNoReadPathBuildsItsOwnFilename:
                 yield f.name, cls._scope_nodes(f.body)
 
     @classmethod
-    def _tainting_functions(cls, tree):
+    def _tainting_functions(cls, tree, sanitizers=None, safe_names=None):
         """Functions returning a sanitizer-derived value — calling one taints.
 
         Fixpoint, so a chain (a calls b calls the sanitizer) resolves.
         """
+        sanitizers = cls.SANITIZERS if sanitizers is None else sanitizers
+        safe_names = cls.SAFE if safe_names is None else safe_names
         fns = {f.name: f for f in ast.walk(tree)
                if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
         tainting, changed = set(), True
@@ -1059,9 +1148,9 @@ class TestNoReadPathBuildsItsOwnFilename:
                         if val is None:
                             continue
                         c = set(cls._calls(val))
-                        if c & cls.SAFE:
+                        if c & safe_names:
                             continue
-                        if (c & cls.SANITIZERS) or (c & tainting) \
+                        if (c & sanitizers) or (c & tainting) \
                                 or (cls._names(val) & local):
                             for t in tgts:
                                 local.update(cls._target_names(t))
@@ -1077,17 +1166,17 @@ class TestNoReadPathBuildsItsOwnFilename:
                             continue
                         for arg in node.args:
                             ac = set(cls._calls(arg))
-                            if ac & cls.SAFE:
+                            if ac & safe_names:
                                 continue
-                            if (ac & cls.SANITIZERS) or (ac & tainting) \
+                            if (ac & sanitizers) or (ac & tainting) \
                                     or (cls._names(arg) & local):
                                 local.add(container)
                 for node in ast.walk(f):
                     if isinstance(node, ast.Return) and node.value is not None:
                         c = set(cls._calls(node.value))
-                        if c & cls.SAFE:
+                        if c & safe_names:
                             continue
-                        if (c & cls.SANITIZERS) or (c & tainting) \
+                        if (c & sanitizers) or (c & tainting) \
                                 or (cls._names(node.value) & local):
                             tainting.add(name)
                             changed = True
@@ -1116,31 +1205,73 @@ class TestNoReadPathBuildsItsOwnFilename:
     def scan(cls, src):
         """[(scope, build_line, probe_line, var)] for each contract violation."""
         tree = ast.parse(src)
-        tainting_fns = cls._tainting_functions(tree)
         out = []
 
         # `from os.path import exists as _e` renames the probe out of every
         # name set above; collect the local aliases so `_e(p)` still counts.
         probe_aliases = set()
+        # Sanitizer aliases matter MORE than probe aliases: `_derive_read_paths`
+        # matches on alias.name and ignores asname, so a module importing
+        # `sanitize_symbol_for_filename as scrub` is listed as a covered read
+        # path, the contract test scans it, and it passes on a live violation.
+        # Coverage that reads as protection while protecting nothing is this
+        # file's whole subject.
+        sanitizers = set(cls.SANITIZERS)
+        safe_names = set(cls.SAFE)
         for n in ast.walk(tree):
             if isinstance(n, ast.ImportFrom):
                 for a in n.names:
                     if a.name in (cls.EXIST_ATTRS | cls.LISTING_FUNCS
                                   | cls.READ_FUNCS):
                         probe_aliases.add(a.asname or a.name)
+                    if a.name in cls.SANITIZERS:
+                        sanitizers.add(a.asname or a.name)
+                    if a.name in cls.SAFE:
+                        safe_names.add(a.asname or a.name)
+
+        tainting_fns = cls._tainting_functions(tree, sanitizers, safe_names)
 
         for scope_name, stmts in cls._scopes(tree):
             tainted, safe = {}, set()
 
+            # Names bound to a directory listing, so `n in files` counts as a
+            # probe even when the listdir call happened on an earlier line.
+            listing_vars = set()
+            # Paths this scope WROTE, with the line it wrote them on. Probing a
+            # path you just created is post-write verification, not a read of a
+            # pre-existing corpus, so flagging it is a false positive on
+            # correct code.
+            written = {}
+            for node in stmts:
+                tgts, val = cls._assign_parts(node)
+                if val is not None and (set(cls._calls(val)) & cls.LISTING_FUNCS):
+                    for t in tgts:
+                        listing_vars.update(cls._target_names(t))
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in cls.WRITE_FUNCS):
+                    for a in node.args:
+                        for nm in cls._names(a):
+                            written.setdefault(nm, node.lineno)
+                if (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id == "open" and len(node.args) > 1):
+                    mode = node.args[1]
+                    if isinstance(mode, ast.Constant) and \
+                            isinstance(mode.value, str) and \
+                            not mode.value.startswith("r"):
+                        for nm in cls._names(node.args[0]):
+                            written.setdefault(nm, node.lineno)
+
             def taints(val):
                 c = set(cls._calls(val))
-                if c & cls.SAFE:
+                if c & safe_names:
                     return False
                 # A sanitizer passed as a VALUE rather than called —
                 # `list(map(_sanitize_filename, syms))` — still produces
                 # sanitized names.
-                return bool((c & cls.SANITIZERS) or (c & tainting_fns)
-                            or (cls._names(val) & cls.SANITIZERS)
+                return bool((c & sanitizers) or (c & tainting_fns)
+                            or (cls._names(val) & sanitizers)
                             or (cls._names(val) & set(tainted)))
 
             for _ in range(6):          # fixpoint: loop-carried bindings settle
@@ -1171,9 +1302,9 @@ class TestNoReadPathBuildsItsOwnFilename:
                     # clearing happens in the assignment loop below, which is
                     # where the fix belongs.
                     for arg in node.args:
-                        if set(cls._calls(arg)) & cls.SAFE:
+                        if set(cls._calls(arg)) & safe_names:
                             continue
-                        if (set(cls._calls(arg)) & cls.SANITIZERS) \
+                        if (set(cls._calls(arg)) & sanitizers) \
                                 or (set(cls._calls(arg)) & tainting_fns) \
                                 or (cls._names(arg) & set(tainted)):
                             tainted.setdefault(container, node.lineno)
@@ -1189,7 +1320,7 @@ class TestNoReadPathBuildsItsOwnFilename:
                     # ast.comprehension has no lineno; fall back to its iter
                     lineno = getattr(node, "lineno", None) \
                         or getattr(val, "lineno", 0)
-                    if set(cls._calls(val)) & cls.SAFE:
+                    if set(cls._calls(val)) & safe_names:
                         for nm in names:
                             safe.add(nm)
                             # ORDER-AWARE. An unconditional pop cleared taint
@@ -1229,18 +1360,34 @@ class TestNoReadPathBuildsItsOwnFilename:
                          else f.id if isinstance(f, ast.Name) else "")
                 if fname not in probe_names:
                     continue
+                # `open(p, 'w')` is a WRITE, not a probe. Write paths are
+                # supposed to build the guarded spelling from the bare
+                # sanitizer -- that is the contract, not a violation of it --
+                # so flagging them is a false positive on correct code, which
+                # is what gets guards deleted.
+                if fname == "open" and len(node.args) > 1:
+                    mode = node.args[1]
+                    if isinstance(mode, ast.Constant) and \
+                            isinstance(mode.value, str) and \
+                            not mode.value.startswith("r"):
+                        continue
                 inner = set(cls._calls(node))
-                if inner & cls.SAFE:
+                if inner & safe_names:
                     continue
                 # A tainting function called INLINE inside the probe. The
                 # cross-function shape that was pinned assigned `p = build(s)`
                 # first; inlining it walked straight through, because this block
                 # never consulted tainting_fns even though it was computed.
-                if (inner & cls.SANITIZERS) or (inner & tainting_fns):
+                if (inner & sanitizers) or (inner & tainting_fns):
                     out.append((scope_name, node.lineno, node.lineno, "<inline>"))
                     continue
                 refs = cls._names(node)
                 hit = refs & set(tainted)
+                # Post-write verification: the scope created this path above,
+                # so probing it is not a read-path lookup.
+                if any(written.get(r, node.lineno + 1) < node.lineno
+                       for r in refs):
+                    continue
                 if hit and not (refs & safe):
                     v = sorted(hit)[0]
                     out.append((scope_name, tainted[v], node.lineno, v))
@@ -1255,12 +1402,19 @@ class TestNoReadPathBuildsItsOwnFilename:
                 rhs = set()
                 for c in node.comparators:
                     rhs |= set(cls._calls(c))
-                if not (rhs & cls.LISTING_FUNCS):
+                # The listing may have been computed earlier and bound to a
+                # name -- `files = os.listdir(d)` ... `if n in files:` -- in
+                # which case the comparator is a Name, not a call, and
+                # requiring the call here misses it.
+                rhs_names = set()
+                for c in node.comparators:
+                    rhs_names |= cls._names(c)
+                if not ((rhs & cls.LISTING_FUNCS) or (rhs_names & listing_vars)):
                     continue
                 left = node.left
-                if set(cls._calls(left)) & cls.SAFE:
+                if set(cls._calls(left)) & safe_names:
                     continue
-                if set(cls._calls(left)) & cls.SANITIZERS:
+                if set(cls._calls(left)) & sanitizers:
                     out.append((scope_name, node.lineno, node.lineno, "<inline>"))
                     continue
                 refs = cls._names(left)
@@ -1464,6 +1618,32 @@ class TestNoReadPathBuildsItsOwnFilename:
             "        self.paths.append(os.path.join(d,_sanitize_filename(s)+'.csv'))\n"
             "        for p in self.paths:\n"
             "            if os.path.isfile(p): return p\n",
+        # --- final QA round -------------------------------------------------
+        # A RENAMED sanitizer import. Nastier than the probe-alias case:
+        # _derive_read_paths matches on alias.name and ignores asname, so the
+        # module is listed as a covered read path, the contract test scans it,
+        # and it passes on a live violation. Coverage that reads as protection.
+        "sanitizer_import_alias":
+            "from helpers.filename_utils import sanitize_symbol_for_filename as scrub\n"
+            "def f(s,d):\n    p=os.path.join(d,scrub(s)+'.parquet')\n"
+            "    if os.path.exists(p): return p\n",
+        # An os.access() spelling of main()'s skip check reverted the #345 fix
+        # with the whole suite green. The verb set is the backstop's entire
+        # surface.
+        "os_access_probe":
+            "def f(s,d):\n    p=os.path.join(d,_sanitize_filename(s)+'.parquet')\n"
+            "    if os.access(p, os.F_OK): return p\n",
+        "lexists_probe":
+            "def f(s,d):\n    p=os.path.join(d,_sanitize_filename(s)+'.parquet')\n"
+            "    if os.path.lexists(p): return p\n",
+        "getatime_probe":
+            "def f(s,d):\n    p=os.path.join(d,_sanitize_filename(s)+'.parquet')\n"
+            "    return os.path.getatime(p)\n",
+        # listing bound to a name on an earlier line
+        "precomputed_listdir_membership":
+            "def f(s,d):\n    files=os.listdir(d)\n"
+            "    n=_sanitize_filename(s)+'.parquet'\n"
+            "    if n in files: return n\n",
         "member_aliased_into_plain_name":
             "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
             "        n=self.safe\n"
@@ -1585,6 +1765,19 @@ class TestNoReadPathBuildsItsOwnFilename:
             "        self.paths=[_resolve_existing(d,s)]\n"
             "        for p in self.paths:\n"
             "            if p and os.path.isfile(p): return p\n",
+        # --- final QA round: WRITE paths are not violations -----------------
+        # A write path is SUPPOSED to build the guarded spelling from the bare
+        # sanitizer -- that is the contract, not a breach of it. Adding `open`
+        # to READ_FUNCS made a plain write flag, and post-write verification
+        # (write the file, then assert it exists) flagged too. Both are correct
+        # code, and false positives are what get guards deleted.
+        "open_for_write":
+            "def f(s,d):\n"
+            "    with open(os.path.join(d,_sanitize_filename(s)+'.csv'),'w') as fh:\n"
+            "        fh.write('x')\n",
+        "verify_own_write":
+            "def f(s,d,df):\n    p=os.path.join(d,_sanitize_filename(s)+'.parquet')\n"
+            "    df.to_parquet(p)\n    assert os.path.exists(p)\n",
     }
 
     @pytest.mark.parametrize("shape", sorted(SHAPES))
@@ -1592,6 +1785,53 @@ class TestNoReadPathBuildsItsOwnFilename:
         assert self.scan(self.SHAPES[shape]), (
             f"scanner is blind to the {shape!r} shape — this is a real defect "
             f"a previous revision passed clean")
+
+    # -- ARCHITECTURAL LIMITS of a flow-insensitive, per-scope taint scan ----
+    #
+    # Found by the final QA round. Unlike the verb-set and alias gaps (fixed
+    # above), these three need analysis this scanner does not do: a probing
+    # function is the mirror of a tainting function, branch merging needs flow
+    # sensitivity, and closures need scopes to nest rather than partition.
+    # Each is a real defect that scans clean; pinned strict so implementing any
+    # of them forces the record to be updated.
+
+    @pytest.mark.xfail(reason=(
+        "the probe crosses a function boundary. _tainting_functions models the "
+        "BUILD side crossing a boundary; there is no matching notion of a "
+        "probing function, so `check(build_bare(s))` is invisible"),
+        strict=True)
+    def test_probe_helper_function_is_a_known_miss(self):
+        src = ("def check(p):\n    return os.path.isfile(p)\n"
+               "def build_bare(s,d):\n"
+               "    return os.path.join(d,_sanitize_filename(s))\n"
+               "def f(s,d):\n    if check(build_bare(s,d)): return 1\n")
+        assert self.scan(src)
+
+    @pytest.mark.xfail(reason=(
+        "branch merging. The taint pass is flow-INSENSITIVE with last-write-"
+        "wins over source order, so a textually-later safe ELSE branch clears "
+        "the bare IF branch's taint. Same laundering class as the order-"
+        "dependent bug fixed earlier, reached through control flow instead"),
+        strict=True)
+    def test_branch_bare_then_else_safe_is_a_known_miss(self):
+        src = ("def f(s,d,c):\n    if c:\n"
+               "        p=os.path.join(d,_sanitize_filename(s))\n"
+               "    else:\n        p=_resolve_existing(d,s)\n"
+               "    if p and os.path.exists(p): return p\n")
+        assert self.scan(src)
+
+    @pytest.mark.xfail(reason=(
+        "closure. _scope_nodes deliberately does NOT descend into nested defs "
+        "-- that partitioning is what removed the cross-function false "
+        "positive on csv_service -- so a nested def probing an enclosing "
+        "scope's variable sees no taint. Fixing it means scopes that nest for "
+        "reads while staying separate for writes"),
+        strict=True)
+    def test_closure_probe_is_a_known_miss(self):
+        src = ("def f(s,d):\n    p=os.path.join(d,_sanitize_filename(s))\n"
+               "    def inner():\n        if os.path.exists(p): return p\n"
+               "    return inner()\n")
+        assert self.scan(src)
 
     @pytest.mark.parametrize("shape", sorted(SAFE_SHAPES))
     def test_scanner_does_not_false_positive(self, shape):
