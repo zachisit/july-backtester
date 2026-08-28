@@ -20,6 +20,44 @@ from helpers.filename_utils import (
 # TestReadPathsFindALegacyUnguardedFile answers symbols for this one only.
 _FIRST_DB = "US Equities"
 
+# Names whose import marks a module as a filename read path.
+_SANITIZER_IMPORTS = {"sanitize_symbol_for_filename", "filename_candidates",
+                      "resolve_existing"}
+_DERIVE_SKIP = {".git", ".venv", "node_modules", "data_cache", "output",
+                "__pycache__", ".tokensave", ".pytest_cache", "tests"}
+
+
+def _derive_read_paths(root=None):
+    """Every non-test module importing a filename helper, repo-relative.
+
+    DERIVED rather than hand-listed: @shardul0701 pointed out that a
+    hand-maintained coverage array reads as "protected" to the next person while
+    silently failing to grow, which is the same failure class the whole contract
+    is about. He verified the derivation is exact against the hand-list, so this
+    is a maintainability fix, not a behaviour change.
+    """
+    if root is None:
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    found = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames
+                       if d not in _DERIVE_SKIP and not d.startswith(".")]
+        for fnm in filenames:
+            if not fnm.endswith(".py") or fnm.startswith("test_"):
+                continue
+            path = os.path.join(dirpath, fnm)
+            try:
+                tree = ast.parse(open(path, encoding="utf-8").read())
+            except (SyntaxError, UnicodeDecodeError, OSError):
+                continue
+            for n in ast.walk(tree):
+                if isinstance(n, ast.ImportFrom) and n.module \
+                        and "filename_utils" in n.module:
+                    if {a.name for a in n.names} & _SANITIZER_IMPORTS:
+                        found.append(os.path.relpath(path, root))
+                        break
+    return sorted(set(found))
+
 
 class TestIllegalChars:
     def test_colon_replaced(self):
@@ -599,40 +637,167 @@ class TestReadPathsFindALegacyUnguardedFile:
             "under the legacy unguarded spelling:\n" + out
         )
 
+    # ---- services/csv_service.py --------------------------------------------
 
-class TestNoReadPathBuildsItsOwnFilename:
-    """The structural backstop, rewritten as an **AST dataflow** scan.
+    def test_csv_service_reads_a_legacy_reserved_name(self, tmp_path):
+        """`CON.csv` on disk must be found. @shardul0701 noted the AST backstop
+        was blind on this file's idiom, so the behavioural test IS the guard
+        here -- it needs to exist rather than be assumed."""
+        from services import csv_service
 
-    The previous version compared substrings on a single source line. It missed
-    `helpers/caching.py` entirely -- name built at line 21, existence tested at
-    line 29 -- which is both the more common shape in real code and the example
-    the PR body led with. It also could not see a violation inside a function
-    that merely *imported* a safe helper without calling it.
+        (tmp_path / "CON.csv").write_text(
+            "Date,Open,High,Low,Close,Volume\n2024-01-02,1,1,1,1,100\n",
+            encoding="utf-8")
+        assert csv_service._find_csv("CON", str(tmp_path)) is not None
 
-    This walks each function, tracks which locals derive from the bare
-    sanitizer, and flags an existence test on any of them -- plus the inline
-    one-liner form. It is a backstop only; the behavioural tests above are the
-    real evidence.
+    def test_csv_service_misses_when_genuinely_absent(self, tmp_path):
+        from services import csv_service
+        assert csv_service._find_csv("CON", str(tmp_path)) is None
+
+    # ---- services/parquet_service.py ----------------------------------------
+
+    def test_parquet_service_reads_a_legacy_reserved_name(self, tmp_path):
+        from services import parquet_service
+
+        self._write_parquet(tmp_path / "CON.parquet")
+        assert parquet_service._find_parquet("CON", str(tmp_path)) is not None
+
+    def test_parquet_service_misses_when_genuinely_absent(self, tmp_path):
+        from services import parquet_service
+        assert parquet_service._find_parquet("CON", str(tmp_path)) is None
+
+
+class TestNotFoundWarningReportsWhatWasActuallyProbed:
+    """@shardul0701's finding: the CSV not-found warning recomposed its own
+    path list from the bare sanitizer instead of reporting the resolver's
+    probes, so it named only the GUARDED spellings.
+
+    For `CON` it claimed to have tried `_CON.csv, _con.csv` while having also
+    probed `CON.csv` and `con.csv` -- the unguarded legacy spellings this whole
+    change exists to support. Someone debugging a missing `CON.csv` was told the
+    loader never looked for it.
+
+    Same defect class as the PR subject -- a bare `_sanitize_filename` on a read
+    path -- wearing a log line.
     """
 
-    READ_PATH_FILES = [
-        os.path.join("helpers", "caching.py"),
-        os.path.join("services", "parquet_service.py"),
-        os.path.join("services", "csv_service.py"),
-        os.path.join("scripts", "norgate_to_parquet.py"),
-        os.path.join("scripts", "validate_norgate_export.py"),
-    ]
+    def test_warning_names_every_probed_spelling(self, tmp_path, caplog):
+        from services import csv_service
+
+        probed = csv_service._csv_probe_paths("CON", str(tmp_path))
+        probed_names = {os.path.basename(p) for p in probed}
+        # the resolver genuinely tries the unguarded spellings
+        assert "CON.csv" in probed_names and "con.csv" in probed_names
+        assert "_CON.csv" in probed_names
+
+        with caplog.at_level("WARNING"):
+            csv_service.get_price_data(
+                "CON", "2024-01-01", "2024-06-01",
+                {"csv_data_dir": str(tmp_path)})
+        warnings = "\n".join(r.message for r in caplog.records)
+        assert "not found" in warnings.lower(), warnings
+
+        # Parse the reported list EXACTLY. A substring check is vacuous here --
+        # "CON.csv" is a substring of "_CON.csv", so `name in warnings` passes
+        # even when the guarded spelling is the only one reported. My own
+        # mutation run caught that; the assertion has to compare basenames as a
+        # set, not search the message text.
+        reported = warnings.split("Tried:", 1)[1]
+        reported_names = {os.path.basename(p.strip())
+                          for p in reported.split(",") if p.strip()}
+        missing = probed_names - reported_names
+        assert not missing, (
+            f"warning omits {sorted(missing)}, which the resolver actually "
+            f"probed — a diagnostic that under-reports sends the reader to the "
+            f"wrong place:\n{warnings}")
+
+    def test_probe_list_is_deduped_and_ordered(self):
+        """An all-caps ticker yields the same path for the .upper() and bare
+        spellings; the warning should not print it twice."""
+        probed = csv_service_probe("AAPL")
+        assert len(probed) == len(set(probed))
+        assert os.path.basename(probed[0]) == "AAPL.csv"
+
+
+def csv_service_probe(symbol, csv_dir="/nonexistent"):
+    from services import csv_service
+    return csv_service._csv_probe_paths(symbol, csv_dir)
+
+
+class TestReadPathListIsDerived:
+    """`READ_PATH_FILES` must be DERIVED, not hand-listed.
+
+    @shardul0701: a name in a coverage list reads as "protected" to the next
+    person. A hand-maintained list is the same "checked, fine" failure one level
+    up -- a sixth read path can be added and the guard never notices, which is
+    precisely the failure mode this whole PR is about.
+
+    He also verified the derivation is exact today, which is why this is a
+    maintainability fix rather than a live bug.
+    """
+
+    def test_derivation_matches_every_sanitizer_importer(self):
+        derived = set(_derive_read_paths())
+        assert derived, "derivation found nothing — the walker is broken"
+        # the five known read paths, as a floor
+        for expected in ["helpers/caching.py", "services/parquet_service.py",
+                         "services/csv_service.py",
+                         "scripts/norgate_to_parquet.py",
+                         "scripts/validate_norgate_export.py"]:
+            assert expected.replace("/", os.sep) in derived, \
+                f"{expected} vanished from the derived read-path set"
+
+    def test_a_new_read_path_is_picked_up_automatically(self, tmp_path):
+        """The property that matters: adding a sixth importer extends coverage
+        without anyone editing a list."""
+        pkg = tmp_path / "svc"
+        pkg.mkdir()
+        (pkg / "new_reader.py").write_text(
+            "from helpers.filename_utils import sanitize_symbol_for_filename\n"
+            "def read(s, d):\n"
+            "    return sanitize_symbol_for_filename(s)\n",
+            encoding="utf-8")
+        found = _derive_read_paths(root=str(tmp_path))
+        assert os.path.join("svc", "new_reader.py") in found
+
+
+class TestNoReadPathBuildsItsOwnFilename:
+    """The structural backstop — an AST taint scan, widened after review.
+
+    Rev 1 compared substrings on one source line and missed the multiline shape.
+    Rev 2 (the taint scan) fixed that but @shardul0701 mutation-proved it was
+    still blind on **eight** further shapes — including the list-literal ->
+    loop-variable idiom that is `csv_service.py`'s OWN live code, so the
+    backstop was blind pointed exactly at a file it claimed to cover.
+
+    Reproduced, then widened: pathlib `is_file`, `glob`/`listdir` probes,
+    annotated and tuple targets, module scope, comprehensions, container ->
+    loop-variable flow, and cross-function returns. The self-tests below pin
+    every one, so a future narrowing fails loudly instead of quietly.
+
+    Still a BACKSTOP. The behavioural tests above are the real evidence — that
+    ordering is what kept the csv blindness from being a hole.
+    """
 
     SANITIZERS = {"_sanitize_filename", "sanitize_symbol_for_filename"}
-    SAFE = {"resolve_existing", "_resolve_existing", "filename_candidates"}
-    EXIST = {"exists", "isfile"}
+    SAFE = {"resolve_existing", "_resolve_existing",
+            "filename_candidates", "_filename_candidates"}
+    # `is_file`/`isdir`/`is_dir` close the pathlib gap: report.py already has
+    # is_file() sites and norgate_to_parquet.py -- where the fourth violator
+    # lived -- is itself pathlib.
+    EXIST_ATTRS = {"exists", "isfile", "is_file", "isdir", "is_dir"}
+    # Directory listings are existence tests wearing different clothes;
+    # parquet_service.py already uses the listdir idiom.
+    LISTING_FUNCS = {"glob", "iglob", "listdir", "scandir"}
+
+    _NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 
     @staticmethod
     def _root():
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
     @classmethod
-    def _called_names(cls, node):
+    def _calls(cls, node):
         for n in ast.walk(node):
             if isinstance(n, ast.Call):
                 f = n.func
@@ -641,99 +806,325 @@ class TestNoReadPathBuildsItsOwnFilename:
                 elif isinstance(f, ast.Attribute):
                     yield f.attr
 
+    @staticmethod
+    def _names(node):
+        return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+    @classmethod
+    def _target_names(cls, t):
+        out = []
+        if isinstance(t, ast.Name):
+            out.append(t.id)
+        elif isinstance(t, (ast.Tuple, ast.List)):
+            for e in t.elts:
+                out.extend(cls._target_names(e))
+        elif isinstance(t, ast.Starred):
+            out.extend(cls._target_names(t.value))
+        return out
+
+    @classmethod
+    def _scope_nodes(cls, body):
+        """A scope's own nodes, NOT descending into nested defs.
+
+        Descending conflates same-named locals across functions — it made the
+        resolver's `candidates` in csv_service collide with the warning block's
+        `candidates` and produced a false positive on correct code.
+        """
+        out = []
+        stack = [st for st in body if not isinstance(st, cls._NESTED)]
+        while stack:
+            node = stack.pop()
+            out.append(node)
+            for child in ast.iter_child_nodes(node):
+                if not isinstance(child, cls._NESTED):
+                    stack.append(child)
+        return out
+
+    @classmethod
+    def _scopes(cls, tree):
+        yield "<module>", cls._scope_nodes(tree.body)
+        for f in ast.walk(tree):
+            if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                yield f.name, cls._scope_nodes(f.body)
+
+    @classmethod
+    def _tainting_functions(cls, tree):
+        """Functions returning a sanitizer-derived value — calling one taints.
+
+        Fixpoint, so a chain (a calls b calls the sanitizer) resolves.
+        """
+        fns = {f.name: f for f in ast.walk(tree)
+               if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        tainting, changed = set(), True
+        while changed:
+            changed = False
+            for name, f in fns.items():
+                if name in tainting:
+                    continue
+                local = set()
+                for _ in range(4):      # fixpoint, so append-accumulators settle
+                    for node in ast.walk(f):
+                        tgts, val = cls._assign_parts(node)
+                        if val is None:
+                            continue
+                        c = set(cls._calls(val))
+                        if c & cls.SAFE:
+                            continue
+                        if (c & cls.SANITIZERS) or (c & tainting) \
+                                or (cls._names(val) & local):
+                            for t in tgts:
+                                local.update(cls._target_names(t))
+                    # container mutation carries taint with no assignment node
+                    for node in ast.walk(f):
+                        if not (isinstance(node, ast.Call)
+                                and isinstance(node.func, ast.Attribute)
+                                and node.func.attr in {"append", "extend",
+                                                       "insert", "add", "update"}
+                                and isinstance(node.func.value, ast.Name)):
+                            continue
+                        for arg in node.args:
+                            ac = set(cls._calls(arg))
+                            if ac & cls.SAFE:
+                                continue
+                            if (ac & cls.SANITIZERS) or (ac & tainting) \
+                                    or (cls._names(arg) & local):
+                                local.add(node.func.value.id)
+                for node in ast.walk(f):
+                    if isinstance(node, ast.Return) and node.value is not None:
+                        c = set(cls._calls(node.value))
+                        if c & cls.SAFE:
+                            continue
+                        if (c & cls.SANITIZERS) or (c & tainting) \
+                                or (cls._names(node.value) & local):
+                            tainting.add(name)
+                            changed = True
+                            break
+        return tainting
+
+    @staticmethod
+    def _assign_parts(node):
+        """(targets, value) for every binding form that can carry taint."""
+        if isinstance(node, ast.Assign):
+            return node.targets, node.value
+        if isinstance(node, ast.AnnAssign) and node.value is not None:
+            return [node.target], node.value
+        if isinstance(node, ast.AugAssign):
+            return [node.target], node.value
+        if isinstance(node, ast.NamedExpr):
+            return [node.target], node.value
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            # container -> loop variable: the csv_service idiom
+            return [node.target], node.iter
+        if isinstance(node, ast.comprehension):
+            return [node.target], node.iter
+        return [], None
+
     @classmethod
     def scan(cls, src):
-        """Return [(func, build_line, test_line, var)] for each violation."""
+        """[(scope, build_line, probe_line, var)] for each contract violation."""
+        tree = ast.parse(src)
+        tainting_fns = cls._tainting_functions(tree)
         out = []
-        for fn in ast.walk(ast.parse(src)):
-            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
+
+        for scope_name, stmts in cls._scopes(tree):
             tainted, safe = {}, set()
-            for node in ast.walk(fn):
-                if not isinstance(node, ast.Assign):
-                    continue
-                names = [t.id for t in node.targets if isinstance(t, ast.Name)]
-                if not names:
-                    continue
-                called = set(cls._called_names(node.value))
-                refs = {n.id for n in ast.walk(node.value)
-                        if isinstance(n, ast.Name)}
-                if called & cls.SAFE:
-                    for nm in names:
-                        safe.add(nm)
-                        tainted.pop(nm, None)
-                elif (called & cls.SANITIZERS) or (refs & set(tainted)):
-                    if not (refs & safe):
+
+            def taints(val):
+                c = set(cls._calls(val))
+                if c & cls.SAFE:
+                    return False
+                return bool((c & cls.SANITIZERS) or (c & tainting_fns)
+                            or (cls._names(val) & set(tainted)))
+
+            for _ in range(6):          # fixpoint: loop-carried bindings settle
+                before = (dict(tainted), set(safe))
+                # `acc.append(x)` / `acc.extend([...])` -- container mutation
+                # carries taint without any assignment node. Missing this is
+                # what let a mutated csv_service (which accumulates into a list
+                # via append) slip past the scanner in my own mutation run.
+                for node in stmts:
+                    if not (isinstance(node, ast.Call)
+                            and isinstance(node.func, ast.Attribute)
+                            and node.func.attr in {"append", "extend", "insert",
+                                                   "add", "update"}
+                            and isinstance(node.func.value, ast.Name)):
+                        continue
+                    container = node.func.value.id
+                    if container in safe:
+                        continue
+                    for arg in node.args:
+                        if set(cls._calls(arg)) & cls.SAFE:
+                            continue
+                        if (set(cls._calls(arg)) & cls.SANITIZERS) \
+                                or (set(cls._calls(arg)) & tainting_fns) \
+                                or (cls._names(arg) & set(tainted)):
+                            tainted.setdefault(container, node.lineno)
+                for node in stmts:
+                    tgts, val = cls._assign_parts(node)
+                    if val is None:
+                        continue
+                    names = []
+                    for t in tgts:
+                        names.extend(cls._target_names(t))
+                    if not names:
+                        continue
+                    # ast.comprehension has no lineno; fall back to its iter
+                    lineno = getattr(node, "lineno", None) \
+                        or getattr(val, "lineno", 0)
+                    if set(cls._calls(val)) & cls.SAFE:
                         for nm in names:
-                            tainted[nm] = node.lineno
-            for node in ast.walk(fn):
-                if not (isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Attribute)
-                        and node.func.attr in cls.EXIST):
+                            safe.add(nm)
+                            tainted.pop(nm, None)
+                    elif taints(val):
+                        for nm in names:
+                            if nm not in safe:
+                                tainted[nm] = lineno
+                if (dict(tainted), set(safe)) == before:
+                    break
+
+            for node in stmts:
+                if not isinstance(node, ast.Call):
                     continue
-                inner = set(cls._called_names(node))
+                f = node.func
+                fname = (f.attr if isinstance(f, ast.Attribute)
+                         else f.id if isinstance(f, ast.Name) else "")
+                if fname not in cls.EXIST_ATTRS and fname not in cls.LISTING_FUNCS:
+                    continue
+                inner = set(cls._calls(node))
                 if inner & cls.SAFE:
                     continue
                 if inner & cls.SANITIZERS:
-                    out.append((fn.name, node.lineno, node.lineno, "<inline>"))
+                    out.append((scope_name, node.lineno, node.lineno, "<inline>"))
                     continue
-                refs = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+                refs = cls._names(node)
                 hit = refs & set(tainted)
                 if hit and not (refs & safe):
                     v = sorted(hit)[0]
-                    out.append((fn.name, tainted[v], node.lineno, v))
-        return out
+                    out.append((scope_name, tainted[v], node.lineno, v))
 
-    @pytest.mark.parametrize("relpath", READ_PATH_FILES)
-    def test_existence_checks_do_not_use_the_bare_sanitizer(self, relpath):
-        src = open(os.path.join(self._root(), relpath), encoding="utf-8").read()
-        offenders = self.scan(src)
+            # `name in os.listdir(d)` — the tainted value is on the LEFT of a
+            # Compare, so the Call walk above cannot reach it.
+            for node in stmts:
+                if not isinstance(node, ast.Compare):
+                    continue
+                if not any(isinstance(o, (ast.In, ast.NotIn)) for o in node.ops):
+                    continue
+                rhs = set()
+                for c in node.comparators:
+                    rhs |= set(cls._calls(c))
+                if not (rhs & cls.LISTING_FUNCS):
+                    continue
+                left = node.left
+                if set(cls._calls(left)) & cls.SAFE:
+                    continue
+                if set(cls._calls(left)) & cls.SANITIZERS:
+                    out.append((scope_name, node.lineno, node.lineno, "<inline>"))
+                    continue
+                refs = cls._names(left)
+                hit = refs & set(tainted)
+                if hit and not (refs & safe):
+                    v = sorted(hit)[0]
+                    out.append((scope_name, tainted[v], node.lineno, v))
+
+        return sorted(set(out), key=lambda r: (r[2], r[0]))
+
+    # -- the contract ---------------------------------------------------------
+
+    def test_no_module_in_the_repo_violates_the_contract(self):
+        """Every derived read path, plus every other non-test module — a
+        violation anywhere is a violation."""
+        root = self._root()
+        offenders = []
+        for rel in _derive_read_paths():
+            src = open(os.path.join(root, rel), encoding="utf-8").read()
+            for sc, bl, tl, v in self.scan(src):
+                offenders.append(f"{rel} {sc}(): '{v}' built L{bl}, probed L{tl}")
         assert not offenders, (
-            f"{relpath} tests a bare-sanitized name for existence — a corpus "
-            f"written before the reserved-name guard will read as MISSING:\n  "
-            + "\n  ".join(
-                f"{fn}(): '{v}' built line {bl}, existence tested line {tl}"
-                for fn, bl, tl, v in offenders)
-        )
+            "a read path tests a bare-sanitized name for existence — a corpus "
+            "written before the reserved-name guard will read as MISSING:\n  "
+            + "\n  ".join(offenders))
 
-    # -- the scanner must itself be able to fail -----------------------------
+    # -- the scanner must itself be able to fail ------------------------------
+    #
+    # Every shape below is a REAL defect that a previous revision of this
+    # scanner passed clean. They are the regression suite for the guard.
 
-    MULTILINE_SHAPE = (
-        "def get_cached_data(symbol):\n"
-        "    safe = _sanitize_filename(symbol)\n"
-        "    fn = f'{safe}_2024_D_1.parquet'\n"
-        "    fp = os.path.join(CACHE_DIR, fn)\n"
-        "    if os.path.exists(fp):\n"
-        "        return 1\n"
-    )
-    INLINE_SHAPE = (
-        "def validate(d, symbols):\n"
-        "    return [s for s in symbols\n"
-        "            if not (d / _sanitize_filename(s)).exists()]\n"
-    )
-    DEAD_IMPORT_SHAPE = (
-        "from helpers.filename_utils import resolve_existing  # never called\n"
-        + MULTILINE_SHAPE
-    )
-    SAFE_SHAPE = (
-        "def get_cached_data(symbol):\n"
-        "    fp = _resolve_existing(CACHE_DIR, symbol)\n"
-        "    if fp and os.path.exists(fp):\n"
-        "        return 1\n"
-    )
+    SHAPES = {
+        "multiline":
+            "def f(s):\n    x=_sanitize_filename(s)\n    p=os.path.join(D,x)\n"
+            "    if os.path.exists(p): return 1\n",
+        "walrus":
+            "def f(s):\n"
+            "    if os.path.exists(p:=os.path.join(D,_sanitize_filename(s))): return p\n",
+        "list_literal_to_loop_var":
+            "def f(s):\n    safe=_sanitize_filename(s)\n"
+            "    c=[os.path.join(D,safe+'.csv'), os.path.join(D,safe.lower()+'.csv')]\n"
+            "    for path in c:\n        if os.path.isfile(path): return path\n",
+        "annotated_assign":
+            "def f(s):\n    p: str = os.path.join(D,_sanitize_filename(s))\n"
+            "    if os.path.exists(p): return 1\n",
+        "pathlib_is_file":
+            "def f(s,d):\n    p = d / (_sanitize_filename(s)+'.parquet')\n"
+            "    if p.is_file(): return 1\n",
+        "module_scope":
+            "x=_sanitize_filename('CON')\np=os.path.join(D,x)\n"
+            "if os.path.exists(p): pass\n",
+        "tuple_assign":
+            "def f(s):\n    a,p = 1, os.path.join(D,_sanitize_filename(s))\n"
+            "    if os.path.exists(p): return 1\n",
+        "glob":
+            "def f(s):\n    p=os.path.join(D,_sanitize_filename(s)+'*')\n"
+            "    if glob.glob(p): return 1\n",
+        "cross_function":
+            "def build(s):\n    return os.path.join(D,_sanitize_filename(s))\n"
+            "def f(s):\n    p=build(s)\n    if os.path.exists(p): return 1\n",
+        "listdir_membership":
+            "def f(s):\n    n=_sanitize_filename(s)+'.parquet'\n"
+            "    if n in os.listdir(D): return 1\n",
+        "comprehension":
+            "def f(s):\n    safe=_sanitize_filename(s)\n"
+            "    return [p for p in [D+safe] if os.path.isfile(p)]\n",
+        # container mutation carries taint with no assignment node -- this is
+        # csv_service's real accumulator shape, and its absence let a mutated
+        # csv_service slip past the scanner during verification.
+        "append_accumulator":
+            "def f(s):\n    acc=[]\n    acc.append(D+_sanitize_filename(s))\n"
+            "    for path in acc:\n        if os.path.isfile(path): return path\n",
+        "append_accumulator_cross_function":
+            "def build(s):\n    acc=[]\n    acc.append(D+_sanitize_filename(s))\n"
+            "    return acc\n"
+            "def f(s):\n    for path in build(s):\n"
+            "        if os.path.isfile(path): return path\n",
+    }
 
-    def test_scanner_catches_the_multiline_shape(self):
-        """The shape the previous same-line guard MISSED, and the one #345
-        actually took in `caching.py`."""
-        assert self.scan(self.MULTILINE_SHAPE)
+    SAFE_SHAPES = {
+        "resolve_existing":
+            "def f(s):\n    p=_resolve_existing(D,s)\n"
+            "    if p and os.path.exists(p): return 1\n",
+        "candidates_loop_the_csv_service_head_shape":
+            "def f(s):\n    c=[]\n    for safe in _filename_candidates(s):\n"
+            "        c += [os.path.join(D,safe+'.csv')]\n"
+            "    for path in c:\n        if os.path.isfile(path): return path\n",
+        "unrelated_existence_test":
+            "def f(d):\n"
+            "    if os.path.exists(os.path.join(d,'config.yml')): return 1\n",
+        "two_functions_reusing_one_local_name":
+            # the false positive that scope-leaking produced on real code
+            "def safe_one(s):\n    c=[]\n"
+            "    for x in _filename_candidates(s):\n        c += [D+x]\n"
+            "    for path in c:\n        if os.path.isfile(path): return path\n"
+            "def unsafe_looking(s):\n    c=[_sanitize_filename(s)]\n"
+            "    return ', '.join(c)\n",
+    }
 
-    def test_scanner_catches_the_inline_shape(self):
-        assert self.scan(self.INLINE_SHAPE)
+    @pytest.mark.parametrize("shape", sorted(SHAPES))
+    def test_scanner_catches(self, shape):
+        assert self.scan(self.SHAPES[shape]), (
+            f"scanner is blind to the {shape!r} shape — this is a real defect "
+            f"a previous revision passed clean")
 
-    def test_scanner_is_not_fooled_by_a_dead_import(self):
-        """The previous whole-file substring guard passed on exactly this."""
-        assert self.scan(self.DEAD_IMPORT_SHAPE)
-
-    def test_scanner_clears_the_safe_shape(self):
-        """No false positive, or the guard gets disabled by whoever it annoys."""
-        assert not self.scan(self.SAFE_SHAPE)
+    @pytest.mark.parametrize("shape", sorted(SAFE_SHAPES))
+    def test_scanner_does_not_false_positive(self, shape):
+        assert not self.scan(self.SAFE_SHAPES[shape]), (
+            f"false positive on {shape!r} — a guard that cries wolf on correct "
+            f"code gets disabled by whoever it annoys")
