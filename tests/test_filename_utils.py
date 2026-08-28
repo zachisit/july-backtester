@@ -826,10 +826,28 @@ class TestReadPathListIsDerived:
         assert _derive_read_paths(root=str(tmp_path)) == []
 
     def test_coverage_is_the_five_known_read_paths(self):
-        """Pin the NUMBER. I published '234 modules' on this PR; the real
-        coverage is 5, and 234 came from a walk over a polluted working tree.
-        An inflated coverage claim is the same failure the contract is about."""
-        assert len(_derive_read_paths()) == 5, _derive_read_paths()
+        """A deliberate TRIPWIRE on the number, not a spec.
+
+        I published "234 modules" on this PR; the real coverage is 5, and 234
+        came from a walk over a polluted working tree. This exists so a change
+        in coverage is noticed rather than assumed.
+
+        @shardul0701 flagged the hazard in pinning a count: it fights
+        `test_a_new_read_path_is_picked_up_automatically` two classes up, and
+        the obvious repair when it breaks is to bump the constant — which is
+        exactly how a pinned number decays back into prose. Hence the message
+        below rather than a bare assert.
+        """
+        found = _derive_read_paths()
+        assert len(found) == 5, (
+            f"read-path coverage changed: {len(found)} modules now import a "
+            f"filename helper, not 5.\n{found}\n\n"
+            f"THIS IS A TRIPWIRE, NOT A FAILURE. If you legitimately added a "
+            f"read path, raise this number DELIBERATELY and add the module to "
+            f"the floor list in TestReadPathListIsDerived — do not bump it "
+            f"just to get green, and do not quote a coverage number anywhere "
+            f"without re-deriving it."
+        )
 
 
 class TestNoReadPathBuildsItsOwnFilename:
@@ -889,9 +907,41 @@ class TestNoReadPathBuildsItsOwnFilename:
                 elif isinstance(f, ast.Attribute):
                     yield f.attr
 
-    @staticmethod
-    def _names(node):
-        return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+    @classmethod
+    def _dotted(cls, node):
+        """Canonical spelling of a Name/Attribute/Subscript chain, or None.
+
+        `self.safe` -> "self.safe";  `d['safe']` -> "d['safe']".
+        Constant subscripts only — a computed key is not a stable identity.
+        """
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            base = cls._dotted(node.value)
+            return f"{base}.{node.attr}" if base else None
+        if isinstance(node, ast.Subscript):
+            base = cls._dotted(node.value)
+            key = node.slice
+            if base and isinstance(key, ast.Constant):
+                return f"{base}[{key.value!r}]"
+        return None
+
+    @classmethod
+    def _names(cls, node):
+        """Every identity referenced: bare names AND dotted/subscripted members.
+
+        Members must be spelled the same way on both the write and read side or
+        the taint never matches at the probe.
+        """
+        out = set()
+        for n in ast.walk(node):
+            if isinstance(n, ast.Name):
+                out.add(n.id)
+            elif isinstance(n, (ast.Attribute, ast.Subscript)):
+                d = cls._dotted(n)
+                if d:
+                    out.add(d)
+        return out
 
     @classmethod
     def _target_names(cls, t):
@@ -905,15 +955,28 @@ class TestNoReadPathBuildsItsOwnFilename:
             out.extend(cls._target_names(t.value))
         elif isinstance(t, (ast.Attribute, ast.Subscript)):
             # `self.safe = _sanitize_filename(s)` / `d['safe'] = ...` bound
-            # nothing at all before, so the taint vanished. Attribute the taint
-            # to the BASE name (`self`, `d`). Deliberately an over-approximation
-            # — a guard should err toward catching — and verified against the
-            # real read paths for false positives.
-            base = t
-            while isinstance(base, (ast.Attribute, ast.Subscript)):
-                base = base.value
-            if isinstance(base, ast.Name):
-                out.append(base.id)
+            # nothing before, so the taint vanished. Key it on the MEMBER, not
+            # the base object.
+            #
+            # The first version of this fix tainted the base (`self`, `d`),
+            # which poisoned every member of that object for the rest of the
+            # scope: @shardul0701 showed `self.cfg_path` and `d['config']` then
+            # flag on correct code. That 0-false-positive result only held
+            # because all five read paths happen to be module-level functions
+            # with no object state — the first class-based read path would have
+            # tripped it, and this file's own SAFE_SHAPES docstring is the
+            # argument against shipping that.
+            dotted = cls._dotted(t)
+            if dotted:
+                out.append(dotted)
+            else:
+                # computed key -- no stable member identity; stay conservative
+                # and taint the base rather than lose the write entirely.
+                base = t
+                while isinstance(base, (ast.Attribute, ast.Subscript)):
+                    base = base.value
+                if isinstance(base, ast.Name):
+                    out.append(base.id)
         return out
 
     @classmethod
@@ -1281,6 +1344,43 @@ class TestNoReadPathBuildsItsOwnFilename:
             "    for path in c:\n        if os.path.isfile(path): return path\n"
             "def unsafe_looking(s):\n    c=[_sanitize_filename(s)]\n"
             "    return ', '.join(c)\n",
+        # --- @shardul0701's correct-code battery ----------------------------
+        # The first two are the FALSE POSITIVES my base-name taint introduced.
+        # The rest are the shapes most likely to annoy someone into deleting
+        # the guard, which is the real way a guard dies.
+        "unrelated_attr_after_tainted_attr":
+            "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
+            "        return os.path.exists(self.cfg_path)\n",
+        "unrelated_dict_key_after_tainted_key":
+            "def f(s,d):\n    d['safe']=_sanitize_filename(s)\n"
+            "    return os.path.exists(d['config'])\n",
+        "write_path_only_no_probe":
+            "def f(s,d):\n    p=os.path.join(d,_sanitize_filename(s)+'.parquet')\n"
+            "    df.to_parquet(p)\n",
+        "resolve_then_read_the_resolved":
+            "def f(s,d):\n    p=_resolve_existing(d,s)\n"
+            "    return pd.read_parquet(p) if p else None\n",
+        "candidates_loop_then_read":
+            "def f(s,d):\n    for safe in _filename_candidates(s):\n"
+            "        p=os.path.join(d,safe)\n"
+            "        if os.path.isfile(p): return pd.read_parquet(p)\n",
+        "unrelated_open_alongside_bare_name":
+            "def f(s,d):\n    safe=_sanitize_filename(s)\n    log(safe)\n"
+            "    return open(os.path.join(d,'config.yml'))\n",
+        "safe_reassigned_from_safe":
+            "def f(s,d):\n    p=_resolve_existing(d,s)\n"
+            "    p=p or _resolve_existing(d,s.upper())\n"
+            "    if p and os.path.exists(p): return p\n",
+        "caching_or_fallback_shape":
+            "def f(s,d):\n    fn=_sanitize_filename(s)+'.parquet'\n"
+            "    fp=_resolve_existing(d,s) or os.path.join(d,fn)\n"
+            "    if os.path.exists(fp): return fp\n",
+        "log_bare_then_resolve":
+            "def f(s,d):\n    logger.debug(_sanitize_filename(s))\n"
+            "    return _resolve_existing(d,s)\n",
+        "write_read_split_across_functions":
+            "def w(s,d):\n    return os.path.join(d,_sanitize_filename(s))\n"
+            "def r(d):\n    return pd.read_parquet(os.path.join(d,'fixed.parquet'))\n",
     }
 
     @pytest.mark.parametrize("shape", sorted(SHAPES))
