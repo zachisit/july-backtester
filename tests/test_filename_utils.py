@@ -167,6 +167,38 @@ class TestWindowsReservedNames:
         assert sanitize_symbol_for_filename("CONT") == "CONT"
         assert sanitize_symbol_for_filename("CONNECT") == "CONNECT"
 
+    # Independently hand-spelled, NOT derived from the implementation — a
+    # comprehension here would reproduce whatever bug the source has.
+    _WIN32_RESERVED_LITERAL = {
+        "CON", "PRN", "AUX", "NUL",
+        "CONIN$", "CONOUT$",
+        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    }
+
+    @pytest.mark.parametrize("name", sorted(_WIN32_RESERVED_LITERAL))
+    def test_every_reserved_name_is_guarded(self, name):
+        """Each name individually, not just the edges of the ranges.
+
+        The parametrization above covers COM1/COM9/LPT1/LPT9. Verified:
+        shrinking the implementation's set to COM{1,2,9} — deleting COM3-COM8 —
+        passed the ENTIRE suite, because nothing tested the middle. A guarded
+        `_COM3.parquet` on disk would then be unreachable, and new writes would
+        emit `COM3.parquet`, which on Windows fails or targets the device.
+        """
+        assert sanitize_symbol_for_filename(name) == f"_{name}"
+        assert filename_candidates(name) == [f"_{name}", name]
+
+    def test_reserved_set_matches_the_hand_spelled_literal(self):
+        """Set equality, so a name cannot be added or dropped unnoticed."""
+        from helpers import filename_utils as fu
+        actual = {n.upper() for n in fu._WINDOWS_RESERVED}
+        assert actual == self._WIN32_RESERVED_LITERAL, (
+            f"reserved set drifted:\n  only in impl: "
+            f"{sorted(actual - self._WIN32_RESERVED_LITERAL)}\n"
+            f"  missing from impl: "
+            f"{sorted(self._WIN32_RESERVED_LITERAL - actual)}")
+
 
 class TestComparisonOperators:
     """Comparison operators must map to distinct tokens so paired sweep configs
@@ -610,6 +642,40 @@ class TestReadPathsResolveEveryCandidateSpelling:
         assert reserved == [
             "_CON.parquet", "_con.parquet", "CON.parquet", "con.parquet",
         ], reserved
+
+    def test_case_expansion_rule_survives_a_lowercase_symbol(self, monkeypatch):
+        """Pin the RULE (exact / upper / lower), not its collapsed output.
+
+        Every existing probe fixture uses a symbol whose sanitized form is
+        already uppercase — `AAPL`, `CON` — so the `.upper()` spelling dedups
+        into the exact one and the expected probe list is IDENTICAL with or
+        without it. Verified: deleting `.upper()` from resolve_existing passed
+        the entire suite. Only a lowercase or mixed-case symbol exercises it,
+        and on a case-sensitive filesystem (CI, Linux prod) that deletion is a
+        silent drop of `CON.parquet` for a ticker configured as `con`.
+        """
+        probes = []
+        real_isfile = os.path.isfile
+
+        def spy(p):
+            probes.append(os.path.basename(p))
+            return False
+
+        monkeypatch.setattr(os.path, "isfile", spy)
+        resolve_existing("/nonexistent", "con")
+        lowered = list(probes)
+        probes.clear()
+        resolve_existing("/nonexistent", "BrkB")
+        mixed = list(probes)
+        monkeypatch.setattr(os.path, "isfile", real_isfile)
+
+        assert "CON.parquet" in lowered, (
+            f"the .upper() case variant is gone — a corpus storing CON.parquet "
+            f"is unreachable for a ticker spelled 'con' on any case-sensitive "
+            f"filesystem: {lowered}")
+        assert lowered == ["_con.parquet", "_CON.parquet",
+                           "con.parquet", "CON.parquet"], lowered
+        assert mixed == ["BrkB.parquet", "BRKB.parquet", "brkb.parquet"], mixed
 
 class TestReadPathsFindALegacyUnguardedFile:
     """The primary evidence for #345: **behaviour**, not source text.
@@ -1193,12 +1259,30 @@ class TestNoReadPathBuildsItsOwnFilename:
     # A new read path is at least as likely to be written this way.
     # Verbs that CREATE the file. A probe on a path this scope just wrote is
     # verification of its own write, not a lookup of a pre-existing corpus.
-    WRITE_FUNCS = {"to_parquet", "to_csv", "to_json", "to_pickle", "to_feather",
-                   "write", "write_text", "write_bytes", "savefig", "dump",
-                   "mkdir", "touch"}
+    #
+    # SPLIT BY WHERE THE PATH LIVES. Treating every name in every arg as
+    # "written" made the suppression fire on spurious overlap — `json.dump({'p':
+    # p}, fh)` marked `p` written when `p` was DATA, and any write sharing the
+    # bare name `os` or a directory variable suppressed unrelated probes.
+    # Verified: that re-opened the os.access regression on main() itself,
+    # because `output_dir.mkdir()` sits above the skip check.
+    PATH_ARG_WRITES = {"to_parquet", "to_csv", "to_json", "to_pickle",
+                       "to_feather", "to_hdf", "to_excel", "savefig"}
+    # the RECEIVER is the path: `p.write_text(...)`, `p.touch()`
+    RECEIVER_WRITES = {"write_text", "write_bytes", "touch", "mkdir"}
+    # `fh.write(x)` / `json.dump(obj, fh)` target a HANDLE, not a path — they
+    # mark nothing, or a path passed as data would read as written.
+    WRITE_FUNCS = PATH_ARG_WRITES | RECEIVER_WRITES
     READ_FUNCS = {"read_parquet", "read_csv", "read_json", "read_pickle",
                   "read_feather", "read_table", "open", "stat", "lstat",
                   "getmtime", "getsize",
+                  # read_bytes/read_text were absent while their WRITE twins
+                  # write_bytes/write_text were present — the asymmetry was the
+                  # tell. A guarded-only reader spelled `Path(p).read_bytes()`
+                  # scanned clean inside a COVERED module while the identical
+                  # `.stat()` spelling was caught: whether a violation is found
+                  # was a verb lottery.
+                  "read_bytes", "read_text", "read_hdf", "read_excel",
                   # An os.access() spelling of main()'s skip check reverted the
                   # #345 fix with the ENTIRE suite still green -- verified. The
                   # verb set is the backstop's whole surface, so a gap in it is
@@ -1465,6 +1549,21 @@ class TestNoReadPathBuildsItsOwnFilename:
                         sanitizers.add(a.asname or a.name)
                     if a.name in cls.SAFE:
                         safe_names.add(a.asname or a.name)
+        # `import helpers.filename_utils as fu` then
+        # `scrub = fu.sanitize_symbol_for_filename` — the sanitizer bound via
+        # an ATTRIBUTE, which the ImportFrom walk above cannot see.
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign) and isinstance(n.value, ast.Attribute) \
+                    and n.value.attr in cls.SANITIZERS:
+                for t in n.targets:
+                    sanitizers.update(cls._target_names(t))
+        # A module that DEFINES its own `resolve_existing` shadows the real
+        # one; treating the local as safe launders every caller. The genuine
+        # helpers are imported by read paths, never defined in them.
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                    and n.name in safe_names:
+                safe_names.discard(n.name)
 
         tainting_fns = cls._tainting_functions(tree, sanitizers, safe_names)
 
@@ -1485,21 +1584,21 @@ class TestNoReadPathBuildsItsOwnFilename:
                     for t in tgts:
                         listing_vars.update(cls._target_names(t))
                 if (isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Attribute)
-                        and node.func.attr in cls.WRITE_FUNCS):
-                    # The path may be an ARG (`df.to_parquet(p)`, keyword or
-                    # positional) or the RECEIVER (`p.write_text(...)`,
-                    # `p.touch()`). Collecting args only made every pathlib
-                    # write-then-verify a false positive — and
-                    # norgate_to_parquet.py is already pathlib, so the first
-                    # such refactor there would trip the contract test on
-                    # correct code.
-                    for a in list(node.args) + [k.value for k in node.keywords]:
-                        for nm in cls._names(a):
-                            written.setdefault(nm, node.lineno)
-                    recv = cls._dotted(node.func.value)
-                    if recv:
-                        written.setdefault(recv, node.lineno)
+                        and isinstance(node.func, ast.Attribute)):
+                    if node.func.attr in cls.PATH_ARG_WRITES:
+                        # `df.to_parquet(p)` / `to_parquet(path=p)` -- the path
+                        # is the first positional or a path keyword. ONLY that
+                        # expression is written; other args are options.
+                        targets = list(node.args[:1])
+                        targets += [k.value for k in node.keywords
+                                    if k.arg in ("path", "path_or_buf", "fname")]
+                        for a in targets:
+                            for nm in cls._names(a):
+                                written.setdefault(nm, node.lineno)
+                    elif node.func.attr in cls.RECEIVER_WRITES:
+                        recv = cls._dotted(node.func.value)
+                        if recv:
+                            written.setdefault(recv, node.lineno)
                 # open(): as a builtin `open(p, 'w')` or as `Path.open('w')`,
                 # with the mode positional OR keyword.
                 is_builtin_open = (isinstance(node, ast.Call)
@@ -1536,8 +1635,14 @@ class TestNoReadPathBuildsItsOwnFilename:
                 # genuinely safe (the bare arm is only reached after the safe
                 # one proved nothing exists); a ternary picks an arm, so a bare
                 # arm can be the live value. BoolOp vs IfExp separates them.
-                if isinstance(val, ast.IfExp):
-                    return taints(val.body) or taints(val.orelse)
+                # ANY IfExp inside the value, not just one at the top. The
+                # first version special-cased `bare if c else safe` only when
+                # the ternary was the whole expression, so one wrapper --
+                # `(... ) or 'x'`, `str(...)` -- laundered it again.
+                for sub in ast.walk(val):
+                    if isinstance(sub, ast.IfExp):
+                        if taints(sub.body) or taints(sub.orelse):
+                            return True
                 c = set(cls._calls(val))
                 if c & safe_names:
                     return False
@@ -1594,8 +1699,15 @@ class TestNoReadPathBuildsItsOwnFilename:
                     # ast.comprehension has no lineno; fall back to its iter
                     lineno = getattr(node, "lineno", None) \
                         or getattr(val, "lineno", 0)
-                    if (set(cls._calls(val)) & safe_names
-                            and not isinstance(val, ast.IfExp)):
+                    # TAINT IS EVALUATED FIRST. Testing safe-ness first
+                    # short-circuited on any SAFE call anywhere in the value, so
+                    # a ternary with a bare arm wrapped in ANYTHING --
+                    # `(bare if c else safe) or 'x'`, `str(bare if c else safe)`
+                    # -- was marked safe before taints() ever ran. taints()
+                    # already treats a fully-safe ternary as untainted and an
+                    # `or`-fallback as safe, so this ordering costs nothing and
+                    # closes the wrapper hole at any depth.
+                    if not taints(val) and (set(cls._calls(val)) & safe_names):
                         for nm in names:
                             safe.add(nm)
                             # ORDER-AWARE. An unconditional pop cleared taint
@@ -1653,6 +1765,12 @@ class TestNoReadPathBuildsItsOwnFilename:
                         continue
                     refs = cls._names(it)
                     hit = refs & set(tainted)
+                    # same post-write suppression as the main probe block —
+                    # this block was added later and did not consult it, so
+                    # `to_parquet(p)` then `all(map(isfile,[p]))` false-flagged
+                    if hit and all(written.get(r, node.lineno + 1) < node.lineno
+                                   for r in hit):
+                        continue
                     if hit and not (refs & safe):
                         v = sorted(hit)[0]
                         out.append((scope_name, tainted[v], node.lineno, v))
@@ -1692,17 +1810,23 @@ class TestNoReadPathBuildsItsOwnFilename:
                     continue
                 refs = cls._names(node)
                 hit = refs & set(tainted)
-                # Post-write verification: the scope created this path above,
-                # so probing it is not a read-path lookup. `refs` covers args
-                # and dotted names; a pathlib probe carries the path as the
-                # RECEIVER (`p.exists()`), which _names does reach via the
-                # Attribute, but the receiver's own dotted spelling is checked
-                # explicitly so `self.p.exists()` matches `self.p.write_text()`.
+                # Post-write verification: this scope created THIS path above,
+                # so probing it is not a read-path lookup.
+                #
+                # Suppress on the TAINTED identity only — never on any shared
+                # name. Checking all refs meant a write that merely mentioned
+                # `os`, or a `mkdir` on the directory the probe also names,
+                # silenced an unrelated violation. Verified: that re-opened the
+                # os.access regression on main() itself, since
+                # `output_dir.mkdir()` sits above its skip check. A suppression
+                # rule is the one place a bug HIDES findings rather than
+                # inventing them, so it has to be exact.
                 _recv = (cls._dotted(node.func.value)
                          if isinstance(node.func, ast.Attribute) else None)
-                _checked = set(refs) | ({_recv} if _recv else set())
-                if any(written.get(r, node.lineno + 1) < node.lineno
-                       for r in _checked):
+                _checked = set(hit) | ({_recv} if _recv in tainted else set())
+                if _checked and all(
+                        written.get(r, node.lineno + 1) < node.lineno
+                        for r in _checked):
                     continue
                 if hit and not (refs & safe):
                     v = sorted(hit)[0]
