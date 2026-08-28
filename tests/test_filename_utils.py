@@ -1162,8 +1162,14 @@ class TestNoReadPathBuildsItsOwnFilename:
                     # rewritten as a method. @shardul0701. `_dotted` composes
                     # with the computed-key rule: `d[k].append` -> `d[*]`.
                     container = cls._dotted(node.func.value)
-                    if not container or container in safe:
+                    if not container:
                         continue
+                    # NO `container in safe` short-circuit here. There used to
+                    # be one; it read as the laundering rule and decided
+                    # nothing. @shardul0701 A/B'd it across every battery and
+                    # the suite -- byte-identical with and without. The actual
+                    # clearing happens in the assignment loop below, which is
+                    # where the fix belongs.
                     for arg in node.args:
                         if set(cls._calls(arg)) & cls.SAFE:
                             continue
@@ -1186,7 +1192,17 @@ class TestNoReadPathBuildsItsOwnFilename:
                     if set(cls._calls(val)) & cls.SAFE:
                         for nm in names:
                             safe.add(nm)
-                            tainted.pop(nm, None)
+                            # ORDER-AWARE. An unconditional pop cleared taint
+                            # that a container mutation had added on a LATER
+                            # line, because the fixpoint re-runs this loop every
+                            # round -- so `paths = [_resolve_existing(...)]`
+                            # followed by `paths.append(<bare>)` laundered the
+                            # append forever. That is the safe-primary /
+                            # bare-fallback shape again, on a list instead of a
+                            # rebinding. Only clear taint that originated at or
+                            # above this assignment.
+                            if tainted.get(nm, lineno) <= lineno:
+                                tainted.pop(nm, None)
                     elif taints(val):
                         # LAST WRITE WINS, in source order. Safety used to be
                         # permanent within a scope, which made the
@@ -1420,6 +1436,34 @@ class TestNoReadPathBuildsItsOwnFilename:
             "def f(s,d):\n    d['paths']=[]\n"
             "    d['paths'] += [os.path.join(D,_sanitize_filename(s))]\n"
             "    for p in d['paths']:\n        if os.path.isfile(p): return p\n",
+        # the whole verb set, not just append
+        "attr_add_verb":
+            "class C:\n    def f(self,s,d):\n        self.seen=set()\n"
+            "        self.seen.add(os.path.join(d,_sanitize_filename(s)))\n"
+            "        for p in self.seen:\n            if os.path.isfile(p): return p\n",
+        "attr_extend_verb":
+            "class C:\n    def f(self,s,d):\n        self.paths=[]\n"
+            "        self.paths.extend([os.path.join(d,_sanitize_filename(s))])\n"
+            "        for p in self.paths:\n            if os.path.isfile(p): return p\n",
+        "attr_insert_verb":
+            "class C:\n    def f(self,s,d):\n        self.paths=[]\n"
+            "        self.paths.insert(0,os.path.join(d,_sanitize_filename(s)))\n"
+            "        for p in self.paths:\n            if os.path.isfile(p): return p\n",
+        # --- safe primary, bare fallback, on a LIST -------------------------
+        # Item 4(b) again in a different spelling. An unconditional taint-pop
+        # in the fixpoint's assignment loop cleared taint that the append had
+        # added on a later line, every round -- so this laundered forever, and
+        # order-independently, despite the comment claiming last-write-wins.
+        "safe_list_then_bare_append":
+            "def f(s,d):\n    paths=[_resolve_existing(d,s)]\n"
+            "    paths.append(os.path.join(d,_sanitize_filename(s)+'.csv'))\n"
+            "    for p in paths:\n        if os.path.isfile(p): return p\n",
+        "safe_attr_list_then_bare_append":
+            "class C:\n    def f(self,s,d):\n"
+            "        self.paths=[_resolve_existing(d,s)]\n"
+            "        self.paths.append(os.path.join(d,_sanitize_filename(s)+'.csv'))\n"
+            "        for p in self.paths:\n"
+            "            if os.path.isfile(p): return p\n",
         "member_aliased_into_plain_name":
             "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
             "        n=self.safe\n"
@@ -1531,6 +1575,16 @@ class TestNoReadPathBuildsItsOwnFilename:
             "            self.paths.append(os.path.join(d,safe+'.csv'))\n"
             "        for path in self.paths:\n"
             "            if os.path.isfile(path): return path\n",
+        # The mirror of safe_list_then_bare_append, and it must stay clean:
+        # the bare entries go with the DISCARDED list, so the probe can only
+        # ever see resolved paths. Missing this is correct, and it is what
+        # makes the order-aware pop a fix rather than a blunt re-taint.
+        "bare_append_then_rebound_to_a_safe_list":
+            "class C:\n    def f(self,s,d):\n        self.paths=[]\n"
+            "        self.paths.append(os.path.join(d,_sanitize_filename(s)+'.csv'))\n"
+            "        self.paths=[_resolve_existing(d,s)]\n"
+            "        for p in self.paths:\n"
+            "            if p and os.path.isfile(p): return p\n",
     }
 
     @pytest.mark.parametrize("shape", sorted(SHAPES))
