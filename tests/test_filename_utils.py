@@ -924,6 +924,17 @@ class TestNoReadPathBuildsItsOwnFilename:
             key = node.slice
             if base and isinstance(key, ast.Constant):
                 return f"{base}[{key.value!r}]"
+            if base:
+                # COMPUTED key -- one identity covering every computed-key
+                # access to this container. @shardul0701 found the previous
+                # fallback (taint the bare container) kept the poison-every-
+                # member false positive alive through a narrower door:
+                #     d[k] = _sanitize_filename(s)
+                #     os.path.exists(d['config'])      # was FLAGGED
+                # Writing `d[k]` and reading `d[k]` both spell `d[*]`, so the
+                # defect stays caught; a constant-key read spells `d['config']`
+                # and no longer collides.
+                return f"{base}[*]"
         return None
 
     @classmethod
@@ -1324,6 +1335,26 @@ class TestNoReadPathBuildsItsOwnFilename:
         "map_over_sanitizer":
             "def f(syms):\n    ps=list(map(_sanitize_filename,syms))\n"
             "    for p in ps:\n        if os.path.isfile(D+p): return p\n",
+        # --- member-keying battery ------------------------------------------
+        "computed_key_target":
+            "def f(s,d,k):\n    d[k]=_sanitize_filename(s)\n"
+            "    return os.path.exists(d[k])\n",
+        "member_aliased_into_plain_name":
+            "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
+            "        n=self.safe\n"
+            "        if os.path.exists(os.path.join(D,n)): return 1\n",
+        "member_in_fstring":
+            "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
+            "        if os.path.exists(f'{D}/{self.safe}.parquet'): return 1\n",
+        "nested_attribute":
+            "class C:\n    def f(self,s):\n        self.cfg.safe=_sanitize_filename(s)\n"
+            "        if os.path.exists(os.path.join(D,self.cfg.safe)): return 1\n",
+        "attr_via_read_func":
+            "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
+            "        return pd.read_parquet(os.path.join(D,self.safe))\n",
+        "dictkey_via_read_func":
+            "def f(s,d):\n    d['safe']=_sanitize_filename(s)\n"
+            "    return pd.read_parquet(os.path.join(D,d['safe']))\n",
     }
 
     SAFE_SHAPES = {
@@ -1381,6 +1412,20 @@ class TestNoReadPathBuildsItsOwnFilename:
         "write_read_split_across_functions":
             "def w(s,d):\n    return os.path.join(d,_sanitize_filename(s))\n"
             "def r(d):\n    return pd.read_parquet(os.path.join(d,'fixed.parquet'))\n",
+        # The false-positive class survived my first member-keying fix through
+        # the computed-key fallback: `d[k] = ...` tainted the bare container,
+        # so an unrelated CONSTANT-key read flagged. Both directions are now
+        # pinned -- `computed_key_target` above must stay caught while this
+        # stays clean.
+        "computed_key_write_then_unrelated_const_read":
+            "def f(s,d,k):\n    d[k]=_sanitize_filename(s)\n"
+            "    return os.path.exists(d['config'])\n",
+        "attr_write_no_probe":
+            "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
+            "        return self.safe\n",
+        "resolve_into_attr_probe_other_attr":
+            "class C:\n    def f(self,s):\n        self.p=_resolve_existing(D,s)\n"
+            "        return os.path.exists(self.other)\n",
     }
 
     @pytest.mark.parametrize("shape", sorted(SHAPES))
@@ -1394,3 +1439,40 @@ class TestNoReadPathBuildsItsOwnFilename:
         assert not self.scan(self.SAFE_SHAPES[shape]), (
             f"false positive on {shape!r} — a guard that cries wolf on correct "
             f"code gets disabled by whoever it annoys")
+
+    # -- KNOWN LIMITS, pinned so they cannot rot -----------------------------
+    #
+    # Both are real defects the scanner does NOT catch. Recorded as strict
+    # xfails rather than prose: the moment either is implemented these flip to
+    # failures and force the record to be updated deliberately. Prose in a
+    # docstring would just quietly become false.
+
+    @pytest.mark.xfail(reason=(
+        "taint keys on the member (self.safe), which does not follow object "
+        "aliases -- `q = o` makes o.safe and q.safe unrelated identities. This "
+        "is the price of the precision that removed the poison-every-member "
+        "false positives, and @shardul0701 and I both judge the trade worth "
+        "it; recorded so it is a decision rather than a surprise"),
+        strict=True)
+    def test_object_alias_is_a_known_miss(self):
+        src = ("def f(s,o):\n    o.safe=_sanitize_filename(s)\n    q=o\n"
+               "    if os.path.exists(os.path.join(D,q.safe)): return 1\n")
+        assert self.scan(src)
+
+    @pytest.mark.xfail(reason=(
+        "taint is per-function, so a write in __init__ never reaches a probe "
+        "in a sibling method -- the most natural spelling of a class-based "
+        "read path, and the shape the member-keying fix was justified by. "
+        "PRE-EXISTING, not a regression from that fix. Closing it means "
+        "seeding method scopes with attribute taint from sibling methods of "
+        "the same ClassDef, which carries its own false-positive risk (one "
+        "method resolving safely into self.p while another probes it) and so "
+        "belongs in its own change"),
+        strict=True)
+    def test_cross_method_attribute_is_a_known_miss(self):
+        src = ("class C:\n    def __init__(self,s):\n"
+               "        self.safe=_sanitize_filename(s)\n"
+               "    def read(self):\n"
+               "        p=os.path.join(D,self.safe+'.parquet')\n"
+               "        if os.path.exists(p): return 1\n")
+        assert self.scan(src)
