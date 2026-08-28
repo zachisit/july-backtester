@@ -1070,8 +1070,10 @@ class TestNoReadPathBuildsItsOwnFilename:
                         if not (isinstance(node, ast.Call)
                                 and isinstance(node.func, ast.Attribute)
                                 and node.func.attr in {"append", "extend",
-                                                       "insert", "add", "update"}
-                                and isinstance(node.func.value, ast.Name)):
+                                                       "insert", "add", "update"}):
+                            continue
+                        container = cls._dotted(node.func.value)
+                        if not container:
                             continue
                         for arg in node.args:
                             ac = set(cls._calls(arg))
@@ -1079,7 +1081,7 @@ class TestNoReadPathBuildsItsOwnFilename:
                                 continue
                             if (ac & cls.SANITIZERS) or (ac & tainting) \
                                     or (cls._names(arg) & local):
-                                local.add(node.func.value.id)
+                                local.add(container)
                 for node in ast.walk(f):
                     if isinstance(node, ast.Return) and node.value is not None:
                         c = set(cls._calls(node.value))
@@ -1151,11 +1153,16 @@ class TestNoReadPathBuildsItsOwnFilename:
                     if not (isinstance(node, ast.Call)
                             and isinstance(node.func, ast.Attribute)
                             and node.func.attr in {"append", "extend", "insert",
-                                                   "add", "update"}
-                            and isinstance(node.func.value, ast.Name)):
+                                                   "add", "update"}):
                         continue
-                    container = node.func.value.id
-                    if container in safe:
+                    # The container may itself be a member: `self.paths.append`
+                    # / `d['paths'].append`. Gating on ast.Name meant those
+                    # never entered this loop at all, so the very function this
+                    # handler was written for went invisible the moment it was
+                    # rewritten as a method. @shardul0701. `_dotted` composes
+                    # with the computed-key rule: `d[k].append` -> `d[*]`.
+                    container = cls._dotted(node.func.value)
+                    if not container or container in safe:
                         continue
                     for arg in node.args:
                         if set(cls._calls(arg)) & cls.SAFE:
@@ -1378,6 +1385,41 @@ class TestNoReadPathBuildsItsOwnFilename:
             "        self.bad=os.path.join(D,_sanitize_filename(s))\n"
             "        self.good=_resolve_existing(D,s)\n"
             "        if os.path.exists(self.bad): return 1\n",
+        # --- container mutation on a MEMBER container -----------------------
+        # Both handlers used to gate on ast.Name, so `self.paths.append(...)`
+        # never entered them -- while `self.paths += [...]` did, because
+        # AugAssign routes through _target_names. The asymmetry meant the very
+        # function the handler was written for went invisible the moment it was
+        # rewritten as a method. Both spellings and both container kinds pinned.
+        "attr_append_then_probe":
+            "class C:\n    def f(self,s):\n        self.paths=[]\n"
+            "        self.paths.append(os.path.join(D,_sanitize_filename(s)))\n"
+            "        for p in self.paths:\n"
+            "            if os.path.isfile(p): return p\n",
+        "attr_append_then_probe_direct":
+            "class C:\n    def f(self,s):\n        self.paths=[]\n"
+            "        self.paths.append(os.path.join(D,_sanitize_filename(s)))\n"
+            "        if os.path.isfile(self.paths[0]): return 1\n",
+        "subscript_append_then_probe":
+            "def f(s,d):\n    d['paths']=[]\n"
+            "    d['paths'].append(os.path.join(D,_sanitize_filename(s)))\n"
+            "    for p in d['paths']:\n        if os.path.isfile(p): return p\n",
+        # csv_service's own resolver, written as a method. THE point of the fix.
+        "csv_service_resolver_as_a_method":
+            "class C:\n    def find(self,symbol,csv_dir):\n        self.paths=[]\n"
+            "        safe=_sanitize_filename(symbol)\n"
+            "        self.paths.append(os.path.join(csv_dir,safe+'.csv'))\n"
+            "        self.paths.append(os.path.join(csv_dir,safe.lower()+'.csv'))\n"
+            "        for path in self.paths:\n"
+            "            if os.path.isfile(path): return path\n",
+        "attr_augassign_then_probe":
+            "class C:\n    def f(self,s):\n        self.paths=[]\n"
+            "        self.paths += [os.path.join(D,_sanitize_filename(s))]\n"
+            "        for p in self.paths:\n            if os.path.isfile(p): return p\n",
+        "subscript_augassign_then_probe":
+            "def f(s,d):\n    d['paths']=[]\n"
+            "    d['paths'] += [os.path.join(D,_sanitize_filename(s))]\n"
+            "    for p in d['paths']:\n        if os.path.isfile(p): return p\n",
         "member_aliased_into_plain_name":
             "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
             "        n=self.safe\n"
@@ -1476,6 +1518,19 @@ class TestNoReadPathBuildsItsOwnFilename:
             "        self.bad=os.path.join(D,_sanitize_filename(s))\n"
             "        self.good=_resolve_existing(D,s)\n"
             "        if self.good and os.path.exists(self.good): return 1\n",
+        # Member-container appends that are CORRECT must stay clean, or
+        # widening the handler to members would have cost precision.
+        "attr_append_resolve_existing":
+            "class C:\n    def f(self,s):\n        self.paths=[]\n"
+            "        self.paths.append(_resolve_existing(D,s))\n"
+            "        for p in self.paths:\n"
+            "            if p and os.path.isfile(p): return p\n",
+        "attr_append_inside_candidates_loop":
+            "class C:\n    def f(self,s,d):\n        self.paths=[]\n"
+            "        for safe in _filename_candidates(s):\n"
+            "            self.paths.append(os.path.join(d,safe+'.csv'))\n"
+            "        for path in self.paths:\n"
+            "            if os.path.isfile(path): return path\n",
     }
 
     @pytest.mark.parametrize("shape", sorted(SHAPES))
