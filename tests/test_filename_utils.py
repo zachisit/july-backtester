@@ -402,6 +402,66 @@ class TestCachingCallSiteIsPinned:
         back = caching.get_cached_data("I:VIX", "2020-01-01", "2020-01-02", "D", 1)
         assert back is not None, "cache write/read used different filenames"
 
+    def test_cache_write_uses_the_guarded_reserved_spelling(
+            self, tmp_path, monkeypatch):
+        """The OTHER half of the #345 contract, which this PR made invisible.
+
+        The contract is: readers try every spelling, writers ALWAYS emit the
+        guarded one. Hardening the readers means a write-guard regression now
+        produces files the tolerant readers happily find — so no round-trip
+        test can detect it. Verified: dropping `guard_reserved` at this write
+        site passes the ENTIRE suite (2226 passed).
+
+        On Windows an unguarded `CON` write fails or targets the device; in
+        caching that failure is swallowed by the try/except into an error log,
+        giving silent perpetual re-fetch — the same silent-failure profile as
+        #345, on the same survivorship-critical names.
+
+        So the write spelling has to be asserted directly, not round-tripped.
+        """
+        import pandas as pd
+        import helpers.caching as caching
+        monkeypatch.setattr(caching, "CACHE_DIR", str(tmp_path))
+
+        df = pd.DataFrame(
+            {"Open": [1.0], "High": [1.0], "Low": [1.0], "Close": [1.0],
+             "Volume": [1.0]},
+            index=pd.to_datetime(["2020-01-01"]))
+        caching.set_cached_data(df, "CON", "2020-01-01", "2020-01-02", "D", 1)
+
+        written = [p.name for p in tmp_path.iterdir()]
+        assert any(n.startswith("_CON_") for n in written), (
+            f"cache WROTE the unguarded reserved spelling: {written}")
+        assert not any(n.startswith("CON_") for n in written), (
+            f"cache wrote an unguarded CON file: {written}")
+
+    def test_cache_roundtrip_discriminates_the_old_whitelist(
+            self, tmp_path, monkeypatch):
+        """`I:VIX` cannot detect the reversion this class exists to pin.
+
+        It sanitizes to `I_VIX` under BOTH the old whitelist and the shared
+        blacklist, so the roundtrip above passes either way — verified by
+        reverting caching.py to a whitelist scrub and watching the whole suite
+        stay green. Only a symbol carrying a character the whitelist ATE and
+        the blacklist KEEPS separates them.
+        """
+        import pandas as pd
+        import helpers.caching as caching
+        monkeypatch.setattr(caching, "CACHE_DIR", str(tmp_path))
+
+        df = pd.DataFrame(
+            {"Open": [1.0], "High": [1.0], "Low": [1.0], "Close": [1.0],
+             "Volume": [1.0]},
+            index=pd.to_datetime(["2020-01-01"]))
+        caching.set_cached_data(df, "$VIX", "2020-01-01", "2020-01-02", "D", 1)
+
+        written = [p.name for p in tmp_path.iterdir()]
+        assert any(n.startswith("$VIX_") for n in written), (
+            f"cache key dropped the '$' — that is the OLD whitelist scrub, "
+            f"which collapsed $VIX and ^VIX onto one file: {written}")
+        assert caching.get_cached_data(
+            "$VIX", "2020-01-01", "2020-01-02", "D", 1) is not None
+
     def test_cache_key_reflects_the_shared_sanitizer_not_the_old_whitelist(self):
         """The old caching.py scrub was a strict whitelist that collapsed `$`
         and `^`; the shared blacklist preserves them."""
@@ -649,16 +709,101 @@ class TestReadPathsFindALegacyUnguardedFile:
         assert ok is True
         assert not called, "fetched data for a symbol already on disk"
 
-    def test_main_skip_existing_honours_a_legacy_reserved_name(
-            self, tmp_path, monkeypatch, capsys):
-        """`main()`'s own skip check, which had NO behavioural test.
+    def test_export_symbol_still_exports_an_absent_symbol(self, tmp_path):
+        """The counter-case, and it is load-bearing.
 
-        Found by the final QA round: reverting this call site to an
-        `os.access(<guarded spelling>)` probe reintroduced the full #345 defect
-        -- CON re-exported, both spellings left on disk -- and the ENTIRE test
-        file still passed, because only the AST backstop covered it and
-        `os.access` was outside its verb set. A single structural check is not
-        coverage; the behavioural test is what makes the call site real.
+        Gutting `export_symbol` to an unconditional `return True` passed the
+        ENTIRE test file — verified. Every assertion about it was of the form
+        "returned True and did not fetch", which a do-nothing exporter
+        satisfies perfectly while silently exporting nothing at all. A skip
+        test without an export test proves only half the contract, and the half
+        it omits is the one that destroys a corpus.
+        """
+        import sys
+        import types
+        import scripts.norgate_to_parquet as n2p
+
+        fetched = []
+        frame = pd.DataFrame(
+            {"Open": [1.0], "High": [1.0], "Low": [1.0],
+             "Close": [1.0], "Volume": [100]},
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-02", tz="UTC")],
+                                   name="Datetime"))
+
+        def _fetch(symbol, *a, **k):
+            fetched.append(symbol)
+            return frame
+
+        stub = types.ModuleType("services.norgate_service")
+        stub.get_price_data = _fetch
+        prev = sys.modules.get("services.norgate_service")
+        sys.modules["services.norgate_service"] = stub
+        try:
+            ok = n2p.export_symbol(
+                "NOSUCH", tmp_path,
+                {"start_date": "2024-01-01", "end_date": "2024-06-01"},
+                skip_existing=True)
+        finally:
+            if prev is None:
+                sys.modules.pop("services.norgate_service", None)
+            else:
+                sys.modules["services.norgate_service"] = prev
+
+        assert fetched == ["NOSUCH"], (
+            "export_symbol did not fetch a symbol that is absent from the "
+            "corpus — it exports nothing")
+        assert ok is True
+        assert (tmp_path / "NOSUCH.parquet").is_file(), (
+            "export_symbol reported success without writing the file")
+
+    def test_export_symbol_writes_the_guarded_reserved_spelling(self, tmp_path):
+        """The export write guard, pinned directly for the same reason as the
+        cache one: the tolerant readers mask its removal, so dropping
+        `guard_reserved` here passes the entire suite. Verified."""
+        import sys
+        import types
+        import scripts.norgate_to_parquet as n2p
+
+        frame = pd.DataFrame(
+            {"Open": [1.0], "High": [1.0], "Low": [1.0],
+             "Close": [1.0], "Volume": [100]},
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-02", tz="UTC")],
+                                   name="Datetime"))
+        stub = types.ModuleType("services.norgate_service")
+        stub.get_price_data = lambda *a, **k: frame
+        prev = sys.modules.get("services.norgate_service")
+        sys.modules["services.norgate_service"] = stub
+        try:
+            n2p.export_symbol(
+                "CON", tmp_path,
+                {"start_date": "2024-01-01", "end_date": "2024-06-01"})
+        finally:
+            if prev is None:
+                sys.modules.pop("services.norgate_service", None)
+            else:
+                sys.modules["services.norgate_service"] = prev
+
+        names = [p.name for p in tmp_path.iterdir()]
+        assert "_CON.parquet" in names, (
+            f"export WROTE the unguarded reserved spelling: {names}")
+        assert "CON.parquet" not in names, names
+
+    def test_main_skip_existing_honours_a_legacy_reserved_name(
+            self, tmp_path, monkeypatch, caplog):
+        """`main()`'s OWN skip decision — measured at main(), not downstream.
+
+        History worth keeping, because the first version of this test was
+        decoration and its docstring said otherwise:
+
+        Reverting main()'s skip check to a guarded-spelling probe does NOT
+        re-export anything, because `export_symbol` runs its own
+        `resolve_existing` and skips there instead. So a test that only asserts
+        "nothing was fetched" passes on a broken main() and measures
+        export_symbol's fix twice. Verified: with main() reverted, that
+        assertion still passed and only the AST scan caught it.
+
+        This version stubs `export_symbol` so main()'s decision is the only
+        thing observed, and asserts on the skip COUNT main() itself reports.
         """
         import sys
         import types
@@ -668,14 +813,16 @@ class TestReadPathsFindALegacyUnguardedFile:
 
         exported = []
         stub = types.ModuleType("services.norgate_service")
+        stub.get_price_data = lambda *a, **k: None
 
-        def _boom(symbol, *a, **k):
+        # Stub export_symbol so main()'s OWN skip decision is what is measured.
+        # Without this, export_symbol's separate resolve_existing absorbs the
+        # defect and this test passes on a broken main().
+        def _reached(symbol, *a, **k):
             exported.append(symbol)
-            raise AssertionError(
-                f"re-exported {symbol!r}, which is already present under its "
-                f"legacy unguarded spelling — this is #345")
+            return True
 
-        stub.get_price_data = _boom
+        monkeypatch.setattr(n2p, "export_symbol", _reached)
         # main() imports norgatedata for its availability check; the package is
         # not installable here (no subscription), so it is stubbed rather than
         # skipped -- a skipped test on the one call site that had no coverage
@@ -695,6 +842,59 @@ class TestReadPathsFindALegacyUnguardedFile:
             ["norgate_to_parquet.py", "--tickers", "CON",
              "--output-dir", str(tmp_path), "--skip-existing"])
         try:
+            with caplog.at_level("INFO", logger="scripts.norgate_to_parquet"):
+                n2p.main()
+        finally:
+            for key, prev in (("services.norgate_service", prev_svc),
+                              ("norgatedata", prev_nd)):
+                if prev is None:
+                    sys.modules.pop(key, None)
+                else:
+                    sys.modules[key] = prev
+
+        assert not exported, (
+            f"main() passed {exported} to export_symbol despite a legacy "
+            f"CON.parquet already on disk — main()'s own skip check did not "
+            f"resolve the unguarded spelling (#345)")
+        # The skip/export ACCOUNTING is the only observable produced solely by
+        # main()'s own check — export_symbol's backstop cannot fake it.
+        summary = "\n".join(r.message for r in caplog.records)
+        assert "0 exported, 0 failed, 1 skipped" in summary, (
+            "main() did not count the symbol as skipped — its own check did "
+            "not resolve the legacy unguarded spelling:\n" + summary)
+
+    def test_main_skip_existing_still_exports_an_absent_symbol(
+            self, tmp_path, monkeypatch):
+        """The counter-case. Without it, `if args.skip_existing:` — skip
+        EVERYTHING, unconditionally — passes, and so does a main() that never
+        exports at all. A skip test that only proves skipping is half a
+        contract."""
+        import sys
+        import types
+        import scripts.norgate_to_parquet as n2p
+
+        exported = []
+        stub = types.ModuleType("services.norgate_service")
+        stub.get_price_data = lambda *a, **k: None
+        monkeypatch.setattr(
+            n2p, "export_symbol",
+            lambda symbol, *a, **k: (exported.append(symbol), True)[1])
+
+        nd = types.ModuleType("norgatedata")
+        nd.status = lambda: "OK"
+        nd.database_symbols = lambda db: ["NOSUCH"]
+        nd.StockPriceAdjustmentType = types.SimpleNamespace(TOTALRETURN=1)
+        nd.PaddingType = types.SimpleNamespace(
+            NONE=0, ALLMARKETDAYS=1, ALLWEEKDAYS=2, ALLCALENDARDAYS=3)
+        prev_svc = sys.modules.get("services.norgate_service")
+        prev_nd = sys.modules.get("norgatedata")
+        sys.modules["services.norgate_service"] = stub
+        sys.modules["norgatedata"] = nd
+        monkeypatch.setattr(
+            sys, "argv",
+            ["norgate_to_parquet.py", "--tickers", "NOSUCH",
+             "--output-dir", str(tmp_path), "--skip-existing"])
+        try:
             n2p.main()
         finally:
             for key, prev in (("services.norgate_service", prev_svc),
@@ -704,11 +904,9 @@ class TestReadPathsFindALegacyUnguardedFile:
                 else:
                     sys.modules[key] = prev
 
-        assert not exported, exported
-        # and the guarded spelling must NOT have been created alongside it
-        assert not (tmp_path / "_CON.parquet").exists(), (
-            "wrote _CON.parquet next to the legacy CON.parquet — both "
-            "spellings now on disk, which is the failure this fix prevents")
+        assert exported == ["NOSUCH"], (
+            "main() skipped a symbol that is NOT on disk — --skip-existing "
+            "skipped everything")
 
     # ---- scripts/validate_norgate_export.py ---------------------------------
 
@@ -752,6 +950,33 @@ class TestReadPathsFindALegacyUnguardedFile:
             "validator reported a symbol as missing from a corpus that has it "
             "under the legacy unguarded spelling:\n" + out
         )
+
+    def test_validator_does_report_a_genuinely_absent_symbol(
+            self, tmp_path, capsys):
+        """The counter-case. Forcing `missing = []` inside validate() passed —
+        verified. For a VALIDATOR the missing-report is the entire product, so
+        a test suite that only proves it stays quiet proves nothing."""
+        import sys
+        import types
+        import importlib
+
+        stub = types.ModuleType("norgatedata")
+        stub.database_symbols = lambda db: ["NOSUCH"] if db == _FIRST_DB else []
+        prev = sys.modules.get("norgatedata")
+        sys.modules["norgatedata"] = stub
+        try:
+            v = importlib.import_module("scripts.validate_norgate_export")
+            v.validate(tmp_path)          # empty corpus — nothing on disk
+            out = capsys.readouterr().out
+        finally:
+            if prev is None:
+                sys.modules.pop("norgatedata", None)
+            else:
+                sys.modules["norgatedata"] = prev
+
+        assert "MISSING 1" in out, out
+        assert "TOTAL missing   : 1" in out, out
+        assert "- NOSUCH" in out, out
 
     # ---- services/csv_service.py --------------------------------------------
 
@@ -954,7 +1179,9 @@ class TestNoReadPathBuildsItsOwnFilename:
     EXIST_ATTRS = {"exists", "isfile", "is_file", "isdir", "is_dir"}
     # Directory listings are existence tests wearing different clothes;
     # parquet_service.py already uses the listdir idiom.
-    LISTING_FUNCS = {"glob", "iglob", "listdir", "scandir"}
+    LISTING_FUNCS = {"glob", "iglob", "listdir", "scandir",
+                     # the other two standard corpus enumerations
+                     "walk", "iterdir"}
     # THE CONTRACT IS NOT VERB-SCOPED. @shardul0701's widest finding: a reader
     # that just opens the path and catches the error has the identical failure
     # — CON/PRN drop out silently — and never calls exists() at all:
@@ -1124,6 +1351,16 @@ class TestNoReadPathBuildsItsOwnFilename:
         for f in ast.walk(tree):
             if isinstance(f, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 yield f.name, cls._scope_nodes(f.body)
+            # Class BODIES were scanned in no scope at all: ClassDef is in
+            # _NESTED (so the module walk skips it) and only functions were
+            # yielded, so a violation written at class-body level was invisible.
+            elif isinstance(f, ast.ClassDef):
+                yield f"class {f.name}", cls._scope_nodes(f.body)
+            # A lambda body is in no scope either, so even a fully
+            # self-contained violation inside one is invisible. Its body is an
+            # expression, not a statement list.
+            elif isinstance(f, ast.Lambda):
+                yield "<lambda>", cls._scope_nodes([ast.Expr(value=f.body)])
 
     @classmethod
     def _tainting_functions(cls, tree, sanitizers=None, safe_names=None):
@@ -1250,20 +1487,57 @@ class TestNoReadPathBuildsItsOwnFilename:
                 if (isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Attribute)
                         and node.func.attr in cls.WRITE_FUNCS):
-                    for a in node.args:
+                    # The path may be an ARG (`df.to_parquet(p)`, keyword or
+                    # positional) or the RECEIVER (`p.write_text(...)`,
+                    # `p.touch()`). Collecting args only made every pathlib
+                    # write-then-verify a false positive — and
+                    # norgate_to_parquet.py is already pathlib, so the first
+                    # such refactor there would trip the contract test on
+                    # correct code.
+                    for a in list(node.args) + [k.value for k in node.keywords]:
                         for nm in cls._names(a):
                             written.setdefault(nm, node.lineno)
-                if (isinstance(node, ast.Call)
-                        and isinstance(node.func, ast.Name)
-                        and node.func.id == "open" and len(node.args) > 1):
-                    mode = node.args[1]
+                    recv = cls._dotted(node.func.value)
+                    if recv:
+                        written.setdefault(recv, node.lineno)
+                # open(): as a builtin `open(p, 'w')` or as `Path.open('w')`,
+                # with the mode positional OR keyword.
+                is_builtin_open = (isinstance(node, ast.Call)
+                                   and isinstance(node.func, ast.Name)
+                                   and node.func.id == "open")
+                is_path_open = (isinstance(node, ast.Call)
+                                and isinstance(node.func, ast.Attribute)
+                                and node.func.attr == "open")
+                if is_builtin_open or is_path_open:
+                    mode = None
+                    margs = node.args[1:] if is_builtin_open else node.args[:1]
+                    if margs:
+                        mode = margs[0]
+                    for k in node.keywords:
+                        if k.arg == "mode":
+                            mode = k.value
                     if isinstance(mode, ast.Constant) and \
                             isinstance(mode.value, str) and \
                             not mode.value.startswith("r"):
-                        for nm in cls._names(node.args[0]):
-                            written.setdefault(nm, node.lineno)
+                        if is_builtin_open and node.args:
+                            for nm in cls._names(node.args[0]):
+                                written.setdefault(nm, node.lineno)
+                        elif is_path_open:
+                            recv = cls._dotted(node.func.value)
+                            if recv:
+                                written.setdefault(recv, node.lineno)
 
             def taints(val):
+                # A TERNARY with a bare arm is not laundered by a safe arm.
+                # `bare if c else _resolve_existing(...)` had a SAFE call in
+                # its calls set, so the short-circuit below cleared it -- the
+                # same short-circuit that deliberately blesses caching.py's
+                # `resolve_existing(...) or join(...)`. An `or`-fallback is
+                # genuinely safe (the bare arm is only reached after the safe
+                # one proved nothing exists); a ternary picks an arm, so a bare
+                # arm can be the live value. BoolOp vs IfExp separates them.
+                if isinstance(val, ast.IfExp):
+                    return taints(val.body) or taints(val.orelse)
                 c = set(cls._calls(val))
                 if c & safe_names:
                     return False
@@ -1320,7 +1594,8 @@ class TestNoReadPathBuildsItsOwnFilename:
                     # ast.comprehension has no lineno; fall back to its iter
                     lineno = getattr(node, "lineno", None) \
                         or getattr(val, "lineno", 0)
-                    if set(cls._calls(val)) & safe_names:
+                    if (set(cls._calls(val)) & safe_names
+                            and not isinstance(val, ast.IfExp)):
                         for nm in names:
                             safe.add(nm)
                             # ORDER-AWARE. An unconditional pop cleared taint
@@ -1352,6 +1627,35 @@ class TestNoReadPathBuildsItsOwnFilename:
 
             probe_names = (cls.EXIST_ATTRS | cls.LISTING_FUNCS | cls.READ_FUNCS
                            | probe_aliases)
+
+            # A probe passed as a VALUE rather than called:
+            # `any(map(os.path.isfile, paths))`. This is the exact mirror of
+            # the sanitizer-as-value case already handled in taints(), which
+            # only ever had one side of the symmetry.
+            for node in stmts:
+                if not (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Name)
+                        and node.func.id in {"map", "filter"}):
+                    continue
+                if not node.args:
+                    continue
+                head = node.args[0]
+                head_name = (head.attr if isinstance(head, ast.Attribute)
+                             else head.id if isinstance(head, ast.Name) else "")
+                if head_name not in probe_names:
+                    continue
+                for it in node.args[1:]:
+                    if set(cls._calls(it)) & safe_names:
+                        continue
+                    if set(cls._calls(it)) & sanitizers:
+                        out.append((scope_name, node.lineno, node.lineno,
+                                    "<inline>"))
+                        continue
+                    refs = cls._names(it)
+                    hit = refs & set(tainted)
+                    if hit and not (refs & safe):
+                        v = sorted(hit)[0]
+                        out.append((scope_name, tainted[v], node.lineno, v))
             for node in stmts:
                 if not isinstance(node, ast.Call):
                     continue
@@ -1365,11 +1669,16 @@ class TestNoReadPathBuildsItsOwnFilename:
                 # sanitizer -- that is the contract, not a violation of it --
                 # so flagging them is a false positive on correct code, which
                 # is what gets guards deleted.
-                if fname == "open" and len(node.args) > 1:
-                    mode = node.args[1]
-                    if isinstance(mode, ast.Constant) and \
-                            isinstance(mode.value, str) and \
-                            not mode.value.startswith("r"):
+                if fname == "open":
+                    _is_builtin = isinstance(node.func, ast.Name)
+                    _margs = node.args[1:] if _is_builtin else node.args[:1]
+                    _mode = _margs[0] if _margs else None
+                    for _k in node.keywords:
+                        if _k.arg == "mode":
+                            _mode = _k.value
+                    if isinstance(_mode, ast.Constant) and \
+                            isinstance(_mode.value, str) and \
+                            not _mode.value.startswith("r"):
                         continue
                 inner = set(cls._calls(node))
                 if inner & safe_names:
@@ -1384,9 +1693,16 @@ class TestNoReadPathBuildsItsOwnFilename:
                 refs = cls._names(node)
                 hit = refs & set(tainted)
                 # Post-write verification: the scope created this path above,
-                # so probing it is not a read-path lookup.
+                # so probing it is not a read-path lookup. `refs` covers args
+                # and dotted names; a pathlib probe carries the path as the
+                # RECEIVER (`p.exists()`), which _names does reach via the
+                # Attribute, but the receiver's own dotted spelling is checked
+                # explicitly so `self.p.exists()` matches `self.p.write_text()`.
+                _recv = (cls._dotted(node.func.value)
+                         if isinstance(node.func, ast.Attribute) else None)
+                _checked = set(refs) | ({_recv} if _recv else set())
                 if any(written.get(r, node.lineno + 1) < node.lineno
-                       for r in refs):
+                       for r in _checked):
                     continue
                 if hit and not (refs & safe):
                     v = sorted(hit)[0]
@@ -1644,6 +1960,34 @@ class TestNoReadPathBuildsItsOwnFilename:
             "def f(s,d):\n    files=os.listdir(d)\n"
             "    n=_sanitize_filename(s)+'.parquet'\n"
             "    if n in files: return n\n",
+        # --- second QA round ------------------------------------------------
+        "os_walk_membership":
+            "def f(s,d):\n    n=_sanitize_filename(s)+'.parquet'\n"
+            "    for root,dirs,files in os.walk(d):\n"
+            "        if n in files: return n\n",
+        "iterdir_membership":
+            "def f(s,d):\n    n=_sanitize_filename(s)+'.parquet'\n"
+            "    names={p.name for p in d.iterdir()}\n"
+            "    if n in names: return n\n",
+        # the mirror of map(_sanitize_filename, ...) — the probe as a value
+        "probe_as_value_map":
+            "def f(s,d):\n    paths=[os.path.join(d,_sanitize_filename(s))]\n"
+            "    if any(map(os.path.isfile, paths)): return 1\n",
+        "probe_as_value_filter":
+            "def f(s,d):\n    paths=[os.path.join(d,_sanitize_filename(s))]\n"
+            "    return next(filter(os.path.isfile, paths), None)\n",
+        # a TERNARY with a bare arm is not laundered by its safe arm, unlike
+        # an `or`-fallback (see the SAFE shape caching_or_fallback_shape)
+        "ternary_bare_arm":
+            "def f(s,d,c):\n"
+            "    p=os.path.join(d,_sanitize_filename(s)) if c else _resolve_existing(d,s)\n"
+            "    if p and os.path.exists(p): return p\n",
+        "class_body_scope":
+            "class C:\n    NAME=_sanitize_filename('CON')+'.parquet'\n"
+            "    P=os.path.join(D,NAME)\n"
+            "    OK=os.path.exists(P)\n",
+        "lambda_body":
+            "f = lambda s: os.path.exists(os.path.join(D,_sanitize_filename(s)))\n",
         "member_aliased_into_plain_name":
             "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
             "        n=self.safe\n"
@@ -1778,6 +2122,30 @@ class TestNoReadPathBuildsItsOwnFilename:
         "verify_own_write":
             "def f(s,d,df):\n    p=os.path.join(d,_sanitize_filename(s)+'.parquet')\n"
             "    df.to_parquet(p)\n    assert os.path.exists(p)\n",
+        # --- second QA round: pathlib and keyword write spellings -----------
+        # `written` collected names from positional args only, so every
+        # receiver-based pathlib write flagged its own verification. This file
+        # covers norgate_to_parquet.py, which is ALREADY pathlib — the first
+        # write-then-verify refactor there would have tripped the contract
+        # test on correct code.
+        "pathlib_write_text_then_verify":
+            "def f(s,d):\n    p=d/(_sanitize_filename(s)+'.parquet')\n"
+            "    p.write_text('x')\n    assert p.exists()\n",
+        "pathlib_touch_then_check":
+            "def f(s,d):\n    p=d/(_sanitize_filename(s)+'.parquet')\n"
+            "    p.touch()\n    if p.exists(): return p\n",
+        "pathlib_open_for_write":
+            "def f(s,d):\n    p=d/(_sanitize_filename(s)+'.csv')\n"
+            "    with p.open('w') as fh:\n        fh.write('x')\n",
+        "open_with_keyword_mode":
+            "def f(s,d):\n"
+            "    with open(os.path.join(d,_sanitize_filename(s)+'.csv'), mode='w') as fh:\n"
+            "        fh.write('x')\n",
+        "to_parquet_keyword_path_then_verify":
+            "def f(s,d,df):\n    p=os.path.join(d,_sanitize_filename(s)+'.parquet')\n"
+            "    df.to_parquet(path=p)\n    assert os.path.exists(p)\n",
+        "unrelated_iterdir_listing":
+            "def f(d):\n    return [p.name for p in d.iterdir()]\n",
     }
 
     @pytest.mark.parametrize("shape", sorted(SHAPES))
@@ -1818,6 +2186,20 @@ class TestNoReadPathBuildsItsOwnFilename:
                "        p=os.path.join(d,_sanitize_filename(s))\n"
                "    else:\n        p=_resolve_existing(d,s)\n"
                "    if p and os.path.exists(p): return p\n")
+        assert self.scan(src)
+
+    @pytest.mark.xfail(reason=(
+        "a module-level tainted constant probed INSIDE a function. The plain-"
+        "name sibling of test_cross_method_attribute_is_a_known_miss, and it "
+        "needs the same missing capability: seeding a scope with taint from an "
+        "enclosing one. Declining it here for the same reason -- seeding "
+        "carries its own false-positive risk (a same-named local that is "
+        "safe) and belongs in one change with its own battery, not bolted on"),
+        strict=True)
+    def test_module_constant_probed_in_a_function_is_a_known_miss(self):
+        src = ("NAME=_sanitize_filename('CON')+'.parquet'\n"
+               "def f(d):\n"
+               "    if os.path.exists(os.path.join(d,NAME)): return 1\n")
         assert self.scan(src)
 
     @pytest.mark.xfail(reason=(
