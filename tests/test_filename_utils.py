@@ -5,14 +5,20 @@ Covers: illegal character replacement, Windows reserved device names,
 and common ticker symbol patterns.
 """
 
+import ast
 import os
 
+import pandas as pd
 import pytest
 from helpers.filename_utils import (
     resolve_existing,
     filename_candidates,
     sanitize_symbol_for_filename,
 )
+
+# First entry of scripts/validate_norgate_export.DATABASES — the stub in
+# TestReadPathsFindALegacyUnguardedFile answers symbols for this one only.
+_FIRST_DB = "US Equities"
 
 
 class TestIllegalChars:
@@ -426,18 +432,187 @@ class TestReadPathsResolveEveryCandidateSpelling:
     def test_absent_symbol_returns_none(self, tmp_path):
         assert resolve_existing(tmp_path, "NOSUCH") is None
 
-    def test_ordinary_symbols_cost_no_extra_lookups(self, tmp_path):
-        """36,682 of 36,684 securities are not reserved names; they must not pay
-        for this."""
+    def test_ordinary_symbols_get_exactly_one_candidate_spelling(self, tmp_path):
+        """36,682 of 36,684 securities are not reserved names, so the guard must
+        not invent a second *spelling* for them."""
         assert filename_candidates("AAPL") == ["AAPL"]
+
+    def test_probe_count_is_one_spelling_times_two_cases(self, monkeypatch):
+        """What the lookup actually costs, measured rather than asserted about
+        candidates.
+
+        @shardul0701 caught the previous version of this: it was named
+        ...cost_no_extra_lookups but asserted on `filename_candidates`, which
+        counts *spellings*, not probes. An ordinary symbol does pay one extra
+        `stat` -- `case_variants=True` doubles every spelling, and that is
+        deliberate (a Linux corpus may hold either case). Pinning the real
+        numbers means a regression to 10 probes fails here instead of passing a
+        test whose name promised otherwise.
+        """
+        probes = []
+        real_isfile = os.path.isfile
+
+        def spy(p):
+            probes.append(os.path.basename(p))
+            return False
+
+        monkeypatch.setattr(os.path, "isfile", spy)
+        resolve_existing("/nonexistent", "AAPL")
+        ordinary = list(probes)
+        probes.clear()
+        resolve_existing("/nonexistent", "CON")
+        reserved = list(probes)
+        monkeypatch.setattr(os.path, "isfile", real_isfile)
+
+        # 1 spelling x 2 cases
+        assert ordinary == ["AAPL.parquet", "aapl.parquet"], ordinary
+        # 2 spellings x 2 cases, guarded spelling probed first
+        assert reserved == [
+            "_CON.parquet", "_con.parquet", "CON.parquet", "con.parquet",
+        ], reserved
+
+class TestReadPathsFindALegacyUnguardedFile:
+    """The primary evidence for #345: **behaviour**, not source text.
+
+    @shardul0701 demonstrated that the two structural guards this class replaces
+    could not detect the defect they existed for -- one required the name-build
+    and the existence-test to sit on the *same source line* (so it missed
+    `caching.py`, whose defect spans eight lines and which the PR body led
+    with), and the other was a whole-file substring check satisfiable by a dead
+    import. Both passed on the pre-fix files.
+
+    So these assert the observable property instead: drop a file under the
+    **legacy unguarded spelling** (`CON.parquet`, as a pre-guard corpus holds
+    it) into a temp corpus, and require each read path to find it. That fails on
+    every pre-fix reader, and no amount of line-layout or import shuffling can
+    fool it.
+    """
+
+    @staticmethod
+    def _write_parquet(path):
+        pd.DataFrame(
+            {"Open": [1.0], "High": [1.0], "Low": [1.0],
+             "Close": [1.0], "Volume": [100]},
+            index=pd.DatetimeIndex([pd.Timestamp("2024-01-02", tz="UTC")],
+                                   name="Datetime"),
+        ).to_parquet(path)
+
+    # ---- helpers/caching.py -------------------------------------------------
+
+    def test_caching_reads_a_legacy_reserved_name(self, tmp_path, monkeypatch):
+        """`get_cached_data("CON", ...)` must HIT a cache file written before the
+        reserved-name guard. Pre-fix this returned None and re-fetched forever."""
+        from helpers import caching
+
+        monkeypatch.setattr(caching, "CACHE_DIR", str(tmp_path))
+        legacy = tmp_path / "CON_2024-01-01_2024-06-01_day_1.parquet"
+        self._write_parquet(legacy)
+
+        got = caching.get_cached_data("CON", "2024-01-01", "2024-06-01", "day", 1)
+        assert got is not None, (
+            "get_cached_data reported a cache MISS for a file that exists under "
+            "the legacy unguarded spelling — this is #345"
+        )
+
+    def test_caching_still_reads_an_ordinary_symbol(self, tmp_path, monkeypatch):
+        """No-regression: the guarded path must not break the 99.99% case."""
+        from helpers import caching
+
+        monkeypatch.setattr(caching, "CACHE_DIR", str(tmp_path))
+        self._write_parquet(tmp_path / "AAPL_2024-01-01_2024-06-01_day_1.parquet")
+        assert caching.get_cached_data(
+            "AAPL", "2024-01-01", "2024-06-01", "day", 1) is not None
+
+    def test_caching_misses_when_genuinely_absent(self, tmp_path, monkeypatch):
+        """The counter-case, so the two above cannot pass by always returning a
+        frame."""
+        from helpers import caching
+
+        monkeypatch.setattr(caching, "CACHE_DIR", str(tmp_path))
+        assert caching.get_cached_data(
+            "CON", "2024-01-01", "2024-06-01", "day", 1) is None
+
+    # ---- scripts/norgate_to_parquet.py --------------------------------------
+
+    def test_export_symbol_skips_a_legacy_reserved_name(self, tmp_path):
+        """`--skip-existing` must treat a legacy `CON.parquet` as present.
+
+        Pre-fix (and still true on the first revision of this PR, which fixed
+        only the `main()` call site) this re-exported every reserved-name symbol
+        and left both spellings on disk.
+        """
+        import scripts.norgate_to_parquet as n2p
+
+        self._write_parquet(tmp_path / "CON.parquet")
+
+        called = []
+
+        def _boom(*a, **k):
+            called.append(1)
+            raise AssertionError("re-exported a symbol that is already present")
+
+        # export_symbol imports get_price_data lazily from services.norgate_service
+        import sys
+        import types
+        stub = types.ModuleType("services.norgate_service")
+        stub.get_price_data = _boom
+        monkey_prev = sys.modules.get("services.norgate_service")
+        sys.modules["services.norgate_service"] = stub
+        try:
+            ok = n2p.export_symbol("CON", tmp_path, {}, skip_existing=True)
+        finally:
+            if monkey_prev is None:
+                sys.modules.pop("services.norgate_service", None)
+            else:
+                sys.modules["services.norgate_service"] = monkey_prev
+
+        assert ok is True
+        assert not called, "fetched data for a symbol already on disk"
+
+    # ---- scripts/validate_norgate_export.py ---------------------------------
+
+    def test_validator_does_not_report_a_legacy_name_as_missing(
+            self, tmp_path, capsys):
+        """The validator's most load-bearing cell. Pre-fix, a corpus containing
+        `CON.parquet` was reported as MISSING it."""
+        import sys
+        import types
+        import importlib
+
+        stub = types.ModuleType("norgatedata")
+        stub.database_symbols = lambda db: ["CON"] if db == _FIRST_DB else []
+        prev = sys.modules.get("norgatedata")
+        sys.modules["norgatedata"] = stub
+        try:
+            v = importlib.import_module("scripts.validate_norgate_export")
+            self._write_parquet(tmp_path / "CON.parquet")
+            v.validate(tmp_path)
+            out = capsys.readouterr().out
+        finally:
+            if prev is None:
+                sys.modules.pop("norgatedata", None)
+            else:
+                sys.modules["norgatedata"] = prev
+
+        assert "MISSING" not in out, (
+            "validator reported a symbol as missing from a corpus that has it "
+            "under the legacy unguarded spelling:\n" + out
+        )
 
 
 class TestNoReadPathBuildsItsOwnFilename:
-    """The structural guard. Every violation of this contract is silent, so the
-    only durable protection is making the violation *detectable*.
+    """The structural backstop, rewritten as an **AST dataflow** scan.
 
-    Scans the read paths for the pattern that caused #345: composing a filename
-    from `sanitize_symbol_for_filename` and then testing it for existence.
+    The previous version compared substrings on a single source line. It missed
+    `helpers/caching.py` entirely -- name built at line 21, existence tested at
+    line 29 -- which is both the more common shape in real code and the example
+    the PR body led with. It also could not see a violation inside a function
+    that merely *imported* a safe helper without calling it.
+
+    This walks each function, tracks which locals derive from the bare
+    sanitizer, and flags an existence test on any of them -- plus the inline
+    one-liner form. It is a backstop only; the behavioural tests above are the
+    real evidence.
     """
 
     READ_PATH_FILES = [
@@ -448,37 +623,117 @@ class TestNoReadPathBuildsItsOwnFilename:
         os.path.join("scripts", "validate_norgate_export.py"),
     ]
 
+    SANITIZERS = {"_sanitize_filename", "sanitize_symbol_for_filename"}
+    SAFE = {"resolve_existing", "_resolve_existing", "filename_candidates"}
+    EXIST = {"exists", "isfile"}
+
     @staticmethod
     def _root():
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+    @classmethod
+    def _called_names(cls, node):
+        for n in ast.walk(node):
+            if isinstance(n, ast.Call):
+                f = n.func
+                if isinstance(f, ast.Name):
+                    yield f.id
+                elif isinstance(f, ast.Attribute):
+                    yield f.attr
+
+    @classmethod
+    def scan(cls, src):
+        """Return [(func, build_line, test_line, var)] for each violation."""
+        out = []
+        for fn in ast.walk(ast.parse(src)):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            tainted, safe = {}, set()
+            for node in ast.walk(fn):
+                if not isinstance(node, ast.Assign):
+                    continue
+                names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                if not names:
+                    continue
+                called = set(cls._called_names(node.value))
+                refs = {n.id for n in ast.walk(node.value)
+                        if isinstance(n, ast.Name)}
+                if called & cls.SAFE:
+                    for nm in names:
+                        safe.add(nm)
+                        tainted.pop(nm, None)
+                elif (called & cls.SANITIZERS) or (refs & set(tainted)):
+                    if not (refs & safe):
+                        for nm in names:
+                            tainted[nm] = node.lineno
+            for node in ast.walk(fn):
+                if not (isinstance(node, ast.Call)
+                        and isinstance(node.func, ast.Attribute)
+                        and node.func.attr in cls.EXIST):
+                    continue
+                inner = set(cls._called_names(node))
+                if inner & cls.SAFE:
+                    continue
+                if inner & cls.SANITIZERS:
+                    out.append((fn.name, node.lineno, node.lineno, "<inline>"))
+                    continue
+                refs = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+                hit = refs & set(tainted)
+                if hit and not (refs & safe):
+                    v = sorted(hit)[0]
+                    out.append((fn.name, tainted[v], node.lineno, v))
+        return out
+
     @pytest.mark.parametrize("relpath", READ_PATH_FILES)
     def test_existence_checks_do_not_use_the_bare_sanitizer(self, relpath):
-        """`.exists()` / `.isfile()` on a name built from the bare sanitizer is
-        the #345 defect. The safe forms are resolve_existing() or
-        filename_candidates()."""
-        path = os.path.join(self._root(), relpath)
-        src = open(path, encoding="utf-8").read()
-        offenders = []
-        for i, line in enumerate(src.splitlines(), 1):
-            if line.strip().startswith("#"):
-                continue
-            builds_name = "_sanitize_filename(" in line or \
-                          "sanitize_symbol_for_filename(" in line
-            tests_existence = ".exists()" in line or "os.path.isfile" in line \
-                or "os.path.exists" in line
-            if builds_name and tests_existence:
-                offenders.append((i, line.strip()[:90]))
+        src = open(os.path.join(self._root(), relpath), encoding="utf-8").read()
+        offenders = self.scan(src)
         assert not offenders, (
             f"{relpath} tests a bare-sanitized name for existence — a corpus "
             f"written before the reserved-name guard will read as MISSING:\n  "
-            + "\n  ".join(f"line {i}: {l}" for i, l in offenders)
+            + "\n  ".join(
+                f"{fn}(): '{v}' built line {bl}, existence tested line {tl}"
+                for fn, bl, tl, v in offenders)
         )
 
-    @pytest.mark.parametrize("relpath", READ_PATH_FILES)
-    def test_every_read_path_imports_a_candidate_aware_helper(self, relpath):
-        src = open(os.path.join(self._root(), relpath), encoding="utf-8").read()
-        assert ("resolve_existing" in src or "filename_candidates" in src), (
-            f"{relpath} is a documented read path but imports neither "
-            f"resolve_existing nor filename_candidates"
-        )
+    # -- the scanner must itself be able to fail -----------------------------
+
+    MULTILINE_SHAPE = (
+        "def get_cached_data(symbol):\n"
+        "    safe = _sanitize_filename(symbol)\n"
+        "    fn = f'{safe}_2024_D_1.parquet'\n"
+        "    fp = os.path.join(CACHE_DIR, fn)\n"
+        "    if os.path.exists(fp):\n"
+        "        return 1\n"
+    )
+    INLINE_SHAPE = (
+        "def validate(d, symbols):\n"
+        "    return [s for s in symbols\n"
+        "            if not (d / _sanitize_filename(s)).exists()]\n"
+    )
+    DEAD_IMPORT_SHAPE = (
+        "from helpers.filename_utils import resolve_existing  # never called\n"
+        + MULTILINE_SHAPE
+    )
+    SAFE_SHAPE = (
+        "def get_cached_data(symbol):\n"
+        "    fp = _resolve_existing(CACHE_DIR, symbol)\n"
+        "    if fp and os.path.exists(fp):\n"
+        "        return 1\n"
+    )
+
+    def test_scanner_catches_the_multiline_shape(self):
+        """The shape the previous same-line guard MISSED, and the one #345
+        actually took in `caching.py`."""
+        assert self.scan(self.MULTILINE_SHAPE)
+
+    def test_scanner_catches_the_inline_shape(self):
+        assert self.scan(self.INLINE_SHAPE)
+
+    def test_scanner_is_not_fooled_by_a_dead_import(self):
+        """The previous whole-file substring guard passed on exactly this."""
+        assert self.scan(self.DEAD_IMPORT_SHAPE)
+
+    def test_scanner_clears_the_safe_shape(self):
+        """No false positive, or the guard gets disabled by whoever it annoys."""
+        assert not self.scan(self.SAFE_SHAPE)

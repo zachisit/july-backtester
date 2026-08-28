@@ -113,9 +113,15 @@ def export_symbol(symbol: str, output_dir: Path, config: dict, skip_existing: bo
     """
     from services.norgate_service import get_price_data
 
+    # WRITE path: always the guarded spelling.
     output_path = output_dir / f"{_sanitize_filename(symbol)}.parquet"
 
-    if skip_existing and output_path.exists():
+    # READ path (#345): the skip check must resolve across every candidate
+    # spelling. main() already resolves before calling us, but this function is
+    # public and callable directly -- testing only the guarded name here
+    # re-exports CON/PRN against a pre-guard corpus and leaves both spellings
+    # on disk, which is the exact failure the main() call site was fixed for.
+    if skip_existing and _resolve_existing(output_dir, symbol) is not None:
         return True
 
     try:
