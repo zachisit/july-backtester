@@ -893,6 +893,32 @@ class TestNoReadPathBuildsItsOwnFilename:
 
     _NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
 
+    # THE COMPUTED-KEY RULE. Stated once; the xfails below refer to it rather
+    # than each re-deriving the same argument.
+    #
+    # `container[*]` is a SINGLE identity covering every computed slot, because
+    # a computed key has no statically-known value. Three consequences follow,
+    # and all three are pinned as strict xfails:
+    #
+    #   1. a constant-key write does not match a computed-key read
+    #   2. a computed-key write does not match a constant-key read
+    #   3. a SAFE computed write clears the taint of an earlier BARE computed
+    #      write to a different key (last-write-wins over one shared identity)
+    #
+    # Each is the same undecidable question -- does the computed key equal the
+    # other one -- answered "assume not". Answering it any other way does not
+    # remove the undecidability, it relocates it onto correct code: (1) and (2)
+    # are mirror images, and reversing (3) would flag a bare write followed by
+    # a safe write whose OWN slot is then probed, which is correct.
+    #
+    # @shardul0701 found faces 1-3 across four revisions. If you find face
+    # four, add it here rather than deriving a fresh justification for it.
+    _COMPUTED_KEY_RULE = (
+        "`container[*]` is one identity for every computed slot; the same "
+        "undecidable question (does the computed key equal the other one) is "
+        "answered 'assume not'. See _COMPUTED_KEY_RULE on this class"
+    )
+
     @staticmethod
     def _root():
         return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -925,15 +951,8 @@ class TestNoReadPathBuildsItsOwnFilename:
             if base and isinstance(key, ast.Constant):
                 return f"{base}[{key.value!r}]"
             if base:
-                # COMPUTED key -- one identity covering every computed-key
-                # access to this container. @shardul0701 found the previous
-                # fallback (taint the bare container) kept the poison-every-
-                # member false positive alive through a narrower door:
-                #     d[k] = _sanitize_filename(s)
-                #     os.path.exists(d['config'])      # was FLAGGED
-                # Writing `d[k]` and reading `d[k]` both spell `d[*]`, so the
-                # defect stays caught; a constant-key read spells `d['config']`
-                # and no longer collides.
+                # COMPUTED key -> `container[*]`. See _COMPUTED_KEY_RULE below
+                # for the single rule this creates and its three consequences.
                 return f"{base}[*]"
         return None
 
@@ -1345,6 +1364,20 @@ class TestNoReadPathBuildsItsOwnFilename:
         "nested_container_computed_key":
             "class C:\n    def f(self,s,k):\n        self.m[k]=_sanitize_filename(s)\n"
             "        return os.path.exists(self.m[k])\n",
+        # The order-dependent counterpart of consequence 3: safe-then-bare IS
+        # caught, because the bare write re-taints. Pinned so the asymmetry is
+        # visible next to the xfail rather than only described in it.
+        "safe_computed_write_then_bare_computed_write":
+            "def f(s,d,k,j):\n    d[k]=_resolve_existing(D,s)\n"
+            "    d[j]=os.path.join(D,_sanitize_filename(s))\n"
+            "    if os.path.exists(d[j]): return 1\n",
+        # Attributes do NOT collapse -- distinct names stay distinct
+        # identities, so the laundering has no attribute-side equivalent.
+        "attr_safe_and_bare_keep_distinct_identities":
+            "class C:\n    def f(self,s):\n"
+            "        self.bad=os.path.join(D,_sanitize_filename(s))\n"
+            "        self.good=_resolve_existing(D,s)\n"
+            "        if os.path.exists(self.bad): return 1\n",
         "member_aliased_into_plain_name":
             "class C:\n    def f(self,s):\n        self.safe=_sanitize_filename(s)\n"
             "        n=self.safe\n"
@@ -1432,6 +1465,17 @@ class TestNoReadPathBuildsItsOwnFilename:
         "resolve_into_attr_probe_other_attr":
             "class C:\n    def f(self,s):\n        self.p=_resolve_existing(D,s)\n"
             "        return os.path.exists(self.other)\n",
+        # Why consequence 3 is not fixable by making a safe write non-clearing:
+        # this correct code would then flag. The probe reads the SAFE slot.
+        "bare_computed_write_then_safe_write_probe_the_safe_one":
+            "def f(s,d,k,j):\n    d[j]=os.path.join(D,_sanitize_filename(s))\n"
+            "    d[k]=_resolve_existing(D,s)\n"
+            "    return os.path.exists(d[k]) if d[k] else None\n",
+        "attr_probe_the_safe_one_alongside_a_bare_one":
+            "class C:\n    def f(self,s):\n"
+            "        self.bad=os.path.join(D,_sanitize_filename(s))\n"
+            "        self.good=_resolve_existing(D,s)\n"
+            "        if self.good and os.path.exists(self.good): return 1\n",
     }
 
     @pytest.mark.parametrize("shape", sorted(SHAPES))
@@ -1483,24 +1527,12 @@ class TestNoReadPathBuildsItsOwnFilename:
                "        if os.path.exists(p): return 1\n")
         assert self.scan(src)
 
-    # The two remaining subscript combinations. Both reduce to ONE undecidable
-    # question -- does the computed key equal the constant one -- and the
-    # scanner answers "assume not" in both directions.
-    #
-    # @shardul0701 offered a recovery for the first: have a constant-key write
-    # also register `container[*]`. Declined, and the reason is the point.
-    # It doesn't remove the undecidability, it relocates it -- a constant write
-    # followed by an unrelated COMPUTED read of the same container would then
-    # false-positive. Answering one question two different ways depending on
-    # which side is computed is harder to defend, and harder for the next
-    # person to predict, than answering it consistently and recording that.
+    # The three consequences of the computed-key collapse. All hang off
+    # _COMPUTED_KEY_RULE above rather than re-deriving the argument three
+    # times -- @shardul0701's point, after finding the third face himself.
 
     @pytest.mark.xfail(reason=(
-        "const-key write / computed-key read: the write spells d['safe'] and "
-        "the read spells d[*], so they do not match. Undecidable without "
-        "knowing k at runtime. Recovering it (constant writes also register "
-        "container[*]) would relocate the false positive to const-write / "
-        "unrelated-computed-read rather than remove it"),
+        "consequence 1 -- const-key write, computed-key read. " + _COMPUTED_KEY_RULE),
         strict=True)
     def test_const_write_computed_read_is_a_known_miss(self):
         src = ("def f(s,d,k):\n    d['safe']=_sanitize_filename(s)\n"
@@ -1508,13 +1540,25 @@ class TestNoReadPathBuildsItsOwnFilename:
         assert self.scan(src)
 
     @pytest.mark.xfail(reason=(
-        "computed-key write / const-key read: a real defect when k == 'safe', "
-        "and STRUCTURALLY IDENTICAL to the correct-code shape "
-        "computed_key_write_then_unrelated_const_read in SAFE_SHAPES. Only the "
-        "runtime value of k separates them, so this is not fixable, only "
-        "chosen -- the choice is to keep the false positive out"),
+        "consequence 2 -- computed-key write, const-key read. Structurally "
+        "identical to the SAFE shape computed_key_write_then_unrelated_const_"
+        "read; only the runtime value of k separates them. " + _COMPUTED_KEY_RULE),
         strict=True)
     def test_computed_write_const_read_is_a_known_miss(self):
         src = ("def f(s,d,k):\n    d[k]=_sanitize_filename(s)\n"
                "    return os.path.exists(d['safe'])\n")
+        assert self.scan(src)
+
+    @pytest.mark.xfail(reason=(
+        "consequence 3 -- a SAFE computed write launders an earlier BARE "
+        "computed write to a different key, because last-write-wins runs over "
+        "one shared identity. Order-dependent: safe-then-bare IS caught (see "
+        "SHAPES). PRE-EXISTING at the base-name level, not introduced by the "
+        "collapse. " + _COMPUTED_KEY_RULE),
+        strict=True)
+    def test_safe_computed_write_launders_earlier_bare_write(self):
+        src = ("def f(s,d,k,j):\n"
+               "    d[j]=os.path.join(D,_sanitize_filename(s))\n"
+               "    d[k]=_resolve_existing(D,s)\n"
+               "    if os.path.exists(d[j]): return 1\n")
         assert self.scan(src)
