@@ -7,6 +7,7 @@ and common ticker symbol patterns.
 
 import ast
 import os
+import re
 
 import pandas as pd
 import pytest
@@ -1164,6 +1165,94 @@ class TestProviderEntryPointsReturnLegacyNamedData:
         assert csv_service.get_price_data(
             "AAPL", "2024-01-01", "2024-06-01",
             {"csv_data_dir": str(tmp_path)}) is not None
+
+    # -- every LOCAL-FILE branch get_data_service dispatches to ---------------
+    #
+    # @shardul0701's answer to "are the provider pins in the right place":
+    # right layer, wrong boundary. The class covered the two providers that
+    # happen to IMPORT a filename helper — which is also the membership rule of
+    # `_derive_read_paths`. That rule is self-fulfilling: a reader that never
+    # imports the sanitizer is invisible to the guard BECAUSE it violates the
+    # contract, so the modules most worth pinning are the ones the derivation
+    # cannot see.
+    #
+    # `get_data_service` has six branches. polygon / norgate / yahoo fetch over
+    # the network and never build a per-symbol local filename, so they are out
+    # of scope by construction. The local-file readers are csv, parquet and
+    # merged — and merged was uncovered.
+
+    LOCAL_FILE_PROVIDERS = ["csv", "parquet", "merged"]
+
+    def test_every_local_file_provider_branch_is_pinned(self):
+        """If a new local-file provider is added, this fails until it is
+        given a pin — the coverage cannot silently stay at the old set."""
+        src = open(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "services", "__init__.py"), encoding="utf-8").read()
+        branches = set(re.findall(r'provider == "(\w+)"', src))
+        network = {"polygon", "norgate", "yahoo"}
+        local = branches - network
+        assert local == set(self.LOCAL_FILE_PROVIDERS), (
+            f"get_data_service's local-file branches changed: {sorted(local)}.\n"
+            f"Every branch that reads a per-symbol file from disk needs a "
+            f"reserved-name pin in this class — add it, or add the new branch "
+            f"to `network` with a one-line reason if it fetches remotely.")
+
+    @pytest.mark.xfail(reason=(
+        "the `merged` provider (src/data/unified_market_data_provider.py) "
+        "builds its own filenames and imports no filename helper, so it "
+        "resolves NEITHER the guarded reserved spelling nor any illegal-char "
+        "scrub. Verified: CON/PRN/NUL/I:VIX/$I:TNX/BRK\\B/ADX>20 all resolve "
+        "through parquet_service and are all lost here, same directory, same "
+        "files. It is self-consistent — list_symbols() returns on-disk stems, "
+        "so anything round-tripping through it works — and only breaks when a "
+        "symbol arrives from OUTSIDE in its source spelling (a PIT roster, a "
+        "config list, a scanner), which is exactly what filename_candidates "
+        "exists for. RECORDED AS A KNOWN GAP, NOT FIXED: repointing the "
+        "canonical merged reader at resolve_existing is a behaviour change to "
+        "production data access and does not belong in a test-pinning PR"),
+        strict=True)
+    def test_merged_provider_returns_a_legacy_unguarded_reserved_name(
+            self, tmp_path):
+        from src.data.unified_market_data_provider import UnifiedMarketDataProvider
+
+        self._frame().rename(columns=str.lower).to_parquet(
+            tmp_path / "_CON.parquet")
+        prov = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        got = prov.get_price_data("CON", "2024-01-01", "2024-06-01")
+        assert got is not None and not got.empty
+
+    @pytest.mark.xfail(reason=(
+        "same gap, illegal-char spelling: a symbol arriving as `BRK/B` cannot "
+        "reach `BRK_B.parquet` through the merged provider. This is the shape "
+        "with live exposure — @shardul0701 measured six sanitized stems "
+        "(BBAI_W, BIII_W, MPTI_R, OPFI_W, PAII_W, VACI_W — warrants and class "
+        "shares) in the shipped merged corpus that resolve_existing finds and "
+        "this provider does not"),
+        strict=True)
+    def test_merged_provider_returns_an_illegal_char_symbol(self, tmp_path):
+        from src.data.unified_market_data_provider import UnifiedMarketDataProvider
+
+        self._frame().rename(columns=str.lower).to_parquet(
+            tmp_path / "BRK_B.parquet")
+        prov = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        got = prov.get_price_data("BRK/B", "2024-01-01", "2024-06-01")
+        assert got is not None and not got.empty
+
+    def test_merged_provider_is_self_consistent_on_disk_spellings(self, tmp_path):
+        """Why the gap is hard to notice, pinned so the xfails above are not
+        read as 'the merged provider is broken'. It resolves what its own
+        list_symbols() reports; the loss is only at the outside boundary."""
+        from src.data.unified_market_data_provider import UnifiedMarketDataProvider
+
+        # the merged store uses lowercase OHLCV column names
+        self._frame().rename(columns=str.lower).to_parquet(
+            tmp_path / "BBAI_W.parquet")
+        prov = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        got = prov.get_price_data("BBAI_W", "2024-01-01", "2024-06-01")
+        assert got is not None and not got.empty, (
+            "the merged provider cannot resolve its own on-disk stem — that "
+            "would be a different and larger defect than the one pinned above")
 
 
 class TestNotFoundWarningReportsWhatWasActuallyProbed:
