@@ -14,10 +14,13 @@ import os
 import re
 import glob
 import json
+import logging
 
 import pandas as pd
 
 from .pipeline import paths
+
+logger = logging.getLogger(__name__)
 
 _CANON = ["open", "high", "low", "close", "volume"]
 _SUFFIX_RE = re.compile(r"-\d{6}$")  # delisted files carry a -YYYYMM suffix
@@ -311,7 +314,8 @@ class UnifiedMarketDataProvider:
     def filter_universe(self, symbols,
                         exclude_statuses=("insufficient_history", "review_no_patch",
                                           "identity_review", "flagged"),
-                        min_bars=0, min_avg_dollar_volume=0.0, lookback=60):
+                        min_bars=0, min_avg_dollar_volume=0.0, lookback=60,
+                        as_of=None):
         """Screen a symbol list for backtest fitness. Returns (kept, dropped) where
         dropped is ``{symbol: reason}``.
 
@@ -322,11 +326,32 @@ class UnifiedMarketDataProvider:
           history-only. Pass ``exclude_statuses=()`` to keep everything, or a
           narrower tuple (e.g. drop only ``insufficient_history``) to opt back in.
         - min_bars: drop series shorter than this (long-lookback strategies).
-        - min_avg_dollar_volume: drop illiquid names (mean close*volume over the
-          last `lookback` bars) — mitigates micro-cap anomalies (#12).
+        - min_avg_dollar_volume: drop illiquid names (mean close*volume over
+          `lookback` bars ending at `as_of`) — mitigates micro-cap anomalies (#12).
+        - as_of: evaluate `min_bars` and `min_avg_dollar_volume` using ONLY bars
+          at or before this date. Omitting it screens on the end of the file,
+          which is survivorship bias whenever the universe is historical: a
+          2010 universe gets screened on 2026 liquidity, so the names dropped
+          are the ones that later died. Measured on a 673-name seasoned sample
+          anchored 2010-01-01 at a $1M/day floor, 44 names (15.2% of the true
+          universe) were dropped despite being liquid at the anchor — every one
+          a delisting or bankruptcy — and 96 illiquid ones were kept (#361).
+          `exclude_statuses` is deliberately NOT sliced: `data_quality_status`
+          is the merge pipeline's retrospective verdict on the file, not a
+          point-in-time field, so it is read from the last row either way.
         Only the requested symbols are opened (cheap for a few-hundred-name
         universe; do not call on all 35k)."""
         exclude_statuses = set(exclude_statuses or ())
+        if as_of is not None:
+            as_of = pd.Timestamp(as_of)
+            if as_of.tz is not None:
+                as_of = as_of.tz_localize(None)
+        elif min_avg_dollar_volume or min_bars:
+            logger.warning(
+                "filter_universe: screening on liquidity/history with no as_of "
+                "date. Bars are taken from the END of each file, so a historical "
+                "universe is screened on today's tape and the names dropped are "
+                "the ones that later died. Pass as_of=<universe date> (#361).")
         kept, dropped = [], {}
         for s in symbols:
             df = self.get_with_provenance(s)
@@ -337,11 +362,20 @@ class UnifiedMarketDataProvider:
             if status in exclude_statuses:
                 dropped[s] = f"status={status}"
                 continue
-            if min_bars and len(df) < min_bars:
-                dropped[s] = f"bars={len(df)}<{min_bars}"
+            # Strictly causal once as_of is supplied: nothing after it is
+            # visible to the numeric screens below. Sliced with the module's own
+            # _slice so this stays consistent with get_price_data's end_date.
+            window = df
+            if as_of is not None:
+                window = self._slice(df, None, as_of)
+                if window.empty:
+                    dropped[s] = f"no bars on or before {as_of.date()}"
+                    continue
+            if min_bars and len(window) < min_bars:
+                dropped[s] = f"bars={len(window)}<{min_bars}"
                 continue
-            if min_avg_dollar_volume and {"close", "volume"} <= set(df.columns):
-                tail = df.tail(lookback)
+            if min_avg_dollar_volume and {"close", "volume"} <= set(window.columns):
+                tail = window.tail(lookback)
                 adv = float((tail["close"] * tail["volume"]).mean())
                 if adv < min_avg_dollar_volume:
                     dropped[s] = f"adv=${adv:,.0f}<${min_avg_dollar_volume:,.0f}"

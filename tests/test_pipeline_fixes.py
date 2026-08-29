@@ -333,6 +333,134 @@ class TestFilterUniverseFlagged:
         assert kept == ["FL"]
 
 
+class TestFilterUniverseAsOf:
+    """#361 — the liquidity/history screens must be strictly causal.
+
+    Without `as_of` the screen reads the LAST `lookback` bars of the file, so a
+    historical universe is screened on today's tape. Measured on a 673-name
+    seasoned sample anchored 2010-01-01 at a $1M/day floor: 44 names (15.2% of
+    the true universe) were dropped despite being liquid at the anchor — every
+    one a delisting or bankruptcy — and 96 illiquid ones were kept.
+    """
+
+    @staticmethod
+    def _ramp(d, name, closes, volumes, start="2009-01-01"):
+        """A series whose liquidity CHANGES over time — the whole point. The
+        constant-close `_write_merged` fixture cannot express this, and a
+        constant series cannot fail for the reason these tests claim."""
+        n = len(closes)
+        idx = pd.date_range(start, periods=n, freq="D")
+        pd.DataFrame({
+            "open": closes, "high": closes, "low": closes, "close": closes,
+            "volume": volumes, "vwap": float("nan"), "source": "polygon",
+            "security_type": "CS", "adjustment_factor": 1.0,
+            "adjustment_method": "none", "data_quality_status": "ok",
+        }, index=idx).to_parquet(os.path.join(d, name + ".parquet"))
+        return idx
+
+    def _dying(self, d):
+        """Liquid through 2009, a husk by the end — the RTHYL/ENDPQ shape.
+        $10 x 1M shares = $10M/day, decaying to $10 x 100 = $1k/day."""
+        return self._ramp(d, "DYING", [10.0] * 400, [1e6] * 200 + [100.0] * 200)
+
+    def _reborn(self, d):
+        """The mirror: illiquid early, liquid late. Kept by the tail screen
+        purely on information that did not exist at the anchor."""
+        return self._ramp(d, "REBORN", [10.0] * 400, [100.0] * 200 + [1e6] * 200)
+
+    def test_liquid_at_the_anchor_is_kept_when_as_of_is_given(self, tmp_path):
+        idx = self._dying(str(tmp_path))
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        kept, dropped = p.filter_universe(
+            ["DYING"], min_avg_dollar_volume=1e6, as_of=idx[199])
+        assert kept == ["DYING"], dropped
+
+    def test_same_name_is_dropped_by_the_tail_screen(self, tmp_path):
+        """The bug itself, pinned: identical call, no as_of, opposite answer."""
+        self._dying(str(tmp_path))
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        kept, dropped = p.filter_universe(["DYING"], min_avg_dollar_volume=1e6)
+        assert kept == [] and "DYING" in dropped
+
+    def test_illiquid_at_the_anchor_is_dropped_when_as_of_is_given(self, tmp_path):
+        idx = self._reborn(str(tmp_path))
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        kept, dropped = p.filter_universe(
+            ["REBORN"], min_avg_dollar_volume=1e6, as_of=idx[199])
+        assert kept == [] and "REBORN" in dropped
+
+    def test_same_name_is_kept_by_the_tail_screen(self, tmp_path):
+        """The look-ahead half of the same bug."""
+        self._reborn(str(tmp_path))
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        kept, _ = p.filter_universe(["REBORN"], min_avg_dollar_volume=1e6)
+        assert kept == ["REBORN"]
+
+    def test_min_bars_counts_only_bars_up_to_as_of(self, tmp_path):
+        idx = self._ramp(str(tmp_path), "SHORT", [5.0] * 300, [1e6] * 300)
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        kept, dropped = p.filter_universe(["SHORT"], min_bars=100, as_of=idx[49])
+        assert kept == [] and "bars=50<100" in dropped["SHORT"]
+        assert p.filter_universe(["SHORT"], min_bars=100)[0] == ["SHORT"]
+
+    def test_no_bars_on_or_before_as_of_is_dropped(self, tmp_path):
+        self._ramp(str(tmp_path), "LATE", [5.0] * 30, [1e6] * 30,
+                   start="2020-01-01")
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        kept, dropped = p.filter_universe(
+            ["LATE"], min_avg_dollar_volume=1.0, as_of="2010-01-01")
+        assert kept == [] and "no bars on or before 2010-01-01" in dropped["LATE"]
+
+    def test_tz_aware_as_of_is_accepted(self, tmp_path):
+        """The store is tz-naive; a tz-aware anchor from a caller must not
+        raise on comparison."""
+        self._dying(str(tmp_path))
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        kept, _ = p.filter_universe(
+            ["DYING"], min_avg_dollar_volume=1e6,
+            as_of=pd.Timestamp("2009-07-18", tz="UTC"))
+        assert kept == ["DYING"]
+
+    def test_exclude_statuses_is_not_sliced(self, tmp_path):
+        """Deliberate, and pinned so it is not 'fixed' silently:
+        data_quality_status is the merge pipeline's retrospective verdict on
+        the FILE, not a point-in-time field. Reading it as-of would read a
+        verdict that did not exist yet."""
+        idx = self._ramp(str(tmp_path), "QUAR", [10.0] * 400, [1e6] * 400)
+        df = pd.read_parquet(os.path.join(tmp_path, "QUAR.parquet"))
+        df["data_quality_status"] = ["ok"] * 399 + ["flagged"]
+        df.to_parquet(os.path.join(tmp_path, "QUAR.parquet"))
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        kept, dropped = p.filter_universe(["QUAR"], as_of=idx[199])
+        assert kept == [] and dropped["QUAR"] == "status=flagged"
+
+    def test_warns_when_screening_numerically_without_as_of(self, tmp_path, caplog):
+        self._dying(str(tmp_path))
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        with caplog.at_level("WARNING",
+                             logger="src.data.unified_market_data_provider"):
+            p.filter_universe(["DYING"], min_avg_dollar_volume=1e6)
+        assert any("as_of" in r.message for r in caplog.records), caplog.records
+
+    def test_no_warning_when_as_of_is_supplied(self, tmp_path, caplog):
+        idx = self._dying(str(tmp_path))
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        with caplog.at_level("WARNING",
+                             logger="src.data.unified_market_data_provider"):
+            p.filter_universe(["DYING"], min_avg_dollar_volume=1e6, as_of=idx[199])
+        assert [r.message for r in caplog.records] == []
+
+    def test_no_warning_for_a_status_only_screen(self, tmp_path, caplog):
+        """Status screening is legitimately not point-in-time, so warning there
+        would train the reader to ignore the warning."""
+        self._dying(str(tmp_path))
+        p = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        with caplog.at_level("WARNING",
+                             logger="src.data.unified_market_data_provider"):
+            p.filter_universe(["DYING"])
+        assert [r.message for r in caplog.records] == []
+
+
 class TestMergedProviderWiring:
     def test_service_factory_exposes_merged_provider(self):
         from services import get_data_service
