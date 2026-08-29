@@ -61,7 +61,7 @@ def _wrapper_source(patches: dict, cli_args=()) -> str:
     phase`, and the parent then waited on them forever. All 7 tests below hit
     the 120s timeout and self-skipped, so the whole `slow` marker reported
     "7 skipped" in 14 minutes while testing nothing. Guarded, the same run
-    finishes in ~3s.
+    finishes in ~3s on macOS, ~12s on Windows.
 
     The CONFIG patches stay at module scope deliberately: spawn children
     re-import this module, so they must re-apply there to reach the workers.
@@ -80,17 +80,16 @@ def _wrapper_source(patches: dict, cli_args=()) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _run_patched(tmp_path, patches: dict, cli_args=(),
-                 expect_simulation=True) -> subprocess.CompletedProcess:
+def _run_patched(tmp_path, patches: dict, cli_args=()) -> subprocess.CompletedProcess:
     """Run the wrapper from :func:`_wrapper_source` as a subprocess.
 
-    `expect_simulation` asserts the run did real work, because six of the seven
-    tests below assert only the ABSENCE of a string in stderr — which holds
-    trivially if main() produced no output at all. Verified: with a nonexistent
-    symbol, or with `min_bars_required` above the fixture's 62 rows, main()
-    logs "Could not fetch data for any symbols" / "No simulation tasks were
-    generated", exits 0, never starts a worker, and ALL SEVEN assertions still
-    pass. The _BASE_PATCHES comment names that risk; nothing enforced it.
+    Asserts the run did real work, because six of the seven tests below assert
+    only the ABSENCE of a string in stderr — which holds trivially if main()
+    produced no output at all. Verified: with a nonexistent symbol, or with
+    `min_bars_required` above the fixture's 62 rows, main() logs "Could not
+    fetch data for any symbols" / "No simulation tasks were generated", exits 0,
+    never starts a worker, and ALL SEVEN assertions still pass. The
+    _BASE_PATCHES comment names that risk; nothing enforced it.
     """
     wrapper = tmp_path / "run_patched.py"
     wrapper.write_text(_wrapper_source(patches, cli_args), encoding="utf-8")
@@ -100,28 +99,40 @@ def _run_patched(tmp_path, patches: dict, cli_args=(),
             [sys.executable, str(wrapper)],
             capture_output=True,
             text=True,
+            # main.py:27-28 reconfigures its own streams to UTF-8. Reading them
+            # back with text=True and no encoding uses the locale default —
+            # cp1252 on Windows — which cannot decode the U+2501 rule in
+            # main.py's own banner. subprocess raises inside _readerthread, so
+            # it does not propagate: it surfaces as an unhandled-thread warning
+            # and `result.stderr` comes back None, turning every assertion in
+            # this file into `TypeError: argument of type 'NoneType' is not
+            # iterable`. Invisible until #362 was fixed, because the deadlock
+            # timed out first and nothing ever decoded anything.
+            encoding="utf-8",
+            errors="replace",
             cwd=PROJECT_ROOT,
             timeout=120,
         )
-        if expect_simulation:
-            assert result.returncode == 0, (
-                f"exit {result.returncode}\n{result.stderr[-2000:]}")
-            assert "All portfolio simulations complete" in result.stderr, (
-                "the run produced no simulation — every absence-assertion in "
-                "this file would pass vacuously\n" + result.stderr[-2000:])
-            assert "Could not fetch data for any symbols" not in result.stderr, (
-                "the fixture symbol was filtered out before any worker ran\n"
-                + result.stderr[-2000:])
+        assert result.returncode == 0, (
+            f"exit {result.returncode}\n{result.stderr[-2000:]}")
+        assert "All portfolio simulations complete" in result.stderr, (
+            "the run produced no simulation — every absence-assertion in "
+            "this file would pass vacuously\n" + result.stderr[-2000:])
+        assert "Could not fetch data for any symbols" not in result.stderr, (
+            "the fixture symbol was filtered out before any worker ran\n"
+            + result.stderr[-2000:])
         return result
     except subprocess.TimeoutExpired:
-        # NOT a skip. This run takes ~3s, so 120s means a deadlock, and #362 is
-        # what happens when a deadlock is reported as "your machine is slow":
-        # 7 skipped and 7 passed read identically in a summary line, and these
-        # were the only tests exercising main() end-to-end through a real Pool.
+        # NOT a skip. This run takes ~3s on macOS and ~12s on Windows, so 120s
+        # means a deadlock, and #362 is what happens when a deadlock is
+        # reported as "your machine is slow": 7 skipped and 7 passed read
+        # identically in a summary line, and these were the only tests
+        # exercising main() end-to-end through a real Pool.
         pytest.fail(
-            "Wrapper subprocess did not finish in 120s. It normally takes ~3s, "
-            "so this is a hang, not a slow machine — see #362 for the "
-            "multiprocessing bootstrap deadlock this guard used to hide.")
+            "Wrapper subprocess did not finish in 120s. It normally takes ~3s "
+            "on macOS and ~12s on Windows, so this is a hang, not a slow "
+            "machine — see #362 for the multiprocessing bootstrap deadlock "
+            "this guard used to hide.")
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +334,8 @@ class TestEmptyComparisonTickersRun:
         # before any worker runs, giving a false-green test
         "min_bars_required": 10,
         # Run one strategy only — keeps subprocess runtime well under the 120s
-        # timeout in _run_patched (the whole run takes ~3s)
+        # timeout in _run_patched (the whole run takes ~3s on macOS, ~12s on
+        # Windows)
         "strategies": ["SMA Crossover (20d/50d)"],
         "wfa_split_ratio": None,
         "wfa_folds": None,
@@ -356,12 +368,15 @@ class TestEmptyComparisonTickersRun:
     def test_exits_zero_or_clean_failure(self, tmp_path):
         """Run must not crash with any unhandled exception or worker fatal error.
 
-        The name promised an exit-code check and the body only grepped the
-        logs, so `sys.exit(1)` with a clean log passed.
+        The name promised an exit-code check that the body never made, so
+        `sys.exit(1)` with a clean log passed. The check now lives in
+        `_run_patched` and covers all seven call sites, not just this one — so
+        it is deliberately NOT repeated here: a duplicate assert after the
+        helper has already asserted can never be the one that fails, and a
+        hollow assertion in a PR about hollow assertions is worse than none.
         """
         result = _run_patched(tmp_path, self._patches_with(), cli_args=[])
         combined = result.stdout + result.stderr
-        assert result.returncode == 0, f"exit {result.returncode}\n{combined}"
         assert "Traceback" not in combined, combined
         assert "FATAL ERROR IN WORKER" not in combined, combined
 
