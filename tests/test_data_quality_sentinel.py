@@ -21,7 +21,10 @@ import pytest
 
 from helpers.data_quality import (
     _DENSITY_MIN_BARS_PER_YEAR,
+    _GAP_DEMERITS,
+    _GAP_MAX_DAYS,
     _SENTINEL_CLOSE,
+    _SENTINEL_DEMERITS,
     validate_ohlcv,
 )
 
@@ -230,3 +233,168 @@ class TestBarDensity:
     def test_threshold_is_the_documented_one(self):
         """Pin the constant, so a future loosening is deliberate."""
         assert _DENSITY_MIN_BARS_PER_YEAR == 150
+
+
+# --- QA round 2 (adversarial audit of the checks above) -----------------------
+# Every test below reproduces a hole found by attacking the first cut. Each one
+# fails against the pre-fix implementation.
+
+
+class TestIndexOrderIndependence:
+    """A newest-first index must not buy a series a free pass.
+
+    `index[-1] - index[0]` goes NEGATIVE on a descending index, fails the
+    `> _DENSITY_MIN_YEARS` gate, and skips CHECK 8 entirely. Not hypothetical:
+    services/csv_service.py never sorts its index (the other three providers
+    do), and the Nasdaq.com export format it supports is newest-first.
+    """
+
+    @staticmethod
+    def _sparse_index():
+        return pd.to_datetime(
+            [f"{y}-01-{d:02d}" for y in range(2015, 2025) for d in range(1, 11)])
+
+    def _frame_for(self, idx):
+        return pd.DataFrame(
+            {"Open": 10.0, "High": 10.1, "Low": 9.9, "Close": 10.0,
+             "Volume": 1_000_000},
+            index=idx)
+
+    def test_descending_index_still_flags_sparse_history(self):
+        idx = self._sparse_index()[::-1]
+        _, issues = validate_ohlcv(self._frame_for(idx), "FER", "D")
+        assert any("Sparse history" in i for i in issues), issues
+
+    def test_descending_index_scores_the_same_as_ascending(self):
+        """The score must be a property of the data, not of row order."""
+        asc = self._sparse_index()
+        asc_score, _ = validate_ohlcv(self._frame_for(asc), "FER", "D")
+        desc_score, _ = validate_ohlcv(self._frame_for(asc[::-1]), "FER", "D")
+        assert desc_score == asc_score, (
+            f"ascending {asc_score} vs descending {desc_score} — row order "
+            f"must not change the verdict")
+
+
+class TestInternalHistoryGap:
+    """bars/span cannot separate "uniformly thin" from "two dense eras with a
+    hole in between" — only the gap itself can.
+
+    A ratio only trips once >40% of the span is missing, so the real recycled
+    shapes were passing: a 5-year hole in a 20-year span scored 87.0, and the
+    sub-3-year variant landed on exactly 80.0 — not below it — sliding under
+    the strict `< 80` gate this PR exists to close.
+    """
+
+    @staticmethod
+    def _two_eras(a_start, a_bars, b_start, b_bars):
+        a = pd.bdate_range(a_start, periods=a_bars)
+        b = pd.bdate_range(b_start, periods=b_bars)
+        return pd.DataFrame(
+            {"Open": 10.0, "High": 10.1, "Low": 9.9, "Close": 10.0,
+             "Volume": 1_000_000},
+            index=a.append(b))
+
+    def test_multi_year_hole_in_a_long_span_is_flagged(self):
+        """7 dense years, a 5-year hole, 8 dense years — 196 bars/yr, which
+        sails past a 150 floor. Scored 87.0 and passed."""
+        df = self._two_eras("2005-01-03", 252 * 7, "2017-01-02", 252 * 8)
+        score, issues = validate_ohlcv(df, "SSCC", "D")
+        assert any("History gap" in i for i in issues), issues
+        assert score < 80.0, f"scored {score} — passes the default gate"
+
+    def test_sub_three_year_recycled_shape_is_flagged(self):
+        """The razor's edge: 6mo, a 2-year hole, 6mo, all inside a 2.89-year
+        span. CHECK 8 is off below 3 years and CHECK 6's demerit is capped at
+        20, so this landed on EXACTLY 80.0 and passed a `< 80` gate."""
+        df = self._two_eras("2020-01-01", 126, "2022-06-01", 126)
+        score, issues = validate_ohlcv(df, "RECYCLED2", "D")
+        assert any("History gap" in i for i in issues), issues
+        assert score < 80.0, f"scored {score} — passes the default gate"
+
+    def test_a_dense_continuous_series_has_no_gap_flag(self):
+        """The control. Weekends and holidays are not gaps."""
+        _, issues = validate_ohlcv(_frame(_clean(600)), "AAPL", "D")
+        assert not any("History gap" in i for i in issues), issues
+
+    def test_a_thin_but_continuous_series_has_no_gap_flag(self):
+        """Separates the two checks: uniformly thin trips density, NOT gap.
+        Without this, the gap check could just duplicate the density check."""
+        idx = pd.to_datetime(
+            [f"{y}-{m:02d}-01" for y in range(2015, 2025) for m in range(1, 13)])
+        df = pd.DataFrame(
+            {"Open": 10.0, "High": 10.1, "Low": 9.9, "Close": 10.0,
+             "Volume": 1_000_000},
+            index=idx)
+        _, issues = validate_ohlcv(df, "THIN", "D")
+        assert any("Sparse history" in i for i in issues), issues
+        assert not any("History gap" in i for i in issues), issues
+
+    def test_gap_actually_costs_score(self):
+        """Without this, setting the demerits to 0 survives mutation."""
+        df = self._two_eras("2005-01-03", 252 * 7, "2017-01-02", 252 * 8)
+        score, _ = validate_ohlcv(df, "SSCC", "D")
+        assert score <= 100.0 - _GAP_DEMERITS, score
+
+    def test_gap_check_is_skipped_for_non_daily_timeframes(self):
+        """A monthly series has ~30-day steps by construction; a sparse
+        monthly history must not be read as a recycled ticker."""
+        idx = pd.date_range("2010-01-01", periods=180, freq="MS")
+        df = pd.DataFrame(
+            {"Open": 10.0, "High": 10.1, "Low": 9.9, "Close": 10.0,
+             "Volume": 1_000_000},
+            index=idx)
+        _, issues = validate_ohlcv(df, "MONTHLY", "M")
+        assert not any("History gap" in i for i in issues), issues
+
+    def test_gap_threshold_is_the_documented_one(self):
+        """Pin the constant, so a future loosening is deliberate."""
+        assert _GAP_MAX_DAYS == 365
+
+
+class TestSentinelColumnResolution:
+    """`{c.lower(): c for c in df.columns}` keeps only the LAST column per
+    lowercased name. With both `close` (sentinel) and `Close` (clean) present,
+    the sentinel column was never scanned — on a check that exists precisely
+    because that corpus has casing problems."""
+
+    def test_every_matching_column_is_scanned_not_just_the_last(self):
+        n = 500
+        px = [10.0] * n
+        dirty = list(px)
+        dirty[10] = _SENTINEL_CLOSE
+        df = pd.DataFrame(
+            {"close": dirty, "Open": px, "High": [p * 1.01 for p in px],
+             "Low": [p * 0.99 for p in px], "Close": px,
+             "Volume": [1_000_000] * n},
+            index=_IDX[:n])
+        score, issues = validate_ohlcv(df, "DUPCASE", "D")
+        assert any("Sentinel prices" in i for i in issues), issues
+        assert score <= 100.0 - _SENTINEL_DEMERITS, score
+
+
+class TestIssueMessagesDoNotOverclaim:
+    """An issue string asserting a cause the check cannot distinguish sends
+    whoever reads it down the wrong path. "Recycled ticker" is a claim only
+    the gap check can evidence."""
+
+    def test_thin_continuous_series_is_not_called_recycled(self):
+        idx = pd.to_datetime(
+            [f"{y}-{m:02d}-01" for y in range(2015, 2025) for m in range(1, 13)])
+        df = pd.DataFrame(
+            {"Open": 10.0, "High": 10.1, "Low": 9.9, "Close": 10.0,
+             "Volume": 1_000_000},
+            index=idx)
+        _, issues = validate_ohlcv(df, "THIN", "D")
+        assert any("Sparse history" in i for i in issues), issues
+        assert not any("recycled" in i.lower() for i in issues), (
+            f"no gap in this series — nothing evidences recycling: {issues}")
+
+    def test_a_real_gap_may_name_the_cause(self):
+        a = pd.bdate_range("2000-01-01", "2001-12-31")
+        b = pd.bdate_range("2015-01-01", "2016-12-31")
+        df = pd.DataFrame(
+            {"Open": 10.0, "High": 10.1, "Low": 9.9, "Close": 10.0,
+             "Volume": 1_000_000},
+            index=a.append(b))
+        _, issues = validate_ohlcv(df, "RECYCLED", "D")
+        assert any("recycled" in i.lower() for i in issues), issues

@@ -51,6 +51,18 @@ _DENSITY_MIN_YEARS = 3.0
 _DENSITY_MIN_BARS_PER_YEAR = 150
 _DENSITY_DEMERITS = 25
 
+# Density measures bars against SPAN, which is a ratio — and a ratio cannot
+# separate "uniformly thin" from "two dense eras with a hole in between". It
+# only trips once >40% of the span is missing, so the shapes this was named for
+# were passing anyway: a 5-year hole in a 20-year span scored 87.0, and the
+# sub-3-year variant landed on EXACTLY 80.0 — not below it — sliding under the
+# strict `< 80` gate. The hole itself is the evidence, so measure it directly
+# and do NOT gate it on _DENSITY_MIN_YEARS; that is the guard it slipped past.
+# A listed equity's largest real gap is a long weekend; a year of nothing is a
+# different security wearing the same symbol.
+_GAP_MAX_DAYS = 365
+_GAP_DEMERITS = 25
+
 
 def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
                    calendar: str = "NYSE") -> tuple[float, list[str]]:
@@ -153,7 +165,11 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
     # different holiday calendar) don't match a Mon–Fri business-day count, so the
     # NYSE-based estimate would flag phantom gaps — skip it for non-NYSE calendars.
     if timeframe.upper() == "D" and total_bars > 1 and str(calendar).upper() == "NYSE":
-        expected_bars = _estimate_expected_bars(df.index[0], df.index[-1], timeframe)
+        # min/max, not [0]/[-1]: on a newest-first index the latter hands
+        # _estimate_expected_bars a reversed range, which returns 0 expected
+        # bars and silently passes the series. Same defect as CHECK 8 had.
+        expected_bars = _estimate_expected_bars(
+            df.index.min(), df.index.max(), timeframe)
         if expected_bars > total_bars:
             missing = expected_bars - total_bars
             pct = (missing / expected_bars) * 100
@@ -167,30 +183,48 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
     # stocks — FMNJ/NEOM/RINO have median closes of $10.00/$8.70/$8.50 against a
     # 1e-06 minimum, which is what makes it a defect rather than tick noise.
     #
-    # BLOCKING by design. Every other check here is proportional; this one is
-    # not, because a single sentinel bar is a fabricated round-trip that a
-    # mean-reversion strategy will happily trade. An affected series previously
-    # scored 92/100 and passed.
+    # Disproportionate by design — see the note on _SENTINEL_DEMERITS for what
+    # that does and does not do. It surfaces the series loudly under stock
+    # config; it hard-stops a run only under `strict_data_quality=True`.
+    # The demerit is not proportional because a single sentinel bar is a
+    # fabricated round-trip a mean-reversion strategy will happily trade. An
+    # affected series previously scored 92/100 and passed.
+    #
+    # SCOPE: keyed on the VALUE 1e-06, not on the round-trip shape, so it
+    # assumes an instrument where 1e-06 cannot be a real price. True for the
+    # equities and futures this engine trades; it would be wrong for a
+    # sub-micro-dollar crypto pair, which would take the full demerit on honest
+    # data. Revisit if such data ever reaches this function.
+    #
     # Scans ALL FOUR price columns, case-insensitively:
     #   * a sentinel on Low is the shape that actually trades — every daily-bar
     #     stop in this engine fills off Low, so a fabricated wick to the floor
     #     is worse than a fabricated close. Close-only scored such a bar 100/100.
     #   * the merged store writes LOWERCASE ohlcv. A raw audit of that corpus —
     #     the corpus this check exists for — silently no-opped against "Close".
+    #   * EVERY column matching the name, not one per name. A dict keyed on the
+    #     lowercased name keeps only the last, so a frame carrying both `close`
+    #     (with the sentinel) and `Close` (clean) — exactly the artifact a merge
+    #     of a mixed-case corpus produces — scanned the clean one and scored 100.
     if total_bars > 0:
-        by_lower = {str(c).lower(): c for c in df.columns}
         affected = np.zeros(total_bars, dtype=bool)
         hit_cols = []
+        lowered = [str(c).lower() for c in df.columns]
         for name in ("close", "open", "high", "low"):
-            col = by_lower.get(name)
-            if col is None:
-                continue
-            vals = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype="float64")
-            mask = np.isclose(vals, _SENTINEL_CLOSE, rtol=0.0,
-                              atol=_SENTINEL_ATOL)
-            if mask.any():
-                affected |= mask
-                hit_cols.append(str(col))
+            for pos, lower_name in enumerate(lowered):
+                if lower_name != name:
+                    continue
+                # Positional, because a duplicated label makes df[label] a
+                # DataFrame rather than a Series.
+                vals = pd.to_numeric(
+                    df.iloc[:, pos], errors="coerce").to_numpy(dtype="float64")
+                mask = np.isclose(vals, _SENTINEL_CLOSE, rtol=0.0,
+                                  atol=_SENTINEL_ATOL)
+                if mask.any():
+                    affected |= mask
+                    col_label = str(df.columns[pos])
+                    if col_label not in hit_cols:
+                        hit_cols.append(col_label)
         sentinel = int(affected.sum())      # bars, not cells — no double count
         if sentinel > 0:
             pct = (sentinel / total_bars) * 100
@@ -206,7 +240,15 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
     # check that would have caught SSCC and FER.
     if (timeframe.upper() == "D" and total_bars > 1
             and isinstance(df.index, pd.DatetimeIndex)):
-        span_years = (df.index[-1] - df.index[0]).days / 365.25
+        # Read the geometry off a SORTED copy. `index[-1] - index[0]` goes
+        # NEGATIVE on a newest-first index, fails the span gate, and skips the
+        # check on exactly the series it exists to catch — a descending sparse
+        # series scored 100.0 where the same data ascending scored 55.0. Not
+        # hypothetical: services/csv_service.py never sorts its index (the
+        # other three providers do) and supports the newest-first Nasdaq.com
+        # export. The score must be a property of the data, not of row order.
+        ordered = df.index.sort_values()
+        span_years = (ordered[-1] - ordered[0]).days / 365.25
         if span_years > _DENSITY_MIN_YEARS:
             # bars / SPAN, not the median over trading years. The median counts
             # only years that have bars, so the canonical recycled-ticker shape
@@ -216,11 +258,28 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
             # makes a hole count against the series, which is the point.
             bars_per_year = total_bars / span_years
             if bars_per_year < _DENSITY_MIN_BARS_PER_YEAR:
+                # States what was measured, not a cause. A thin-but-continuous
+                # series and a stock returning from a two-year halt both land
+                # here, and neither is evidence of stitching — naming a cause
+                # this check cannot distinguish sends the reader the wrong way.
+                # CHECK 9 owns the "recycled" claim, because a hole evidences it.
                 issues.append(
                     f"Sparse history: {bars_per_year:.0f} bars/yr over "
-                    f"{span_years:.1f}y (expect ~252) — stitched or recycled "
-                    f"ticker (#350)")
+                    f"{span_years:.1f}y (expect ~252) — thin coverage (#350)")
                 demerits += _DENSITY_DEMERITS
+
+        # --- CHECK 9: internal history gap (issue #350) ---
+        # The hole itself, measured directly. See _GAP_MAX_DAYS for why the
+        # bars/span ratio in CHECK 8 cannot stand in for this, and why this one
+        # is deliberately NOT gated on _DENSITY_MIN_YEARS.
+        gap = ordered.to_series().diff().max()
+        if pd.notna(gap) and gap.days > _GAP_MAX_DAYS:
+            at = ordered[int(np.argmax(np.diff(ordered.to_numpy())))]
+            issues.append(
+                f"History gap: {gap.days} days ({gap.days / 365.25:.1f}y) with "
+                f"no bars after {at.date()} — stitched or recycled ticker "
+                f"(#350)")
+            demerits += _GAP_DEMERITS
 
     # --- COMPUTE SCORE ---
     score = max(0.0, 100.0 - demerits)
