@@ -1198,22 +1198,15 @@ class TestProviderEntryPointsReturnLegacyNamedData:
             f"reserved-name pin in this class — add it, or add the new branch "
             f"to `network` with a one-line reason if it fetches remotely.")
 
-    @pytest.mark.xfail(reason=(
-        "the `merged` provider (src/data/unified_market_data_provider.py) "
-        "builds its own filenames and imports no filename helper, so it "
-        "resolves NEITHER the guarded reserved spelling nor any illegal-char "
-        "scrub. Verified: CON/PRN/NUL/I:VIX/$I:TNX/BRK\\B/ADX>20 all resolve "
-        "through parquet_service and are all lost here, same directory, same "
-        "files. It is self-consistent — list_symbols() returns on-disk stems, "
-        "so anything round-tripping through it works — and only breaks when a "
-        "symbol arrives from OUTSIDE in its source spelling (a PIT roster, a "
-        "config list, a scanner), which is exactly what filename_candidates "
-        "exists for. RECORDED AS A KNOWN GAP, NOT FIXED: repointing the "
-        "canonical merged reader at resolve_existing is a behaviour change to "
-        "production data access and does not belong in a test-pinning PR"),
-        strict=True)
     def test_merged_provider_returns_a_legacy_unguarded_reserved_name(
             self, tmp_path):
+        """Was a strict xfail; closed by #355.
+
+        The merged provider built its own candidate list and imported no
+        filename helper, so a symbol arriving in its SOURCE spelling could not
+        reach the file the corpus stores. It now also tries
+        `filename_candidates`, and the xfail flipping to XPASS is what said so.
+        """
         from src.data.unified_market_data_provider import UnifiedMarketDataProvider
 
         self._frame().rename(columns=str.lower).to_parquet(
@@ -1222,15 +1215,11 @@ class TestProviderEntryPointsReturnLegacyNamedData:
         got = prov.get_price_data("CON", "2024-01-01", "2024-06-01")
         assert got is not None and not got.empty
 
-    @pytest.mark.xfail(reason=(
-        "same gap, illegal-char spelling: a symbol arriving as `BRK/B` cannot "
-        "reach `BRK_B.parquet` through the merged provider. This is the shape "
-        "with live exposure — @shardul0701 measured six sanitized stems "
-        "(BBAI_W, BIII_W, MPTI_R, OPFI_W, PAII_W, VACI_W — warrants and class "
-        "shares) in the shipped merged corpus that resolve_existing finds and "
-        "this provider does not"),
-        strict=True)
     def test_merged_provider_returns_an_illegal_char_symbol(self, tmp_path):
+        """Was a strict xfail; closed by #355. This is the shape with live
+        exposure — @shardul0701 measured six sanitized stems in the shipped
+        merged corpus (BBAI_W, BIII_W, MPTI_R, OPFI_W, PAII_W, VACI_W —
+        warrants and class shares) that this provider could not reach."""
         from src.data.unified_market_data_provider import UnifiedMarketDataProvider
 
         self._frame().rename(columns=str.lower).to_parquet(

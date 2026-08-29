@@ -19,6 +19,8 @@ import pandas as pd
 
 from .pipeline import paths
 
+from helpers.filename_utils import filename_candidates as _filename_candidates
+
 _CANON = ["open", "high", "low", "close", "volume"]
 _SUFFIX_RE = re.compile(r"-\d{6}$")  # delisted files carry a -YYYYMM suffix
 _RENAME = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
@@ -65,6 +67,21 @@ class UnifiedMarketDataProvider:
                   symbol.upper().replace(".", "-"), symbol.upper().replace("-", ".")):
             if c not in cands:
                 cands.append(c)
+        # SANITIZED spellings too (#355). This provider previously built its
+        # own candidate list only, so a symbol arriving in its SOURCE spelling
+        # could not reach the file the corpus actually stores:
+        #
+        #     CON   -> _CON.parquet     (Windows reserved-name guard)
+        #     BRK/B -> BRK_B.parquet    (illegal-character scrub)
+        #
+        # It stayed self-consistent — `list_symbols()` returns on-disk stems, so
+        # anything round-tripping through it worked — which is why the loss was
+        # invisible until a symbol arrived from outside: a PIT roster, a config
+        # list, a scanner. Exactly what filename_candidates exists for.
+        for c in _filename_candidates(symbol):
+            for variant in (c, c.upper()):
+                if variant not in cands:
+                    cands.append(variant)
         out, seen = [], set()
         for c in cands:
             p = os.path.join(self.merged_dir, f"{c}.parquet")
