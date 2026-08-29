@@ -47,10 +47,23 @@ _FIXTURE_AVAILABLE = os.path.isdir(_FIXTURE_DIR) and any(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _run_patched(tmp_path, patches: dict, cli_args=()) -> subprocess.CompletedProcess:
+def _wrapper_source(patches: dict, cli_args=()) -> str:
     """
-    Write a wrapper script that applies CONFIG patches then calls main.main().
-    Uses the same pattern as test_main_cli.py.
+    Build the wrapper script that applies CONFIG patches then calls main.main().
+
+    The `main.main()` call MUST sit under an `if __name__ == "__main__"` guard
+    (#362). `main.py` builds a multiprocessing Pool, and under the spawn start
+    method — macOS and Windows — every worker re-imports the parent's __main__,
+    which is this wrapper. Without the guard each child re-entered main.main()
+    during bootstrap, died on `RuntimeError: An attempt has been made to start
+    a new process before the current process has finished its bootstrapping
+    phase`, and the parent then waited on them forever. All 7 tests below hit
+    the 120s timeout and self-skipped, so the whole `slow` marker reported
+    "7 skipped" in 14 minutes while testing nothing. Guarded, the same run
+    finishes in ~3s.
+
+    The CONFIG patches stay at module scope deliberately: spawn children
+    re-import this module, so they must re-apply there to reach the workers.
     """
     lines = [
         "import sys",
@@ -59,12 +72,17 @@ def _run_patched(tmp_path, patches: dict, cli_args=()) -> subprocess.CompletedPr
     ]
     for k, v in patches.items():
         lines.append(f"config.CONFIG[{repr(k)}] = {repr(v)}")
-    lines.append(f"sys.argv = {repr(['main.py'] + list(cli_args))}")
     lines.append("import main")
-    lines.append("main.main()")
+    lines.append('if __name__ == "__main__":')
+    lines.append(f"    sys.argv = {repr(['main.py'] + list(cli_args))}")
+    lines.append("    main.main()")
+    return "\n".join(lines) + "\n"
 
+
+def _run_patched(tmp_path, patches: dict, cli_args=()) -> subprocess.CompletedProcess:
+    """Run the wrapper from :func:`_wrapper_source` as a subprocess."""
     wrapper = tmp_path / "run_patched.py"
-    wrapper.write_text("\n".join(lines), encoding="utf-8")
+    wrapper.write_text(_wrapper_source(patches, cli_args), encoding="utf-8")
 
     try:
         return subprocess.run(
@@ -75,7 +93,14 @@ def _run_patched(tmp_path, patches: dict, cli_args=()) -> subprocess.CompletedPr
             timeout=120,
         )
     except subprocess.TimeoutExpired:
-        pytest.skip("Subprocess timed out — system too slow for this integration test")
+        # NOT a skip. This run takes ~3s, so 120s means a deadlock, and #362 is
+        # what happens when a deadlock is reported as "your machine is slow":
+        # 7 skipped and 7 passed read identically in a summary line, and these
+        # were the only tests exercising main() end-to-end through a real Pool.
+        pytest.fail(
+            "Wrapper subprocess did not finish in 120s. It normally takes ~3s, "
+            "so this is a hang, not a slow machine — see #362 for the "
+            "multiprocessing bootstrap deadlock this guard used to hide.")
 
 
 # ---------------------------------------------------------------------------
@@ -343,3 +368,40 @@ class TestEmptyComparisonTickersRun:
         """'Actual Data Period' line should NOT appear — only 'Data Period (config)'."""
         result = _run_patched(tmp_path, self._patches_with(), cli_args=[])
         assert "Actual Data Period" not in result.stderr, result.stderr
+
+
+class TestWrapperSource:
+    """Pins the generated wrapper directly (#362).
+
+    Fast, no subprocess — so the harness contract is checked even when the
+    `slow` marker is deselected, which is the default. That matters here: the
+    bug it guards made every slow test report "skipped", and a deselected suite
+    reports nothing at all, so nothing in a default run could have caught it.
+    """
+
+    def test_main_is_called_under_a_dunder_main_guard(self):
+        src = _wrapper_source({"data_provider": "parquet"})
+        assert 'if __name__ == "__main__":' in src, src
+        body = src.split('if __name__ == "__main__":', 1)[1]
+        assert "main.main()" in body, (
+            "main.main() must be inside the guard — outside it, spawn workers "
+            "re-enter it during bootstrap and the Pool deadlocks (#362)")
+        head = src.split('if __name__ == "__main__":', 1)[0]
+        assert "main.main()" not in head, head
+
+    def test_config_patches_stay_at_module_scope(self):
+        """Spawn children re-import the wrapper, so the patches must apply
+        there too — moving them under the guard would leave workers on the
+        unpatched CONFIG."""
+        src = _wrapper_source({"data_provider": "parquet", "wfa_folds": None})
+        head = src.split('if __name__ == "__main__":', 1)[0]
+        assert "config.CONFIG['data_provider'] = 'parquet'" in head, head
+        assert "config.CONFIG['wfa_folds'] = None" in head, head
+
+    def test_cli_args_reach_sys_argv(self):
+        src = _wrapper_source({}, cli_args=["--verbose"])
+        assert "['main.py', '--verbose']" in src, src
+
+    def test_the_wrapper_is_syntactically_valid(self):
+        compile(_wrapper_source({"a": 1}, cli_args=["--dry-run"]),
+                "<wrapper>", "exec")
