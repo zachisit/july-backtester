@@ -102,6 +102,28 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
     if df is None or df.empty:
         return 0.0, [f"{symbol}: DataFrame is empty"]
 
+    # --- CANONICALISE COLUMN LABELS (issue #350 review) ---
+    # CHECKS 2-5 index the literal labels "Open"/"High"/"Low"/"Close"/"Volume".
+    # The merged store writes LOWERCASE ohlcv, so against that corpus - the
+    # corpus #350 is about - all four silently no-opped: a frame carrying a
+    # High<Low violation, a 400% jump and 30 zero-volume bars scored 79.0
+    # capitalised and a confident 100.0 lowercased. CHECK 7 solved this for
+    # itself by scanning positionally; the fix belongs to the whole function.
+    #
+    # Renames onto a COPY, never the caller's frame, and only where the
+    # canonical label is absent - a frame carrying both `close` and `Close`
+    # keeps today's behaviour rather than silently swapping which column
+    # CHECKS 2-5 read. CHECK 7 lowercases regardless, so it is unaffected.
+    _canonical = ("Open", "High", "Low", "Close", "Volume")
+    _rename = {}
+    for _label in df.columns:
+        _canon = str(_label).capitalize()
+        if (_canon in _canonical and _canon not in df.columns
+                and _canon not in _rename.values()):
+            _rename[_label] = _canon
+    if _rename:
+        df = df.rename(columns=_rename)
+
     issues = []
     demerits = 0  # Points deducted from 100
     total_bars = len(df)
@@ -178,17 +200,48 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
 
     # --- CHECK 7: sentinel-value closes (issue #350) ---
     # Closes of EXACTLY 1e-06 sitting next to normal bars. Each manufactures a
-    # fake round-trip: collapse to the floor, bounce straight back. Measured at
-    # 23,695+ bars across 782+ series in the merged corpus, and NOT sub-penny
-    # stocks — FMNJ/NEOM/RINO have median closes of $10.00/$8.70/$8.50 against a
-    # 1e-06 minimum, which is what makes it a defect rather than tick noise.
+    # fake round-trip: collapse to the floor, bounce straight back. Measured on
+    # the shipped corpus (35,309 files / 74,866,808 bars): 25,730 bars across
+    # 813 series.
+    #
+    # WHAT 1e-06 ACTUALLY IS - corrected. An earlier version of this comment
+    # said these were "NOT sub-penny stocks - FMNJ/NEOM/RINO have median closes
+    # of $10.00/$8.70/$8.50". Those are medians over the WHOLE FILE, i.e. over
+    # the years the company was alive. The medians over the bars that actually
+    # print 1e-06 are $0.0005 / $0.0001 / $0.0001. Corpus-wide the same error:
+    # whole-file median $2.75 vs era median $0.0002, and of the 539 series whose
+    # whole-file median exceeds $1.00 - the very statistic that sentence quoted
+    # - 396 have era medians <= $0.01. 1e-06 is the bottom of Norgate's fixed
+    # absolute tick grid, not a clamp: the share of bars sitting exactly on a
+    # round decade climbs monotonically 0.26% ($100) -> 5.57% ($0.01) -> 99.34%
+    # (1e-06), exactly ONE bar in 74.9M sits below it, and none carry zero
+    # volume. A clamp would leave zero below and pile up at the floor.
+    #
+    # So these are REAL PRICES, and this is a TRADEABILITY screen, not a
+    # corruption screen. A bar at the bottom of the tick grid cannot be traded
+    # at anything like its printed size, and it still manufactures a round-trip
+    # a mean-reversion strategy will happily take - which is why the demerit is
+    # flat rather than proportional to affected-bar count.
+    #
+    # KNOWN FALSE POSITIVE, accepted deliberately and pinned by
+    # test_an_honest_series_touching_the_floor_is_flagged: an honest sub-penny
+    # series that merely trades down to the floor takes the full demerit. The
+    # narrower fix is a dollar-volume floor at SELECTION -
+    # UnifiedMarketDataProvider.filter_universe(min_avg_dollar_volume=...) plus
+    # the already-present but currently unwired `merged_min_avg_dollar_volume`
+    # config key - which drops the bars without accusing the data.
     #
     # Disproportionate by design — see the note on _SENTINEL_DEMERITS for what
     # that does and does not do. It surfaces the series loudly under stock
     # config; it hard-stops a run only under `strict_data_quality=True`.
     # The demerit is not proportional because a single sentinel bar is a
-    # fabricated round-trip a mean-reversion strategy will happily trade. An
-    # affected series previously scored 92/100 and passed.
+    # fabricated round-trip a mean-reversion strategy will happily trade.
+    #
+    # The "92/100 and passed" figure an earlier version of this comment cited is
+    # NOT reproducible. Scored at base across all 813 affected series: min 50,
+    # median 67, max 84 - none reached 90. What is true, and is the real
+    # justification: 115 of them (14.1%) scored >= 80 and so passed the default
+    # `data_quality_threshold` gate.
     #
     # SCOPE: keyed on the VALUE 1e-06, not on the round-trip shape, so it
     # assumes an instrument where 1e-06 cannot be a real price. True for the
@@ -238,6 +291,7 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
     # A listed equity trades ~252 days/yr. A long span with a low median
     # bars-per-year is a stitched or recycled ticker wearing one symbol — the
     # check that would have caught SSCC and FER.
+    sparse_flagged = False
     if (timeframe.upper() == "D" and total_bars > 1
             and isinstance(df.index, pd.DatetimeIndex)):
         # Read the geometry off a SORTED copy. `index[-1] - index[0]` goes
@@ -267,6 +321,7 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
                     f"Sparse history: {bars_per_year:.0f} bars/yr over "
                     f"{span_years:.1f}y (expect ~252) — thin coverage (#350)")
                 demerits += _DENSITY_DEMERITS
+                sparse_flagged = True
 
         # --- CHECK 9: internal history gap (issue #350) ---
         # The hole itself, measured directly. See _GAP_MAX_DAYS for why the
@@ -275,10 +330,19 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
         gap = ordered.to_series().diff().max()
         if pd.notna(gap) and gap.days > _GAP_MAX_DAYS:
             at = ordered[int(np.argmax(np.diff(ordered.to_numpy())))]
+            # Claim "stitched or recycled" ONLY when CHECK 8 also fired. A hole
+            # in an otherwise DENSE series is not evidence of a recycled ticker:
+            # NBIS trades $1.44bn/day and carries a multi-year hole spanning the
+            # Yandex suspension and the Nebius relisting - correct detection,
+            # wrong accusation, and it was demoted 82 -> 57 at every window.
+            # OLED ($68.8M/day) and RDNT ($47.3M/day) land the same way. This is
+            # the discipline CHECK 8 already applies to itself: state what was
+            # measured, name a cause only where the evidence distinguishes one.
+            cause = ("stitched or recycled ticker" if sparse_flagged
+                     else "coverage hole in an otherwise dense series")
             issues.append(
                 f"History gap: {gap.days} days ({gap.days / 365.25:.1f}y) with "
-                f"no bars after {at.date()} — stitched or recycled ticker "
-                f"(#350)")
+                f"no bars after {at.date()} — {cause} (#350)")
             demerits += _GAP_DEMERITS
 
     # --- COMPUTE SCORE ---

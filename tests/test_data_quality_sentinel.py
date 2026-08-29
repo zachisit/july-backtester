@@ -4,15 +4,22 @@ Issue #350: the merged corpus carries closes of EXACTLY 1e-06 sitting next to
 normal bars, and stitched/recycled tickers wearing one symbol.
 
 The sentinel is a fabricated round-trip — collapse to the floor, bounce back on
-the next bar — measured at 23,695+ bars across 782+ series. They are not
-sub-penny stocks, which is what makes it a defect rather than tick noise: FMNJ,
-NEOM and RINO have median closes of $10.00, $8.70 and $8.50 against a 1e-06
-minimum.
+the next bar — measured on the shipped corpus (35,309 files / 74,866,808 bars)
+at 25,730 bars across 813 series.
 
-The bar that mattered: an affected series scored **92/100 and passed** the
-existing checks. Every other check here is proportional to how much data is
-affected; this one must not be, because ONE sentinel bar is a fake round-trip
-that a mean-reversion strategy will trade.
+CORRECTED. An earlier version of this docstring said these were "not sub-penny
+stocks: FMNJ, NEOM and RINO have median closes of $10.00, $8.70 and $8.50".
+Those are medians over the WHOLE FILE. Over the bars that actually print 1e-06
+the medians are $0.0005 / $0.0001 / $0.0001. 1e-06 is the bottom of Norgate's
+fixed absolute tick grid, so these bars are REAL PRICES and this is a
+TRADEABILITY screen, not a corruption screen — a bar on the floor cannot be
+traded at its printed size, yet still manufactures a round-trip a mean-reversion
+strategy will take. See helpers/data_quality.py CHECK 7 for the measurement.
+
+The "**92/100 and passed**" figure is likewise not reproducible: scored at base,
+the 813 affected series run min 50 / median 67 / max 84. What IS true is that
+115 of them (14.1%) scored >= 80 and passed the default gate — which is why this
+check is flat rather than proportional: ONE sentinel bar is a fake round-trip.
 """
 
 import numpy as np
@@ -74,12 +81,32 @@ class TestSentinelCloses:
         assert hit and "3 bars" in hit[0], issues
 
     def test_matches_only_the_exact_sentinel_not_small_prices(self):
-        """A genuine sub-penny stock must NOT be flagged — the defect is the
-        exact value 1e-06 next to normal bars, not smallness."""
-        score, issues = validate_ohlcv(
-            _frame([0.0004 + (i % 3) * 0.00001 for i in range(500)]),
-            "PENNY", "D")
+        """A genuine sub-penny series must NOT be flagged for smallness.
+
+        The fixture is a real Norgate tick grid one decade ABOVE the floor. The
+        earlier version used 0.0004 — four hundred times the sentinel, and two
+        whole decades of grid away — so it could not fail for the reason its
+        docstring claimed: it passed whether or not the check keyed on the exact
+        value. A control whose fixture cannot fail is not a control.
+        """
+        grid = [1e-05 + (i % 4) * 1e-05 for i in range(500)]   # 1e-05..4e-05
+        score, issues = validate_ohlcv(_frame(grid), "PENNY", "D")
         assert not any("Sentinel prices" in i for i in issues), issues
+
+    def test_an_honest_series_touching_the_floor_is_flagged(self):
+        """The accepted FALSE POSITIVE, pinned so it cannot be forgotten.
+
+        1e-06 is the bottom of Norgate's absolute tick grid, so an honest
+        sub-penny series that trades down to it takes the full demerit on real
+        data. That is the cost of keying on the value instead of the shape; the
+        narrower fix is a dollar-volume floor at selection. Pinned rather than
+        fixed so the trade-off stays visible to whoever revisits CHECK 7.
+        """
+        grid = [_SENTINEL_CLOSE if i % 7 == 0 else 1e-05 + (i % 3) * 1e-05
+                for i in range(500)]
+        score, issues = validate_ohlcv(_frame(grid), "HMNY", "D")
+        assert any("Sentinel prices" in i for i in issues), issues
+        assert score <= 100.0 - _SENTINEL_DEMERITS, (score, issues)
 
     def test_near_miss_values_are_not_flagged(self):
         closes = _clean()
@@ -398,3 +425,88 @@ class TestIssueMessagesDoNotOverclaim:
             index=a.append(b))
         _, issues = validate_ohlcv(df, "RECYCLED", "D")
         assert any("recycled" in i.lower() for i in issues), issues
+
+
+class TestEveryCheckReachesALowercaseFrame:
+    """CHECKS 2-5 indexed literal capitalised labels, so against the merged
+    store's LOWERCASE ohlcv — the corpus #350 is about — they silently no-opped.
+    CHECK 7 fixed this for itself only.
+    """
+
+    @staticmethod
+    def _defective(n=100):
+        closes = _clean(n)
+        closes[50] = closes[49] * 5                  # a 400% jump for CHECK 4
+        df = _frame(closes)
+        hi = df.columns.get_loc("High")
+        lo = df.columns.get_loc("Low")
+        df.iloc[10, hi] = df.iloc[10, lo] - 1.0      # High < Low for CHECK 3
+        df.iloc[:30, df.columns.get_loc("Volume")] = 0   # zero vol for CHECK 5
+        return df
+
+    def test_lowercase_frame_scores_the_same_as_capitalised(self):
+        cap = self._defective()
+        low = cap.rename(columns=str.lower)
+        s_cap, i_cap = validate_ohlcv(cap, "CAP", "D")
+        s_low, i_low = validate_ohlcv(low, "LOW", "D")
+        assert s_low == s_cap, (s_cap, i_cap, s_low, i_low)
+        assert s_low < 100.0, (s_low, i_low)
+
+    def test_lowercase_frame_reports_the_same_issues(self):
+        low = self._defective().rename(columns=str.lower)
+        _, issues = validate_ohlcv(low, "LOW", "D")
+        assert any("High < Low" in i for i in issues), issues
+        assert any("Price jumps" in i for i in issues), issues
+        assert any("Zero volume" in i for i in issues), issues
+
+    def test_rename_does_not_mutate_the_callers_frame(self):
+        low = _frame(_clean(50)).rename(columns=str.lower)
+        before = list(low.columns)
+        validate_ohlcv(low, "LOW", "D")
+        assert list(low.columns) == before
+
+    def test_a_frame_carrying_both_cases_keeps_todays_behaviour(self):
+        """Ambiguous input must not silently swap which column is read."""
+        df = _frame(_clean(50))
+        df["close"] = [_SENTINEL_CLOSE] * 50
+        score, issues = validate_ohlcv(df, "MIXED", "D")
+        assert any("Sentinel prices" in i for i in issues), issues
+
+
+class TestGapWordingIsGatedOnDensity:
+    """CHECK 9 named a cause it cannot distinguish. CHECK 8 already refuses to."""
+
+    @staticmethod
+    def _holed(left_n, left_start, right_n, right_start):
+        idx = pd.bdate_range(left_start, periods=left_n).append(
+            pd.bdate_range(right_start, periods=right_n))
+        return _frame(_clean(len(idx)), index=idx)
+
+    def test_a_dense_series_with_a_hole_is_not_called_recycled(self):
+        """NBIS: $1.44bn/day, a multi-year hole across the Yandex suspension and
+        the Nebius relisting. Correct detection, wrong accusation — it was
+        demoted 82 -> 57 at every window."""
+        df = self._holed(1500, "2015-01-01", 400, "2024-01-01")
+        _, issues = validate_ohlcv(df, "NBIS", "D")
+        gap = [i for i in issues if "History gap" in i]
+        assert gap, issues
+        assert not any("Sparse history" in i for i in issues), issues
+        assert "recycled" not in gap[0], gap
+        assert "dense series" in gap[0], gap
+
+    def test_a_sparse_series_with_a_hole_still_says_recycled(self):
+        """SSCC/FER: thin AND holed. Both fire, so the claim is evidenced."""
+        df = self._holed(300, "2000-01-01", 300, "2020-01-01")
+        _, issues = validate_ohlcv(df, "SSCC", "D")
+        gap = [i for i in issues if "History gap" in i]
+        assert gap, issues
+        assert any("Sparse history" in i for i in issues), issues
+        assert "stitched or recycled ticker" in gap[0], gap
+
+    def test_the_gap_is_still_scored_either_way(self):
+        dense = self._holed(1500, "2015-01-01", 400, "2024-01-01")
+        clean = _frame(_clean(1900),
+                       index=pd.bdate_range("2015-01-01", periods=1900))
+        s_gap, _ = validate_ohlcv(dense, "NBIS", "D")
+        s_ok, _ = validate_ohlcv(clean, "DENSE", "D")
+        assert s_ok - s_gap >= _GAP_DEMERITS
