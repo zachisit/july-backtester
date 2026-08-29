@@ -61,7 +61,7 @@ def _wrapper_source(patches: dict, cli_args=()) -> str:
     phase`, and the parent then waited on them forever. All 7 tests below hit
     the 120s timeout and self-skipped, so the whole `slow` marker reported
     "7 skipped" in 14 minutes while testing nothing. Guarded, the same run
-    finishes in ~3s on macOS, 10-40s on Windows.
+    finishes in ~3s on macOS, ~6-9s on Windows (idle box).
 
     The CONFIG patches stay at module scope deliberately: spawn children
     re-import this module, so they must re-apply there to reach the workers.
@@ -123,17 +123,18 @@ def _run_patched(tmp_path, patches: dict, cli_args=()) -> subprocess.CompletedPr
             + result.stderr[-2000:])
         return result
     except subprocess.TimeoutExpired:
-        # NOT a skip. This run takes ~3s on macOS and 10-40s on Windows, so 120s
+        # NOT a skip. This run takes ~3s on macOS and ~6-9s on Windows idle, so 120s
         # means a deadlock, and #362 is what happens when a deadlock is
         # reported as "your machine is slow": 7 skipped and 7 passed read
         # identically in a summary line, and these were the only tests
         # exercising main() end-to-end through a real Pool.
         pytest.fail(
-            "Wrapper subprocess did not finish in 120s. It normally takes ~3s "
-            "on macOS and 10-40s on Windows (measured), so a timeout here is "
-            "PROBABLY the #362 multiprocessing bootstrap deadlock this guard "
-            "used to hide — but the Windows margin is only ~3x, so rule out a "
-            "loaded machine before assuming a hang.")
+            "Wrapper subprocess did not finish in 120s. It normally takes ~3s on "
+            "macOS and ~6-9s on Windows on an idle box, so 120s is a ~13x "
+            "margin and a timeout here is PROBABLY the #362 multiprocessing "
+            "bootstrap deadlock this guard used to hide. Rule out a loaded "
+            "machine first — CPU contention was measured inflating these same "
+            "seven tests 4x, to ~38s.")
 
 
 # ---------------------------------------------------------------------------
@@ -335,7 +336,7 @@ class TestEmptyComparisonTickersRun:
         # before any worker runs, giving a false-green test
         "min_bars_required": 10,
         # Run one strategy only — keeps subprocess runtime well under the 120s
-        # timeout in _run_patched (the whole run takes ~3s on macOS, 10-40s on
+        # timeout in _run_patched (the whole run takes ~3s on macOS, ~6-9s on
         # Windows)
         "strategies": ["SMA Crossover (20d/50d)"],
         "wfa_split_ratio": None,
