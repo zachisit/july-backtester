@@ -61,7 +61,7 @@ def _wrapper_source(patches: dict, cli_args=()) -> str:
     phase`, and the parent then waited on them forever. All 7 tests below hit
     the 120s timeout and self-skipped, so the whole `slow` marker reported
     "7 skipped" in 14 minutes while testing nothing. Guarded, the same run
-    finishes in ~3s on macOS, ~12s on Windows.
+    finishes in ~3s on macOS, 10-40s on Windows.
 
     The CONFIG patches stay at module scope deliberately: spawn children
     re-import this module, so they must re-apply there to reach the workers.
@@ -123,16 +123,17 @@ def _run_patched(tmp_path, patches: dict, cli_args=()) -> subprocess.CompletedPr
             + result.stderr[-2000:])
         return result
     except subprocess.TimeoutExpired:
-        # NOT a skip. This run takes ~3s on macOS and ~12s on Windows, so 120s
+        # NOT a skip. This run takes ~3s on macOS and 10-40s on Windows, so 120s
         # means a deadlock, and #362 is what happens when a deadlock is
         # reported as "your machine is slow": 7 skipped and 7 passed read
         # identically in a summary line, and these were the only tests
         # exercising main() end-to-end through a real Pool.
         pytest.fail(
             "Wrapper subprocess did not finish in 120s. It normally takes ~3s "
-            "on macOS and ~12s on Windows, so this is a hang, not a slow "
-            "machine — see #362 for the multiprocessing bootstrap deadlock "
-            "this guard used to hide.")
+            "on macOS and 10-40s on Windows (measured), so a timeout here is "
+            "PROBABLY the #362 multiprocessing bootstrap deadlock this guard "
+            "used to hide — but the Windows margin is only ~3x, so rule out a "
+            "loaded machine before assuming a hang.")
 
 
 # ---------------------------------------------------------------------------
@@ -334,7 +335,7 @@ class TestEmptyComparisonTickersRun:
         # before any worker runs, giving a false-green test
         "min_bars_required": 10,
         # Run one strategy only — keeps subprocess runtime well under the 120s
-        # timeout in _run_patched (the whole run takes ~3s on macOS, ~12s on
+        # timeout in _run_patched (the whole run takes ~3s on macOS, 10-40s on
         # Windows)
         "strategies": ["SMA Crossover (20d/50d)"],
         "wfa_split_ratio": None,
@@ -493,3 +494,65 @@ class TestWrapperSource:
     def test_the_wrapper_is_syntactically_valid(self):
         compile(_wrapper_source({"a": 1}, cli_args=["--dry-run"]),
                 "<wrapper>", "exec")
+
+
+class TestSubprocessCallSiteHygiene:
+    """Every `subprocess.run` in the four wrapper modules must pass
+    `encoding`/`errors` and a `timeout` (#362, #366).
+
+    Both invariants have already bitten, and both were fixed by hand across
+    four hand-copied helpers — which is how one of seven call sites got missed
+    in the same file as one that was fixed. Nothing could catch that, because
+    `TestWrapperSource` pins one of four implementations.
+
+    This is the stopgap until #366 replaces the copies with a shared harness:
+    it cannot stop them drifting, but it can stop them drifting SILENTLY.
+
+    Walked with `ast`, not grep — a grep for "encoding" matches the comment
+    that explains `encoding`, which on this particular defect is the wrong
+    instrument.
+    """
+
+    _MODULES = (
+        "test_empty_comparison_tickers.py",
+        "test_main_cli.py",
+        "test_startup_validation.py",
+        "test_ui_output.py",
+    )
+
+    @staticmethod
+    def _call_sites(module_name):
+        import ast
+        path = os.path.join(PROJECT_ROOT, "tests", module_name)
+        with open(path, encoding="utf-8") as fh:
+            tree = ast.parse(fh.read())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            if (isinstance(fn, ast.Attribute) and fn.attr == "run"
+                    and isinstance(fn.value, ast.Name)
+                    and fn.value.id == "subprocess"):
+                yield node.lineno, {k.arg for k in node.keywords}
+
+    def test_every_call_site_decodes_as_utf8(self):
+        bare = [f"{m}:{ln}" for m in self._MODULES
+                for ln, kw in self._call_sites(m)
+                if not {"encoding", "errors"} <= kw]
+        assert not bare, (
+            f"subprocess.run without encoding/errors: {bare} — main.py writes "
+            f"UTF-8, the locale default is cp1252 on Windows, and the decode "
+            f"failure surfaces as stderr=None, not as an exception (#362)")
+
+    def test_every_call_site_has_a_timeout(self):
+        bare = [f"{m}:{ln}" for m in self._MODULES
+                for ln, kw in self._call_sites(m) if "timeout" not in kw]
+        assert not bare, (
+            f"subprocess.run without timeout: {bare} — a wrapper that hangs "
+            f"with no ceiling hangs the default suite forever")
+
+    def test_the_walk_actually_finds_the_call_sites(self):
+        """Guards the guard: if the AST walk silently matched nothing, both
+        tests above would pass against any amount of breakage."""
+        total = sum(1 for m in self._MODULES for _ in self._call_sites(m))
+        assert total >= 7, f"found only {total} subprocess.run call sites"

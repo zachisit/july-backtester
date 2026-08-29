@@ -42,6 +42,10 @@ def _run(*args, extra_env=None):
         errors="replace",
         env=env,
         cwd=PROJECT_ROOT,
+        # The only bare subprocess.run left in these four modules. A wrapper
+        # that hangs with no ceiling hangs the DEFAULT suite forever, which is
+        # strictly worse than the 120s-then-skip that hid #362.
+        timeout=120,
     )
 
 
@@ -79,6 +83,13 @@ def _run_with_config_patch(tmp_path, patches: dict, cli_args=("--dry-run",), ext
     return subprocess.run(
         [sys.executable, str(wrapper)],
         capture_output=True, text=True,
+        # main.py:27-28 reconfigures its streams to UTF-8; the locale default
+        # is cp1252 on Windows, which cannot decode the U+2501 in its banner.
+        # subprocess raises inside _readerthread, so stderr comes back None and
+        # every assertion becomes a TypeError. ASCII-only --dry-run output makes
+        # this benign here TODAY, which is incidental, not structural (#362).
+        encoding="utf-8",
+        errors="replace",
         env=env, cwd=PROJECT_ROOT,
         timeout=120,
     )
