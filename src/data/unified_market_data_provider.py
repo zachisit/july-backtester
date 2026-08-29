@@ -19,8 +19,6 @@ import pandas as pd
 
 from .pipeline import paths
 
-from helpers.filename_utils import filename_candidates as _filename_candidates
-
 _CANON = ["open", "high", "low", "close", "volume"]
 _SUFFIX_RE = re.compile(r"-\d{6}$")  # delisted files carry a -YYYYMM suffix
 _RENAME = {"open": "Open", "high": "High", "low": "Low", "close": "Close", "volume": "Volume"}
@@ -74,11 +72,21 @@ class UnifiedMarketDataProvider:
         #     CON   -> _CON.parquet     (Windows reserved-name guard)
         #     BRK/B -> BRK_B.parquet    (illegal-character scrub)
         #
-        # It stayed self-consistent — `list_symbols()` returns on-disk stems, so
+        # It stayed self-consistent — `available_symbols()` returns on-disk stems, so
         # anything round-tripping through it worked — which is why the loss was
         # invisible until a symbol arrived from outside: a PIT roster, a config
         # list, a scanner. Exactly what filename_candidates exists for.
-        for c in _filename_candidates(symbol):
+        #
+        # LAZY import: `helpers/__init__.py` does `from .indicators import *`,
+        # so a module-level `from helpers.filename_utils import ...` pulls in 14
+        # helpers modules plus config.py — measured 0.600s -> 0.772s on a fresh
+        # interpreter. Free for the engine (main.py loads helpers first anyway)
+        # but a real cost for standalone src.data pipeline tools, and it put
+        # this module one hop from an import cycle. The read-path derivation
+        # counts a function-body import too — that form is a pinned self-test —
+        # so the coverage tripwire still sees this module.
+        from helpers.filename_utils import filename_candidates
+        for c in filename_candidates(symbol):
             for variant in (c, c.upper()):
                 if variant not in cands:
                     cands.append(variant)

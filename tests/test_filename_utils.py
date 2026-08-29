@@ -1228,6 +1228,56 @@ class TestProviderEntryPointsReturnLegacyNamedData:
         got = prov.get_price_data("BRK/B", "2024-01-01", "2024-06-01")
         assert got is not None and not got.empty
 
+    def test_merged_provider_composes_the_uppercase_sanitized_variant(
+            self, tmp_path, monkeypatch):
+        """The `.upper()` branch, tested WITHOUT the filesystem.
+
+        On macOS/APFS a case-insensitive lookup matches regardless, so a
+        behavioural test here passes through the filesystem rather than through
+        the code — and deleting `.upper()` survived mutation. On case-sensitive
+        CI/Linux that branch is the only thing letting a lowercase source
+        spelling reach an uppercase stem. Record the composed candidates
+        instead.
+        """
+        from src.data.unified_market_data_provider import UnifiedMarketDataProvider
+
+        self._frame().rename(columns=str.lower).to_parquet(
+            tmp_path / "BRK_B.parquet")
+        prov = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+
+        probed = []
+        real_exists = os.path.exists
+
+        def spy(p):
+            probed.append(os.path.basename(p))
+            return real_exists(p)
+
+        monkeypatch.setattr(os.path, "exists", spy)
+        prov._candidate_paths("brk/b")
+        monkeypatch.setattr(os.path, "exists", real_exists)
+
+        assert "BRK_B.parquet" in probed, (
+            f"the uppercase sanitized variant was never composed, so a "
+            f"lowercase symbol cannot reach an uppercase stem on a "
+            f"case-sensitive filesystem: {probed}")
+
+    def test_merged_provider_prefers_the_exact_file_over_the_sanitized_one(
+            self, tmp_path):
+        """Candidate ORDER. Nothing pinned it, so a refactor that put the
+        sanitized spellings first passed the whole suite while flipping which
+        file wins when both exist."""
+        from src.data.unified_market_data_provider import UnifiedMarketDataProvider
+
+        f = self._frame().rename(columns=str.lower)
+        f.to_parquet(tmp_path / "CON.parquet")
+        f.to_parquet(tmp_path / "_CON.parquet")
+        prov = UnifiedMarketDataProvider(merged_dir=str(tmp_path))
+        got = prov._resolve("CON")
+        assert os.path.basename(got) == "CON.parquet", (
+            f"resolved {os.path.basename(got)} — a bare exact file must still "
+            f"beat a sanitized one; the new candidates are appended, not "
+            f"prepended")
+
     def test_merged_provider_is_self_consistent_on_disk_spellings(self, tmp_path):
         """Why the gap is hard to notice, pinned so the xfails above are not
         read as 'the merged provider is broken'. It resolves what its own
