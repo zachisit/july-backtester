@@ -27,6 +27,25 @@ logger = logging.getLogger(__name__)
 # Price jump threshold (20% daily move flags as potential unadjusted split)
 _PRICE_JUMP_THRESHOLD = 0.20
 
+# --- issue #350 ---------------------------------------------------------------
+# The merged corpus carries closes of EXACTLY 1e-06 next to normal bars. Each is
+# a fabricated round-trip: collapse to the floor, bounce back on the next bar.
+# 23,695+ bars across 782+ series, and NOT sub-penny stocks — FMNJ/NEOM/RINO
+# have median closes of $10.00/$8.70/$8.50 against a 1e-06 minimum.
+_SENTINEL_CLOSE = 1e-06
+_SENTINEL_ATOL = 1e-12
+# Deliberately large enough to fail any reasonable gate on its own. Every other
+# check here is proportional to how much data is affected; this one is not,
+# because ONE sentinel bar is a fake round-trip a mean-reversion strategy will
+# trade. An affected series previously scored 92/100 and passed.
+_SENTINEL_DEMERITS = 60
+
+# A listed equity trades ~252 days/yr. A long span at low density is a stitched
+# or recycled ticker wearing one symbol — the check that catches SSCC and FER.
+_DENSITY_MIN_YEARS = 3.0
+_DENSITY_MIN_BARS_PER_YEAR = 150
+_DENSITY_DEMERITS = 25
+
 
 def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
                    calendar: str = "NYSE") -> tuple[float, list[str]]:
@@ -135,6 +154,46 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
             pct = (missing / expected_bars) * 100
             issues.append(f"Missing bars: {missing} gaps ({pct:.1f}% of expected)")
             demerits += min(20, int(pct / 2))  # 1 point per 2% missing
+
+    # --- CHECK 7: sentinel-value closes (issue #350) ---
+    # Closes of EXACTLY 1e-06 sitting next to normal bars. Each manufactures a
+    # fake round-trip: collapse to the floor, bounce straight back. Measured at
+    # 23,695+ bars across 782+ series in the merged corpus, and NOT sub-penny
+    # stocks — FMNJ/NEOM/RINO have median closes of $10.00/$8.70/$8.50 against a
+    # 1e-06 minimum, which is what makes it a defect rather than tick noise.
+    #
+    # BLOCKING by design. Every other check here is proportional; this one is
+    # not, because a single sentinel bar is a fabricated round-trip that a
+    # mean-reversion strategy will happily trade. An affected series previously
+    # scored 92/100 and passed.
+    if "Close" in df.columns and total_bars > 0:
+        close_num = pd.to_numeric(df["Close"], errors="coerce")
+        sentinel = int(np.isclose(close_num.to_numpy(dtype="float64"),
+                                  _SENTINEL_CLOSE, rtol=0.0,
+                                  atol=_SENTINEL_ATOL).sum())
+        if sentinel > 0:
+            pct = (sentinel / total_bars) * 100
+            issues.append(
+                f"Sentinel closes (== {_SENTINEL_CLOSE:g}): {sentinel} bars "
+                f"({pct:.1f}%) — fabricated round-trips, treat as missing (#350)")
+            demerits += _SENTINEL_DEMERITS
+
+    # --- CHECK 8: bar density (issue #350) ---
+    # A listed equity trades ~252 days/yr. A long span with a low median
+    # bars-per-year is a stitched or recycled ticker wearing one symbol — the
+    # check that would have caught SSCC and FER.
+    if (timeframe.upper() == "D" and total_bars > 1
+            and isinstance(df.index, pd.DatetimeIndex)):
+        span_years = (df.index[-1] - df.index[0]).days / 365.25
+        if span_years > _DENSITY_MIN_YEARS:
+            per_year = df.index.to_series().groupby(df.index.year).size()
+            median_per_year = float(per_year.median())
+            if median_per_year < _DENSITY_MIN_BARS_PER_YEAR:
+                issues.append(
+                    f"Sparse history: median {median_per_year:.0f} bars/yr over "
+                    f"{span_years:.1f}y (expect ~252) — stitched or recycled "
+                    f"ticker (#350)")
+                demerits += _DENSITY_DEMERITS
 
     # --- COMPUTE SCORE ---
     score = max(0.0, 100.0 - demerits)
