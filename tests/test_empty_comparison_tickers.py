@@ -34,6 +34,7 @@ These tests exercise:
 import os
 import subprocess
 import sys
+import types
 
 import pytest
 
@@ -79,19 +80,39 @@ def _wrapper_source(patches: dict, cli_args=()) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _run_patched(tmp_path, patches: dict, cli_args=()) -> subprocess.CompletedProcess:
-    """Run the wrapper from :func:`_wrapper_source` as a subprocess."""
+def _run_patched(tmp_path, patches: dict, cli_args=(),
+                 expect_simulation=True) -> subprocess.CompletedProcess:
+    """Run the wrapper from :func:`_wrapper_source` as a subprocess.
+
+    `expect_simulation` asserts the run did real work, because six of the seven
+    tests below assert only the ABSENCE of a string in stderr — which holds
+    trivially if main() produced no output at all. Verified: with a nonexistent
+    symbol, or with `min_bars_required` above the fixture's 62 rows, main()
+    logs "Could not fetch data for any symbols" / "No simulation tasks were
+    generated", exits 0, never starts a worker, and ALL SEVEN assertions still
+    pass. The _BASE_PATCHES comment names that risk; nothing enforced it.
+    """
     wrapper = tmp_path / "run_patched.py"
     wrapper.write_text(_wrapper_source(patches, cli_args), encoding="utf-8")
 
     try:
-        return subprocess.run(
+        result = subprocess.run(
             [sys.executable, str(wrapper)],
             capture_output=True,
             text=True,
             cwd=PROJECT_ROOT,
             timeout=120,
         )
+        if expect_simulation:
+            assert result.returncode == 0, (
+                f"exit {result.returncode}\n{result.stderr[-2000:]}")
+            assert "All portfolio simulations complete" in result.stderr, (
+                "the run produced no simulation — every absence-assertion in "
+                "this file would pass vacuously\n" + result.stderr[-2000:])
+            assert "Could not fetch data for any symbols" not in result.stderr, (
+                "the fixture symbol was filtered out before any worker ran\n"
+                + result.stderr[-2000:])
+        return result
     except subprocess.TimeoutExpired:
         # NOT a skip. This run takes ~3s, so 120s means a deadlock, and #362 is
         # what happens when a deadlock is reported as "your machine is slow":
@@ -301,7 +322,8 @@ class TestEmptyComparisonTickersRun:
         # AAPL fixture has 62 rows — must be below this or the symbol is filtered
         # before any worker runs, giving a false-green test
         "min_bars_required": 10,
-        # Run one strategy only — keeps subprocess runtime under the 90s timeout
+        # Run one strategy only — keeps subprocess runtime well under the 120s
+        # timeout in _run_patched (the whole run takes ~3s)
         "strategies": ["SMA Crossover (20d/50d)"],
         "wfa_split_ratio": None,
         "wfa_folds": None,
@@ -332,9 +354,14 @@ class TestEmptyComparisonTickersRun:
         assert "FATAL ERROR IN WORKER" not in result.stderr, result.stderr
 
     def test_exits_zero_or_clean_failure(self, tmp_path):
-        """Run must not crash with any unhandled exception or worker fatal error."""
+        """Run must not crash with any unhandled exception or worker fatal error.
+
+        The name promised an exit-code check and the body only grepped the
+        logs, so `sys.exit(1)` with a clean log passed.
+        """
         result = _run_patched(tmp_path, self._patches_with(), cli_args=[])
         combined = result.stdout + result.stderr
+        assert result.returncode == 0, f"exit {result.returncode}\n{combined}"
         assert "Traceback" not in combined, combined
         assert "FATAL ERROR IN WORKER" not in combined, combined
 
@@ -379,15 +406,61 @@ class TestWrapperSource:
     reports nothing at all, so nothing in a default run could have caught it.
     """
 
-    def test_main_is_called_under_a_dunder_main_guard(self):
-        src = _wrapper_source({"data_provider": "parquet"})
-        assert 'if __name__ == "__main__":' in src, src
-        body = src.split('if __name__ == "__main__":', 1)[1]
-        assert "main.main()" in body, (
-            "main.main() must be inside the guard — outside it, spawn workers "
-            "re-enter it during bootstrap and the Pool deadlocks (#362)")
-        head = src.split('if __name__ == "__main__":', 1)[0]
-        assert "main.main()" not in head, head
+    @staticmethod
+    def _exec_as(src, module_name):
+        """Execute the wrapper under a chosen __name__, with `main` and
+        `config` stubbed. Returns (main_was_called, captured_config).
+
+        This executes the real spawn-child contract rather than grepping the
+        source. A purely textual pin does not hold: emitting the guard with a
+        `pass` body and leaving `main.main()` at module scope satisfies every
+        string assertion while fully reintroducing the #362 deadlock.
+        """
+        calls = []
+        stub_main = types.ModuleType("main")
+        stub_main.main = lambda: calls.append(1)
+        stub_config = types.ModuleType("config")
+        stub_config.CONFIG = {}
+
+        saved = {k: sys.modules.get(k) for k in ("main", "config")}
+        saved_argv = list(sys.argv)
+        sys.modules["main"] = stub_main
+        sys.modules["config"] = stub_config
+        try:
+            exec(compile(src, "<wrapper>", "exec"), {"__name__": module_name})
+        finally:
+            sys.argv = saved_argv
+            for k, v in saved.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
+        return bool(calls), stub_config.CONFIG
+
+    def test_a_spawn_child_import_does_not_call_main(self):
+        """THE contract. A spawn worker re-imports the parent's __main__ under
+        the name "__mp_main__"; if that import calls main.main() it builds a
+        second Pool during bootstrap, dies, and hangs the parent — #362."""
+        called, _ = self._exec_as(_wrapper_source({"data_provider": "parquet"}),
+                                  "__mp_main__")
+        assert not called, (
+            "a spawn child re-importing this wrapper called main.main() — "
+            "that is the #362 deadlock")
+
+    def test_running_it_directly_does_call_main(self):
+        """The other half: the guard must not make the wrapper inert."""
+        called, _ = self._exec_as(_wrapper_source({"data_provider": "parquet"}),
+                                  "__main__")
+        assert called, "the wrapper never called main.main() at all"
+
+    def test_a_spawn_child_still_applies_the_config_patches(self):
+        """Same contract, other direction: the patches must reach the child,
+        so they cannot be moved under the guard to fix the above."""
+        _, cfg = self._exec_as(
+            _wrapper_source({"data_provider": "parquet", "wfa_folds": None}),
+            "__mp_main__")
+        assert cfg.get("data_provider") == "parquet", cfg
+        assert "wfa_folds" in cfg, cfg
 
     def test_config_patches_stay_at_module_scope(self):
         """Spawn children re-import the wrapper, so the patches must apply

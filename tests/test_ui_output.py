@@ -37,6 +37,7 @@ def _run_main(*args, extra_env=None):
         [sys.executable, MAIN, *args],
         capture_output=True, text=True,
         env=env, cwd=PROJECT_ROOT,
+        timeout=120,
     )
 
 
@@ -52,9 +53,17 @@ def _run_with_config_patch(tmp_path, patches: dict, cli_args=("--dry-run",), ext
     ]
     for k, v in patches.items():
         lines.append(f"config.CONFIG[{repr(k)}] = {repr(v)}")
-    lines.append(f"sys.argv = {repr(['main.py'] + list(cli_args))}")
     lines.append("import main")
-    lines.append("main.main()")
+    # main.main() MUST sit under a __main__ guard (#362): main.py builds a
+    # multiprocessing Pool, and under the spawn start method every worker
+    # re-imports the parent __main__ — this wrapper — so an unguarded call
+    # re-enters main.main() during bootstrap and deadlocks the parent. Safe
+    # here only while every call site passes --dry-run and exits before the
+    # Pool; the first one that does not would hang the suite. The CONFIG
+    # patches stay at module scope so spawn children re-apply them.
+    lines.append('if __name__ == "__main__":')
+    lines.append(f"    sys.argv = {repr(['main.py'] + list(cli_args))}")
+    lines.append("    main.main()")
 
     wrapper = tmp_path / "run_patched.py"
     wrapper.write_text("\n".join(lines), encoding="utf-8")
@@ -68,6 +77,7 @@ def _run_with_config_patch(tmp_path, patches: dict, cli_args=("--dry-run",), ext
         [sys.executable, str(wrapper)],
         capture_output=True, text=True,
         env=env, cwd=PROJECT_ROOT,
+        timeout=120,
     )
 
 
