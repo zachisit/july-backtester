@@ -335,20 +335,34 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
             rets = returns.to_numpy(dtype="float64")
 
             # The magnitude weighed below is max/min - 1, not the return
-            # (#368). Identical to `rets` for an upward move -- both are
-            # p/prev - 1 -- and the mirror-image magnitude for a downward one,
-            # which `rets` cannot express at all: it is bounded at 1.0 below.
+            # (#368). For an upward move it is algebraically the same as
+            # `rets` -- both are p/prev - 1 -- and the mirror-image magnitude
+            # for a downward one, which `rets` cannot express at all: it is
+            # bounded at 1.0 below. Algebraically, not bit-for-bit: (b-a)/a
+            # and b/a - 1 are different float evaluations and disagree in the
+            # last ulp (measured max 9.1e-13 over 200k random up-moves). That
+            # cannot reach a decade -- 3M samples clustered on the 11x
+            # boundary produced 0 disagreements in floor(log10) -- so the
+            # #360 calibration is preserved, but do not read "identical" as
+            # "the same bits".
             with np.errstate(divide="ignore", invalid="ignore"):
                 magnitude = np.where(lo_end > 0, hi_end / lo_end - 1.0, np.nan)
 
-            # isfinite on BOTH, because the two catch different bars and each
-            # is a zero price rather than a split -- CHECK 2's axis, not this
-            # one. A prev_close of exactly 0 makes pct_change return inf, and
+            # isfinite on BOTH, because the two catch different bars. A
+            # prev_close of exactly 0 makes pct_change return inf, and
             # np.log10(inf) is not an int (OverflowError). A CLOSE of exactly
             # 0 against a positive previous close makes pct_change return
             # exactly -1.0, which is finite and passes the 20% threshold,
             # while max/min is infinite -- the same OverflowError from the
             # other side, and one this check did not have before #368.
+            #
+            # Both are a zero price rather than a split, so neither has a
+            # magnitude worth weighing here. Do NOT read that as "CHECK 2
+            # owns it": CHECK 2 tests `< 0` strictly, so a close of exactly
+            # 0 is caught by no check in this function -- 6.25 -> 0 -> 6.25
+            # scores 96.0 and prints "inf%" in the CHECK 4 count string.
+            # Skipping it is still right for this check; it is simply
+            # unowned, not handled elsewhere (#369).
             eligible = (rets > _PRICE_JUMP_THRESHOLD) & np.isfinite(rets)
             eligible &= np.isfinite(magnitude)
             eligible &= hi_end >= _JUMP_SUBPENNY_PRICE
