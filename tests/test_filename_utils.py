@@ -1320,7 +1320,11 @@ class TestReadPathListIsDerived:
         for expected in ["helpers/caching.py", "services/parquet_service.py",
                          "services/csv_service.py",
                          "scripts/norgate_to_parquet.py",
-                         "scripts/validate_norgate_export.py"]:
+                         "scripts/validate_norgate_export.py",
+                         # joined the set in #355: the merged provider now
+                         # imports filename_candidates, so the derivation sees
+                         # it. Its arrival here IS the fix being real.
+                         "src/data/unified_market_data_provider.py"]:
             assert expected.replace("/", os.sep) in derived, \
                 f"{expected} vanished from the derived read-path set"
 
@@ -1363,8 +1367,12 @@ class TestReadPathListIsDerived:
             "import os\ndef f():\n    return os.getcwd()\n", encoding="utf-8")
         assert _derive_read_paths(root=str(tmp_path)) == []
 
-    def test_coverage_is_the_five_known_read_paths(self):
+    def test_coverage_is_the_six_known_read_paths(self):
         """A deliberate TRIPWIRE on the number, not a spec.
+
+        Raised 5 -> 6 in #355, deliberately: the merged provider now imports
+        filename_candidates, so the derivation sees it. That is the fix being
+        real, not the number being bumped to get green.
 
         I published "234 modules" on this PR; the real coverage is 5, and 234
         came from a walk over a polluted working tree. This exists so a change
@@ -1377,9 +1385,9 @@ class TestReadPathListIsDerived:
         below rather than a bare assert.
         """
         found = _derive_read_paths()
-        assert len(found) == 5, (
+        assert len(found) == 6, (
             f"read-path coverage changed: {len(found)} modules now import a "
-            f"filename helper, not 5.\n{found}\n\n"
+            f"filename helper, not 6.\n{found}\n\n"
             f"THIS IS A TRIPWIRE, NOT A FAILURE. If you legitimately added a "
             f"read path, raise this number DELIBERATELY and add the module to "
             f"the floor list in TestReadPathListIsDerived — do not bump it "
