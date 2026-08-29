@@ -28,16 +28,58 @@ logger = logging.getLogger(__name__)
 _PRICE_JUMP_THRESHOLD = 0.20
 
 # --- issue #350 ---------------------------------------------------------------
-# The merged corpus carries closes of EXACTLY 1e-06 next to normal bars. Each is
-# a fabricated round-trip: collapse to the floor, bounce back on the next bar.
-# 23,695+ bars across 782+ series, and NOT sub-penny stocks — FMNJ/NEOM/RINO
-# have median closes of $10.00/$8.70/$8.50 against a 1e-06 minimum.
+# The merged corpus carries closes of EXACTLY 1e-06: 25,730 bars across 813
+# series (measured full-corpus over O/H/L/C; an earlier partial scan said
+# 23,695+/782+).
+#
+# WHAT 1e-06 IS. Not an injected sentinel. It is the bottom of the provider's
+# fixed absolute tick grid: the share of closes sitting exactly on the round
+# decade climbs monotonically as price falls ($100 0.26% -> $0.01 5.57% ->
+# $0.0001 38.79% -> $1e-06 99.34%), one bar in 74.9M sits strictly below it,
+# none of the affected bars have zero volume, and all 813 series come from one
+# provider. A clamp produces a spike with nothing behind it and leaves zero
+# bars below the floor. This is a real, representable price.
+#
+# NOT "these are not sub-penny stocks" — that claim was filed on #350 and
+# RETRACTED there, and it was wrong the same way twice: the $10.00/$8.70/$8.50
+# medians quoted for FMNJ/NEOM/RINO are over the WHOLE FILE (29-36 years,
+# mostly while the company was alive). Over only the years the 1e-06 prints
+# occur they are $0.0005/$0.0001/$0.0001. Corpus-wide, 639 of the 813 affected
+# series are under a cent in the era the prints occur. They ARE sub-penny.
+#
+# WHY THE CHECK STILL EARNS ITS PLACE. Correct price, unusable bar: a close of
+# 1e-06 against a neighbour at 1e-04 is a true -99% and a true +9,900%, and
+# returns/ATR/vol/sizing computed off it are garbage whether or not the quote
+# is honest. The check is about tradeability, not truthfulness.
 _SENTINEL_CLOSE = 1e-06
 _SENTINEL_ATOL = 1e-12
 # Deliberately large enough to fail any reasonable gate on its own. Every other
 # check here is proportional to how much data is affected; this one is not,
-# because ONE sentinel bar is a fake round-trip a mean-reversion strategy will
-# trade. An affected series previously scored 92/100 and passed.
+# because the DAMAGE saturates at one bar. A single floor print in an otherwise
+# clean $2 series manufactures a +199,999,900% one-bar return, which is as
+# ruinous to a Sharpe, a vol estimate or an MC draw over that window as 644 of
+# them. So LKCOF (1 bar in 1,690) and HMNY (644 in 5,750) taking the same 60 is
+# the design working, not indiscriminate scoring. Proportional scoring would
+# re-open the hole: at 0.06% affected, LKCOF would lose ~0 points and pass.
+#
+# WHY IT IS NOT REDUNDANT WITH CHECK 4. Every affected series does also trip
+# the price-jump check, but CHECK 4 saturates at min(15, jumps*2), so 115 of
+# the 813 affected corpus series still score >= 80 at base (max 84) — and
+# main.py prints only sub-threshold rows, so the issue string of a passing
+# symbol is never displayed. CHECK 7 is what demotes those 115.
+#
+# WHAT IT IS NOT: a general detector. It keys on one value, so the identical
+# round-trip one tick up evades it entirely — verified: a single 2e-06 bar
+# carrying +99,999,900% scores 96/100 and passes, as does 1e-04 at +1,999,900%,
+# because CHECK 4 counts jumps and never weighs magnitude. The durable fix is a
+# magnitude escalation in CHECK 4 plus a dollar-volume screen at selection
+# (both follow-ups). This is a stopgap keyed to today's corpus, and should be
+# retired when they land.
+#
+# PRECISION ON "FAIL": main.py warns below `data_quality_threshold` (80) and
+# only RAISES when `strict_data_quality=True`, which is False by default. So
+# under stock config this surfaces the series loudly; it hard-stops a run only
+# in strict mode. Worth stating exactly, because "blocking" overstated it.
 #
 # PRECISION ON "FAIL": main.py warns below `data_quality_threshold` (80) and
 # only RAISES when `strict_data_quality=True`, which is False by default. So
@@ -106,6 +148,22 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
     demerits = 0  # Points deducted from 100
     total_bars = len(df)
 
+    # Column-name normalisation (#358). CHECK 7 was made case-insensitive
+    # because the merged store writes lowercase `ohlcv` and a raw audit of that
+    # corpus silently no-opped against "Close". That reasoning applies to every
+    # check here, and CHECKS 2-5 matched literally — so against the corpus this
+    # module exists to audit they did not fail loudly, they SKIPPED. A frame
+    # with a High<Low violation, a 400% jump and 30 zero-volume bars scored
+    # 100/100 in lowercase.
+    #
+    # Resolved once here rather than per check, so the next check added cannot
+    # reintroduce it. `capitalize()` also folds "CLOSE". Duplicate labels after
+    # folding keep the first (the csv_service pattern) — CHECK 7 deliberately
+    # keeps reading the ORIGINAL frame positionally, so it still sees a column
+    # dropped here.
+    named = df.rename(columns=lambda c: str(c).capitalize())
+    named = named.loc[:, ~named.columns.duplicated(keep="first")]
+
     # --- CHECK 1: Duplicate timestamps ---
     duplicates = df.index.duplicated().sum()
     if duplicates > 0:
@@ -114,35 +172,35 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
 
     # --- CHECK 2: Negative prices ---
     for col in ["Open", "High", "Low", "Close"]:
-        if col in df.columns:
-            negative_count = (df[col] < 0).sum()
+        if col in named.columns:
+            negative_count = (named[col] < 0).sum()
             if negative_count > 0:
                 issues.append(f"Negative {col} prices: {negative_count} bars")
                 demerits += min(30, negative_count * 5)  # Severe issue
 
     # --- CHECK 3: OHLC relationship violations ---
-    if all(c in df.columns for c in ["Open", "High", "Low", "Close"]):
+    if all(c in named.columns for c in ["Open", "High", "Low", "Close"]):
         # High must be >= Low
-        hl_violations = (df["High"] < df["Low"]).sum()
+        hl_violations = (named["High"] < named["Low"]).sum()
         if hl_violations > 0:
             issues.append(f"High < Low violations: {hl_violations} bars")
             demerits += min(25, hl_violations * 3)
 
         # Close must be within [Low, High]
-        close_violations = ((df["Close"] < df["Low"]) | (df["Close"] > df["High"])).sum()
+        close_violations = ((named["Close"] < named["Low"]) | (named["Close"] > named["High"])).sum()
         if close_violations > 0:
             issues.append(f"Close outside H/L range: {close_violations} bars")
             demerits += min(20, close_violations * 2)
 
         # Open must be within [Low, High]
-        open_violations = ((df["Open"] < df["Low"]) | (df["Open"] > df["High"])).sum()
+        open_violations = ((named["Open"] < named["Low"]) | (named["Open"] > named["High"])).sum()
         if open_violations > 0:
             issues.append(f"Open outside H/L range: {open_violations} bars")
             demerits += min(15, open_violations * 2)
 
     # --- CHECK 4: Price jumps >20% (potential unadjusted splits) ---
-    if "Close" in df.columns:
-        returns = df["Close"].pct_change().abs()
+    if "Close" in named.columns:
+        returns = named["Close"].pct_change().abs()
         large_jumps = returns[returns > _PRICE_JUMP_THRESHOLD]
         if len(large_jumps) > 0:
             # Report first 3 jumps
@@ -153,8 +211,8 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
             demerits += min(15, len(large_jumps) * 2)
 
     # --- CHECK 5: Zero volume days ---
-    if "Volume" in df.columns:
-        zero_volume = (df["Volume"] == 0).sum()
+    if "Volume" in named.columns:
+        zero_volume = (named["Volume"] == 0).sum()
         if zero_volume > 0:
             pct = (zero_volume / total_bars) * 100
             issues.append(f"Zero volume: {zero_volume} bars ({pct:.1f}%)")
@@ -176,23 +234,18 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
             issues.append(f"Missing bars: {missing} gaps ({pct:.1f}% of expected)")
             demerits += min(20, int(pct / 2))  # 1 point per 2% missing
 
-    # --- CHECK 7: sentinel-value closes (issue #350) ---
-    # Closes of EXACTLY 1e-06 sitting next to normal bars. Each manufactures a
-    # fake round-trip: collapse to the floor, bounce straight back. Measured at
-    # 23,695+ bars across 782+ series in the merged corpus, and NOT sub-penny
-    # stocks — FMNJ/NEOM/RINO have median closes of $10.00/$8.70/$8.50 against a
-    # 1e-06 minimum, which is what makes it a defect rather than tick noise.
+    # --- CHECK 7: floor-tick prices (issue #350) ---
+    # Bars printing EXACTLY 1e-06, the bottom of the provider's tick grid. See
+    # the note on _SENTINEL_CLOSE for what the value is and is not — in
+    # particular this does NOT claim the affected names are anything other than
+    # sub-penny stocks, which is what they are.
     #
     # Disproportionate by design — see the note on _SENTINEL_DEMERITS for what
-    # that does and does not do. It surfaces the series loudly under stock
-    # config; it hard-stops a run only under `strict_data_quality=True`.
-    # The demerit is not proportional because a single sentinel bar is a
-    # fabricated round-trip a mean-reversion strategy will happily trade. An
-    # affected series previously scored 92/100 and passed.
+    # that does and does not do, and for the open question about flat scoring.
     #
     # SCOPE: keyed on the VALUE 1e-06, not on the round-trip shape, so it
-    # assumes an instrument where 1e-06 cannot be a real price. True for the
-    # equities and futures this engine trades; it would be wrong for a
+    # assumes an instrument where 1e-06 is below anything worth trading. True
+    # for the equities and futures this engine trades; it would be wrong for a
     # sub-micro-dollar crypto pair, which would take the full demerit on honest
     # data. Revisit if such data ever reaches this function.
     #
@@ -229,9 +282,11 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
         if sentinel > 0:
             pct = (sentinel / total_bars) * 100
             issues.append(
-                f"Sentinel prices (== {_SENTINEL_CLOSE:g}) in "
-                f"{'/'.join(hit_cols)}: {sentinel} bars ({pct:.1f}%) — "
-                f"fabricated round-trips, treat as missing (#350)")
+                f"Tick-floor prices (== {_SENTINEL_CLOSE:g}) in "
+                f"{'/'.join(hit_cols)}: {sentinel} bars ({pct:.1f}%) — real "
+                f"quotes at the provider's grid floor, but untradeable: one "
+                f"such bar poisons return/vol/Sharpe/MC for any window "
+                f"containing it (#350)")
             demerits += _SENTINEL_DEMERITS
 
     # --- CHECK 8: bar density (issue #350) ---
@@ -249,6 +304,10 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
         # export. The score must be a property of the data, not of row order.
         ordered = df.index.sort_values()
         span_years = (ordered[-1] - ordered[0]).days / 365.25
+        # Measured regardless of the span gate, because CHECK 9 needs the
+        # density verdict even on spans too short for CHECK 8 to report on.
+        is_sparse = (span_years > 0
+                     and total_bars / span_years < _DENSITY_MIN_BARS_PER_YEAR)
         if span_years > _DENSITY_MIN_YEARS:
             # bars / SPAN, not the median over trading years. The median counts
             # only years that have bars, so the canonical recycled-ticker shape
@@ -275,11 +334,29 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
         gap = ordered.to_series().diff().max()
         if pd.notna(gap) and gap.days > _GAP_MAX_DAYS:
             at = ordered[int(np.argmax(np.diff(ordered.to_numpy())))]
-            issues.append(
-                f"History gap: {gap.days} days ({gap.days / 365.25:.1f}y) with "
-                f"no bars after {at.date()} — stitched or recycled ticker "
-                f"(#350)")
-            demerits += _GAP_DEMERITS
+            where = (f"{gap.days} days ({gap.days / 365.25:.1f}y) with no bars "
+                     f"after {at.date()}")
+            if is_sparse:
+                # Sparse on both sides AND holed — the SSCC/FER signature,
+                # where the provider resolved a thin wrong-file series over the
+                # dense real one. Here the accusation is earned.
+                issues.append(
+                    f"History gap: {where} — stitched or recycled ticker "
+                    f"(#350)")
+                demerits += _GAP_DEMERITS
+            else:
+                # Dense on both sides of the hole: a corporate action, not a
+                # stitch. NBIS (Yandex suspended Feb 2022, relisted as Nebius
+                # Oct 2024) runs 207 bars/yr and trades $1.4bn/day; OLED and
+                # RDNT are the same shape. Charging them the gap demerit
+                # crossed the 80 gate on all three, on honest data. The hole is
+                # real and worth reporting — a backtest spanning it has a
+                # hole too — so report it and charge nothing. The demerit
+                # needs the sparse evidence, and that is CHECK 8's job.
+                issues.append(
+                    f"History gap: {where} — dense on both sides, so a "
+                    f"corporate action or suspension rather than a stitch; "
+                    f"reported, not penalised (#350)")
 
     # --- COMPUTE SCORE ---
     score = max(0.0, 100.0 - demerits)
