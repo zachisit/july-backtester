@@ -38,6 +38,11 @@ _SENTINEL_ATOL = 1e-12
 # check here is proportional to how much data is affected; this one is not,
 # because ONE sentinel bar is a fake round-trip a mean-reversion strategy will
 # trade. An affected series previously scored 92/100 and passed.
+#
+# PRECISION ON "FAIL": main.py warns below `data_quality_threshold` (80) and
+# only RAISES when `strict_data_quality=True`, which is False by default. So
+# under stock config this surfaces the series loudly; it hard-stops a run only
+# in strict mode. Worth stating exactly, because "blocking" overstated it.
 _SENTINEL_DEMERITS = 60
 
 # A listed equity trades ~252 days/yr. A long span at low density is a stitched
@@ -166,16 +171,33 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
     # not, because a single sentinel bar is a fabricated round-trip that a
     # mean-reversion strategy will happily trade. An affected series previously
     # scored 92/100 and passed.
-    if "Close" in df.columns and total_bars > 0:
-        close_num = pd.to_numeric(df["Close"], errors="coerce")
-        sentinel = int(np.isclose(close_num.to_numpy(dtype="float64"),
-                                  _SENTINEL_CLOSE, rtol=0.0,
-                                  atol=_SENTINEL_ATOL).sum())
+    # Scans ALL FOUR price columns, case-insensitively:
+    #   * a sentinel on Low is the shape that actually trades — every daily-bar
+    #     stop in this engine fills off Low, so a fabricated wick to the floor
+    #     is worse than a fabricated close. Close-only scored such a bar 100/100.
+    #   * the merged store writes LOWERCASE ohlcv. A raw audit of that corpus —
+    #     the corpus this check exists for — silently no-opped against "Close".
+    if total_bars > 0:
+        by_lower = {str(c).lower(): c for c in df.columns}
+        affected = np.zeros(total_bars, dtype=bool)
+        hit_cols = []
+        for name in ("close", "open", "high", "low"):
+            col = by_lower.get(name)
+            if col is None:
+                continue
+            vals = pd.to_numeric(df[col], errors="coerce").to_numpy(dtype="float64")
+            mask = np.isclose(vals, _SENTINEL_CLOSE, rtol=0.0,
+                              atol=_SENTINEL_ATOL)
+            if mask.any():
+                affected |= mask
+                hit_cols.append(str(col))
+        sentinel = int(affected.sum())      # bars, not cells — no double count
         if sentinel > 0:
             pct = (sentinel / total_bars) * 100
             issues.append(
-                f"Sentinel closes (== {_SENTINEL_CLOSE:g}): {sentinel} bars "
-                f"({pct:.1f}%) — fabricated round-trips, treat as missing (#350)")
+                f"Sentinel prices (== {_SENTINEL_CLOSE:g}) in "
+                f"{'/'.join(hit_cols)}: {sentinel} bars ({pct:.1f}%) — "
+                f"fabricated round-trips, treat as missing (#350)")
             demerits += _SENTINEL_DEMERITS
 
     # --- CHECK 8: bar density (issue #350) ---
@@ -186,11 +208,16 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
             and isinstance(df.index, pd.DatetimeIndex)):
         span_years = (df.index[-1] - df.index[0]).days / 365.25
         if span_years > _DENSITY_MIN_YEARS:
-            per_year = df.index.to_series().groupby(df.index.year).size()
-            median_per_year = float(per_year.median())
-            if median_per_year < _DENSITY_MIN_BARS_PER_YEAR:
+            # bars / SPAN, not the median over trading years. The median counts
+            # only years that have bars, so the canonical recycled-ticker shape
+            # — dense era, multi-year hole, dense era — read as 261 bars/yr and
+            # scored exactly 80.0, passing a strict `< 80` gate. That is the
+            # very shape this check is named for. Measuring against the span
+            # makes a hole count against the series, which is the point.
+            bars_per_year = total_bars / span_years
+            if bars_per_year < _DENSITY_MIN_BARS_PER_YEAR:
                 issues.append(
-                    f"Sparse history: median {median_per_year:.0f} bars/yr over "
+                    f"Sparse history: {bars_per_year:.0f} bars/yr over "
                     f"{span_years:.1f}y (expect ~252) — stitched or recycled "
                     f"ticker (#350)")
                 demerits += _DENSITY_DEMERITS
