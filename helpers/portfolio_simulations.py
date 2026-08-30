@@ -1,3 +1,4 @@
+import logging
 import random as _random
 
 import pandas as pd
@@ -7,6 +8,8 @@ from .simulations import calculate_advanced_metrics
 from helpers.position_sizing import calculate_position_size, check_portfolio_heat
 from helpers import instruments as _inst
 from helpers import intrabar as _intrabar
+
+logger = logging.getLogger(__name__)
 
 
 def _hold_duration_days(entry_dt, exit_dt):
@@ -183,6 +186,29 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
     execution_time = CONFIG.get("execution_time", "open").lower()
     htb_rate_annual = CONFIG.get("htb_rate_annual", 0.0)
+
+    # The equity SHORT entry path sizes as alloc/fill unconditionally -- it never
+    # calls calculate_position_size -- so a run configured risk_parity, kelly,
+    # vol_parity or risk_pct_capped silently gets FIXED allocation on every
+    # short while the long side honours the setting. The book is then sized by
+    # two different methods depending on direction, and nothing says so (#372).
+    #
+    # Warned rather than wired: routing shorts through calculate_position_size
+    # changes short-side share counts for every existing run using a non-fixed
+    # method, which is a behavioural change that wants its own PR and its own
+    # golden master. Making the gap audible costs nothing and stops it being
+    # discovered from a results discrepancy months later, which is how the
+    # neighbouring defects in this file were all found.
+    _sizing_method_cfg = CONFIG.get("position_sizing_method", "fixed")
+    if _sizing_method_cfg not in ("fixed", "fixed_contracts"):
+        _has_shorts = any((s < 0).any() for s in signals.values()
+                          if s is not None and len(s))
+        if _has_shorts:
+            logger.warning(
+                "position_sizing_method=%r is honoured on the LONG side only; "
+                "equity short entries always size as allocation/fill (#372). "
+                "This book contains short signals, so it is sized by two "
+                "different methods depending on direction.", _sizing_method_cfg)
     # Sub-bar resolution: opt-in and requires finer-resolution data to be supplied.
     # Off / no data -> stop fills behave exactly as before (no-op).
     _intrabar_on = bool(CONFIG.get("intrabar_resolution", False)) and intrabar_data is not None
@@ -1232,6 +1258,31 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _pv = stop_config.get("value")
                         if _pv is not None and _pv > 0 and raw_entry_price > 0:
                             sizing_kwargs["stop_distance_pct"] = float(_pv) / raw_entry_price
+                    elif stop_type == "signal_bar":
+                        # Also known before entry: the level is the signal bar's own
+                        # extreme, which is exactly what the stop path computes at
+                        # :1520 via signal_bar_stop_level(). Deriving it here rather
+                        # than falling through to the 3xATR proxy keeps sizing and
+                        # the stop on the SAME number -- the disagreement that put
+                        # 20% of the book at risk on the atr branch (#324).
+                        #
+                        # `bars_back` is honoured for the same reason: the stop path
+                        # walks back through _walk_back(), so sizing must walk the
+                        # same distance or it sizes against a bar the stop is not on.
+                        _sb_d = _walk_back(prev_trading_dates[symbol], signal_date,
+                                           stop_config.get("bars_back", 0))
+                        if pd.notna(_sb_d) and _sb_d in df.index and raw_entry_price > 0:
+                            _sb_row = df.loc[_sb_d]
+                            _sb_lvl = _inst.signal_bar_stop_level(
+                                _sb_row.get('High'), _sb_row.get('Low'),
+                                stop_config.get("buffer", 0.0), side="long")
+                            # Only when the level is actually protective. A next-open
+                            # that gaps through the signal-bar low leaves the level
+                            # ABOVE entry, the stop path declines to arm it, and a
+                            # negative distance here would size a nonsense position.
+                            if _sb_lvl is not None and _sb_lvl < raw_entry_price:
+                                sizing_kwargs["stop_distance_pct"] = (
+                                    (raw_entry_price - _sb_lvl) / raw_entry_price)
 
                 # For kelly: compute rolling stats from completed trades so sizing
                 # actually adapts to the strategy's live performance.

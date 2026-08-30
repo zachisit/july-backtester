@@ -313,3 +313,169 @@ class TestGapThroughEntryGuard:
         log = pd.DataFrame(_run_half(df, [1, 0, 0, 0], {"type": "signal_bar"})["trade_log"])
         assert "Stop Loss" in log.iloc[0]["ExitReason"]
         assert log.iloc[0]["Profit"] < 0                       # a real losing stop
+
+
+# ---------------------------------------------------------------------------
+# #372: risk_parity must size off the signal_bar stop, not a 3xATR proxy
+# ---------------------------------------------------------------------------
+
+class TestRiskParitySizesOffTheSignalBarStop:
+    """`risk_parity` derives `stop_distance_pct` from the configured stop. It
+    had branches for `percentage`, `atr`, `trailing_atr` and `points` but not
+    for `signal_bar` -- so a stop whose level is exactly computable before
+    entry fell through to the fallback at position_sizing.py:205, a 3xATR proxy
+    read off `.iloc[-1]` of whatever slice the caller passed.
+
+    That is the same class as the #324 regression: sizing and the stop level
+    holding two different beliefs about one stop. There the disagreement put
+    20% of the book at risk against a 2% target.
+
+    The signal-bar level needs only the bar's own High/Low and the buffer, so
+    there is no reason to proxy it.
+    """
+
+    CFG = {"type": "signal_bar", "buffer": 0.0}
+
+    @staticmethod
+    def _sized(stop_config, sizing_method):
+        from unittest.mock import patch
+        import helpers.portfolio_simulations as ps
+        # Signal bar Low = 90 against a ~100 entry: a 10% stop distance, which
+        # is deliberately far from the 3% a 3xATR proxy would produce here
+        # (ATR_14 = 1.0), so the two are not confusable.
+        df = _frame([
+            ("2024-01-02", 100, 105,  90, 100),   # signal bar, Low = 90
+            ("2024-01-03", 100, 101,  99, 100),   # fill here under open-exec
+            ("2024-01-04", 100, 101,  99, 100),
+            ("2024-01-05", 100, 101,  99, 100),
+            ("2024-01-08", 100, 101,  99, 100),
+        ])
+        with patch.dict(ps.CONFIG, {"position_sizing_method": sizing_method,
+                                    "target_risk_per_trade": 0.02}):
+            res = ps.run_portfolio_simulation(
+                portfolio_data={"TEST": df},
+                signals={"TEST": pd.Series([1, 0, 0, 0, 0], index=df.index)},
+                initial_capital=100_000.0, allocation_pct=0.5,
+                spy_df=None, vix_df=None, tnx_df=None,
+                stop_config=stop_config,
+            )
+        if not res or not res.get("trade_log"):
+            return None
+        t = res["trade_log"][0]
+        return float(t["Shares"]), float(t["InitialRisk"])
+
+    def test_dollars_at_risk_match_the_target_not_the_atr_proxy(self):
+        """risk_parity's whole purpose is equalising risk per trade. With a
+        stop 10% away and a 2% target on $100k, that is ~$2,000 at risk.
+
+        Falling through to the 3xATR proxy sizes against a 3% distance instead
+        of 10%, over-sizing by more than 3x.
+        """
+        out = self._sized(self.CFG, "risk_parity")
+        if out is None:
+            pytest.skip("no trade produced")
+        shares, risk_per_share = out
+        dollars = shares * risk_per_share
+        assert dollars == pytest.approx(2_000.0, rel=0.30), (
+            f"${dollars:,.2f} at risk against a $2,000 target — sizing did not "
+            f"use the signal-bar stop distance"
+        )
+
+    def test_initial_risk_is_measured_from_the_signal_bar_low(self):
+        """The stop level itself is unchanged by this fix; asserted so a
+        regression in the stop path cannot be mistaken for a sizing win."""
+        out = self._sized(self.CFG, "risk_parity")
+        if out is None:
+            pytest.skip("no trade produced")
+        _, risk_per_share = out
+        assert risk_per_share == pytest.approx(10.0, rel=0.05), risk_per_share
+
+    def test_fixed_sizing_is_unchanged(self):
+        """The no-regression half: `fixed` never consulted stop_distance_pct,
+        so it must not move."""
+        out = self._sized(self.CFG, "fixed")
+        if out is None:
+            pytest.skip("no trade produced")
+        shares, _ = out
+        assert shares == pytest.approx(500.0, rel=0.02), shares
+
+
+class TestShortSideSizingMethodIsAudible:
+    """#372: the equity short entry sizes as alloc/fill unconditionally, so a
+    run configured risk_parity gets FIXED allocation on every short while the
+    long side honours the setting — the book sized by two different methods
+    depending on direction, silently.
+
+    Wiring it is a behavioural change for every existing non-fixed run and
+    wants its own PR. Until then the gap is at least audible: pinned here so
+    nobody removes the warning without replacing it with the fix.
+    """
+
+    def test_a_short_book_with_non_fixed_sizing_warns(self, caplog):
+        from unittest.mock import patch
+        import logging
+        import helpers.portfolio_simulations as ps
+        df = _frame([
+            ("2024-01-02", 100, 105,  95, 100),
+            ("2024-01-03", 100, 101,  99, 100),
+            ("2024-01-04", 100, 101,  99, 100),
+        ])
+        with patch.dict(ps.CONFIG, {"position_sizing_method": "risk_parity"}):
+            with caplog.at_level(logging.WARNING):
+                ps.run_portfolio_simulation(
+                    portfolio_data={"TEST": df},
+                    signals={"TEST": pd.Series([-2, 0, 0], index=df.index)},
+                    initial_capital=100_000.0, allocation_pct=0.5,
+                    spy_df=None, vix_df=None, tnx_df=None,
+                    stop_config={"type": "none"},
+                )
+        assert any("#372" in r.message or "LONG side only" in r.message
+                   for r in caplog.records), [r.message for r in caplog.records]
+
+    def test_a_long_only_book_does_not_warn(self, caplog):
+        """No false alarm on the overwhelming majority of runs."""
+        from unittest.mock import patch
+        import logging
+        import helpers.portfolio_simulations as ps
+        df = _frame([
+            ("2024-01-02", 100, 105,  95, 100),
+            ("2024-01-03", 100, 101,  99, 100),
+            ("2024-01-04", 100, 101,  99, 100),
+        ])
+        with patch.dict(ps.CONFIG, {"position_sizing_method": "risk_parity"}):
+            with caplog.at_level(logging.WARNING):
+                ps.run_portfolio_simulation(
+                    portfolio_data={"TEST": df},
+                    signals={"TEST": pd.Series([1, 0, 0], index=df.index)},
+                    initial_capital=100_000.0, allocation_pct=0.5,
+                    spy_df=None, vix_df=None, tnx_df=None,
+                    stop_config={"type": "none"},
+                )
+        assert not any("#372" in r.message for r in caplog.records)
+
+    def test_fixed_sizing_does_not_warn_even_with_shorts(self):
+        """`fixed` is honoured identically on both sides, so there is nothing
+        to warn about."""
+        from unittest.mock import patch
+        import logging
+        import helpers.portfolio_simulations as ps
+        import io
+        df = _frame([
+            ("2024-01-02", 100, 105,  95, 100),
+            ("2024-01-03", 100, 101,  99, 100),
+        ])
+        stream = io.StringIO()
+        h = logging.StreamHandler(stream)
+        ps.logger.addHandler(h)
+        try:
+            with patch.dict(ps.CONFIG, {"position_sizing_method": "fixed"}):
+                ps.run_portfolio_simulation(
+                    portfolio_data={"TEST": df},
+                    signals={"TEST": pd.Series([-2, 0], index=df.index)},
+                    initial_capital=100_000.0, allocation_pct=0.5,
+                    spy_df=None, vix_df=None, tnx_df=None,
+                    stop_config={"type": "none"},
+                )
+        finally:
+            ps.logger.removeHandler(h)
+        assert "#372" not in stream.getvalue()
