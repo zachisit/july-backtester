@@ -25,6 +25,7 @@ to it, not in its arithmetic.
 import ast
 import os
 import re
+from datetime import date
 
 import pytest
 
@@ -251,13 +252,15 @@ class TestAtrAnchorsToTheSignalBarInBothExecutionModes:
         src = open(SIM, encoding="utf-8").read()
         assert site in src
 
-    def test_both_risk_sizing_branches_anchor_to_signal_date(self):
-        """trailing_atr and atr sizing — these set the share count."""
-        src = open(SIM, encoding="utf-8").read()
-        assert src.count("_dbe_sz = signal_date") == 2, (
-            "expected both the trailing_atr and atr sizing branches to anchor "
-            "to signal_date"
-        )
+    # DELETED: test_both_risk_sizing_branches_anchor_to_signal_date.
+    #
+    # It asserted `src.count("_dbe_sz = signal_date") == 2` — a source-text
+    # count on a PRIVATE LOCAL VARIABLE NAME. It broke the moment the epic
+    # spelled the same fix inline without the temporary, and it would break
+    # again on any rename, while saying nothing about behaviour either way.
+    # The widened grid in tests/test_atr_logic.py now covers both sites
+    # behaviourally — reverting either anchor fails it — so this pinned a
+    # spelling and nothing else. @shardul0701 called it; he is right.
 
     def test_no_atr_branch_still_hardcodes_prev_of_the_fill_bar(self):
         """The regression guard, generalised.
@@ -278,7 +281,20 @@ class TestAtrAnchorsToTheSignalBarInBothExecutionModes:
         EXEC_AWARE = ("signal_date", "sig_date")
         offenders = []
         for node in ast.walk(tree):
-            if not isinstance(node, ast.Assign):
+            # `ast.Assign` ONLY made this guard structurally blind a SECOND
+            # time. The epic spelled the same anchors inline —
+            # `df.loc[signal_date].get('ATR_14')` inside an `if`, no assignment
+            # node — and the guard reported a clean sweep across all three.
+            #
+            # It has now been blind twice: first to the short entry path
+            # (keyed on `entry_exec_date`, a name that path never uses), then
+            # to inline anchors (keyed on a node type the code stopped using).
+            # Both times it said everything was fine. The lesson is that a
+            # guard keyed on how code is *spelled* fails silently whenever the
+            # spelling moves, so key it as broadly as the thing it protects:
+            # any node that mentions prev_trading_dates at all.
+            if not isinstance(node, (ast.Assign, ast.If, ast.Expr,
+                                     ast.Call, ast.Subscript, ast.Compare)):
                 continue
             seg = ast.get_source_segment(src, node) or ""
             if "prev_trading_dates" not in seg:
@@ -319,28 +335,87 @@ class TestWeekdayOvernightGapArithmeticIsPinned:
     """
 
     # (label, calendar-day gap between consecutive SESSIONS)
+    # DATES are the input; the gap is DERIVED. Previously this table hard-coded
+    # both the gap AND the expected flag, and the assertion compared them to
+    # each other -- so it could not tell 4 from 3. @shardul0701 proved it by
+    # putting my original error back (Memorial row 4 -> 3): all three
+    # CASES-dependent tests still passed, because `3 > 2` is True and `flat` was
+    # True. The fact that was actually wrong -- how many calendar days that gap
+    # spans -- was the hard-coded input, so a wrong belief was encoded and
+    # confirmed by the same number.
+    #
+    # All dates are real 2026 sessions around the named closure.
     CASES = [
-        ("normal weeknight  Tue->Wed", 1, False),
-        ("normal weekend    Fri->Mon", 3, True),
-        ("Good Friday       Thu->Mon", 4, True),
-        ("Memorial/Labor    Fri->Tue", 4, True),
-        ("Thanksgiving      Wed->Fri", 2, False),
-        ("July 4th on Thu   Wed->Fri", 2, False),
+        ("normal weeknight  Tue->Wed", "2026-05-19", "2026-05-20", False),
+        ("normal weekend    Fri->Mon", "2026-05-15", "2026-05-18", True),
+        ("Good Friday       Thu->Mon", "2026-04-02", "2026-04-06", True),
+        ("Memorial/Labor    Fri->Tue", "2026-05-22", "2026-05-26", True),
+        ("Thanksgiving      Wed->Fri", "2026-11-25", "2026-11-27", False),
+        ("July 4th on Thu   Wed->Fri", "2020-07-01", "2020-07-03", False),
     ]
 
-    @pytest.mark.parametrize("label,gap,flat", CASES)
-    def test_the_documented_table_matches_the_threshold(self, label, gap, flat):
-        """Every row of the docstring table, checked against `> 2`."""
-        assert (gap > 2) is flat, label
+    @staticmethod
+    def _gap(prev_session, next_session):
+        """Calendar days between two sessions — computed, never asserted."""
+        return (date.fromisoformat(next_session)
+                - date.fromisoformat(prev_session)).days
+
+    @pytest.mark.parametrize("label,prev_session,next_session,flat", CASES)
+    def test_the_documented_table_matches_the_threshold(
+            self, label, prev_session, next_session, flat):
+        """Every row of the docstring table, checked against `> 2` — with the
+        gap derived from the dates rather than supplied alongside the answer."""
+        gap = self._gap(prev_session, next_session)
+        assert (gap > 2) is flat, f"{label}: gap={gap}"
+
+    @pytest.mark.parametrize("label,prev_session,next_session,flat", CASES)
+    def test_each_rows_dates_are_the_weekdays_its_label_names(
+            self, label, prev_session, next_session, flat):
+        """The row's LABEL is the independent fact; the dates must match it.
+
+        Deriving the gap from dates was not enough on its own — moving a date
+        moves the gap, and if the hard-coded `flat` still agrees the row passes
+        anyway. I checked: re-pointing the Memorial row at Fri->Mon (3 days)
+        left all the gap tests green, which is the same defect one level down.
+
+        `Fri->Tue` is a claim about weekdays, and weekday names come from the
+        calendar rather than from this table, so a typo'd date fails here even
+        when its gap happens to keep the threshold verdict intact.
+        """
+        names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        arrow = label.split()[-1]
+        want_prev, want_next = arrow.split("->")
+        got_prev = names[date.fromisoformat(prev_session).weekday()]
+        got_next = names[date.fromisoformat(next_session).weekday()]
+        assert (got_prev, got_next) == (want_prev, want_next), (
+            f"{label}: dates are {got_prev}->{got_next} "
+            f"({prev_session} -> {next_session})")
+
+    def test_the_monday_closures_really_are_four_days(self):
+        """The specific number I got wrong, now computed from a calendar.
+
+        Memorial and Labor Day close a MONDAY, so Fri -> Tue spans 4 calendar
+        days; 3 is the plain-weekend value. This is the assertion the old table
+        could not make, because it was handed 4 and asked whether 4 > 2.
+        """
+        assert self._gap("2026-05-22", "2026-05-26") == 4
+        assert self._gap("2026-05-15", "2026-05-18") == 3
 
     def test_ge_two_changes_only_the_midweek_holiday_rows(self):
         """The claim I got wrong, now pinned in both directions."""
-        flipped = [l for l, gap, _ in self.CASES if (gap >= 2) != (gap > 2)]
+        flipped = [l for l, p, n, _ in self.CASES
+                   if (self._gap(p, n) >= 2) != (self._gap(p, n) > 2)]
         assert flipped == ["Thanksgiving      Wed->Fri", "July 4th on Thu   Wed->Fri"]
 
     def test_ge_two_does_not_touch_normal_weeknights(self):
-        """The specific false claim: a weeknight gap is 1, and 1 >= 2 is False."""
-        weeknight_gap = 1
+        """The specific false claim — with the weeknight gap COMPUTED.
+
+        This previously read `weeknight_gap = 1; assert (1 >= 2) is False`,
+        which asserts arithmetic. The fact under test is that a weeknight
+        session gap IS 1 calendar day, and that was the hard-coded input.
+        """
+        weeknight_gap = self._gap("2026-05-19", "2026-05-20")
+        assert weeknight_gap == 1
         assert (weeknight_gap >= 2) is False
         assert (weeknight_gap > 2) is False
 
