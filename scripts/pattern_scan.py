@@ -34,7 +34,23 @@ log = logging.getLogger("pattern_scan")
 # Data loading
 # ---------------------------------------------------------------------------
 
-PARQUET_DIR = os.path.join(PROJECT_ROOT, "parquet_data", "data")
+# Overridable so a GOLDEN SET can be captured from the pinned corpus and then
+# replayed from committed fixture bars -- which is what makes the set frozen
+# AND portable at the same time.
+#
+# `yahoo` cannot serve that purpose, for reasons that are not about data
+# quality: `period="3y"` (:889) anchors the window to TODAY, and
+# `auto_adjust=True` (:129) restates every historical bar on each ex-date. A
+# golden set wants FROZEN; "current" is the opposite property, and a suite
+# that goes red on its own schedule trains people to ignore it.
+#
+# `parquet` is frozen by construction (submodule SHA + .tail(800)); its only
+# defect is access. Committing the bars removes that, and also survives the
+# submodule advancing, which the pin alone does not. @shardul0701 on #349.
+PARQUET_DIR = os.environ.get(
+    "PATTERN_SCAN_PARQUET_DIR",
+    os.path.join(PROJECT_ROOT, "parquet_data", "data"),
+)
 
 
 def _finviz_universe(spec):
