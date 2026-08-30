@@ -61,7 +61,12 @@ class TestValidateOHLCV:
         assert any("Duplicate" in issue for issue in issues)
 
     def test_negative_prices_detected(self):
-        """Negative prices are detected and heavily penalized."""
+        """Negative prices are detected and heavily penalized.
+
+        Wording widened to "Non-positive" with #369 -- the check now covers
+        `<= 0`, and "Negative Close prices" would be actively wrong on a
+        series whose problem is that they are zero. See TestNonPositivePrices.
+        """
         dates = pd.date_range("2020-01-01", periods=5, freq="D")
         df = pd.DataFrame({
             "Open": [100, -5, 102, 103, 104],  # Negative Open
@@ -73,8 +78,8 @@ class TestValidateOHLCV:
 
         score, issues = validate_ohlcv(df, "AAPL", "D")
         assert score < 100.0  # Penalty applied
-        assert any("Negative" in issue and "Open" in issue for issue in issues)
-        assert any("Negative" in issue and "Low" in issue for issue in issues)
+        assert any("Non-positive" in issue and "Open" in issue for issue in issues)
+        assert any("Non-positive" in issue and "Low" in issue for issue in issues)
 
     def test_high_less_than_low_detected(self):
         """High < Low violations are detected."""
@@ -302,7 +307,7 @@ class TestQualityReport:
 
         issues_str = report.iloc[0]["issues"]
         assert ";" in issues_str  # Multiple issues joined
-        assert "Negative" in issues_str
+        assert "Non-positive" in issues_str
         assert "High < Low" in issues_str or "Zero volume" in issues_str
 
 
@@ -329,3 +334,118 @@ class TestIntegrationWithConfig:
         score, issues = validate_ohlcv(df, "AAPL", "D")
         assert score == 100.0
         assert issues == []
+
+
+# ---------------------------------------------------------------------------
+# CHECK 2 — non-positive prices (#369)
+# ---------------------------------------------------------------------------
+
+# The six zero-carrying bars of UFMC-200512, TRANSCRIBED rather than read.
+# `data/market_data/merged/` is gitignored, so a test that opens the parquet
+# passes here and errors on a fresh clone and in CI -- the same convention
+# tests/test_rule_based_universe.py follows with its synthetic corpus. These
+# are not synthetic: they are the tape, as literals. Census + bars from
+# @shardul0701 on #369.
+#
+#             open   high    low  close  volume
+# 1998-07-02   0.0  6.875  6.875  6.875     100   <- open-only zero
+# 1998-07-29   0.0  0.000  0.000  0.000     900   <- fully zero
+# 1998-09-02   0.0  0.000  0.000  0.000    1300   <- fully zero
+# 2000-12-21   0.0  0.750  0.750  0.750     500   <- open-only zero
+# 2001-09-19   0.0  1.300  1.300  1.300    1000   <- open-only zero
+# 2002-07-10   0.0  0.000  0.000  0.000     100   <- fully zero
+#
+# 1,277 bars total; open ==0 -> 6, high/low/close ==0 -> 3 each. All six carry
+# source="norgate": these are PROVENANCED bars with a bad value, NOT the
+# null-source trailing-bar class of #365/#371. Different defect, different fix.
+
+_UFMC_FULLY_ZERO = (0.0, 0.0, 0.0, 0.0)            # 1998-07-29, 1998-09-02, 2002-07-10
+_UFMC_OPEN_ONLY_ZERO = (0.0, 6.875, 6.875, 6.875)  # 1998-07-02 (single-print day)
+
+_CLEAN = (10.0, 10.5, 9.5, 10.0)
+
+
+def _bars(rows):
+    """rows: list of (open, high, low, close) on a contiguous business index."""
+    idx = pd.bdate_range("2020-01-01", periods=len(rows))
+    return pd.DataFrame({
+        "Open":  [r[0] for r in rows],
+        "High":  [r[1] for r in rows],
+        "Low":   [r[2] for r in rows],
+        "Close": [r[3] for r in rows],
+        "Volume": [1_000_000] * len(rows),
+    }, index=idx)
+
+
+class TestNonPositivePrices:
+    """CHECK 2 guarded `< 0`, a shape that has never occurred: zero negative
+    prices in all 35,309 series of the corpus. The one real instance of the
+    defect family it exists to catch is a ZERO, which is the shape it did not
+    test for. The check was dead code, and narrow in the only direction that
+    ever occurs.
+    """
+
+    def test_a_fully_zero_bar_is_invisible_to_check_3(self):
+        """The structural reason CHECK 2 has to widen, pinned by the data.
+
+        On a 0/0/0/0 bar every relationship holds -- `High >= Low` is `0 >= 0`,
+        and both Open and Close sit inside `[0, 0]`. A relationship check
+        cannot see a value that agrees with all of its relations, so CHECK 3
+        is not missing these by oversight and no tightening of it would help.
+        """
+        _, issues = validate_ohlcv(_bars([_CLEAN, _UFMC_FULLY_ZERO, _CLEAN]), "UFMC", "D")
+        relational = [i for i in issues
+                      if "High < Low" in i or "outside H/L range" in i]
+        assert not relational, (
+            f"CHECK 3 saw a fully-zero bar; the premise of this fix is that it "
+            f"cannot: {relational}")
+
+    def test_an_open_only_zero_bar_is_caught_by_check_3(self):
+        """The paired control, and the other half of the same file.
+
+        1998-07-02 is a single-print day (high == low == close) whose open was
+        never recorded. Here the zero DISAGREES with its neighbours, so
+        `Open < Low` fires and CHECK 3 sees it. Same series, same defect
+        family, opposite outcome -- the difference is purely whether the zero
+        contradicts anything.
+        """
+        _, issues = validate_ohlcv(_bars([_CLEAN, _UFMC_OPEN_ONLY_ZERO, _CLEAN]), "UFMC", "D")
+        assert any("Open outside H/L range" in i for i in issues), issues
+
+    @pytest.mark.parametrize("col,row", [
+        ("Open",  (0.0, 10.5, 9.5, 10.0)),
+        ("High",  (10.0, 0.0, 0.0, 0.0)),
+        ("Low",   (10.0, 10.5, 0.0, 10.0)),
+        ("Close", (10.0, 10.5, 9.5, 0.0)),
+    ])
+    def test_a_zero_price_is_charged_as_non_positive(self, col, row):
+        """The fix: `<= 0`, not `< 0`, on each of the four price columns."""
+        _, issues = validate_ohlcv(_bars([_CLEAN, row, _CLEAN]), "UFMC", "D")
+        assert any("Non-positive" in i and col in i for i in issues), (
+            f"a zero {col} was not charged by CHECK 2: {issues}")
+
+    def test_negative_prices_are_still_charged(self):
+        """No-regression: widening the operator must not stop catching the
+        shape the check was originally written for."""
+        _, issues = validate_ohlcv(_bars([_CLEAN, (-5.0, 10.5, 9.5, 10.0), _CLEAN]), "X", "D")
+        assert any("Non-positive" in i and "Open" in i for i in issues), issues
+
+    def test_zero_volume_is_not_charged_by_check_2(self):
+        """Volume is deliberately untouched. A zero-volume session is real and
+        common; a zero PRICE is not."""
+        df = _bars([_CLEAN, _CLEAN, _CLEAN])
+        df["Volume"] = [1_000_000, 0, 1_000_000]
+        _, issues = validate_ohlcv(df, "X", "D")
+        assert not any("Non-positive Volume" in i for i in issues), issues
+
+    def test_the_open_only_bars_are_charged_by_both_checks(self):
+        """The double-charge is correct, not a bug.
+
+        After the widening an open-only-zero bar is charged by CHECK 3 (the
+        open contradicts H/L) AND by CHECK 2 (the open is non-positive). Both
+        are true statements about that bar. Pinned so nobody later "fixes" the
+        apparent duplication by suppressing one of them.
+        """
+        _, issues = validate_ohlcv(_bars([_CLEAN, _UFMC_OPEN_ONLY_ZERO, _CLEAN]), "UFMC", "D")
+        assert any("Open outside H/L range" in i for i in issues), issues
+        assert any("Non-positive" in i and "Open" in i for i in issues), issues

@@ -7,7 +7,7 @@ Detects common data issues that silently corrupt backtest results:
 2. Price jumps >20% (potential unadjusted splits)
 3. Zero volume days
 4. OHLC relationship violations
-5. Negative prices
+5. Non-positive prices (zero or negative — see CHECK 2, issue #369)
 6. Duplicate timestamps
 """
 
@@ -271,13 +271,32 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
         issues.append(f"Duplicate timestamps: {duplicates} bars")
         demerits += min(20, duplicates * 2)  # Cap at 20 points
 
-    # --- CHECK 2: Negative prices ---
+    # --- CHECK 2: Non-positive prices ---
+    # `<= 0`, not `< 0`. Corpus census over all 35,309 series: ZERO negative
+    # prices anywhere, and exactly one series with a close of 0.0
+    # (UFMC-200512, 3 bars of 1,277). So the strict form guarded a shape that
+    # has never occurred while missing the only real instance of the family --
+    # the check was dead code, and narrow in the only direction that happens.
+    #
+    # CHECK 3 is NOT a backstop for this. A 0/0/0/0 bar is internally
+    # CONSISTENT -- High >= Low holds as 0 >= 0, and Open and Close both sit
+    # inside [0, 0] -- so every relationship test reads False. A relationship
+    # check cannot see a value that agrees with all of its relations. UFMC's
+    # own file shows both halves: its 3 open-only zeros DO trip CHECK 3
+    # (the open contradicts H/L), its 3 fully-zero bars do not.
+    #
+    # An open-only-zero bar is therefore charged by CHECK 3 and CHECK 2 both.
+    # That double-charge is correct -- both statements are true of the bar --
+    # not a duplication to be suppressed later.
+    #
+    # Volume is deliberately excluded: a zero-volume session is real and
+    # common, a zero PRICE is not.
     for col in ["Open", "High", "Low", "Close"]:
         if col in named.columns:
-            negative_count = (named[col] < 0).sum()
-            if negative_count > 0:
-                issues.append(f"Negative {col} prices: {negative_count} bars")
-                demerits += min(30, negative_count * 5)  # Severe issue
+            nonpositive_count = (named[col] <= 0).sum()
+            if nonpositive_count > 0:
+                issues.append(f"Non-positive {col} prices: {nonpositive_count} bars")
+                demerits += min(30, nonpositive_count * 5)  # Severe issue
 
     # --- CHECK 3: OHLC relationship violations ---
     if all(c in named.columns for c in ["Open", "High", "Low", "Close"]):
