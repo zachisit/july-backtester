@@ -4,31 +4,36 @@ import os
 import pandas as pd
 from datetime import datetime, timedelta
 import logging
-import re # Import the regular expressions module
+
+from helpers.filename_utils import (
+    resolve_existing as _resolve_existing,
+    sanitize_symbol_for_filename as _sanitize_filename,
+)
 
 logger = logging.getLogger(__name__)
 
 # --- CONFIGURABLE SETTINGS ---
 CACHE_DIR = "data_cache"
-CACHE_TTL_HOURS = 24 
+CACHE_TTL_HOURS = 24
 
 os.makedirs(CACHE_DIR, exist_ok=True)
-
-def _sanitize_filename(symbol: str) -> str:
-    """Replaces characters invalid for filenames with an underscore."""
-    # This regex will replace any character that is NOT a letter, digit, hyphen, or underscore.
-    return re.sub(r'[^a-zA-Z0-9_-]', '_', symbol)
 
 def get_cached_data(symbol: str, start: str, end: str, timeframe: str, multiplier: int) -> pd.DataFrame | None:
     """Checks for and loads a DataFrame from a local Parquet cache."""
     # Sanitize the symbol for use in a filename
-    safe_symbol = _sanitize_filename(symbol)
-
     end_date_str = datetime.now().strftime('%Y-%m-%d') if end == datetime.now().strftime('%Y-%m-%d') else end
-    
-    # Use the sanitized symbol to create the filename
+
+    # READ path: resolve across every candidate spelling, not just the guarded
+    # one (#345). A cache written before the reserved-name guard stores CON/PRN
+    # unguarded; checking only "_CON" reports "not cached" for a file that
+    # exists, and re-fetches a delisted symbol on every run. Silent, and exactly
+    # the survivorship-critical names.
+    safe_symbol = _sanitize_filename(symbol)
     filename = f"{safe_symbol}_{start}_{end_date_str}_{timeframe}_{multiplier}.parquet"
-    filepath = os.path.join(CACHE_DIR, filename)
+    filepath = _resolve_existing(
+        CACHE_DIR, symbol,
+        template=f"{{name}}_{start}_{end_date_str}_{timeframe}_{multiplier}.parquet",
+    ) or os.path.join(CACHE_DIR, filename)
 
     if os.path.exists(filepath):
         file_mod_time = datetime.fromtimestamp(os.path.getmtime(filepath))

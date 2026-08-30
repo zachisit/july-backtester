@@ -20,19 +20,16 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-_ILLEGAL_FILENAME_CHARS = r'\\/:*?"<>|'
+from helpers.filename_utils import (
+    resolve_existing as _resolve_existing,
+    sanitize_symbol_for_filename as _sanitize_filename,
+)
 
 DATABASES = [
     "US Equities",
     "US Equities Delisted",
     "US Indices",
 ]
-
-
-def _sanitize_filename(symbol: str) -> str:
-    for ch in _ILLEGAL_FILENAME_CHARS:
-        symbol = symbol.replace(ch, "_")
-    return symbol
 
 
 def validate(output_dir: Path) -> None:
@@ -48,7 +45,11 @@ def validate(output_dir: Path) -> None:
             print(f"\n[{db}]  — 0 symbols returned, skipping")
             continue
 
-        missing = [s for s in symbols if not (output_dir / f"{_sanitize_filename(s)}.parquet").exists()]
+        # READ path: check every candidate spelling (#345). Checking only the
+        # guarded form reported CON/PRN as MISSING FROM A CORPUS THAT HAS THEM
+        # -- and they are precisely the delisted names the survivorship work
+        # depends on, so the report was wrong in its most load-bearing cell.
+        missing = [s for s in symbols if _resolve_existing(output_dir, s) is None]
         present = len(symbols) - len(missing)
 
         total_norgate += len(symbols)

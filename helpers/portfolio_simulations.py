@@ -1183,6 +1183,24 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     stop_type = stop_config.get("type", "none")
                     if stop_type == "percentage":
                         sizing_kwargs["stop_distance_pct"] = stop_config.get("value", 0.05)
+                    elif stop_type == "trailing_atr":
+                        # trailing_atr had NO branch here, so stop_distance_pct was
+                        # never set and risk_parity fell through to the fallback in
+                        # position_sizing.py:205 -- symbol_data["ATR_14"].iloc[-1],
+                        # the last row of whatever slice the caller passed, which is
+                        # execution-mode dependent. Found by the parametrised
+                        # invariant test, not by inspection: 10x share divergence on
+                        # long/trailing_atr/risk_parity. Setting it explicitly here
+                        # means the ATR-family paths never reach that fallback.
+                        if pd.notna(signal_date) and signal_date in df.index and "ATR_14" in df.columns:
+                            _atr_tp = df.loc[signal_date, 'ATR_14']
+                            _close_tp = df.loc[signal_date, 'Close']
+                            if pd.notna(_atr_tp) and pd.notna(_close_tp) and _close_tp > 0:
+                                _eff_tp = float(_atr_tp) * stop_config.get("stop_mult", 1.0)
+                                _pc_tp = stop_config.get("point_cap")
+                                if _pc_tp is not None and _pc_tp > 0:
+                                    _eff_tp = min(_eff_tp, _pc_tp)
+                                sizing_kwargs["stop_distance_pct"] = _eff_tp / float(_close_tp)
                     elif stop_type == "atr":
                         # Signal bar, not prev(fill bar) -- see the `atr` stop
                         # anchor below. A FOURTH instance of the same defect,
@@ -1195,8 +1213,25 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             _atr = df.loc[_day_before, 'ATR_14']
                             _close = df.loc[_day_before, 'Close']
                             if pd.notna(_atr) and pd.notna(_close) and _close > 0:
-                                sizing_kwargs["stop_distance_pct"] = _inst.atr_stop_distance_pct(
-                                    _atr, stop_config.get("multiplier", 3.0), _close)
+                                # point_cap applied here too, because the stop LEVEL
+                                # applies it (atr_stop_level) and atr_stop_distance_pct
+                                # has no cap parameter. Uncapped sizing against a capped
+                                # stop is a 6x UNDER-size when the cap binds (0.34% of
+                                # book against a 2% target) -- wrong in the safe
+                                # direction, and mode-INDEPENDENT, so the execution-mode
+                                # invariant cannot see it. Pinned by a value test.
+                                _eff_ap = float(_atr) * stop_config.get("multiplier", 3.0)
+                                _pc_ap = stop_config.get("point_cap")
+                                if _pc_ap is not None and _pc_ap > 0:
+                                    _eff_ap = min(_eff_ap, _pc_ap)
+                                sizing_kwargs["stop_distance_pct"] = _eff_ap / float(_close)
+                    elif stop_type == "points":
+                        # The distance is KNOWN for a points stop and there was no
+                        # branch, so risk_parity fell through to the 3xATR proxy at
+                        # position_sizing.py:205 and ignored a number it already had.
+                        _pv = stop_config.get("value")
+                        if _pv is not None and _pv > 0 and raw_entry_price > 0:
+                            sizing_kwargs["stop_distance_pct"] = float(_pv) / raw_entry_price
 
                 # For kelly: compute rolling stats from completed trades so sizing
                 # actually adapts to the strategy's live performance.
@@ -1287,7 +1322,16 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         method=sizing_method,
                         equity=total_equity,
                         price=entry_price,
-                        symbol_data=df.loc[:date],
+                        # Slice to the SIGNAL bar, not the fill bar (#324 review).
+                        # Both consumers take .iloc[-1] of this frame:
+                        # _volatility_parity (position_sizing.py:173) and the
+                        # risk_parity ATR fallback (:205). Sliced to `date` that
+                        # last row is the FILL bar, so under execution_time="open"
+                        # sizing reads a bar the signal never saw -- same-bar
+                        # look-ahead -- and the modes diverge 5x on shares. A
+                        # sizing decision may only use information available at
+                        # the signal.
+                        symbol_data=df.loc[:(signal_date if pd.notna(signal_date) else date)],
                         config=CONFIG,
                         allocation_pct=allocation_pct,  # honour the caller's allocation, not CONFIG only
                         **sizing_kwargs

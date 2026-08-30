@@ -52,23 +52,10 @@ _COL_ALIASES: dict[str, str] = {
 }
 
 
-# Characters illegal in Windows filenames (and generally problematic on any OS)
-_ILLEGAL_FILENAME_CHARS = r'\/:*?"<>|'
-
-
-def _sanitize_filename(symbol: str) -> str:
-    """
-    Replace characters that are illegal in Windows filenames with underscores.
-
-    Examples
-    --------
-    ``"I:VIX"``   → ``"I_VIX"``
-    ``"$I:TNX"``  → ``"$I_TNX"``
-    ``"AAPL"``    → ``"AAPL"``   (unchanged)
-    """
-    for ch in _ILLEGAL_FILENAME_CHARS:
-        symbol = symbol.replace(ch, "_")
-    return symbol
+from helpers.filename_utils import (
+    filename_candidates as _filename_candidates,
+    sanitize_symbol_for_filename as _sanitize_filename,
+)
 
 
 def _resolve_dir(config: dict) -> str:
@@ -79,6 +66,36 @@ def _resolve_dir(config: dict) -> str:
     return csv_dir
 
 
+def _csv_probe_paths(symbol: str, csv_dir: str) -> list[str]:
+    """Every path _find_csv will test for *symbol*, in probe order.
+
+    Factored out so the not-found warning can report what was ACTUALLY tried
+    rather than recomposing its own guess. @shardul0701 caught the recomposed
+    version dropping the unguarded legacy spellings -- the exact spellings this
+    change exists to support -- so a user debugging a missing ``CON.csv`` was
+    told the loader never looked for it when it had.
+    """
+    # Every sanitized spelling, not just the guarded one. The Windows
+    # reserved-name guard prefixes "_", but a user's pre-existing PRN.csv is a
+    # perfectly legal filename on macOS/Linux; looking only for _PRN.csv would
+    # silently drop the symbol. See helpers.filename_utils.filename_candidates.
+    paths = []
+    for safe in _filename_candidates(symbol):
+        paths += [
+            os.path.join(csv_dir, f"{safe.upper()}.csv"),
+            os.path.join(csv_dir, f"{safe.lower()}.csv"),
+            os.path.join(csv_dir, f"{safe}.csv"),
+        ]
+    # dedupe, preserving probe order (an all-caps ticker yields the same path
+    # for the .upper() and bare spellings)
+    seen, ordered = set(), []
+    for p in paths:
+        if p not in seen:
+            seen.add(p)
+            ordered.append(p)
+    return ordered
+
+
 def _find_csv(symbol: str, csv_dir: str) -> str | None:
     """Return the first matching CSV path for *symbol*, or None.
 
@@ -86,13 +103,7 @@ def _find_csv(symbol: str, csv_dir: str) -> str | None:
     ``I:VIX``) are replaced with underscores before constructing the path, so
     the expected file for ``I:VIX`` is ``I_VIX.csv``.
     """
-    safe = _sanitize_filename(symbol)
-    candidates = [
-        os.path.join(csv_dir, f"{safe.upper()}.csv"),
-        os.path.join(csv_dir, f"{safe.lower()}.csv"),
-        os.path.join(csv_dir, f"{safe}.csv"),
-    ]
-    for path in candidates:
+    for path in _csv_probe_paths(symbol, csv_dir):
         if os.path.isfile(path):
             return path
     return None
@@ -192,17 +203,21 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
             )
 
     if filepath is None:
-        safe_normalized = _sanitize_filename(csv_symbol)
-        safe_original = _sanitize_filename(symbol)
-        candidates = [
-            os.path.join(csv_dir, f"{safe_normalized.upper()}.csv"),
-            os.path.join(csv_dir, f"{safe_normalized.lower()}.csv"),
-            os.path.join(csv_dir, f"{safe_original.upper()}.csv"),
-            os.path.join(csv_dir, f"{safe_original.lower()}.csv"),
-        ]
+        # Report what was ACTUALLY probed. The previous version recomposed its
+        # own list from the bare sanitizer, so it named only the guarded
+        # spellings and silently omitted the unguarded legacy ones -- for CON it
+        # claimed "_CON.csv, _con.csv" while having also tried CON.csv and
+        # con.csv. Same defect class as the one this PR fixes, wearing a log
+        # line: a diagnostic that under-reports is worse than none, because it
+        # sends the reader looking in the wrong place.
+        tried = list(_csv_probe_paths(csv_symbol, csv_dir))
+        if csv_symbol != symbol:
+            for p in _csv_probe_paths(symbol, csv_dir):
+                if p not in tried:
+                    tried.append(p)
         logger.warning(
             f"CSV file not found for '{symbol}' (normalized to '{csv_symbol}'). "
-            f"Tried: {', '.join(candidates)}"
+            f"Tried: {', '.join(tried)}"
         )
         return None
 
