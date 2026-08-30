@@ -38,6 +38,9 @@ import types
 
 import pytest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _wrapper_harness as _harness  # noqa: E402
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 _FIXTURE_DIR = os.path.join(PROJECT_ROOT, "tests", "fixtures", "parquet_data")
 _FIXTURE_AVAILABLE = os.path.isdir(_FIXTURE_DIR) and any(
@@ -48,93 +51,20 @@ _FIXTURE_AVAILABLE = os.path.isdir(_FIXTURE_DIR) and any(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _wrapper_source(patches: dict, cli_args=()) -> str:
-    """
-    Build the wrapper script that applies CONFIG patches then calls main.main().
-
-    The `main.main()` call MUST sit under an `if __name__ == "__main__"` guard
-    (#362). `main.py` builds a multiprocessing Pool, and under the spawn start
-    method — macOS and Windows — every worker re-imports the parent's __main__,
-    which is this wrapper. Without the guard each child re-entered main.main()
-    during bootstrap, died on `RuntimeError: An attempt has been made to start
-    a new process before the current process has finished its bootstrapping
-    phase`, and the parent then waited on them forever. All 7 tests below hit
-    the 120s timeout and self-skipped, so the whole `slow` marker reported
-    "7 skipped" in 14 minutes while testing nothing. Guarded, the same run
-    finishes in ~3s on macOS, ~6-9s on Windows (idle box).
-
-    The CONFIG patches stay at module scope deliberately: spawn children
-    re-import this module, so they must re-apply there to reach the workers.
-    """
-    lines = [
-        "import sys",
-        f"sys.path.insert(0, {repr(PROJECT_ROOT)})",
-        "import config",
-    ]
-    for k, v in patches.items():
-        lines.append(f"config.CONFIG[{repr(k)}] = {repr(v)}")
-    lines.append("import main")
-    lines.append('if __name__ == "__main__":')
-    lines.append(f"    sys.argv = {repr(['main.py'] + list(cli_args))}")
-    lines.append("    main.main()")
-    return "\n".join(lines) + "\n"
+# The two helpers now live in tests/_wrapper_harness.py (#366). Four modules
+# hand-rolled this same wrapper, and BOTH invariants it must hold -- the
+# __main__ guard and encoding="utf-8" -- were violated in production and then
+# fixed four times by hand. The second fix reached six of seven call sites; the
+# seventh was in the same file as one that was fixed.
+#
+# These names are kept as thin aliases so the pins below read unchanged.
+_wrapper_source = _harness.wrapper_source
 
 
 def _run_patched(tmp_path, patches: dict, cli_args=()) -> subprocess.CompletedProcess:
-    """Run the wrapper from :func:`_wrapper_source` as a subprocess.
-
-    Asserts the run did real work, because six of the seven tests below assert
-    only the ABSENCE of a string in stderr — which holds trivially if main()
-    produced no output at all. Verified: with a nonexistent symbol, or with
-    `min_bars_required` above the fixture's 62 rows, main() logs "Could not
-    fetch data for any symbols" / "No simulation tasks were generated", exits 0,
-    never starts a worker, and ALL SEVEN assertions still pass. The
-    _BASE_PATCHES comment names that risk; nothing enforced it.
-    """
-    wrapper = tmp_path / "run_patched.py"
-    wrapper.write_text(_wrapper_source(patches, cli_args), encoding="utf-8")
-
-    try:
-        result = subprocess.run(
-            [sys.executable, str(wrapper)],
-            capture_output=True,
-            text=True,
-            # main.py:27-28 reconfigures its own streams to UTF-8. Reading them
-            # back with text=True and no encoding uses the locale default —
-            # cp1252 on Windows — which cannot decode the U+2501 rule in
-            # main.py's own banner. subprocess raises inside _readerthread, so
-            # it does not propagate: it surfaces as an unhandled-thread warning
-            # and `result.stderr` comes back None, turning every assertion in
-            # this file into `TypeError: argument of type 'NoneType' is not
-            # iterable`. Invisible until #362 was fixed, because the deadlock
-            # timed out first and nothing ever decoded anything.
-            encoding="utf-8",
-            errors="replace",
-            cwd=PROJECT_ROOT,
-            timeout=120,
-        )
-        assert result.returncode == 0, (
-            f"exit {result.returncode}\n{result.stderr[-2000:]}")
-        assert "All portfolio simulations complete" in result.stderr, (
-            "the run produced no simulation — every absence-assertion in "
-            "this file would pass vacuously\n" + result.stderr[-2000:])
-        assert "Could not fetch data for any symbols" not in result.stderr, (
-            "the fixture symbol was filtered out before any worker ran\n"
-            + result.stderr[-2000:])
-        return result
-    except subprocess.TimeoutExpired:
-        # NOT a skip. This run takes ~3s on macOS and ~6-9s on Windows idle, so 120s
-        # means a deadlock, and #362 is what happens when a deadlock is
-        # reported as "your machine is slow": 7 skipped and 7 passed read
-        # identically in a summary line, and these were the only tests
-        # exercising main() end-to-end through a real Pool.
-        pytest.fail(
-            "Wrapper subprocess did not finish in 120s. It normally takes ~3s on "
-            "macOS and ~6-9s on Windows on an idle box, so 120s is a ~13x "
-            "margin and a timeout here is PROBABLY the #362 multiprocessing "
-            "bootstrap deadlock this guard used to hide. Rule out a loaded "
-            "machine first — CPU contention was measured inflating these same "
-            "seven tests 4x, to ~38s.")
+    """This module's runs DO simulate, so they opt into the non-vacuity check."""
+    return _harness.run_wrapper(tmp_path, patches, cli_args,
+                                expect_simulation=True)
 
 
 # ---------------------------------------------------------------------------
@@ -514,12 +444,15 @@ class TestSubprocessCallSiteHygiene:
     instrument.
     """
 
-    _MODULES = (
-        "test_empty_comparison_tickers.py",
-        "test_main_cli.py",
-        "test_startup_validation.py",
-        "test_ui_output.py",
-    )
+    # EVERY module under tests/, not a hardcoded four. A list is a thing to
+    # forget to update: a fifth module that shells out to main.py would not be
+    # covered and nothing would say so. Scanning the directory is both simpler
+    # and strictly stronger, and it is cheap now that the harness owns the only
+    # wrapper implementation. @shardul0701's suggestion on #366.
+    @staticmethod
+    def _modules():
+        d = os.path.join(PROJECT_ROOT, "tests")
+        return sorted(f for f in os.listdir(d) if f.endswith(".py"))
 
     @staticmethod
     def _call_sites(module_name):
@@ -537,7 +470,7 @@ class TestSubprocessCallSiteHygiene:
                 yield node.lineno, {k.arg for k in node.keywords}
 
     def test_every_call_site_decodes_as_utf8(self):
-        bare = [f"{m}:{ln}" for m in self._MODULES
+        bare = [f"{m}:{ln}" for m in self._modules()
                 for ln, kw in self._call_sites(m)
                 if not {"encoding", "errors"} <= kw]
         assert not bare, (
@@ -546,7 +479,7 @@ class TestSubprocessCallSiteHygiene:
             f"failure surfaces as stderr=None, not as an exception (#362)")
 
     def test_every_call_site_has_a_timeout(self):
-        bare = [f"{m}:{ln}" for m in self._MODULES
+        bare = [f"{m}:{ln}" for m in self._modules()
                 for ln, kw in self._call_sites(m) if "timeout" not in kw]
         assert not bare, (
             f"subprocess.run without timeout: {bare} — a wrapper that hangs "
@@ -555,5 +488,72 @@ class TestSubprocessCallSiteHygiene:
     def test_the_walk_actually_finds_the_call_sites(self):
         """Guards the guard: if the AST walk silently matched nothing, both
         tests above would pass against any amount of breakage."""
-        total = sum(1 for m in self._MODULES for _ in self._call_sites(m))
-        assert total >= 7, f"found only {total} subprocess.run call sites"
+        total = sum(1 for m in self._modules() for _ in self._call_sites(m))
+        # >= 1, not >= 7. The harness now owns the only WRAPPER implementation
+        # (#366), so the count legitimately fell from 7 to 4 -- one in the
+        # harness plus the three direct main.py invocations that are not
+        # wrappers. A high floor would now fail for the right reason, which is
+        # the wrong behaviour. The floor exists only to catch a walk that
+        # silently matches NOTHING, which would make both checks above vacuous.
+        assert total >= 1, f"the AST walk found no subprocess.run call sites"
+
+    def test_the_walk_reaches_the_harness(self):
+        """Guards the guard, structurally rather than by magnitude.
+
+        `total >= 1` does not protect the file this consolidation exists to
+        create. The walk does not have to match NOTHING to go blind -- it only
+        has to stop matching the HARNESS, and the three direct main.py
+        invocations keep the count at 3 on their own.
+
+        Demonstrated: adding `and not f.startswith("_")` to _modules() -- the
+        kind of "skip private helpers" edit someone writes without thinking --
+        and then stripping BOTH encoding= and timeout= from the harness's own
+        subprocess.run leaves all three checks GREEN. Restoring _modules()
+        alone, harness still broken, fails two of them. So the hygiene checks
+        work perfectly when the harness is in scope, and nothing kept it there.
+
+        That would have been the FOURTH instance of the pattern this module
+        docstring itemises: keyed on a name one path never used, then a node
+        type the code stopped using, then a line window excluding the line
+        under judgement -- and then a COUNT, which any three unrelated files
+        satisfy. A named file is a structural fact and cannot drift that way.
+
+        @shardul0701 on #376.
+        """
+        seen = {m for m in self._modules() for _ in self._call_sites(m)}
+        assert "_wrapper_harness.py" in seen, (
+            f"the walk did not reach the harness — it saw {sorted(seen)}. "
+            f"The harness owns the ONLY wrapper implementation (#366); if it "
+            f"is out of scope, both hygiene checks above are vacuous for it.")
+
+    def test_tests_use_exactly_one_subprocess_entry_point(self):
+        """The two hygiene checks understand `subprocess.run` and nothing else.
+
+        Invisible to them: `from subprocess import run`, `import subprocess as
+        sp`, and Popen / check_output / check_call / call. There are zero such
+        call sites today, so this is not a live hole -- but the walk now covers
+        the whole directory, which makes an unconventional spelling likelier to
+        arrive later, and handling each variant's kwargs is more work than it
+        is worth.
+
+        So assert the convention instead of policing the alternatives: this
+        fails the day the assumption stops holding, rather than the day it
+        starts costing something. @shardul0701 on #376.
+        """
+        import ast
+        spellings = set()
+        d = os.path.join(PROJECT_ROOT, "tests")
+        for module_name in self._modules():
+            with open(os.path.join(d, module_name), encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn = node.func
+                if (isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name)
+                        and fn.value.id == "subprocess"):
+                    spellings.add(fn.attr)
+        assert spellings == {"run"}, (
+            f"tests/ uses subprocess spellings {sorted(spellings)}; the "
+            f"encoding and timeout checks above only understand "
+            f"`subprocess.run`, so anything else is unchecked silently")
