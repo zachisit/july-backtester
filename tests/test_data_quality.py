@@ -340,6 +340,13 @@ class TestIntegrationWithConfig:
 # CHECK 2 — non-positive prices (#369)
 # ---------------------------------------------------------------------------
 
+# PROVENANCE: transcribed by @shardul0701 from
+#   data/market_data/merged/UFMC-200512.parquet
+# during the corpus census on issue #369 (2026-08-30), and posted there in
+# full. These are READ VALUES, not constructed ones -- stated explicitly so a
+# later reader can tell a deliberate transcription from a made-up number,
+# which is not otherwise recoverable once the source is out of reach.
+#
 # The six zero-carrying bars of UFMC-200512, TRANSCRIBED rather than read.
 # `data/market_data/merged/` is gitignored, so a test that opens the parquet
 # passes here and errors on a fresh clone and in CI -- the same convention
@@ -449,3 +456,74 @@ class TestNonPositivePrices:
         _, issues = validate_ohlcv(_bars([_CLEAN, _UFMC_OPEN_ONLY_ZERO, _CLEAN]), "UFMC", "D")
         assert any("Open outside H/L range" in i for i in issues), issues
         assert any("Non-positive" in i and "Open" in i for i in issues), issues
+
+    def test_the_30_point_cap_actually_binds(self):
+        """The cap must be reachable, and reaching it must not floor the score.
+
+        With the charge inside the column loop, `min(30, ...)` capped each
+        COLUMN, so a single check could contribute 4 x 30 = 120 on a 100-point
+        budget. The cap sat above the whole budget and could never bind: on an
+        otherwise-perfect 10,000-bar series, 5 fully-zero bars (0.05%) scored
+        0.0 -- identical to 1,000 of them (10%).
+
+        Charging once per bar makes the cap mean what it says. Asserted as a
+        PLATEAU rather than a specific number: 20 bad bars and 1,000 bad bars
+        must score the same, and that score must be above zero, because the
+        check's own ceiling is 30 of 100. @shardul0701 on #379.
+        """
+        import numpy as np
+        n = 10_000
+
+        def series(n_bad):
+            idx = pd.bdate_range("1990-01-01", periods=n)
+            o = np.full(n, 10.0); h = np.full(n, 10.5)
+            lo = np.full(n, 9.5); c = np.full(n, 10.0)
+            o[:n_bad] = h[:n_bad] = lo[:n_bad] = c[:n_bad] = 0.0
+            return pd.DataFrame({"Open": o, "High": h, "Low": lo, "Close": c,
+                                 "Volume": np.full(n, 1e6)}, index=idx)
+
+        s20, _ = validate_ohlcv(series(20), "T", "D")
+        s1000, _ = validate_ohlcv(series(1000), "T", "D")
+        assert s20 == pytest.approx(s1000), (
+            f"20 bad bars scored {s20} and 1000 scored {s1000}; the cap is not "
+            f"binding, so the charge is unbounded in practice")
+        assert s20 > 0.0, (
+            f"score floored at {s20} with a check whose own cap is 30/100 — "
+            f"the per-column charge is back")
+
+    def test_a_few_bad_bars_do_not_destroy_a_long_series(self):
+        """Severity must scale with the defect, not sit at maximum.
+
+        Five bad bars in ten thousand is 0.05% of a series. Pre-fix that
+        scored 0.0 -- unusable, and indistinguishable from a series that is
+        10% zeros.
+        """
+        import numpy as np
+        n = 10_000
+        idx = pd.bdate_range("1990-01-01", periods=n)
+        o = np.full(n, 10.0); h = np.full(n, 10.5)
+        lo = np.full(n, 9.5); c = np.full(n, 10.0)
+        o[:5] = h[:5] = lo[:5] = c[:5] = 0.0
+        df = pd.DataFrame({"Open": o, "High": h, "Low": lo, "Close": c,
+                           "Volume": np.full(n, 1e6)}, index=idx)
+        score, _ = validate_ohlcv(df, "T", "D")
+        assert score > 50.0, (
+            f"0.05% bad bars scored {score}; the charge is not proportionate")
+
+    def test_one_bar_is_charged_once_however_many_columns_are_zero(self):
+        """A fully-zero bar makes ONE statement -- this bar has no price -- and
+        was charged four times for it, while an open-only zero (an internally
+        CONTRADICTORY bar, arguably the more suspicious shape) was charged once.
+
+        Asserted on the issue text rather than the score, because the two
+        shapes legitimately differ in score: the open-only bar also trips
+        CHECK 3, which is correct and is pinned separately above.
+        """
+        df = _bars([_CLEAN, _UFMC_FULLY_ZERO, _CLEAN])
+        _, issues = validate_ohlcv(df, "UFMC", "D")
+        nonpos = [i for i in issues if "Non-positive" in i]
+        assert len(nonpos) == 1, (
+            f"expected one non-positive issue for one bad bar, got "
+            f"{len(nonpos)}: {nonpos}")
+        # ...and it names every column it found, so nothing is lost by folding.
+        assert all(c in nonpos[0] for c in ("Open", "High", "Low", "Close")), nonpos[0]
