@@ -308,7 +308,22 @@ class TestAtrAnchorsToTheSignalBarInBothExecutionModes:
         # fill bar; only the three ATR anchor/sizing sites were wrong, and those
         # now use signal_date. Assert none of the remaining ones read ATR_14.
         for lineno, seg in offenders:
-            following = src.splitlines()[lineno:lineno + 6]
+            # lineno - 1, not lineno: ast lineno is 1-based and splitlines() is
+            # 0-based, so [lineno] starts at the line AFTER the offending node
+            # and the window never reads the offender's own line. A single-line
+            # inline anchor carries both `prev_trading_dates` and `ATR_14` on
+            # that one skipped line, so the guard reported a clean sweep against
+            # a live defect. Verified on merged main: injecting
+            # `_atr_tp = df.loc[prev_trading_dates[entry_exec_date], 'ATR_14']`
+            # left this file at 35 passed while test_atr_logic.py failed.
+            #
+            # THIRD time this guard has been blind while reporting clean --
+            # first keyed on `entry_exec_date` (a name the short path never
+            # uses), then on `ast.Assign` (a node type the code stopped using),
+            # now on a window that excludes the line it is judging. The rule
+            # generalises: a guard keyed on how code is SPELLED fails silently
+            # the moment the spelling moves -- including onto one line.
+            following = src.splitlines()[lineno - 1:lineno + 6]
             assert not any("ATR_14" in l for l in following), (
                 f"line {lineno} anchors an ATR read to prev(fill bar): {seg!r} — "
                 f"wrong under execution_time='close'"
@@ -351,7 +366,18 @@ class TestWeekdayOvernightGapArithmeticIsPinned:
         ("Good Friday       Thu->Mon", "2026-04-02", "2026-04-06", True),
         ("Memorial/Labor    Fri->Tue", "2026-05-22", "2026-05-26", True),
         ("Thanksgiving      Wed->Fri", "2026-11-25", "2026-11-27", False),
-        ("July 4th on Thu   Wed->Fri", "2020-07-01", "2020-07-03", False),
+        # 2019, not 2020. July 4 2020 fell on a SATURDAY, so the market closed
+        # Friday 2020-07-03 -- meaning the old row's second date was not a
+        # session at all, and 2020-07-02 -> 2020-07-06 (gap 4, flat=True) is
+        # the real consecutive pair across that holiday. The row asserted the
+        # opposite and passed BOTH new guards: the derived gap agreed (2 days,
+        # flat=False) and the weekday label agreed (07-01 is a Wed, 07-03 is a
+        # Fri). "Are these consecutive SESSIONS" is not derivable from a plain
+        # calendar -- weekdays come from a calendar, sessions come from an
+        # EXCHANGE calendar, and this module has none. Caught by @shardul0701.
+        # 2019 is correct on all three axes: real consecutive sessions, the
+        # weekdays match the label, and July 4 genuinely falls on a Thursday.
+        ("July 4th on Thu   Wed->Fri", "2019-07-03", "2019-07-05", False),
     ]
 
     @staticmethod
