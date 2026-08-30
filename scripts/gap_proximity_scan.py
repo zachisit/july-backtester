@@ -19,6 +19,7 @@ Usage:
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -55,12 +56,62 @@ def read_ohlcv(path: Path) -> pd.DataFrame | None:
     return out
 
 
-def resolve(sym: str, pdir: Path) -> Path | None:
-    p = pdir / f"{sym}.parquet"
-    if p.exists():
-        return p
-    hits = sorted(pdir.glob(f"{sym}-*.parquet"))   # delisted: TICKER-YYYYMM
-    return hits[-1] if hits else None
+def candidates(sym: str, pdir: Path) -> list[Path]:
+    """Bare file plus date-suffixed delisted files (TICKER-YYYYMM).
+
+    The regex guard stops a share-class hyphen (BF-B, BRK-B) from matching the
+    date-suffix pattern.
+    """
+    pat = re.compile(rf"^{re.escape(sym)}-\d{{6}}\.parquet$")
+    out = []
+    bare = pdir / f"{sym}.parquet"
+    if bare.exists():
+        out.append(bare)
+    out += sorted(p for p in pdir.glob(f"{sym}-*.parquet") if pat.match(p.name))
+    return out
+
+
+def resolve(sym: str, pdir: Path, span: tuple | None = None) -> Path | None:
+    """Pick the file that best covers the symbol's own trade window.
+
+    Preferring the bare file unconditionally is wrong when a ticker has been
+    reused: the sparse successor outlives the real company, so any rule that
+    scores on span or latest-end date picks the junk series every time. SSCC is
+    the worked example -- 63 bars/yr of six-figure quotes running to 2025
+    beating the real 252 bars/yr series that ends at the 2011 acquisition
+    (zachisit/july-backtester#350, found by @shardul0701 in the merged
+    provider's _resolve; this harness had the same shape).
+
+    Scores on bars actually present inside the window, then on overall density.
+    A window sitting entirely after the real company's delisting correctly
+    resolves to the bare file, because there only the bare file has bars --
+    that is an honest answer rather than a wrong one.
+
+    span=None preserves the old behaviour for callers without a window.
+    """
+    cands = candidates(sym, pdir)
+    if not cands:
+        return None
+    if span is None:
+        # No window to score against -- preserve the original behaviour exactly:
+        # bare file if present, else the most recent delisted stamp.
+        bare = pdir / f"{sym}.parquet"
+        return bare if bare.exists() else cands[-1]
+    if len(cands) == 1:
+        return cands[0]
+
+    lo, hi = span
+    best, best_key = None, (-1, -1.0)
+    for p in cands:
+        d = read_ohlcv(p)
+        if d is None or d.empty:
+            continue
+        in_win = int(((d.index >= lo) & (d.index <= hi)).sum())
+        yrs = max((d.index.max() - d.index.min()).days / 365.25, 1e-9)
+        key = (in_win, len(d) / yrs)
+        if key > best_key:
+            best, best_key = p, key
+    return best or cands[0]
 
 
 def qualifying(df: pd.DataFrame, move_th: float, vol_mult: float) -> pd.Series:
@@ -112,18 +163,29 @@ def main() -> None:
     print(f"  symbols: {tr['Symbol'].nunique()}")
 
     # --- load prices once per symbol --------------------------------------
-    px, missing = {}, []
+    px, missing, multi = {}, [], []
     for s in sorted(tr["Symbol"].unique()):
-        p = resolve(str(s), pdir)
+        sym = str(s)
+        sub = tr[tr["Symbol"].astype(str) == sym]
+        lo = sub["EntryDate"].min()
+        hi = sub["ExitDate"].max()
+        if pd.isna(hi):
+            hi = sub["EntryDate"].max()
+        if len(candidates(sym, pdir)) > 1:
+            multi.append(sym)
+        p = resolve(sym, pdir, (lo, hi))
         d = read_ohlcv(p) if p else None
         if d is None or d.empty:
-            missing.append(str(s))
+            missing.append(sym)
         else:
-            px[str(s)] = d
+            px[sym] = d
     print(f"  price data: {len(px)}/{tr['Symbol'].nunique()} symbols"
           + (f"  MISSING: {missing[:10]}" if missing else ""))
     if missing:
         print("  ^ trades on these symbols cannot be scanned and are excluded below")
+    if multi:
+        shown = ", ".join(multi[:8]) + (" ..." if len(multi) > 8 else "")
+        print(f"  multi-candidate symbols resolved by window coverage: {len(multi)}  [{shown}]")
 
     scan = tr[tr["Symbol"].astype(str).isin(px)].reset_index(drop=True)
 
@@ -193,7 +255,8 @@ def main() -> None:
         if mv.notna().any():
             i = mv.idxmax()
             biggest.append({"sym": r["Symbol"], "entry": r["EntryDate"].date(),
-                            "max_move": float(mv.loc[i]), "vol_x": float(vr.loc[i]) if pd.notna(vr.loc[i]) else np.nan,
+                            "max_move": float(mv.loc[i]),
+                            "vol_x": float(vr.loc[i]) if pd.notna(vr.loc[i]) else np.nan,
                             "when": (i - r["EntryDate"]).days, "profit": r["Profit"]})
     bg = pd.DataFrame(biggest)
     if len(bg):
