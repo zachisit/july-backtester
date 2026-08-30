@@ -193,6 +193,39 @@ class TestPeakExposure:
         assert r["open_positions"] == r["peak_concurrency"]
         assert r["entry_notional"] == pytest.approx(15_000.0)
 
+    def test_profit_realised_on_the_peak_date_reaches_the_equity_floor(self, tmp_path):
+        """The complement of the test above, and it has to be its own fixture.
+
+        `still_open` uses `ExitDate > peak_date` and `realized` uses
+        `ExitDate <= peak_date` -- two boundaries on the same instant. A trade
+        exiting exactly on the peak date is not open AND its profit is already
+        realised. Break the second and that trade falls out of both sides: not
+        counted as exposure, and its P&L never reaches the floor.
+
+        The previous test reaches the branch but cannot detect this, because
+        the trade exiting on the peak date carries no profit to lose. Here it
+        carries $20,000, and mutating `<=` to `<` flips levered False -> True
+        on a book that is not levered -- the one output of this script anyone
+        acts on. Found by @zachisit reviewing the first version of this file.
+        """
+        p = _write_log(tmp_path, [
+            {"EntryDate": "2024-01-02", "ExitDate": "2024-01-05",
+             "Shares": 1000, "EntryPrice": 50.0, "Profit": 20_000.0},
+            {"EntryDate": "2024-01-03", "ExitDate": None,
+             "Shares": 800, "EntryPrice": 50.0, "Profit": 0.0},
+            {"EntryDate": "2024-01-05", "ExitDate": None,
+             "Shares": 700, "EntryPrice": 50.0, "Profit": 0.0},
+            {"EntryDate": "2024-01-05", "ExitDate": None,
+             "Shares": 700, "EntryPrice": 50.0, "Profit": 0.0},
+        ])
+        r = cl.peak_exposure(cl.load_trades(p), 100_000.0)
+        assert r["peak_concurrency"] == 3
+        assert r["entry_notional"] == pytest.approx(110_000.0)
+        assert r["realized_to_date"] == pytest.approx(20_000.0)
+        assert r["equity_floor"] == pytest.approx(120_000.0)
+        assert r["gross_exposure_pct"] == pytest.approx(91.666667, abs=1e-4)
+        assert r["levered"] is False
+
     def test_missing_columns_raise_a_named_error(self, tmp_path):
         p = _write_log(tmp_path, [{"EntryDate": "2020-01-02", "Shares": 1}])
         with pytest.raises(KeyError, match="missing required columns"):
