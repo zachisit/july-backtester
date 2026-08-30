@@ -307,6 +307,18 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
         # every move backwards: a +10,000% jump prints as -99%, which still
         # trips the 20% threshold but reads as 0 decades and escapes the
         # magnitude escalation entirely. Same defect CHECK 8 was fixed for.
+        # PANDAS VERSION NOTE (#371/#378). `pct_change()` below pads across
+        # interior NaNs on pandas 2.x and does NOT on 3.x, where the default
+        # became fill_method=None. The pad is LOAD-BEARING: it is what charges
+        # a step spanning a NaN run, and the deprecation's own suggested fix
+        # silently drops that jump.
+        #
+        # Inert on the merged corpus, measured rather than assumed: the only
+        # NaNs anywhere in it are TRAILING (CVS's two capitalised-set bars),
+        # and a trailing NaN bridges nothing, so pad and no-pad agree by
+        # construction. NOT inert for CSV or provider frames, where a blank
+        # cell is an ordinary way to get an interior NaN -- and `close` is
+        # never dropna()'d, so nothing here guards it.
         close = named["Close"]
         if isinstance(close.index, pd.DatetimeIndex):
             close = close.sort_index()
@@ -422,7 +434,27 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
             missing = expected_bars - total_bars
             pct = (missing / expected_bars) * 100
             issues.append(f"Missing bars: {missing} gaps ({pct:.1f}% of expected)")
-            demerits += min(20, int(pct / 2))  # 1 point per 2% missing
+            # CAP 30, NOT 20 (issue #378). At 20 this term saturated at
+            # exactly 40% missing, and `100 - 20 == 80` is the gate -- so a
+            # series missing >=40% of its expected bars, with nothing else
+            # wrong, scored EXACTLY 80.0 by construction and passed. The term
+            # could not charge a 21st point, so the score could not move off
+            # the gate however bad the coverage got: 26 series missing >=90%
+            # of their history scored 80.0 and passed, indistinguishable from
+            # one missing 60%.
+            #
+            # Corpus census (@shardul0701 on #378): 1,740 series sit at exactly
+            # 80.0, ALL of them carrying this term. Raising the cap to 30
+            # disperses 1,141 of the 1,231 missing-only cohort -- 92.7% -- and
+            # touches at most 7 series in the >=1260-bar slice a real universe
+            # could hold.
+            #
+            # The residue is structural, not a tuning miss: 90 remain at 80.0
+            # in the 40-42% band, where int(pct / 2) is 20 under ANY cap >= 20.
+            # That is why 45 and uncapped also leave 90 and buy nothing at the
+            # gate, and why 30 is the right stopping point rather than a
+            # compromise.
+            demerits += min(30, int(pct / 2))  # 1 point per 2% missing
 
     # --- CHECK 7: floor-tick prices (issue #350) ---
     # Bars printing EXACTLY 1e-06, the bottom of the provider's tick grid. See
