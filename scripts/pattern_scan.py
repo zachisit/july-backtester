@@ -900,6 +900,35 @@ def main():
     spy_close = data.pop("SPY", pd.DataFrame()).get("Close")
     log.info("Loaded data for %d symbols", len(data))
 
+    # A non-empty universe that loads NO data is never a legitimate outcome --
+    # but it produced `0 candidates`, exit 0, and a written HTML report, which
+    # reads as "no setups today" rather than "the data source is empty".
+    #
+    # The live cause is that `parquet_data` is a SUBMODULE and is uninitialised
+    # in a fresh clone / CI / new worktree. PARQUET_DIR (:37) then points at a
+    # missing directory, fetch_parquet returns {}, and nothing says so. The
+    # default `--source parquet` therefore fails silently everywhere the
+    # submodule has not been checked out.
+    #
+    # Fail loudly, name the source and the path, and name the fix -- a scanner
+    # whose entire output is a function of its input must not report a clean
+    # run on no input.
+    if tickers and not data:
+        log.error("Loaded data for 0 of %d symbols from source=%r.",
+                  len(tickers), args.source)
+        if args.source == "parquet":
+            log.error("  PARQUET_DIR = %s", PARQUET_DIR)
+            if not os.path.isdir(PARQUET_DIR):
+                log.error("  That directory does not exist. `parquet_data` is a "
+                          "submodule; initialise it with:")
+                log.error("    git submodule update --init parquet_data")
+            else:
+                log.error("  Directory exists but yielded no frames -- check it "
+                          "contains <SYMBOL>.parquet files.")
+            log.error("  Or re-run with `--source yahoo`, which needs no key "
+                      "and no submodule.")
+        return 2
+
     cands = []
     for sym, df in sorted(data.items()):
         adv = None
@@ -953,4 +982,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main() returns a status code (2 on an empty load). Calling it bare
+    # discards that -- the guard printed its ERROR block and the process still
+    # exited 0, so anything checking the exit code saw a clean run.
+    raise SystemExit(main())
