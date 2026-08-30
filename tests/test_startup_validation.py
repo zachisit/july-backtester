@@ -36,6 +36,9 @@ import sys
 
 import pytest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _wrapper_harness as _harness  # noqa: E402
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MAIN = os.path.join(PROJECT_ROOT, "main.py")
 
@@ -70,61 +73,22 @@ def _run_main(*args, extra_env=None):
 
 
 def _run_with_config_patch(tmp_path, patches: dict, cli_args=("--dry-run",), extra_env=None):
+    """Delegates to tests/_wrapper_harness.py (#366).
+
+    This module previously hand-rolled the wrapper. Both invariants it
+    must hold -- the __main__ guard and encoding="utf-8" -- were violated
+    in production and fixed four times by hand; the second fix reached
+    six of seven call sites, and the seventh was in this file.
     """
-    Generate a wrapper script in tmp_path that mutates specific CONFIG keys
-    then calls main.main(). Passes --dry-run by default so tests that survive
-    S1+S2 exit cleanly at the dry-run gate rather than attempting data fetches.
-
-    Parameters
-    ----------
-    patches   : dict of {config_key: value} to inject via config.CONFIG[key]=value
-    cli_args  : CLI arguments forwarded to main() via sys.argv (default: --dry-run)
-    extra_env : extra env var overrides (POLYGON_API_KEY pre-set to "test-key")
-    """
-    # Build the wrapper as a flat list of un-indented lines to avoid
-    # IndentationError when patch_lines spans multiple lines inside an f-string.
-    lines = [
-        "import sys",
-        f"sys.path.insert(0, {repr(PROJECT_ROOT)})",
-        "import config",
-    ]
-    for k, v in patches.items():
-        lines.append(f"config.CONFIG[{repr(k)}] = {repr(v)}")
-    lines.append("import main")
-    # main.main() MUST sit under a __main__ guard (#362): main.py builds a
-    # multiprocessing Pool, and under the spawn start method every worker
-    # re-imports the parent __main__ — this wrapper — so an unguarded call
-    # re-enters main.main() during bootstrap and deadlocks the parent. Safe
-    # here only while every call site passes --dry-run and exits before the
-    # Pool; the first one that does not would hang the suite. The CONFIG
-    # patches stay at module scope so spawn children re-apply them.
-    lines.append('if __name__ == "__main__":')
-    lines.append(f"    sys.argv = {repr(['main.py'] + list(cli_args))}")
-    lines.append("    main.main()")
-
-    wrapper = tmp_path / "run_patched.py"
-    wrapper.write_text("\n".join(lines), encoding="utf-8")
-
-    env = os.environ.copy()
-    env["POLYGON_API_KEY"] = "test-key"   # satisfy S1 by default
+    # This module's S1 guard fires before anything it wants to test, so the key
+    # is pre-set by default and extra_env can still override it (a couple of
+    # tests deliberately blank it to exercise S1 itself). Kept at the call site
+    # rather than in the shared harness: it is this module's convention, not a
+    # property of running a wrapper.
+    env = {"POLYGON_API_KEY": "test-key"}
     if extra_env:
         env.update(extra_env)
-
-    return subprocess.run(
-        [sys.executable, str(wrapper)],
-        capture_output=True,
-        text=True,
-        # main.py:27-28 reconfigures its streams to UTF-8; the locale default
-        # is cp1252 on Windows, which cannot decode the U+2501 in its banner.
-        # subprocess raises inside _readerthread, so stderr comes back None and
-        # every assertion becomes a TypeError. ASCII-only --dry-run output makes
-        # this benign here TODAY, which is incidental, not structural (#362).
-        encoding="utf-8",
-        errors="replace",
-        env=env,
-        cwd=PROJECT_ROOT,
-        timeout=120,
-    )
+    return _harness.run_wrapper(tmp_path, patches, cli_args, env=env)
 
 
 # ---------------------------------------------------------------------------
