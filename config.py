@@ -212,6 +212,32 @@ CONFIG = {
     "entry_priority": "alphabetical",
     "entry_random_seed": 42,
 
+    # Whether a bar qualifies as an ENTRY at all.
+    # "level" (default) — enter on any bar whose signal reads the entry value.
+    #                     Strategies emitting a forward-filled state series make
+    #                     every hold bar entry-eligible under this mode.
+    # "edge"            — enter only on the transition INTO the entry state,
+    #                     matching how the live scanner triggers. Opt-in: the
+    #                     default is unchanged so existing results are stable.
+    #
+    # TWO CONSEQUENCES OF "edge" BEYOND THE LATE-ENTRY FIX, both intended:
+    #   * A STOPPED-OUT POSITION DOES NOT RE-ENTER while the state signal is
+    #     still held. Level mode re-enters on the next bar (the series still
+    #     reads 1); edge mode waits for a transition that will not come until
+    #     the strategy actually re-signals. A live scanner triggering on
+    #     `last == 1 and prev != 1` behaves the same way, which is the point —
+    #     but on a stopped strategy this moves results more than the capacity
+    #     path this option was written for.
+    #   * ON A CONTESTED BOOK IT RE-PLANS, IT DOES NOT ONLY SUBTRACT. Skipping
+    #     a late entry frees the capital that entry would have consumed, and
+    #     that capital goes to whatever else is competing on the bar — so a
+    #     surviving trade can change SIZE, and a symbol can end up with MORE
+    #     trades than level mode gave it. Measured over 80 randomised contested
+    #     books (5 symbols x 120 bars): 20 of the 80 had at least one symbol
+    #     trading more often under edge (25 of 400 book-symbol cells), while
+    #     book totals fell 1564 -> 1434. Net subtraction, but not a filter.
+    "entry_trigger": "level",
+
     # ============================================================
     # SECTION 21: VERBOSE SUMMARY TABLE
     # ============================================================

@@ -153,6 +153,7 @@ KNOWN_KEYS: set[str] = {
     # SECTION 27: Deterministic Entry Queue
     "entry_priority",
     "entry_random_seed",
+    "entry_trigger",
     "nq100_pit_path",
     # Merged Norgate+Polygon provider (merged_data_root registered in SECTION 1)
     "merged_quality_filter_enabled",
@@ -226,6 +227,20 @@ def validate_config(config: dict) -> list[str]:
                    f"be DROPPED at run time with a single ERROR line")
             warnings.append(msg)
             logger.warning(msg)
+
+    # Value-level check for entry_trigger. Registering the key without its
+    # DOMAIN would leave the worst possible gap for this particular setting: a
+    # typo like "edges" falls back to "level", which is the exact behaviour the
+    # option exists to switch OFF -- so the run silently produces the unfixed
+    # numbers while the config file says otherwise. Same precedent as
+    # universe_rebase and smoothness_profile above.
+    et = config.get("entry_trigger")
+    if et is not None and str(et).lower() not in {"level", "edge"}:
+        msg = (f"WARNING: entry_trigger '{et}' is not a known mode "
+               f"(expected 'level' or 'edge') -- the run will fall back to "
+               f"'level', i.e. entry on ANY bar holding the signal value")
+        warnings.append(msg)
+        logger.warning(msg)
 
     return warnings
 
