@@ -11,6 +11,10 @@ from helpers import intrabar as _intrabar
 
 logger = logging.getLogger(__name__)
 
+# Sizing methods already warned about on the short side (#372). Module-level so
+# the banner is once per process rather than once per portfolio per strategy.
+_WARNED_SHORT_SIZING = set()
+
 
 def _hold_duration_days(entry_dt, exit_dt):
     """Hold duration in days, preserving sub-day precision for intraday trades.
@@ -201,9 +205,19 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # neighbouring defects in this file were all found.
     _sizing_method_cfg = CONFIG.get("position_sizing_method", "fixed")
     if _sizing_method_cfg not in ("fixed", "fixed_contracts"):
-        _has_shorts = any((s < 0).any() for s in signals.values()
+        # `-2` is the ONLY short entry. `-1` is exit-long as well as
+        # cover-short, and `-1 < s < 0` is a scaled partial exit, so a guard
+        # keyed on `s < 0` is true for any long book that closes a position:
+        # 39 of the signal functions in helpers/indicators.py emit -1 and
+        # exactly 2 emit -2. `s < 0` would fire on essentially every run.
+        _has_shorts = any((s == -2).any() for s in signals.values()
                           if s is not None and len(s))
-        if _has_shorts:
+        # Once per method per process, not once per run_portfolio_simulation
+        # call -- that is once per portfolio per strategy, so a 20-strategy
+        # book prints 20 identical lines. Workers are separate processes and
+        # each keeps its own set, which is the intended granularity.
+        if _has_shorts and _sizing_method_cfg not in _WARNED_SHORT_SIZING:
+            _WARNED_SHORT_SIZING.add(_sizing_method_cfg)
             logger.warning(
                 "position_sizing_method=%r is honoured on the LONG side only; "
                 "equity short entries always size as allocation/fill (#372). "

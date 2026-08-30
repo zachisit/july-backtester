@@ -337,24 +337,31 @@ class TestRiskParitySizesOffTheSignalBarStop:
     CFG = {"type": "signal_bar", "buffer": 0.0}
 
     @staticmethod
-    def _sized(stop_config, sizing_method):
+    def _sized(stop_config, sizing_method, lead_low=None):
         from unittest.mock import patch
         import helpers.portfolio_simulations as ps
         # Signal bar Low = 90 against a ~100 entry: a 10% stop distance, which
         # is deliberately far from the 3% a 3xATR proxy would produce here
         # (ATR_14 = 1.0), so the two are not confusable.
-        df = _frame([
+        rows = [
             ("2024-01-02", 100, 105,  90, 100),   # signal bar, Low = 90
             ("2024-01-03", 100, 101,  99, 100),   # fill here under open-exec
             ("2024-01-04", 100, 101,  99, 100),
             ("2024-01-05", 100, 101,  99, 100),
             ("2024-01-08", 100, 101,  99, 100),
-        ])
+        ]
+        sig = [1, 0, 0, 0, 0]
+        if lead_low is not None:
+            # One bar BEFORE the signal bar, with a distinct Low, so that
+            # `bars_back=1` anchors somewhere the default cannot reach.
+            rows.insert(0, ("2024-01-01", 100, 105, lead_low, 100))
+            sig.insert(0, 0)
+        df = _frame(rows)
         with patch.dict(ps.CONFIG, {"position_sizing_method": sizing_method,
                                     "target_risk_per_trade": 0.02}):
             res = ps.run_portfolio_simulation(
                 portfolio_data={"TEST": df},
-                signals={"TEST": pd.Series([1, 0, 0, 0, 0], index=df.index)},
+                signals={"TEST": pd.Series(sig, index=df.index)},
                 initial_capital=100_000.0, allocation_pct=0.5,
                 spy_df=None, vix_df=None, tnx_df=None,
                 stop_config=stop_config,
@@ -390,6 +397,40 @@ class TestRiskParitySizesOffTheSignalBarStop:
         _, risk_per_share = out
         assert risk_per_share == pytest.approx(10.0, rel=0.05), risk_per_share
 
+    def test_sizing_honours_bars_back(self):
+        """`bars_back` moves the anchor, so it must move the SIZE.
+
+        The sizing branch walks back through `_walk_back()` exactly as the stop
+        path does. Hardcoding the walk to 0 leaves every other assertion in
+        this class green -- they all run at the default -- which is precisely
+        the #324 shape: sizing and the stop path holding two beliefs about one
+        stop, with nothing to notice.
+
+        Lead bar Low = 80 against a 100.05 fill -> a 20% distance, double the
+        default's 10%, so the two cannot be confused. @shardul0701 on #375.
+        """
+        cfg = {"type": "signal_bar", "buffer": 0.0, "bars_back": 1}
+        out = self._sized(cfg, "risk_parity", lead_low=80)
+        if out is None:
+            pytest.skip("no trade produced")
+        shares, risk_per_share = out
+        assert risk_per_share == pytest.approx(20.05, rel=0.02), risk_per_share
+        assert shares == pytest.approx(99.95, rel=0.02), shares
+
+    def test_sizing_honours_buffer(self):
+        """`buffer` widens the level, so it must widen the risk and shrink the
+        size. Hardcoding it to 0.0 survives every other test in this class.
+
+        Low 90 with a 5% buffer -> 85.50, a 14.5% distance off the raw 100.
+        """
+        cfg = {"type": "signal_bar", "buffer": 0.05}
+        out = self._sized(cfg, "risk_parity")
+        if out is None:
+            pytest.skip("no trade produced")
+        shares, risk_per_share = out
+        assert risk_per_share == pytest.approx(14.55, rel=0.02), risk_per_share
+        assert shares == pytest.approx(137.86, rel=0.02), shares
+
     def test_fixed_sizing_is_unchanged(self):
         """The no-regression half: `fixed` never consulted stop_distance_pct,
         so it must not move."""
@@ -410,6 +451,16 @@ class TestShortSideSizingMethodIsAudible:
     wants its own PR. Until then the gap is at least audible: pinned here so
     nobody removes the warning without replacing it with the fix.
     """
+
+    @pytest.fixture(autouse=True)
+    def _reset_warn_dedup(self):
+        """The banner is deduped once-per-method-per-process, so without this
+        the warn test passes only while it happens to run first. Clearing makes
+        every test in the class independent of collection order."""
+        import helpers.portfolio_simulations as ps
+        ps._WARNED_SHORT_SIZING.clear()
+        yield
+        ps._WARNED_SHORT_SIZING.clear()
 
     def test_a_short_book_with_non_fixed_sizing_warns(self, caplog):
         from unittest.mock import patch
@@ -452,6 +503,44 @@ class TestShortSideSizingMethodIsAudible:
                     stop_config={"type": "none"},
                 )
         assert not any("#372" in r.message for r in caplog.records)
+
+    @pytest.mark.parametrize("label,sig", [
+        ("long entry then long EXIT", [1, 0, -1]),
+        ("long entry then SCALED partial exit", [1, 0, -0.5]),
+    ])
+    def test_a_long_only_book_that_exits_does_not_warn(self, caplog, label, sig):
+        """The discriminator is -2, not "negative".
+
+        `-1` is *exit long* as well as *cover short*, and `-1 < s < 0` is a
+        scaled partial exit (v1.11.0) -- so a guard keyed on `s < 0` is true
+        for any long book the moment it closes a position. An AST walk over
+        helpers/indicators.py counts 39 signal functions emitting -1 against
+        exactly 2 emitting -2, so `s < 0` matches ~95% of the shipped signal
+        logic and is short-specific for none of it.
+
+        `[1, 0, 0]` above is the one long-only shape that does NOT trip it --
+        a book that enters and never exits. These two are the shapes real
+        strategies actually produce. @shardul0701 on #375.
+        """
+        from unittest.mock import patch
+        import logging
+        import helpers.portfolio_simulations as ps
+        df = _frame([
+            ("2024-01-02", 100, 105,  95, 100),
+            ("2024-01-03", 100, 101,  99, 100),
+            ("2024-01-04", 100, 101,  99, 100),
+        ])
+        with patch.dict(ps.CONFIG, {"position_sizing_method": "risk_parity"}):
+            with caplog.at_level(logging.WARNING):
+                ps.run_portfolio_simulation(
+                    portfolio_data={"TEST": df},
+                    signals={"TEST": pd.Series(sig, index=df.index)},
+                    initial_capital=100_000.0, allocation_pct=0.5,
+                    spy_df=None, vix_df=None, tnx_df=None,
+                    stop_config={"type": "none"},
+                )
+        assert not any("#372" in r.message for r in caplog.records), (
+            f"{label}: warned on a long-only book -> {[r.message for r in caplog.records]}")
 
     def test_fixed_sizing_does_not_warn_even_with_shorts(self):
         """`fixed` is honoured identically on both sides, so there is nothing
