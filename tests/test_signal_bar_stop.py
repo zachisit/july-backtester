@@ -542,6 +542,35 @@ class TestShortSideSizingMethodIsAudible:
         assert not any("#372" in r.message for r in caplog.records), (
             f"{label}: warned on a long-only book -> {[r.message for r in caplog.records]}")
 
+    def test_fixed_contracts_DOES_warn_with_shorts(self, caplog):
+        """`fixed_contracts` reads as a fixed method by name and is not one.
+
+        The equity short leg implements neither `fixed_contracts` nor any other
+        non-default method -- it sizes as alloc/fill unconditionally -- so a
+        run configured for 3 contracts takes 3 shares long and ~100 short. That
+        is the WIDEST divergence of the five methods (33x) and it was the one
+        configuration excluded from the banner. @shardul0701 on #381.
+        """
+        from unittest.mock import patch
+        import logging
+        import helpers.portfolio_simulations as ps
+        df = _frame([
+            ("2024-01-02", 100, 105,  95, 100),
+            ("2024-01-03", 100, 101,  99, 100),
+            ("2024-01-04", 100, 101,  99, 100),
+        ])
+        with patch.dict(ps.CONFIG, {"position_sizing_method": "fixed_contracts",
+                                    "fixed_contracts_per_trade": 3}):
+            with caplog.at_level(logging.WARNING):
+                ps.run_portfolio_simulation(
+                    portfolio_data={"TEST": df},
+                    signals={"TEST": pd.Series([-2, 0, 0], index=df.index)},
+                    initial_capital=100_000.0, allocation_pct=0.5,
+                    spy_df=None, vix_df=None, tnx_df=None,
+                    stop_config={"type": "none"})
+        assert any("#372" in r.message or "LONG side only" in r.message
+                   for r in caplog.records), [r.message for r in caplog.records]
+
     def test_fixed_sizing_does_not_warn_even_with_shorts(self):
         """`fixed` is honoured identically on both sides, so there is nothing
         to warn about."""

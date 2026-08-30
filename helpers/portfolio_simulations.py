@@ -204,7 +204,17 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # discovered from a results discrepancy months later, which is how the
     # neighbouring defects in this file were all found.
     _sizing_method_cfg = CONFIG.get("position_sizing_method", "fixed")
-    if _sizing_method_cfg not in ("fixed", "fixed_contracts"):
+    # ONLY `fixed` is excluded. `fixed_contracts` was on this list because it
+    # reads as a fixed method by name -- but the equity short leg does not
+    # implement it either, and it is the WIDEST divergence of the five:
+    #
+    #                    method   long shares   short shares
+    #                     fixed         99.95         100.05   legs agree
+    #           fixed_contracts          3.00         100.05   33x, and silent
+    #
+    # So it was the one configuration that diverges most and got no banner.
+    # @shardul0701 on #381.
+    if _sizing_method_cfg not in ("fixed",):
         # `-2` is the ONLY short entry. `-1` is exit-long as well as
         # cover-short, and `-1 < s < 0` is a scaled partial exit, so a guard
         # keyed on `s < 0` is true for any long book that closes a position:
