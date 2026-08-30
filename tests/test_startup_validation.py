@@ -136,6 +136,11 @@ class TestS1ApiKeyCheck:
             extra_env={"POLYGON_API_KEY": ""},
         )
         combined = result.stdout + result.stderr
+        # The name is an ORDERING claim: S1 fires, and the summary does not.
+        # Asserting only the second half is satisfied by neither happening --
+        # replacing main()'s body with `raise SystemExit(3)` left this and six
+        # siblings green. @shardul0701 on #376.
+        assert "POLYGON_API_KEY" in result.stdout
         assert "RUN SUMMARY" not in combined
 
     def test_s1_fires_before_dry_run_gate(self, tmp_path):
@@ -146,6 +151,7 @@ class TestS1ApiKeyCheck:
             extra_env={"POLYGON_API_KEY": ""},
         )
         combined = result.stdout + result.stderr
+        assert "POLYGON_API_KEY" in result.stdout   # S1 actually fired
         assert "[DRY RUN]" not in combined
 
     # --- Pass case ---
@@ -173,8 +179,12 @@ class TestS1ApiKeyCheck:
         )
         # S1 error message must NOT appear
         assert "POLYGON_API_KEY is not set" not in result.stdout
-        # Returncode must NOT be due to S1 (may be 0 for dry-run or non-zero for other reason)
-        # The definitive signal is the absence of the S1 error string.
+        # ...and execution must have CONTINUED past S1, which absence alone
+        # does not show: a main() that does nothing also prints no S1 error.
+        # The norgate path reaches the U1 summary block (logged to stderr), so
+        # that is the positive evidence S1 was skipped rather than never
+        # reached. @shardul0701 on #376.
+        assert "RUN SUMMARY" in (result.stdout + result.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -333,9 +343,13 @@ class TestS2ErrorReporting:
         """S2 exits before the U1 RUN SUMMARY block is reached."""
         result = _run_with_config_patch(tmp_path, patches={"portfolios": {}})
         combined = result.stdout + result.stderr
+        # S2 actually fired -- otherwise "did not reach the summary" is also
+        # true of a main() that did nothing at all. @shardul0701 on #376.
+        assert "portfolios" in result.stdout.lower()
         assert "RUN SUMMARY" not in combined
 
     def test_s2_fires_before_dry_run_gate(self, tmp_path):
         result = _run_with_config_patch(tmp_path, patches={"portfolios": {}})
         combined = result.stdout + result.stderr
+        assert "portfolios" in result.stdout.lower()   # S2 actually fired
         assert "[DRY RUN]" not in combined

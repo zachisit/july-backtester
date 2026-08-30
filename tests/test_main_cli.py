@@ -129,6 +129,11 @@ class TestMissingApiKey:
             extra_env={"POLYGON_API_KEY": ""},
         )
         combined = result.stdout + result.stderr
+        # The POSITIVE half. Without it the name's ordering claim -- S1 fires,
+        # AND the gate does not -- is satisfied by NEITHER happening: replacing
+        # main()'s whole body with `raise SystemExit(3)` left this green.
+        # @shardul0701 on #376.
+        assert "POLYGON_API_KEY is not set" in result.stdout
         assert "[DRY RUN]" not in combined
 
     def test_run_summary_not_printed(self, tmp_path):
@@ -139,6 +144,8 @@ class TestMissingApiKey:
             extra_env={"POLYGON_API_KEY": ""},
         )
         combined = result.stdout + result.stderr
+        # See test_dry_run_message_not_printed: absence alone is vacuous.
+        assert "POLYGON_API_KEY is not set" in result.stdout
         assert "RUN SUMMARY" not in combined
 
 

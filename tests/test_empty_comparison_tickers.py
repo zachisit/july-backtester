@@ -496,3 +496,64 @@ class TestSubprocessCallSiteHygiene:
         # the wrong behaviour. The floor exists only to catch a walk that
         # silently matches NOTHING, which would make both checks above vacuous.
         assert total >= 1, f"the AST walk found no subprocess.run call sites"
+
+    def test_the_walk_reaches_the_harness(self):
+        """Guards the guard, structurally rather than by magnitude.
+
+        `total >= 1` does not protect the file this consolidation exists to
+        create. The walk does not have to match NOTHING to go blind -- it only
+        has to stop matching the HARNESS, and the three direct main.py
+        invocations keep the count at 3 on their own.
+
+        Demonstrated: adding `and not f.startswith("_")` to _modules() -- the
+        kind of "skip private helpers" edit someone writes without thinking --
+        and then stripping BOTH encoding= and timeout= from the harness's own
+        subprocess.run leaves all three checks GREEN. Restoring _modules()
+        alone, harness still broken, fails two of them. So the hygiene checks
+        work perfectly when the harness is in scope, and nothing kept it there.
+
+        That would have been the FOURTH instance of the pattern this module
+        docstring itemises: keyed on a name one path never used, then a node
+        type the code stopped using, then a line window excluding the line
+        under judgement -- and then a COUNT, which any three unrelated files
+        satisfy. A named file is a structural fact and cannot drift that way.
+
+        @shardul0701 on #376.
+        """
+        seen = {m for m in self._modules() for _ in self._call_sites(m)}
+        assert "_wrapper_harness.py" in seen, (
+            f"the walk did not reach the harness — it saw {sorted(seen)}. "
+            f"The harness owns the ONLY wrapper implementation (#366); if it "
+            f"is out of scope, both hygiene checks above are vacuous for it.")
+
+    def test_tests_use_exactly_one_subprocess_entry_point(self):
+        """The two hygiene checks understand `subprocess.run` and nothing else.
+
+        Invisible to them: `from subprocess import run`, `import subprocess as
+        sp`, and Popen / check_output / check_call / call. There are zero such
+        call sites today, so this is not a live hole -- but the walk now covers
+        the whole directory, which makes an unconventional spelling likelier to
+        arrive later, and handling each variant's kwargs is more work than it
+        is worth.
+
+        So assert the convention instead of policing the alternatives: this
+        fails the day the assumption stops holding, rather than the day it
+        starts costing something. @shardul0701 on #376.
+        """
+        import ast
+        spellings = set()
+        d = os.path.join(PROJECT_ROOT, "tests")
+        for module_name in self._modules():
+            with open(os.path.join(d, module_name), encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call):
+                    continue
+                fn = node.func
+                if (isinstance(fn, ast.Attribute) and isinstance(fn.value, ast.Name)
+                        and fn.value.id == "subprocess"):
+                    spellings.add(fn.attr)
+        assert spellings == {"run"}, (
+            f"tests/ uses subprocess spellings {sorted(spellings)}; the "
+            f"encoding and timeout checks above only understand "
+            f"`subprocess.run`, so anything else is unchecked silently")
