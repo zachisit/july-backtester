@@ -267,7 +267,8 @@ def find_floor(df, piv_lo, atr, window_start, min_touches=2, tol_pct_floor=0.012
     """Cluster pivot lows inside the base into a flat support level (rectangle
     bottom). Mirror of find_ceiling. Returns (level, touch_indices) or None.
     Closes may pierce the floor by up to (1 - hold_grace) — long rectangles
-    routinely wick through their lower boundary.
+    routinely wick through their lower boundary. The hold test spans the whole
+    base (from `window_start`), not merely the touched span.
     """
     n = len(df)
     closes = df["Close"].values
@@ -280,7 +281,14 @@ def find_floor(df, piv_lo, atr, window_start, min_touches=2, tol_pct_floor=0.012
         if len(touches) < min_touches:
             continue
         level = float(np.mean([df["Low"].iloc[i] for i in touches]))
-        if (closes[min(touches):n] < level * hold_grace).any():
+        # Veto over the WHOLE base, not just from the first floor touch. The
+        # candidate population is selected from `window_start` (`cand`, above),
+        # so anchoring the hold test at min(touches) leaves everything between
+        # the base start and the first touch unchecked -- one landmark for the
+        # population, a different one for the test applied to it. On MDLZ that
+        # was 112 bars containing a close 9.2% under the level.
+        # min(window_start, ...) because `cand` admits pivots at window_start-5.
+        if (closes[min(window_start, min(touches)):n] < level * hold_grace).any():
             continue
         key = (len(touches), max(touches) - min(touches))
         if best is None or key > best[0]:
