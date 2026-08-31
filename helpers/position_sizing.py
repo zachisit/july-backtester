@@ -2,11 +2,27 @@
 
 Position sizing algorithms for portfolio risk management.
 
-Supports 4 methods:
+Supports 6 methods:
 1. Fixed % allocation (current default)
 2. Kelly Criterion (optimal growth)
 3. Volatility parity (inverse ATR)
 4. Risk parity (equal $ risk per position)
+5. Risk-percent capped (risk a % of CURRENT equity, hard-capped contract count)
+6. Fixed contracts (a constant count, never equity-scaled)
+
+Methods 5 and 6 were implemented inline in ``portfolio_simulations.py`` --
+twice each, on the long path and again on the futures-short path -- and never
+reached this module at all, so ``calculate_position_size`` answered both with
+the "Unknown position sizing method" warning despite both being documented,
+validated ``KNOWN_KEYS`` values (#384, part of #381).
+
+Stop distance is passed in POINTS (``stop_distance_points``), not as a fraction
+of price. A fraction carries an implicit anchor and the engine builds it with a
+different denominator per stop type, so the fraction is only half a computation
+finished at the call site; points are self-sufficient once paired with
+``point_value``. ``_risk_parity`` still accepts the legacy
+``stop_distance_pct`` -- see its docstring for why the engine has not been
+switched over to points for that method yet.
 """
 
 from __future__ import annotations
@@ -14,6 +30,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
@@ -37,7 +54,8 @@ def calculate_position_size(
     Parameters
     ----------
     method : str
-        Position sizing method: "fixed", "kelly", "vol_parity", "risk_parity"
+        Position sizing method: "fixed", "kelly", "vol_parity", "risk_parity",
+        "risk_pct_capped", "fixed_contracts"
     equity : float
         Current total portfolio equity
     price : float
@@ -50,6 +68,7 @@ def calculate_position_size(
         Method-specific parameters:
         - Kelly: win_rate, avg_win, avg_loss
         - Risk parity: stop_distance_pct
+        - Risk-pct capped: stop_distance_points, point_value
 
     Returns
     -------
@@ -78,6 +97,12 @@ def calculate_position_size(
 
     elif method == "risk_parity":
         return _risk_parity(equity, price, symbol_data, config, **kwargs)
+
+    elif method == "risk_pct_capped":
+        return _risk_pct_capped(equity, config, **kwargs)
+
+    elif method == "fixed_contracts":
+        return _fixed_contracts(config)
 
     else:
         logger.warning(
@@ -197,8 +222,27 @@ def _risk_parity(equity: float, price: float, symbol_data: pd.DataFrame, config:
     hitting the stop would lose `target_risk_per_trade` of equity.
 
     shares = (equity * target_risk) / (price * stop_distance_pct)
+
+    Accepts either ``stop_distance_points`` (the module's primitive) or the
+    legacy ``stop_distance_pct``; points win when both are given and are
+    converted here against ``price``.
+
+    The engine still feeds this method ``stop_distance_pct``, NOT points, and
+    #384 deliberately did not switch it. ``portfolio_simulations.py`` builds
+    that fraction with a different denominator per stop type -- native for
+    ``percentage``, ``Close`` at the signal bar for the ATR family,
+    ``raw_entry_price`` for ``points`` -- while this function then multiplies
+    back by ``price``, the slipped fill. Converting points against ``price``
+    here therefore agrees with none of those three, so routing risk_parity
+    through points changes share counts on live configurations. That
+    unification is a behaviour change and belongs to #381-D; #384 is a no-op
+    refactor and may not make it.
     """
-    stop_distance_pct = kwargs.get("stop_distance_pct")
+    stop_distance_points = kwargs.get("stop_distance_points")
+    if stop_distance_points and stop_distance_points > 0 and price > 0:
+        stop_distance_pct = stop_distance_points / price
+    else:
+        stop_distance_pct = kwargs.get("stop_distance_pct")
 
     if stop_distance_pct is None or stop_distance_pct <= 0:
         # Fallback: use ATR-based stop if available
@@ -218,6 +262,48 @@ def _risk_parity(equity: float, price: float, symbol_data: pd.DataFrame, config:
     shares = (equity * target_risk) / (price * stop_distance_pct) if stop_distance_pct > 0 else 0.0
 
     return shares
+
+
+def _risk_pct_capped(equity: float, config: dict, **kwargs) -> float:
+    """
+    Risk-percent sizing off CURRENT equity, hard-capped at a contract count.
+
+        contracts = floor(risk_pct_per_trade * equity
+                          / (stop_distance_points * point_value))
+        contracts = clamp(contracts, 0, max_contracts_cap)
+
+    Unlike ``fixed_contracts`` this compounds with account growth -- but only
+    until ``max_contracts_cap`` binds, after which it stops compounding and
+    holds dollar risk constant. That interaction, and the fact that ``floor``
+    and the cap are both contract-shaped concepts applied unconditionally to
+    fractional share counts, is the subject of #381-B and is deliberately
+    preserved byte-for-byte here.
+
+    Returns 0.0 when no stop distance was supplied. That is the pre-existing
+    behaviour of both inline copies; whether "declined to size" should be
+    distinguishable from "sized to zero" is #381-D.
+    """
+    stop_distance_points = kwargs.get("stop_distance_points")
+    point_value = kwargs.get("point_value", 1.0)
+
+    if not stop_distance_points or stop_distance_points <= 0:
+        return 0.0
+
+    risk_budget = max(equity, 0.0) * config.get("risk_pct_per_trade", 0.01)
+    raw_contracts = np.floor(risk_budget / (stop_distance_points * point_value))
+    cap = config.get("max_contracts_cap", 20)
+    return max(0.0, min(raw_contracts, cap))
+
+
+def _fixed_contracts(config: dict) -> float:
+    """
+    A constant contract count on every trade, forever -- never equity-scaled.
+
+    Already a unit count rather than a dollar-notional target, so callers must
+    NOT put it through the point_value / margin conversion that turns the other
+    methods' dollar answers into contracts.
+    """
+    return float(config.get("fixed_contracts_per_trade", 1))
 
 
 def check_portfolio_heat(positions: dict, new_position_risk: float, equity: float, max_heat: float) -> bool:
