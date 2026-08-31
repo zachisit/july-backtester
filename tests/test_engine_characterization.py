@@ -299,6 +299,62 @@ def _scenario(name):
                                  "overrides": {}}},
                 {"type": "percentage", "value": 0.05}, {})
 
+    if name == "equity_short_non_fixed_method":
+        # #386. Frozen BEFORE the change, deliberately, because as the fixture
+        # stood it could not detect that change at all: `short_borrow` is the
+        # only short scenario and it inherits `position_sizing_method: "fixed"`
+        # from _BASE_CFG — the one method whose long and short legs already
+        # agree to the tick. So routing the equity short leg through
+        # calculate_position_size moves nothing in the fixture, and a reviewer
+        # gets a clean diff for a change that alters every non-`fixed` short in
+        # production. (@shardul0701's audit on #386.)
+        #
+        # Mirror image of #384's problem: there the fixture could not detect a
+        # refactor that SHOULD NOT move numbers; here it cannot detect one that
+        # SHOULD.
+        #
+        # A real stop config so the sizing path is reachable, and vol_parity
+        # because its long/short divergence is the largest in the measured
+        # table (999.48 vs 100.05).
+        df = _df([100, 99, 98, 97, 96, 95, 96, 97, 98, 99],
+                 atr=[2.0] * 10)
+        sig = _sig(df, {1: -2, 6: -1})
+        return ({"NNN": df}, {"NNN": sig},
+                {"position_sizing_method": "vol_parity",
+                 "target_risk_per_trade": 0.02,
+                 "max_portfolio_heat": 1.0, "max_pct_adv": 0.0},
+                {"type": "percentage", "value": 0.05}, {})
+
+    if name == "size_mults_both_legs":
+        # #386. `size_mults` is a public parameter of run_portfolio_simulation
+        # that the long path honours and the short path drops. Nothing in-repo
+        # passes it (git grep finds only test_intrabar_wiring.py asserting it
+        # stays None), so it is latent through main.py and live for anything
+        # sizing off an ML probability band — and it had NO regression guard on
+        # either leg until #384 added one.
+        #
+        # Uses the 5th tuple slot, which is `{}` in every other scenario. One
+        # long symbol and one short, both at 0.5x, so the ratio is assertable on
+        # both legs from one frozen fixture.
+        #
+        # EQUITY on purpose: `round_units` floors a futures position to whole
+        # contracts, so 19 x 0.5 lands at 9 rather than 9.5 and an exact-ratio
+        # reading fails for a reason unrelated to size_mults. `fixed` sizing and
+        # heat off for the same reason — at the default 2% target, vol_parity
+        # sizes to ~100% of equity and the cash clamp bites at 1.0x but not at
+        # 0.5x, which also breaks the ratio. Both cost a round on #384's version
+        # of this test.
+        dfl = _df([100, 101, 102, 103, 104, 105, 106, 107])
+        dfs = _df([100, 99, 98, 97, 96, 95, 96, 97])
+        mults_l = pd.Series(0.5, index=dfl.index, dtype=float)
+        mults_s = pd.Series(0.5, index=dfs.index, dtype=float)
+        return ({"LONG": dfl, "SHRT": dfs},
+                {"LONG": _sig(dfl, {1: 1, 6: -1}),
+                 "SHRT": _sig(dfs, {1: -2, 6: -1})},
+                {"max_portfolio_heat": 1.0, "max_pct_adv": 0.0},
+                {"type": "none"},
+                {"size_mults": {"LONG": mults_l, "SHRT": mults_s}})
+
     if name == "risk_pct_capped_points_stop":
         # The futures-native pairing: `points` stop + risk_pct_capped, which
         # long-only took ZERO trades for an entire backtest before #385 closed
@@ -413,6 +469,9 @@ SCENARIOS = [
     # #385 -- the equity path, where the cap and floor no longer apply.
     "risk_pct_capped_equity_uncapped", "risk_pct_capped_ceiling",
     "risk_pct_capped_points_stop",
+    # #386 -- frozen BEFORE the equity-short change, which the fixture could not
+    # otherwise detect at all. See the audit note in the coverage section.
+    "equity_short_non_fixed_method", "size_mults_both_legs",
 ]
 
 
