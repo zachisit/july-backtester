@@ -408,3 +408,110 @@ class TestLongAndShortShareTheFunction:
             "risk_pct_capped arithmetic is back in the engine")
         assert "fixed_contracts_per_trade" not in src, (
             "fixed_contracts arithmetic is back in the engine")
+
+
+# ---------------------------------------------------------------------------
+class TestEngineFeedsRiskParityAFractionBehaviourally:
+    """Behavioural teeth for `test_engine_still_feeds_risk_parity_a_fraction`.
+
+    That test greps the engine source for `sizing_kwargs["stop_distance_pct"]`
+    — and the string it matches is not the line it is guarding. The SAME literal
+    appears on the risk_pct_capped heat side-output line, so the grep is
+    satisfied by a line in a different method entirely. Measured, not argued:
+    rewriting the `points` branch to feed `stop_distance_points` instead —
+    which silently moves the fraction's denominator from `raw_entry_price` to
+    the slipped fill inside `_risk_parity` — passed the ENTIRE suite,
+    2725 passed / 0 failed.
+
+    The grep test is kept as a cheap tripwire for wholesale deletion, but it is
+    not the guard. This class is: it observes what the engine actually hands the
+    sizing function rather than what the file contains, across every stop type
+    that derives a fraction.
+
+    #384 accepts points as the primitive but deliberately does NOT switch the
+    engine over for risk_parity — the fraction is built with a different
+    denominator per stop type, so one conversion agrees with none of them and
+    live share counts move. That is #381-D's call. Found by the adversarial QA
+    pass over this branch.
+    """
+
+    FRACTION_DERIVING_STOPS = {
+        "percentage": {"type": "percentage", "value": 0.05},
+        "trailing_atr": {"type": "trailing_atr", "stop_mult": 1.0,
+                         "trail_mult": 1.0, "t1_mult": 2.0, "point_cap": 60,
+                         "floor": "breakeven"},
+        "atr": {"type": "atr", "multiplier": 2.0},
+        "points": {"type": "points", "value": 5.0},
+        "signal_bar": {"type": "signal_bar", "buffer": 0.005},
+    }
+
+    @pytest.mark.parametrize("stop_key", sorted(FRACTION_DERIVING_STOPS))
+    def test_risk_parity_is_handed_a_fraction_not_points(self, stop_key):
+        from unittest.mock import patch
+        import helpers.portfolio_simulations as ps
+
+        seen = []
+        real = ps.calculate_position_size
+
+        def _spy(**kwargs):
+            if kwargs.get("method") == "risk_parity":
+                seen.append(dict(kwargs))
+            return real(**kwargs)
+
+        df = _frame(1000.0)
+        sig = pd.Series(0, index=df.index, dtype=int)
+        sig.iloc[2], sig.iloc[9] = 1, -1
+        cfg = {**_FUT_CFG, "position_sizing_method": "risk_parity"}
+        with patch.dict("config.CONFIG", cfg, clear=False):
+            with patch.object(ps, "calculate_position_size", _spy):
+                ps.run_portfolio_simulation(
+                    portfolio_data={"AAA": df}, signals={"AAA": sig},
+                    initial_capital=100_000.0, allocation_pct=0.10,
+                    spy_df=None, vix_df=None, tnx_df=None,
+                    stop_config=self.FRACTION_DERIVING_STOPS[stop_key],
+                )
+
+        assert seen, "risk_parity never reached calculate_position_size"
+        call = seen[0]
+        assert "stop_distance_points" not in call, (
+            "engine fed risk_parity POINTS for a %s stop; the fraction's "
+            "denominator silently became the slipped fill (#381-D, not #384)"
+            % stop_key)
+        frac = call.get("stop_distance_pct")
+        assert frac is not None and frac > 0, (
+            "engine derived no stop fraction for a %s stop, so risk_parity fell "
+            "through to the 3xATR proxy" % stop_key)
+
+
+# ---------------------------------------------------------------------------
+class TestModuleDefaultsAreLive:
+    """`_risk_pct_capped`'s three `config.get(...)` defaults were unpinned.
+
+    Every in-repo caller passes all three keys explicitly, so mutating any
+    default survived the whole targeted sizing suite. The #384 commit message
+    already flagged the `max_contracts_cap` one as a VACUOUS mutant and then
+    left it uncovered — noticing a gap is not closing it.
+
+    Direct module calls are exactly the usage #384 exists to enable (the method
+    was unreachable through this function before), so these defaults are public
+    surface, not dead parameters. Found by the adversarial QA pass.
+    """
+
+    def test_max_contracts_cap_defaults_to_twenty(self):
+        cfg = {"risk_pct_per_trade": 0.01}          # cap omitted
+        assert _risk_pct_capped(100_000.0, cfg, stop_distance_points=1.0,
+                                point_value=1.0) == 20
+
+    def test_risk_pct_per_trade_defaults_to_one_percent(self):
+        cfg = {"max_contracts_cap": 100_000}        # risk pct omitted
+        # 1% of 100k = $1,000 budget / $10 per unit = 100 units
+        assert _risk_pct_capped(100_000.0, cfg, stop_distance_points=10.0,
+                                point_value=1.0) == pytest.approx(100.0)
+
+    def test_point_value_defaults_to_one(self):
+        cfg = {"risk_pct_per_trade": 0.01, "max_contracts_cap": 100_000}
+        omitted = _risk_pct_capped(100_000.0, cfg, stop_distance_points=10.0)
+        explicit = _risk_pct_capped(100_000.0, cfg, stop_distance_points=10.0,
+                                    point_value=1.0)
+        assert omitted == pytest.approx(explicit)
+        assert omitted == pytest.approx(100.0)
