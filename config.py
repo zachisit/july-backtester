@@ -284,6 +284,39 @@ CONFIG = {
     # 1.0 = no limit (allow full portfolio risk)
     "max_portfolio_heat": 0.10,
 
+    # --- "risk_pct_capped" method (issue #385) ---------------------------
+    # These three existed only in config_validator.KNOWN_KEYS, so the
+    # CONFIG.get(..., default) in helpers/position_sizing.py always applied
+    # and a user had no documented dial. Listed here with their real defaults.
+
+    # Fraction of CURRENT equity to risk per trade, measured through the
+    # actual stop distance. Unlike target_risk_per_trade (used by vol_parity /
+    # risk_parity, which derive their own distance), this one is delivered
+    # exactly whenever it is reachable -- see the ceiling below.
+    "risk_pct_per_trade": 0.01,
+
+    # Hard ceiling on the CONTRACT count. Applies to MARGINED instruments
+    # (futures) only -- it is a contract count, and applying it to a fractional
+    # share count was a unit error that pinned equities at a flat 20 shares
+    # regardless of price, stop width or account size (#385). The integer
+    # floor() travels with it and is gated the same way.
+    "max_contracts_cap": 20,
+
+    # Notional ceiling for risk_pct_capped on UNMARGINED instruments
+    # (equities), as a fraction of equity. 1.0 = no leverage.
+    #
+    # This is deliberately NOT allocation_per_trade. Required notional is
+    # risk_pct_per_trade / stop_frac of equity, so an allocation ceiling of
+    # 0.10 would bind for any stop tighter than 10% -- nearly all of them --
+    # and deliver ~0.2-0.5% against a configured 1%, which is the same defect
+    # the cap gating removes, wearing a different number. At 1.0 the ceiling
+    # binds if and only if stop_frac < risk_pct_per_trade, i.e. exactly when
+    # the budget is unreachable without leverage.
+    "risk_pct_capped_max_notional_pct": 1.0,
+
+    # Constant contract count for position_sizing_method="fixed_contracts".
+    "fixed_contracts_per_trade": 1,
+
     # ============================================================
     # SECTION 26: POINT-IN-TIME (PIT) MEMBERSHIP ENFORCEMENT
     # ============================================================

@@ -132,6 +132,7 @@ KNOWN_KEYS: set[str] = {
     "fixed_contracts_per_trade",
     "risk_pct_per_trade",
     "max_contracts_cap",
+    "risk_pct_capped_max_notional_pct",
     # PIT and merged-data screening
     "pit_enforce_daily",
     "pit_warmup_days",
@@ -224,6 +225,36 @@ def validate_config(config: dict) -> list[str]:
             msg = (f"WARNING: universe_rebase '{ur}' is not a known frequency "
                    f"(expected one of '{options}') -- any rule: portfolio will "
                    f"be DROPPED at run time with a single ERROR line")
+            warnings.append(msg)
+            logger.warning(msg)
+
+    # Value-level checks for the position-sizing numerics (#385). These four
+    # are read via CONFIG.get(key, default) deep inside the entry loop in
+    # helpers/position_sizing.py, so a bad value does not surface as a config
+    # error -- it surfaces as a TypeError thrown per-symbol mid-backtest, or
+    # worse, as a NEGATIVE share count that the engine then trades.
+    #
+    #   max_contracts_cap: None            -> TypeError in min(units, cap)
+    #   fixed_contracts_per_trade: None    -> TypeError in float(None)
+    #   fixed_contracts_per_trade: -3      -> a -3 contract position, silently
+    #
+    # Same precedent as the two enum checks above: catch it at startup where it
+    # is attributable to the key the user set.
+    for _key, _allow_zero in (("risk_pct_per_trade", False),
+                              ("max_contracts_cap", False),
+                              ("risk_pct_capped_max_notional_pct", False),
+                              ("fixed_contracts_per_trade", False)):
+        if _key not in config:
+            continue
+        _val = config[_key]
+        if _val is None or isinstance(_val, bool) or not isinstance(_val, (int, float)):
+            msg = (f"WARNING: {_key} must be a positive number, got "
+                   f"{_val!r} -- position sizing will raise mid-backtest")
+            warnings.append(msg)
+            logger.warning(msg)
+        elif _val < 0 or (_val == 0 and not _allow_zero):
+            msg = (f"WARNING: {_key} must be a positive number, got {_val!r} "
+                   f"-- this produces a zero or NEGATIVE position size")
             warnings.append(msg)
             logger.warning(msg)
 

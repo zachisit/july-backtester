@@ -1051,6 +1051,14 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             allocation_pct=allocation_pct,
                             stop_distance_points=_s_ir,
                             point_value=inst_se.point_value,
+                            # Always True here -- this block is inside the
+                            # INITIAL_MARGIN branch -- but written as the
+                            # expression rather than the literal so it stays
+                            # correct when #386 routes equity shorts through
+                            # the same call. A hardcoded True would silently
+                            # apply the contract cap to equities at that point.
+                            margined=(inst_se.margin_mode
+                                      == _inst.INITIAL_MARGIN),
                         )
                     else:
                         alloc = min(total_equity * allocation_pct, _free)
@@ -1384,6 +1392,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
                     sizing_kwargs["stop_distance_points"] = _rp_stop_dist_pts
                     sizing_kwargs["point_value"] = inst.point_value
+                    # #385: the integer floor and max_contracts_cap are contract-
+                    # shaped and apply to margined instruments only; the
+                    # unmargined path gets a notional ceiling instead. Resolved
+                    # here because position_sizing.py must not import the
+                    # instruments enum.
+                    sizing_kwargs["margined"] = (
+                        inst.margin_mode == _inst.INITIAL_MARGIN)
                     if _rp_stop_dist_pts and _rp_stop_dist_pts > 0:
                         # The portfolio heat check below falls back to the flat
                         # target_risk_per_trade (2%) proxy when stop_distance_pct is

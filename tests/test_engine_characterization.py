@@ -37,8 +37,13 @@ Regression map — scenario -> engine behaviour proven unchanged
   risk_pct_capped_heat risk_pct_capped WITH the portfolio heat check live — pins
                        that method's SECOND output, the stop fraction the heat
                        check reads. Cap deliberately not binding here (#384)
-  risk_pct_capped_cap  risk_pct_capped where max_contracts_cap DOES bind: 200
-                       units wanted, 20 delivered (#384)
+  risk_pct_capped_cap  risk_pct_capped where max_contracts_cap DOES bind: 40
+                       contracts wanted, 20 delivered. On MES since #385 gated
+                       the cap on margin_mode (#384, retargeted by #385)
+  risk_pct_capped_equity_uncapped
+                       the same method on an EQUITY, where #385 removed the cap
+                       and the integer floor and added a notional ceiling — the
+                       delivered-risk behaviour the fix exists to produce (#385)
   fixed_contracts_futures  fixed_contracts on a MARGINED instrument — a unit
                        count that must skip the point_value / margin conversion.
                        Futures on purpose: on an equity that conversion is a
@@ -63,6 +68,18 @@ above and both of which produce a scenario that passes every mutant:
 
 Every scenario added for #384 was verified by mutation — each one moves for a
 specific defect and the others do not.
+
+A third trap, from #385 (which DID move numbers, deliberately):
+
+  3. A behavioural change can turn an existing scenario VACUOUS rather than
+     failing it, and the re-bless then freezes the vacuity. #385 sized
+     risk_pct_capped up to its real 1%-of-equity target on equities, which the
+     `risk_pct_capped_heat` scenario's 1% heat cap then REJECTED — the scenario
+     went to zero trades, which passes forever and asserts nothing. And
+     `risk_pct_capped_cap` stopped binding the cap it is named for, because the
+     cap no longer applies to its (equity) symbol. Before regenerating, check
+     that every scenario still exercises what its name claims; `_snapshot`
+     asserting `result is not None` catches only the extreme case.
 
 Regenerate the fixture (ONLY when an intended behaviour change is reviewed):
     REGEN_GOLDEN=1 .venv/bin/python -m pytest tests/test_engine_characterization.py -q
@@ -224,27 +241,104 @@ def _scenario(name):
         # fraction of 1.2%, and heat 0.01 falls between that and the flat 2%
         # target_risk_per_trade proxy the check silently reverts to if the
         # output is dropped.  (@shardul0701 on #384.)
+        # Heat 0.015, not 0.01 (#385). This scenario was frozen while the
+        # 20-unit cap still applied to equities, so the position risked ~0.1%
+        # and fitted inside a 1% budget trivially. With the cap gated to
+        # margined instruments the position risks a genuine ~1.0%, a 1% heat
+        # cap rejects it, and the scenario freezes ZERO TRADES -- which passes
+        # forever and asserts nothing. Raised so it still exercises a real
+        # position while keeping the real-fraction/2%-proxy comparison live.
         closes = [5000 + 10 * i for i in range(11)]
         df = _df(closes, atr=[100.0] * len(closes))
         sig = _sig(df, {2: 1, 8: -1})
         return ({"III": df}, {"III": sig},
                 {"position_sizing_method": "risk_pct_capped",
                  "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
-                 "max_portfolio_heat": 0.01, "max_pct_adv": 0.05},
+                 "risk_pct_capped_max_notional_pct": 1.0,
+                 "max_portfolio_heat": 0.015, "max_pct_adv": 0.05},
                 {"type": "trailing_atr", "stop_mult": 1.0, "trail_mult": 1.0,
                  "t1_mult": 2.0, "point_cap": 60, "floor": "breakeven"}, {})
 
     if name == "risk_pct_capped_cap":
-        # Sibling of risk_pct_capped_heat, which deliberately does NOT bind the
-        # cap (16 of 20 units) because its job is the heat side output. This one
-        # binds it: $1,000 budget / $5 stop = 200 units wanted, 20 delivered.
-        # Verified by mutation -- removing the clamp moves this scenario and not
-        # the other, and vice versa for dropping the side output.
-        df = _df([100, 101, 102, 103, 104, 105, 106, 107, 108, 109])
+        # Binds max_contracts_cap: $1,000 budget / $5-per-contract stop = 200
+        # contracts wanted, 20 delivered.
+        #
+        # On MES, not on an equity (#385). The first version of this scenario
+        # used a cash equity, which was correct while the cap applied to
+        # everything -- but #385 gates the cap (and the integer floor) on
+        # margin_mode, because a contract count is not a share count. On an
+        # equity this now pins the UNCAPPED path and the mutant that deletes
+        # the clamp sails through it. Moving it to a margined instrument keeps
+        # it pinning what its name says.
+        #
+        # Price ~100, not ~1000: on MES a 5% stop at 1000 is 50 points, so the
+        # budget buys 1000/(50*5) = 3.9 -> 3 contracts and the cap never binds
+        # — the scenario would freeze the FLOOR while claiming to freeze the
+        # cap. At 100 the stop is 5 points, 40 contracts are wanted and 20
+        # delivered. Checked by running it, not by reading it.
+        df = _df([100 + i for i in range(10)])
         sig = _sig(df, {1: 1, 6: -1})
-        return ({"JJJ": df}, {"JJJ": sig},
+        return ({"MESM6": df}, {"MESM6": sig},
                 {"position_sizing_method": "risk_pct_capped",
                  "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "max_portfolio_heat": 1.0, "max_pct_adv": 0.05,
+                 "instruments": {"default_asset_class": "equity",
+                                 "futures_initial_margin_pct": 0.10,
+                                 "futures_commission_per_contract": 2.50,
+                                 "futures_slippage_ticks": 1.0,
+                                 "overrides": {}}},
+                {"type": "percentage", "value": 0.05}, {})
+
+    if name == "risk_pct_capped_ceiling":
+        # The notional ceiling BINDING, which nothing else here does. Added
+        # because the mutation matrix caught the gap: deleting the ceiling
+        # outright passed all 14 other scenarios. Every one of them has a stop
+        # wide enough (>= risk_pct_per_trade) that the ceiling costs nothing —
+        # which is by design, but it means the fixture could not fail on the
+        # one control #385 adds.
+        #
+        # 0.5% stop against a 1% risk budget: 2,000 shares wanted at $100,
+        # $200k of notional on $100k of equity. Unreachable without leverage,
+        # so the ceiling clamps to 1,000 shares.
+        #
+        # max_portfolio_heat is 0.0075 for a specific reason, found by mutation
+        # rather than by design. With heat at 1.0 this scenario ALSO passed the
+        # ceiling-deleted mutant, because the pre-existing cash clamp
+        # (`capital_needed > cash` -> `shares = cash / entry_price`) truncates
+        # an unclamped 2,000 shares back to ~999 anyway. At a ceiling of 1.0 on
+        # a single-name book the two are very nearly the same number.
+        #
+        # What the ceiling adds is not a smaller number, it is an EARLIER one:
+        # it clamps BEFORE the heat check, so heat evaluates the position that
+        # will actually be held. The cash clamp runs after. Unclamped, this
+        # position presents 200k of notional to the heat check and reads as
+        # 1.00% risk; clamped, it presents 100k and reads as 0.50%. A 0.75%
+        # heat budget therefore ADMITS it with the ceiling and REJECTS it
+        # without — and the rejection is on a position size that would never
+        # have been held. (The ceiling is also equity-based rather than
+        # cash-based, which diverges once other positions are open, and is
+        # configurable below 1.0; neither is exercised here.)
+        df = _df([100, 101, 102, 103, 104, 105, 106, 107, 108, 109])
+        sig = _sig(df, {1: 1, 6: -1})
+        return ({"LLL": df}, {"LLL": sig},
+                {"position_sizing_method": "risk_pct_capped",
+                 "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "risk_pct_capped_max_notional_pct": 1.0,
+                 "max_portfolio_heat": 0.0075, "max_pct_adv": 0.05},
+                {"type": "percentage", "value": 0.005}, {})
+
+    if name == "risk_pct_capped_equity_uncapped":
+        # #385's actual subject: the same method on an EQUITY, where the cap
+        # and the floor no longer apply and the notional ceiling does. The
+        # budget is fully deliverable here (5% stop >> 1% risk), so this
+        # freezes the delivered-risk behaviour the fix exists to produce
+        # rather than the clamp that used to hide it.
+        df = _df([1000 + 10 * i for i in range(10)])
+        sig = _sig(df, {1: 1, 6: -1})
+        return ({"KKK": df}, {"KKK": sig},
+                {"position_sizing_method": "risk_pct_capped",
+                 "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "risk_pct_capped_max_notional_pct": 1.0,
                  "max_portfolio_heat": 1.0, "max_pct_adv": 0.05},
                 {"type": "percentage", "value": 0.05}, {})
 
@@ -279,6 +373,8 @@ SCENARIOS = [
     "trailing_atr_equity",
     # #384 -- the two methods the fixture was structurally unable to fail on.
     "risk_pct_capped_heat", "risk_pct_capped_cap", "fixed_contracts_futures",
+    # #385 -- the equity path, where the cap and floor no longer apply.
+    "risk_pct_capped_equity_uncapped", "risk_pct_capped_ceiling",
 ]
 
 
