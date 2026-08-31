@@ -343,9 +343,15 @@ def _risk_pct_capped(equity: float, config: dict, price: float | None = None,
     equity, and below 1.0 it binds directly. (@shardul0701 on #390 — two
     comments claimed it bound on size at the default and were wrong.)
 
-    ``None`` disables it. ``0.0`` does NOT — it is rejected at config
-    validation, because a bare truthiness guard made it silently mean "off"
-    while reading like "zero size".
+    ``None`` disables it. ``0.0`` does NOT — it is a ceiling of zero and takes
+    no position, because a bare truthiness guard used to make it silently mean
+    "off" while reading like "zero size".
+
+    ``0.0`` **warns; it does not abort.** ``validate_config`` returns warnings
+    that ``main.py`` logs, and only the separate ``errors`` list exits — so a
+    config with ``0.0`` runs, logs one line, and takes no positions. Said
+    precisely because this is the line a reader would use to decide whether
+    leaving ``0.0`` in a config is safe. (@shardul0701 on #390.)
 
     The ceiling is NOT applied on the margined path: a futures position posts
     margin rather than notional, the engine already clamps it on
