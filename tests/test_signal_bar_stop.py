@@ -579,6 +579,50 @@ class TestShortSideSizingMethodIsAudible:
         assert not any("#372" in r.message for r in caplog.records), \
             [r.message for r in caplog.records]
 
+    def test_a_MIXED_book_still_warns_for_the_equity_short(self, caplog):
+        """The row that separates a per-symbol gate from a whole-book one.
+
+        A futures-only book is the easy case. The way this gate goes wrong is
+        MIXED: collapse the book to a single instrument class and an equity
+        short sitting beside a futures short gets silenced -- turning the
+        false-positive fix into a false-NEGATIVE on the real gap.
+
+        `_has_shorts` evaluates `margin_mode` per symbol inside the `any()`,
+        so it doesn't. Both shapes pass every other test in this class, which
+        is why this one exists. @shardul0701 on #381.
+        """
+        from unittest.mock import patch
+        import logging
+        import helpers.portfolio_simulations as ps
+        fut = _frame([
+            ("2024-01-02", 5000, 5050, 4950, 5000),
+            ("2024-01-03", 5000, 5050, 4950, 5000),
+            ("2024-01-04", 5000, 5050, 4950, 5000),
+        ])
+        eq = _frame([
+            ("2024-01-02", 100, 105,  95, 100),
+            ("2024-01-03", 100, 101,  99, 100),
+            ("2024-01-04", 100, 101,  99, 100),
+        ])
+        ovr = {"instruments": {"overrides": {"ESZ6": {
+            "asset_class": "future", "point_value": 20.0, "tick_size": 0.25,
+            "margin_mode": "initial_margin", "initial_margin": 20000.0,
+            "integer_units": True, "borrow_applies": False}}},
+            "position_sizing_method": "fixed_contracts",
+            "fixed_contracts_per_trade": 1}
+        with patch.dict(ps.CONFIG, ovr):
+            with caplog.at_level(logging.WARNING):
+                ps.run_portfolio_simulation(
+                    portfolio_data={"ESZ6": fut, "TEST": eq},
+                    signals={"ESZ6": pd.Series([-2, 0, 0], index=fut.index),
+                             "TEST": pd.Series([-2, 0, 0], index=eq.index)},
+                    initial_capital=200_000.0, allocation_pct=0.5,
+                    spy_df=None, vix_df=None, tnx_df=None,
+                    stop_config={"type": "none"})
+        assert any("#372" in r.message for r in caplog.records), (
+            "a mixed book with an EQUITY short must still warn; the gate "
+            "collapsed to book level")
+
     def test_fixed_contracts_DOES_warn_with_shorts(self, caplog):
         """`fixed_contracts` reads as a fixed method by name and is not one.
 
