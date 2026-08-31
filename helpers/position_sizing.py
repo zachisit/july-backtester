@@ -329,9 +329,23 @@ def _risk_pct_capped(equity: float, config: dict, price: float | None = None,
     ``1.0`` — no leverage), which is exactly the threshold in the ticket's
     acceptance clause. ``stop_frac >= risk_pct_per_trade`` is precisely the
     condition under which the required notional is ``<= equity``, so a ceiling
-    at 1.0 binds *if and only if* the budget was unreachable without leverage —
-    and never on a trade whose target it could have delivered. Below that
-    threshold the delivered value is the ceiling-clamped one.
+    at 1.0 engages *if and only if* the budget was unreachable without leverage
+    — and never on a trade whose target it could have delivered.
+
+    **At the 1.0 default it rarely changes the size actually held, and that is
+    not what it is for.** On a long-only book ``cash <= equity``, so the
+    pre-existing cash clamp (``capital_needed > cash`` →
+    ``shares = cash / entry_price``) is at least as tight and lands on very
+    nearly the same number. What the ceiling changes is *when*: it clamps
+    BEFORE the portfolio heat check, so heat evaluates the position that will
+    actually be held rather than an unclamped one the cash clamp would shrink
+    afterwards. It can change the held size once short proceeds push cash above
+    equity, and below 1.0 it binds directly. (@shardul0701 on #390 — two
+    comments claimed it bound on size at the default and were wrong.)
+
+    ``None`` disables it. ``0.0`` does NOT — it is rejected at config
+    validation, because a bare truthiness guard made it silently mean "off"
+    while reading like "zero size".
 
     The ceiling is NOT applied on the margined path: a futures position posts
     margin rather than notional, the engine already clamps it on
@@ -359,8 +373,19 @@ def _risk_pct_capped(equity: float, config: dict, price: float | None = None,
         return max(0.0, min(units, cap))
 
     # Unmargined: no integer floor, no contract cap, but a notional ceiling.
+    #
+    # `is not None`, NOT a bare truthiness test. `0.0` is falsy, so the original
+    # guard made it silently mean "no ceiling" -- the opposite of what the
+    # number reads as, and the opposite of what the validator warned it did.
+    #
+    # There were two coherent ways to resolve that and only one that makes the
+    # value mean what it says: `None` is the off switch, and `0.0` is a ceiling
+    # of zero, which yields a zero position. The alternative -- keeping 0.0 as
+    # "off" with an accurate message -- leaves 0.0 and 0.0001 as adjacent values
+    # at opposite extremes of the same control. (@shardul0701 on #390.)
     ceiling_pct = config.get("risk_pct_capped_max_notional_pct", 1.0)
-    if price is not None and price > 0 and point_value > 0 and ceiling_pct:
+    if (price is not None and price > 0 and point_value > 0
+            and ceiling_pct is not None):
         ceiling = (max(equity, 0.0) * ceiling_pct) / (price * point_value)
         units = min(units, ceiling)
     return max(0.0, units)

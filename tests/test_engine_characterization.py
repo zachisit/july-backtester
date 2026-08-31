@@ -44,6 +44,16 @@ Regression map — scenario -> engine behaviour proven unchanged
                        the same method on an EQUITY, where #385 removed the cap
                        and the integer floor and added a notional ceiling — the
                        delivered-risk behaviour the fix exists to produce (#385)
+  risk_pct_capped_ceiling  the notional ceiling BINDING — the only scenario in
+                       which it does. Runs at heat 0.0075 because at heat 1.0
+                       the pre-existing cash clamp lands on the same number and
+                       the ceiling can be deleted without moving anything (#385)
+  risk_pct_capped_points_stop
+                       `points` stop + risk_pct_capped, which took ZERO trades
+                       long-only until #385 closed the shorter of the engine's
+                       two stop-distance ladders. Blessed at the POST state, not
+                       frozen pre-change — the pre-change result is no trades,
+                       which `_snapshot` cannot represent (#385)
   fixed_contracts_futures  fixed_contracts on a MARGINED instrument — a unit
                        count that must skip the point_value / margin conversion.
                        Futures on purpose: on an equity that conversion is a
@@ -289,6 +299,33 @@ def _scenario(name):
                                  "overrides": {}}},
                 {"type": "percentage", "value": 0.05}, {})
 
+    if name == "risk_pct_capped_points_stop":
+        # The futures-native pairing: `points` stop + risk_pct_capped, which
+        # long-only took ZERO trades for an entire backtest before #385 closed
+        # the shorter of the engine's two stop-distance ladders.
+        #
+        # This scenario is blessed at the POST state, not frozen pre-change like
+        # the #384 ones. It cannot be frozen pre-change: the pre-change result
+        # is no trades at all, and `_snapshot` asserts `result is not None`.
+        # That is the correct asymmetry — this is a NEW scenario for behaviour
+        # that did not exist, not a re-bless of an existing number. The
+        # pre-change value is recorded here instead: `{'shares': None}`, against
+        # the short leg's 20 contracts on identical inputs.
+        #
+        # floor(1000 budget / (5 points x $5/point)) = 40 -> capped at 20.
+        df = _df([1000 + 10 * i for i in range(10)])
+        sig = _sig(df, {1: 1, 6: -1})
+        return ({"MESM6": df}, {"MESM6": sig},
+                {"position_sizing_method": "risk_pct_capped",
+                 "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "max_portfolio_heat": 1.0, "max_pct_adv": 0.05,
+                 "instruments": {"default_asset_class": "equity",
+                                 "futures_initial_margin_pct": 0.10,
+                                 "futures_commission_per_contract": 2.50,
+                                 "futures_slippage_ticks": 1.0,
+                                 "overrides": {}}},
+                {"type": "points", "value": 5.0}, {})
+
     if name == "risk_pct_capped_ceiling":
         # The notional ceiling BINDING, which nothing else here does. Added
         # because the mutation matrix caught the gap: deleting the ceiling
@@ -375,6 +412,7 @@ SCENARIOS = [
     "risk_pct_capped_heat", "risk_pct_capped_cap", "fixed_contracts_futures",
     # #385 -- the equity path, where the cap and floor no longer apply.
     "risk_pct_capped_equity_uncapped", "risk_pct_capped_ceiling",
+    "risk_pct_capped_points_stop",
 ]
 
 

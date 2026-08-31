@@ -303,16 +303,28 @@ CONFIG = {
     "max_contracts_cap": 20,
 
     # Notional ceiling for risk_pct_capped on UNMARGINED instruments
-    # (equities), as a fraction of equity. 1.0 = no leverage.
+    # (equities), as a fraction of equity. 1.0 = no leverage. None = disabled.
+    # 0.0 is NOT "disabled" and is rejected -- use None.
     #
     # This is deliberately NOT allocation_per_trade. Required notional is
     # risk_pct_per_trade / stop_frac of equity, so an allocation ceiling of
     # 0.10 would bind for any stop tighter than 10% -- nearly all of them --
     # and deliver ~0.2-0.5% against a configured 1%, which is the same defect
-    # the cap gating removes, wearing a different number. At 1.0 the ceiling
-    # binds if and only if stop_frac < risk_pct_per_trade, i.e. exactly when
-    # the budget is unreachable without leverage.
+    # the cap gating removes, wearing a different number.
+    #
+    # At the 1.0 default this rarely changes the size HELD: on a long-only book
+    # cash <= equity, so the pre-existing cash clamp is at least as tight. What
+    # it changes is WHEN -- it clamps before the portfolio heat check, so heat
+    # sees the position that will actually be held. It binds on size below 1.0,
+    # or once short proceeds push cash above equity.
     "risk_pct_capped_max_notional_pct": 1.0,
+
+    # NOTE: setting max_portfolio_heat == risk_pct_per_trade takes ZERO trades
+    # on equities. The heat gate is shown notional(SLIPPED entry) x
+    # stop_fraction(RAW entry), so it evaluates (1 + slippage_pct) times the
+    # risk actually taken -- a position risking exactly 1.000% presents as
+    # 1.0005% and a 1% cap rejects it. The config validator warns; the
+    # underlying raw-vs-slipped drift is tracked on #381-D.
 
     # Constant contract count for position_sizing_method="fixed_contracts".
     "fixed_contracts_per_trade": 1,

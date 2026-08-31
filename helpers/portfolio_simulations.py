@@ -1389,6 +1389,56 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                 if _pc_sz is not None and _pc_sz > 0:
                                     _eff_sz = min(_eff_sz, _pc_sz)
                                 _rp_stop_dist_pts = _eff_sz
+                    elif _stype_sz == "points":
+                        # THE one stop type whose distance is natively expressed
+                        # in the unit this ladder asks for -- and the one it could
+                        # not get (#385; @shardul0701's "second ladder" on #388).
+                        #
+                        # The engine resolves the same physical quantity twice in
+                        # this entry block, ~90 lines apart, with different
+                        # coverage: the risk_parity FRACTION ladder above handles
+                        # five stop types, this POINTS ladder handled three. The
+                        # fraction ladder even reads stop_config["value"] and
+                        # DIVIDES it by raw_entry_price to manufacture a fraction
+                        # -- out of the number this branch needed verbatim.
+                        #
+                        # `points` + risk_pct_capped is the futures-native pairing
+                        # and long-only it took ZERO trades for a whole backtest,
+                        # silently. Matched pair differing only in side (MES,
+                        # points stop, price 1000): long None, short 20 contracts.
+                        # The short leg is right because it is handed the REALISED
+                        # initial risk instead of re-deriving a subset of it.
+                        _pv_sz = stop_config.get("value")
+                        if _pv_sz is not None and _pv_sz > 0:
+                            _rp_stop_dist_pts = float(_pv_sz)
+                    elif _stype_sz == "signal_bar":
+                        # Same gap, same fix. The level is the signal bar's own
+                        # extreme, known before entry -- signal_bar_stop_level is
+                        # what the stop path itself calls, so deriving it here
+                        # keeps sizing and the stop on the SAME number.
+                        _sb_sz = signal_date
+                        if pd.notna(_sb_sz) and _sb_sz in df.index:
+                            _sb_bar = df.loc[_sb_sz]
+                            _sb_lvl = _inst.signal_bar_stop_level(
+                                _sb_bar.get('High'), _sb_bar.get('Low'),
+                                stop_config.get("buffer", 0.0), "long")
+                            if _sb_lvl is not None and _sb_lvl < raw_entry_price:
+                                # Protective side only: a next-open that gaps
+                                # through the extreme leaves the level ABOVE the
+                                # fill, so raw - lvl is negative.
+                                #
+                                # REDUNDANT for the share count and kept anyway.
+                                # `_risk_pct_capped` rejects `<= 0` itself, so
+                                # both paths reach zero units -- removing this
+                                # guard passes every test, which is how I found
+                                # out rather than by reasoning. What it does
+                                # change is what leaves this block: without it a
+                                # NEGATIVE distance is written into
+                                # sizing_kwargs, where the next reader of that
+                                # key has no way to tell it from a real one. The
+                                # stop path guards the same way at :1520; the two
+                                # sites agreeing is worth more than the line.
+                                _rp_stop_dist_pts = float(raw_entry_price - _sb_lvl)
 
                     sizing_kwargs["stop_distance_points"] = _rp_stop_dist_pts
                     sizing_kwargs["point_value"] = inst.point_value

@@ -240,23 +240,73 @@ def validate_config(config: dict) -> list[str]:
     #
     # Same precedent as the two enum checks above: catch it at startup where it
     # is attributable to the key the user set.
-    for _key, _allow_zero in (("risk_pct_per_trade", False),
-                              ("max_contracts_cap", False),
-                              ("risk_pct_capped_max_notional_pct", False),
-                              ("fixed_contracts_per_trade", False)):
+    # `None` is a legal "off" switch only where the sizer implements one. For
+    # the other three it is the input that raises. Spelled out per key rather
+    # than shared, because the original version of this loop asserted a single
+    # consequence ("a zero or NEGATIVE position size") for four keys with four
+    # different failure modes -- and was measurably wrong for one of them.
+    for _key, _none_means_off in (("risk_pct_per_trade", False),
+                                  ("max_contracts_cap", False),
+                                  ("risk_pct_capped_max_notional_pct", True),
+                                  ("fixed_contracts_per_trade", False)):
         if _key not in config:
             continue
         _val = config[_key]
-        if _val is None or isinstance(_val, bool) or not isinstance(_val, (int, float)):
+        if _val is None:
+            if _none_means_off:
+                continue
+            msg = (f"WARNING: {_key} must be a positive number, got None "
+                   f"-- position sizing will raise mid-backtest")
+            warnings.append(msg)
+            logger.warning(msg)
+        elif isinstance(_val, bool) or not isinstance(_val, (int, float)):
             msg = (f"WARNING: {_key} must be a positive number, got "
                    f"{_val!r} -- position sizing will raise mid-backtest")
             warnings.append(msg)
             logger.warning(msg)
-        elif _val < 0 or (_val == 0 and not _allow_zero):
+        elif _val == 0 and _key == "risk_pct_capped_max_notional_pct":
+            # 0 is a ceiling of zero, so it takes no position at all. It used to
+            # mean the OPPOSITE -- the sizer's guard was a bare truthiness test,
+            # so 0.0 skipped the ceiling and produced the same size as 1.0 --
+            # and this warning used to claim it produced "a zero or NEGATIVE
+            # position size", which was wrong about a value that was also wrong
+            # in the code. Both now say the same thing. `None` disables it.
+            # (@shardul0701 on #390.)
+            msg = (f"WARNING: {_key} = 0 is a ceiling of zero and takes NO "
+                   f"position -- use None to disable the ceiling instead")
+            warnings.append(msg)
+            logger.warning(msg)
+        elif _val <= 0:
             msg = (f"WARNING: {_key} must be a positive number, got {_val!r} "
                    f"-- this produces a zero or NEGATIVE position size")
             warnings.append(msg)
             logger.warning(msg)
+
+    # The max_portfolio_heat == risk_pct_per_trade cliff (#385). The heat gate
+    # is shown notional(SLIPPED entry) x stop_fraction(RAW entry), so it
+    # evaluates (1 + slippage_pct) times the risk actually taken: a position
+    # risking exactly 1.000% of equity presents as 1.0005% and a 1% cap
+    # rejects it. Measured -- `risk_pct_per_trade: 0.02` with
+    # `max_portfolio_heat: 0.02` takes zero trades on both percentage and ATR
+    # stops, with no error. Pre-existing, but newly REACHABLE: gating the
+    # contract cap is what lets an equity position grow enough to reach the
+    # gate, and #385 is also what promoted both keys to documented dials, so
+    # setting them to the same round number is now a supported path into a
+    # silent zero-trade run. The drift itself is #381-D's.
+    _rp = config.get("risk_pct_per_trade")
+    _heat = config.get("max_portfolio_heat")
+    _slip = config.get("slippage_pct", 0.0)
+    if (config.get("position_sizing_method") == "risk_pct_capped"
+            and isinstance(_rp, (int, float)) and not isinstance(_rp, bool)
+            and isinstance(_heat, (int, float)) and not isinstance(_heat, bool)
+            and isinstance(_slip, (int, float)) and _rp > 0 and _heat > 0
+            and _heat <= _rp * (1.0 + _slip)):
+        msg = ("WARNING: max_portfolio_heat "
+               f"({_heat}) <= risk_pct_per_trade ({_rp}) x (1 + slippage_pct) "
+               f"-- risk_pct_capped will size every equity position to just "
+               f"over the heat cap and take ZERO trades, silently")
+        warnings.append(msg)
+        logger.warning(msg)
 
     return warnings
 
