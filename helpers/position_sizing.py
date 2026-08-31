@@ -251,6 +251,23 @@ def _risk_parity(equity: float, price: float, symbol_data: pd.DataFrame, config:
             atr = symbol_data["ATR_14"].iloc[-1]
             if pd.notna(atr) and atr > 0:
                 # Default: 3x ATR stop
+                #
+                # #387: the ONLY one of this function's three fallbacks that was
+                # silent, and the only one that returns a WRONG SIZE rather than
+                # a different method -- the other two announce themselves and
+                # then hand off to _fixed_allocation, which is a documented
+                # method behaving as documented. This one sizes against a
+                # distance the strategy never asked for (3.35x too large,
+                # measured) while reporting nothing. An inconsistently applied
+                # concept, not a missing one: the vocabulary already exists in
+                # this module and was skipped on the harmful branch.
+                # (@shardul0701's correction on #387 -- my ticket claimed all
+                # three were silent.)
+                logger.warning(
+                    "risk_parity: no stop distance supplied, substituting a "
+                    "3xATR proxy (%.4f of price). The position is sized "
+                    "against a distance the strategy did not ask for.",
+                    (atr * 3.0) / price if price > 0 else 0.0)
                 stop_distance_pct = (atr * 3.0) / price
             else:
                 logger.warning("No valid stop distance for risk parity sizing. Falling back to fixed.")
@@ -260,9 +277,18 @@ def _risk_parity(equity: float, price: float, symbol_data: pd.DataFrame, config:
             return _fixed_allocation(equity, price, config)
 
     target_risk = config.get("target_risk_per_trade", 0.02)
-    shares = (equity * target_risk) / (price * stop_distance_pct) if stop_distance_pct > 0 else 0.0
-
-    return shares
+    if stop_distance_pct <= 0:
+        # #387, site 6: the THIRD distinct answer this one function gives to
+        # "no measurable stop" -- proxy above, fall back to fixed above that,
+        # and zero here. Reachable when the 3xATR proxy itself resolves
+        # non-positive. Announced for the same reason as the proxy: a returned
+        # zero is indistinguishable from a deliberate no-trade at every call
+        # site. (@shardul0701 on #387.)
+        logger.warning(
+            "risk_parity: stop distance resolved to %r; taking no position.",
+            stop_distance_pct)
+        return 0.0
+    return (equity * target_risk) / (price * stop_distance_pct)
 
 
 def _risk_pct_capped(equity: float, config: dict, price: float | None = None,
@@ -395,6 +421,34 @@ def _risk_pct_capped(equity: float, config: dict, price: float | None = None,
         ceiling = (max(equity, 0.0) * ceiling_pct) / (price * point_value)
         units = min(units, ceiling)
     return max(0.0, units)
+
+
+def notional_ceiling_will_bind(config: dict, stop_distance_pct: float) -> bool:
+    """True when `risk_pct_capped`'s notional ceiling will clamp the position.
+
+    The budget needs `risk_pct_per_trade / stop_frac` of equity in notional, so
+    the ceiling engages exactly when
+
+        stop_frac < risk_pct_per_trade / risk_pct_capped_max_notional_pct
+
+    which at the 1.0 default is `stop_frac < risk_pct_per_trade` — the threshold
+    in #385's acceptance clause, and the condition under which the budget is
+    genuinely unreachable without leverage.
+
+    Exposed as a predicate so the ENGINE can report the condition (#387) without
+    re-deriving it. The first version computed it inline at the call site and was
+    caught by `test_no_inline_sizing_copies_remain` — correctly: reading
+    `risk_pct_per_trade` in `portfolio_simulations.py` to reconstruct a sizing
+    decision is the fifth copy of the thing #384 consolidated, whatever it is
+    being used for. The guard does not care that the caller only wanted to log.
+    """
+    if not stop_distance_pct or stop_distance_pct <= 0:
+        return False
+    ceiling_pct = config.get("risk_pct_capped_max_notional_pct", 1.0)
+    if ceiling_pct is None or ceiling_pct <= 0:
+        return False
+    return stop_distance_pct < (config.get("risk_pct_per_trade", 0.01)
+                                / ceiling_pct)
 
 
 def _fixed_contracts(config: dict) -> float:
