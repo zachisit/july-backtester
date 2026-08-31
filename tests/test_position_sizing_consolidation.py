@@ -225,20 +225,122 @@ def _frame(base_price, n=14, atr_pct=2.0):
     }, index=idx)
 
 
-def _run(symbol, method, stop_config, direction="long", price=1000.0):
+def _run(symbol, method, stop_config, direction="long", price=1000.0, **over):
     from unittest.mock import patch
     df = _frame(price)
     pairs = {2: -2, 9: -1} if direction == "short" else {2: 1, 9: -1}
     sig = pd.Series(0, index=df.index, dtype=int)
     for i, v in pairs.items():
         sig.iloc[i] = v
-    cfg = {**_FUT_CFG, "position_sizing_method": method}
+    cfg = {**_FUT_CFG, "position_sizing_method": method, **over}
     with patch.dict("config.CONFIG", cfg, clear=False):
         return run_portfolio_simulation(
             portfolio_data={symbol: df}, signals={symbol: sig},
             initial_capital=100_000.0, allocation_pct=0.10,
             spy_df=None, vix_df=None, tnx_df=None, stop_config=stop_config,
         )
+
+
+_TRAILING_ATR = {"type": "trailing_atr", "stop_mult": 1.0, "trail_mult": 1.0,
+                 "t1_mult": 2.0, "point_cap": 60, "floor": "breakeven"}
+
+
+class TestRiskPctCappedHasTwoOutputs:
+    """`risk_pct_capped` returns a unit count AND a stop fraction.
+
+    The second output is `sizing_kwargs["stop_distance_pct"]`, read only by the
+    portfolio heat check, whose fallback is a silent
+    `or CONFIG.get("target_risk_per_trade", 0.02)`. A float-returning hoist
+    drops it, nothing raises, and heat quietly reverts to the flat 2% proxy —
+    which is 10-15x off the real fraction on the strategy this method exists
+    for. It therefore stays at the CALL SITE and is pinned here.
+
+    Both tests need a stop fraction materially under 2% (point_cap 60 on a
+    5000-point index -> 1.2%) and a heat cap between the two values. At the
+    config-default heat of 0.10 both sides pass and the swap is invisible;
+    that is why these are not written against the defaults.
+    (@shardul0701 on #384.)
+    """
+
+    def test_heat_admits_on_the_real_fraction(self):
+        res = _run("AAA", "risk_pct_capped", _TRAILING_ATR, price=5000.0,
+                   max_portfolio_heat=0.01, max_pct_adv=0.05)
+        assert res is not None and res["trade_log"], (
+            "the position risks 1.2% of a 1% heat budget on notional -- it must "
+            "be admitted; with the 2% proxy it is rejected and there is no trade")
+        assert res["trade_log"][0]["InitialRisk"] == pytest.approx(60.0)
+
+    def test_heat_rejects_when_the_real_fraction_is_larger(self):
+        """The other direction: dropping the side output does not merely
+        over-reject, it also ADMITS trades the real fraction excludes."""
+        res = _run("AAA", "risk_pct_capped", {"type": "atr", "multiplier": 2.0},
+                   price=5000.0, max_portfolio_heat=0.01, max_pct_adv=0.05)
+        assert res is None or not res.get("trade_log"), (
+            "a ~4% real stop fraction exceeds the 1% heat cap; with the 2% "
+            "proxy it is admitted")
+
+
+class TestSizeMultStaysAtTheCallSite:
+    """`_size_mult` is applied by the ENGINE after the sizing call, not inside
+    the shared function.
+
+    Pulled inside, the futures-short leg would silently start honouring
+    `size_mults` — which is #386's behavioural change arriving inside a ticket
+    whose whole claim is that it changes nothing. The asymmetry below is
+    therefore pinned as it is, not as it should be. (@shardul0701 on #384.)
+
+    `size_mults` is latent through `main.py` — nothing in-repo passes it — so
+    without these two tests the mutation that drops `shares * _size_mult`
+    entirely passes the whole suite, golden master included. Measured.
+    """
+
+    def _mults(self, symbol, df, value):
+        return {symbol: pd.Series(value, index=df.index, dtype=float)}
+
+    def _shares(self, symbol, method, entry_signal, mult):
+        from unittest.mock import patch
+        df = _frame(1000.0)
+        sig = pd.Series(0, index=df.index, dtype=int)
+        sig.iloc[2], sig.iloc[9] = entry_signal, -1
+        # target_risk 0.005, not the 0.02 default: at 0.02 vol_parity sizes to
+        # ~100% of equity, the cash clamp (`capital_needed > cash`) bites at
+        # mult=1.0 and not at mult=0.5, and the ratio comes out 0.502 for a
+        # reason that has nothing to do with size_mults. Keep the position well
+        # inside cash so the multiplier is the only thing moving.
+        cfg = {**_FUT_CFG, "position_sizing_method": method,
+               "target_risk_per_trade": 0.005}
+        with patch.dict("config.CONFIG", cfg, clear=False):
+            res = run_portfolio_simulation(
+                portfolio_data={symbol: df}, signals={symbol: sig},
+                initial_capital=100_000.0, allocation_pct=0.10,
+                spy_df=None, vix_df=None, tnx_df=None,
+                stop_config={"type": "atr", "multiplier": 2.0},
+                size_mults=self._mults(symbol, df, mult),
+            )
+        return res["trade_log"][0]["Shares"]
+
+    @pytest.mark.parametrize("method", ["risk_pct_capped", "fixed_contracts",
+                                        "fixed", "vol_parity"])
+    def test_long_leg_honours_it(self, method):
+        # Equity, not futures: `round_units` floors a futures position to whole
+        # contracts, so a 0.5x multiplier on 19 contracts lands at 9, not 9.5,
+        # and an exact-ratio assertion fails for a reason that has nothing to do
+        # with size_mults. Equities take fractional shares, so the ratio is clean.
+        full = self._shares("AAA", method, 1, 1.0)
+        half = self._shares("AAA", method, 1, 0.5)
+        assert half == pytest.approx(full * 0.5), (
+            "long leg dropped size_mults for %s" % method)
+
+    def test_futures_short_leg_does_not_and_that_is_pinned_not_endorsed(self):
+        """Pre-existing asymmetry, deliberately unchanged by #384 — closing it
+        is #386. If this starts failing because the short leg gained
+        `size_mults`, that is the right fix arriving in the wrong ticket."""
+        full = self._shares("MESM6", "fixed_contracts", -2, 1.0)
+        half = self._shares("MESM6", "fixed_contracts", -2, 0.5)
+        # 3 contracts either way, so the futures rounding that confounds an
+        # exact-ratio assertion on the long leg cannot mask the result here.
+        assert full == pytest.approx(3.0)
+        assert half == pytest.approx(full)
 
 
 class TestUnitCountMethodsSkipConversion:

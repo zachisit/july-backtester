@@ -16,11 +16,33 @@ and diff:
 b=json.load(open('after.json')); \
 print([k for k in a if a[k]!=b[k]])"
 
-The grid is 1,008 cells: {equity, futures} x {long, short} x {close, open}
-execution x 7 methods (six real plus one deliberate typo, to prove the
-unknown-method path is still reachable) x 6 stop types x 3 price levels. 942 of
-them take a position; the 66 that do not are themselves an observable and are
+The grid is 4,032 cells: {equity, futures} x {long, short} x {close, open}
+execution x 3 clamp profiles x 7 methods (six real plus one deliberate typo, to
+prove the unknown-method path is still reachable) x 6 stop types x 4 price
+levels. Cells that take no position are themselves an observable and are
 recorded as `shares: null` rather than dropped.
+
+The clamp axis exists because the first version of this harness pinned
+`max_portfolio_heat: 1.0` and `max_pct_adv: 0.0` — copied from the golden
+master's base config, where disabling them is correct design for isolating the
+core arithmetic. That made this harness blind in exactly the place the golden
+master is blind, and for the same reason: `risk_pct_capped` returns TWO values,
+the unit count and `sizing_kwargs["stop_distance_pct"]`, and the second one is
+read only by the portfolio heat check. Deleting that second output produced
+**0 diffs of 1008** against the heat-disabled grid while silently reverting the
+heat check to its flat 2% `target_risk_per_trade` proxy — the 10-15x
+misvaluation documented at the assignment site.
+(@shardul0701 called this out on #384 before the harness caught it.)
+
+Turning the clamps on at their config defaults was NOT enough either: at heat
+0.10 both the real fraction and the 2% proxy pass everywhere in this grid, so
+the swap stayed invisible. It is only observable where the cap falls BETWEEN
+the two, which needs a real stop fraction materially under 2% — the documented
+shape of the bug. Hence the 5000.0 price level (where trailing_atr's point_cap
+of 60 binds, giving 1.2% of price) and the `heat_tight` profile. With those,
+deleting the side output moves 10 cells, all in `heat_tight`, in BOTH
+directions: a correctly-sized trade gets rejected, and an over-risked one gets
+admitted.
 
 Exceptions are caught and recorded as `{"error": ...}` on purpose — a refactor
 that turns a sized trade into a NameError is a diff, not a crash of the harness.
@@ -48,9 +70,7 @@ _BASE = {
     "risk_free_rate": 0.05,
     "htb_rate_annual": 0.0,
     "volume_impact_coeff": 0.0,
-    "max_pct_adv": 0.0,
     "target_risk_per_trade": 0.02,
-    "max_portfolio_heat": 1.0,
     "entry_priority": "alphabetical",
     "exclude_open_positions": False,
     "include_delisted": False,
@@ -84,6 +104,25 @@ STOPS = {
 # an MES future ($5/point, 10% initial margin). "AAA" resolves to a cash equity.
 SYMBOLS = ("AAA", "MESM6")
 
+# "off" isolates the sizing arithmetic (the golden master's choice); "default"
+# turns on the two clamps the sized number actually flows into on a real run.
+# Only "default" can see risk_pct_capped's heat-check side output.
+CLAMPS = {
+    "off": {"max_portfolio_heat": 1.0, "max_pct_adv": 0.0},
+    "default": {"max_portfolio_heat": 0.10, "max_pct_adv": 0.05},
+    # `default` is still not tight enough to SEE the heat-check side output:
+    # dropping it swaps the real stop fraction for the flat 2% proxy, and at
+    # heat 0.10 both sides pass everywhere in this grid, so the swap is
+    # invisible. It only becomes observable where the cap falls BETWEEN the two
+    # -- i.e. where the real fraction is materially under 2%, which is the
+    # documented shape of the bug (a point_cap of 60 on a multi-thousand-point
+    # index). The 5000.0 price level below puts trailing_atr's cap in force
+    # (ATR 100 -> capped to 60 -> 1.2% of price) and 1% heat then admits on the
+    # real fraction and rejects on the proxy. Measured, not assumed: mutating
+    # the side output away moves cells only in this profile.
+    "heat_tight": {"max_portfolio_heat": 0.01, "max_pct_adv": 0.05},
+}
+
 
 def _frame(base_price, n=14, atr_pct=2.0):
     """Gently rising series — nothing stops out before the exit signal fires."""
@@ -110,13 +149,14 @@ def _round(v):
     return None if math.isnan(f) or math.isinf(f) else round(f, 8)
 
 
-def _cell(symbol, method, stop_key, price, equity, direction, exec_time):
+def _cell(symbol, method, stop_key, price, equity, direction, exec_time, clamps):
     df = _frame(price)
     pairs = {2: -2, 9: -1} if direction == "short" else {2: 1, 9: -1}
     sig = pd.Series(0, index=df.index, dtype=int)
     for i, v in pairs.items():
         sig.iloc[i] = v
-    cfg = {**_BASE, "position_sizing_method": method, "execution_time": exec_time}
+    cfg = {**_BASE, **CLAMPS[clamps],
+           "position_sizing_method": method, "execution_time": exec_time}
     try:
         with patch.dict("config.CONFIG", cfg, clear=False):
             res = run_portfolio_simulation(
@@ -148,14 +188,17 @@ def main(argv):
     for symbol in SYMBOLS:
         for direction in ("long", "short"):
             for exec_time in ("close", "open"):
-                for method in METHODS:
-                    for stop_key in STOPS:
-                        for price in (20.0, 100.0, 1000.0):
-                            equity = 100_000.0
-                            key = "|".join([symbol, direction, exec_time, method,
-                                            stop_key, str(price), str(equity)])
-                            out[key] = _cell(symbol, method, stop_key, price,
-                                             equity, direction, exec_time)
+                for clamps in CLAMPS:
+                    for method in METHODS:
+                        for stop_key in STOPS:
+                            for price in (20.0, 100.0, 1000.0, 5000.0):
+                                equity = 100_000.0
+                                key = "|".join([symbol, direction, exec_time,
+                                                clamps, method, stop_key,
+                                                str(price), str(equity)])
+                                out[key] = _cell(symbol, method, stop_key, price,
+                                                 equity, direction, exec_time,
+                                                 clamps)
     with open(argv[1], "w") as fh:
         json.dump(out, fh, indent=0, sort_keys=True)
     traded = sum(1 for v in out.values() if v.get("shares") is not None)
