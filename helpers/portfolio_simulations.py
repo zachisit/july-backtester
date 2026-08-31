@@ -220,8 +220,26 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         # keyed on `s < 0` is true for any long book that closes a position:
         # 39 of the signal functions in helpers/indicators.py emit -1 and
         # exactly 2 emit -2. `s < 0` would fire on essentially every run.
-        _has_shorts = any((s == -2).any() for s in signals.values()
-                          if s is not None and len(s))
+        # ...and only for an EQUITY short. The gap is the `cash_full` branch
+        # at :1031; the futures short leg DOES dispatch on
+        # position_sizing_method (:1010 onward), so on a futures book both
+        # legs agree and the banner was a false alarm:
+        #
+        #     futures, fixed_contracts   LONG 1.0   SHORT 1.0   banner fired
+        #
+        # The message's middle clause ("equity short entries always size as
+        # allocation/fill") was always exact; the first and third were written
+        # from the equity path and over-claimed. A futures user reading it
+        # would go hunting for an inconsistency that isn't there.
+        # @shardul0701 on #381.
+        # NB resolve_instrument here rather than reading `instruments`, which
+        # is not built until :361 -- below this block.
+        _has_shorts = any(
+            (s == -2).any()
+            and _inst.resolve_instrument(sym, CONFIG).margin_mode
+                != _inst.INITIAL_MARGIN
+            for sym, s in signals.items()
+            if s is not None and len(s))
         # Once per method per process, not once per run_portfolio_simulation
         # call -- that is once per portfolio per strategy, so a 20-strategy
         # book prints 20 identical lines. Workers are separate processes and

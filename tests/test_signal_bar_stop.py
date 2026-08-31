@@ -542,6 +542,43 @@ class TestShortSideSizingMethodIsAudible:
         assert not any("#372" in r.message for r in caplog.records), (
             f"{label}: warned on a long-only book -> {[r.message for r in caplog.records]}")
 
+    def test_a_futures_short_book_does_NOT_warn(self, caplog):
+        """The gap is the equity `cash_full` branch. The FUTURES short leg does
+        dispatch on position_sizing_method, so both legs agree there and the
+        banner was a false alarm:
+
+            futures, fixed_contracts   LONG 1.0   SHORT 1.0   banner fired
+
+        `_has_shorts` scanned for -2 and never consulted margin_mode. A futures
+        user reading "sized by two different methods depending on direction"
+        would go hunting for an inconsistency that isn't there.
+        @shardul0701 on #381.
+        """
+        from unittest.mock import patch
+        import logging
+        import helpers.portfolio_simulations as ps
+        df = _frame([
+            ("2024-01-02", 5000, 5050, 4950, 5000),
+            ("2024-01-03", 5000, 5050, 4950, 5000),
+            ("2024-01-04", 5000, 5050, 4950, 5000),
+        ])
+        ovr = {"instruments": {"overrides": {"ESZ6": {
+            "asset_class": "future", "point_value": 20.0, "tick_size": 0.25,
+            "margin_mode": "initial_margin", "initial_margin": 20000.0,
+            "integer_units": True, "borrow_applies": False}}},
+            "position_sizing_method": "fixed_contracts",
+            "fixed_contracts_per_trade": 1}
+        with patch.dict(ps.CONFIG, ovr):
+            with caplog.at_level(logging.WARNING):
+                ps.run_portfolio_simulation(
+                    portfolio_data={"ESZ6": df},
+                    signals={"ESZ6": pd.Series([-2, 0, 0], index=df.index)},
+                    initial_capital=200_000.0, allocation_pct=0.5,
+                    spy_df=None, vix_df=None, tnx_df=None,
+                    stop_config={"type": "none"})
+        assert not any("#372" in r.message for r in caplog.records), \
+            [r.message for r in caplog.records]
+
     def test_fixed_contracts_DOES_warn_with_shorts(self, caplog):
         """`fixed_contracts` reads as a fixed method by name and is not one.
 
