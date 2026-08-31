@@ -141,6 +141,53 @@
       }
     ]
   },
+  "futures_short_non_fixed_method": {
+    "equity_curve": [
+      100000.0,
+      100000.0,
+      104228.75,
+      109203.75,
+      114178.75,
+      119153.75,
+      124128.75,
+      123382.5,
+      123382.5,
+      123382.5
+    ],
+    "equity_len": 10,
+    "scalars": {
+      "Trades": 1,
+      "avg_trade_duration": 7.0,
+      "calmar_ratio": 178080.244971,
+      "initial_capital": 100000.0,
+      "max_drawdown": 0.006012,
+      "pnl_percent": 0.233825,
+      "profit_factor": null,
+      "sharpe_ratio": 15.528681,
+      "win_rate": 1.0
+    },
+    "trade_log": [
+      {
+        "EntryDate": "2023-01-03T00:00:00",
+        "EntryPrice": 994.75,
+        "ExitDate": "2023-01-10T00:00:00",
+        "ExitPrice": 970.25,
+        "ExitReason": "Short Cover",
+        "HoldDuration": 7,
+        "InitialRisk": 49.75,
+        "MAE_pct": 0.010254,
+        "MFE_pct": 0.034632,
+        "Profit": 23382.5,
+        "ProfitPct": 0.023624,
+        "RMultiple": 0.472362,
+        "Shares": 199.0,
+        "Symbol": "MESM6",
+        "Trade": "Short 1",
+        "VolumeImpact_bps": 0.0,
+        "is_win": 1
+      }
+    ]
+  },
   "long_atr_stop": {
     "equity_curve": [
       100000.0,

@@ -325,6 +325,34 @@ def _scenario(name):
                  "max_portfolio_heat": 1.0, "max_pct_adv": 0.0},
                 {"type": "percentage", "value": 0.05}, {})
 
+    if name == "futures_short_non_fixed_method":
+        # #386, second half. Frozen BEFORE the change, same as its equity
+        # sibling. The FUTURES short leg dispatched on a two-method list
+        # (`risk_pct_capped`, `fixed_contracts`) while the long leg calls
+        # calculate_position_size for all six, so vol_parity / risk_parity /
+        # kelly fell to fixed-fractional-over-margin there.
+        #
+        # The comment that guarded it — "Same two methods the long path
+        # dispatches" — was true when #384 wrote it and stopped being true in
+        # the same PR, because #384 is what made the long path unconditional.
+        #
+        # vol_parity because the short leg is INERT rather than merely
+        # different, and vol_parity's response to ATR is the clearest way to
+        # show that: swept over ATR the long leg tracks 197/198/100/50 while the
+        # short stays pinned at 19. (@shardul0701 on #392.)
+        df = _df([1000 - 5 * i for i in range(10)], atr=[20.0] * 10)
+        sig = _sig(df, {1: -2, 6: -1})
+        return ({"MESM6": df}, {"MESM6": sig},
+                {"position_sizing_method": "vol_parity",
+                 "target_risk_per_trade": 0.02,
+                 "max_portfolio_heat": 1.0, "max_pct_adv": 0.0,
+                 "instruments": {"default_asset_class": "equity",
+                                 "futures_initial_margin_pct": 0.10,
+                                 "futures_commission_per_contract": 2.50,
+                                 "futures_slippage_ticks": 1.0,
+                                 "overrides": {}}},
+                {"type": "percentage", "value": 0.05}, {})
+
     if name == "size_mults_both_legs":
         # #386. `size_mults` is a public parameter of run_portfolio_simulation
         # that the long path honours and the short path drops. Nothing in-repo
@@ -471,7 +499,8 @@ SCENARIOS = [
     "risk_pct_capped_points_stop",
     # #386 -- frozen BEFORE the equity-short change, which the fixture could not
     # otherwise detect at all. See the audit note in the coverage section.
-    "equity_short_non_fixed_method", "size_mults_both_legs",
+    "equity_short_non_fixed_method", "futures_short_non_fixed_method",
+    "size_mults_both_legs",
 ]
 
 

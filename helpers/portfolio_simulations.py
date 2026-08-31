@@ -1008,43 +1008,93 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     # only the realized fill used for margin/notional/P&L accounting.
                     _s_entry_fill = _inst.apply_slippage(inst_se, ep, "sell")
                     _free = cash - reserved_margin
-                    _s_sizing_method = CONFIG.get('position_sizing_method', 'fixed')
-                    if _s_sizing_method in ("risk_pct_capped", "fixed_contracts"):
-                        # Same two methods the long path dispatches, now through the
-                        # same function (#384). These were open-coded mirrors of the
-                        # long branches; the copy has drifted from its original twice
-                        # in this file already. _s_ir (initial risk in POINTS) is
-                        # computed above, before this dispatch -- unlike the long
-                        # path, the short path sets its stop before sizing.
-                        shares = calculate_position_size(
-                            method=_s_sizing_method,
-                            equity=total_equity,
-                            price=_s_entry_fill,
-                            symbol_data=portfolio_data[symbol].loc[
-                                :(sig_date if pd.notna(sig_date) else date)],
-                            config=CONFIG,
-                            allocation_pct=allocation_pct,
-                            stop_distance_points=_s_ir,
-                            point_value=inst_se.point_value,
-                            # Always True here -- this block is inside the
-                            # INITIAL_MARGIN branch -- but written as the
-                            # expression rather than the literal so it stays
-                            # correct when #386 routes equity shorts through
-                            # the same call. A hardcoded True would silently
-                            # apply the contract cap to equities at that point.
-                            margined=(inst_se.margin_mode
-                                      == _inst.INITIAL_MARGIN),
-                        )
-                    else:
-                        alloc = min(total_equity * allocation_pct, _free)
-                        if alloc <= 0:
+                    _s_sizing_method = _s_eq_sizing_method
+                    # ALL SIX methods, not the two-name list this used to
+                    # carry. The comment here said "same two methods the long
+                    # path dispatches" -- true when #384 wrote it, and false
+                    # by the end of that same PR, because #384 is what made
+                    # the long path unconditional. So the long leg called
+                    # this for six and the short leg for two, and
+                    # vol_parity / risk_parity / kelly fell to
+                    # fixed-fractional-over-margin below.
+                    #
+                    # The short leg was INERT, not merely different --
+                    # sweeping the axis each method keys off (MES):
+                    #
+                    #   vol_parity, ATR swept      risk_parity, stop swept
+                    #    ATR  LONG  SHORT           stop  LONG  SHORT
+                    #     1%   197     19             2%   198     19
+                    #     2%   198     19             5%    79     19
+                    #     4%   100     19            10%    39     19
+                    #     8%    50     19            20%    19     19  <- agree
+                    #
+                    # The long leg tracks its input; the short was pinned at
+                    # the 10% allocation. And at a 20% stop the two coincide
+                    # exactly, so a comparative test that happened to pick
+                    # that distance passes on the bug.
+                    #
+                    # kelly agrees on both legs but by DEGRADING, not by
+                    # working: neither leg supplies win_rate/avg_win/avg_loss
+                    # on a short, so _kelly_criterion falls back to
+                    # _fixed_allocation either way. Do not read that
+                    # agreement as evidence the dispatch is sound.
+                    #
+                    # (@shardul0701 on #392, who also traced the coverage gap
+                    # to his own narrowing of the #372 banner: it was scoped
+                    # to `margin_mode != INITIAL_MARGIN` on evidence from
+                    # `fixed_contracts`, one of the two methods that DID
+                    # work here -- so futures were excluded from the only
+                    # surface naming the gap.)
+                    #
+                    # _s_ir (initial risk in POINTS) is computed above,
+                    # before this dispatch -- unlike the long path, the short
+                    # path sets its stop before sizing. See #391.
+                    shares = calculate_position_size(
+                        method=_s_sizing_method,
+                        equity=total_equity,
+                        price=_s_entry_fill,
+                        symbol_data=portfolio_data[symbol].loc[
+                            :(sig_date if pd.notna(sig_date) else date)],
+                        config=CONFIG,
+                        allocation_pct=allocation_pct,
+                        stop_distance_points=_s_ir,
+                        point_value=inst_se.point_value,
+                        # Always True here -- this block is inside the
+                        # INITIAL_MARGIN branch -- but written as the
+                        # expression rather than the literal so it stays
+                        # correct when #386 routes equity shorts through
+                        # the same call. A hardcoded True would silently
+                        # apply the contract cap to equities at that point.
+                        margined=(inst_se.margin_mode
+                                  == _inst.INITIAL_MARGIN),
+                    )
+
+                    # Unit-vs-dollar conversion, mirroring the long path's gate.
+                    # risk_pct_capped and fixed_contracts answer in CONTRACTS and
+                    # skip it; the other four answer in dollars and size off
+                    # margin capacity rather than full notional -- dividing the
+                    # target dollar amount by point_value treats it as unlevered
+                    # notional, which for a leveraged contract eventually floors
+                    # to 0 forever as price appreciates.
+                    _s_per_contract_margin = _inst.margin_required(inst_se, 1, ep)
+                    if _s_sizing_method not in ("risk_pct_capped",
+                                                "fixed_contracts"):
+                        shares = ((shares * _s_entry_fill)
+                                  / _s_per_contract_margin
+                                  if _s_per_contract_margin > 0 else 0.0)
+
+                    # Free-margin clamp. The old branch applied this up front via
+                    # `alloc = min(total_equity * allocation_pct, _free)`; the
+                    # sizing methods do not all target a notional, so it is a
+                    # clamp here instead. Without it an over-large size falls to
+                    # the affordability check below and the trade is SKIPPED
+                    # rather than reduced, which is a different outcome.
+                    if _s_per_contract_margin > 0:
+                        _s_max_by_margin = _free / _s_per_contract_margin
+                        if _s_max_by_margin <= 0:
                             continue
-                        # Size off margin capacity, not full notional (mirror of the long-side
-                        # fix): dividing the target dollar amount by point_value treats it as
-                        # unlevered notional, which for a leveraged futures contract eventually
-                        # floors to 0 contracts forever as price appreciates.
-                        _s_per_contract_margin = _inst.margin_required(inst_se, 1, ep)
-                        shares = _inst.round_units(inst_se, alloc / _s_per_contract_margin) if _s_per_contract_margin > 0 else 0.0
+                        shares = min(shares, _s_max_by_margin)
+                    shares = _inst.round_units(inst_se, shares)
                     # size_mults on the FUTURES short leg too (#386). #384 pinned
                     # its absence here as-is rather than fixing it, on the
                     # grounds that fixing it there would be this ticket arriving

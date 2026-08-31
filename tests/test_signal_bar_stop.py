@@ -517,10 +517,23 @@ class TestShortSideHonoursTheSizingMethod:
     in any other row is the method and not the leg.
     """
 
+    # Instrument is a parameter, not a fixture constant. The equity-only
+    # version of this class passed while the FUTURES short leg still dispatched
+    # on a two-name list, so vol_parity / risk_parity / kelly fell to
+    # fixed-fractional-over-margin there and nothing said so. One argument.
+    # (@shardul0701 on #392.)
+    # Two contract months of the SAME root, not two different roots. The first
+    # draft used MESM6/MNQM6 — $5/point against $2/point — so even `fixed`, the
+    # control that must agree, came out 2.5x apart and the test failed for a
+    # reason with nothing to do with the short leg. A long/short comparison
+    # needs the legs to differ ONLY in direction.
+    SYMS = {"equity": ("LNG", "SRT"), "futures": ("MESM6", "MESZ6")}
+
     @staticmethod
-    def _book(method, size_mult=None, **cfg):
+    def _book(method, size_mult=None, instrument="equity", **cfg):
         from unittest.mock import patch
         import helpers.portfolio_simulations as ps
+        lng, srt = TestShortSideHonoursTheSizingMethod.SYMS[instrument]
         rows_l = [("2024-01-02", 100, 105,  90, 100),
                   ("2024-01-03", 100, 101,  99, 100),
                   ("2024-01-04", 100, 101,  99, 100),
@@ -532,21 +545,33 @@ class TestShortSideHonoursTheSizingMethod:
         dfl, dfs = _frame(rows_l), _frame(rows_s)
         mults = None
         if size_mult is not None:
-            mults = {"LNG": pd.Series(size_mult, index=dfl.index, dtype=float),
-                     "SRT": pd.Series(size_mult, index=dfs.index, dtype=float)}
+            mults = {lng: pd.Series(size_mult, index=dfl.index, dtype=float),
+                     srt: pd.Series(size_mult, index=dfs.index, dtype=float)}
+        # target_risk 0.004, not the 0.02 default. At 0.02 with this frame's
+        # ATR of 1.0 on a ~100 price, vol_parity sizes to 2,000 shares = 200% of
+        # equity; the long leg absorbs the cash, the short cannot open, and the
+        # test SKIPS on "no trade produced" — silently, for BOTH instruments,
+        # on the one method whose long/short divergence is largest (7.9x). A
+        # skip is not a pass, but it reads like one in a green run.
         base = {"position_sizing_method": method,
-                "target_risk_per_trade": 0.02,
+                "target_risk_per_trade": 0.004,
                 "risk_pct_per_trade": 0.01,
                 "max_contracts_cap": 20,
                 "fixed_contracts_per_trade": 3,
                 "max_portfolio_heat": 1.0,
                 "max_pct_adv": 0.0}
+        if instrument == "futures":
+            base.setdefault("instruments", {
+                "default_asset_class": "equity",
+                "futures_initial_margin_pct": 0.10,
+                "futures_commission_per_contract": 2.50,
+                "futures_slippage_ticks": 1.0, "overrides": {}})
         base.update(cfg)
         with patch.dict(ps.CONFIG, base):
             res = ps.run_portfolio_simulation(
-                portfolio_data={"LNG": dfl, "SRT": dfs},
-                signals={"LNG": pd.Series([1, 0, 0, 0], index=dfl.index),
-                         "SRT": pd.Series([-2, 0, 0, 0], index=dfs.index)},
+                portfolio_data={lng: dfl, srt: dfs},
+                signals={lng: pd.Series([1, 0, 0, 0], index=dfl.index),
+                         srt: pd.Series([-2, 0, 0, 0], index=dfs.index)},
                 initial_capital=100_000.0, allocation_pct=0.10,
                 spy_df=None, vix_df=None, tnx_df=None,
                 stop_config={"type": "percentage", "value": 0.05},
@@ -554,17 +579,27 @@ class TestShortSideHonoursTheSizingMethod:
             )
         if not res or not res.get("trade_log"):
             return {}
-        return {t["Symbol"]: float(t["Shares"]) for t in res["trade_log"]}
+        by_sym = {t["Symbol"]: float(t["Shares"]) for t in res["trade_log"]}
+        return {"LNG": by_sym.get(lng), "SRT": by_sym.get(srt)}
 
+    @pytest.mark.parametrize("instrument", ["equity", "futures"])
     @pytest.mark.parametrize(
         "method", ["fixed", "vol_parity", "risk_parity", "fixed_contracts"])
-    def test_both_legs_agree_on_share_count(self, method):
+    def test_both_legs_agree_on_share_count(self, method, instrument):
         """The acceptance criterion: same method, same count, modulo the
-        slippage sign that separates a buy fill from a sell fill."""
-        out = self._book(method)
-        if "LNG" not in out or "SRT" not in out:
+        slippage sign that separates a buy fill from a sell fill.
+
+        `kelly` is deliberately absent. It agrees on both legs — but by
+        DEGRADING, not by working: the short path never supplies
+        win_rate/avg_win/avg_loss, so `_kelly_criterion` falls back to
+        `_fixed_allocation` on both sides. Including it here would add a green
+        row that is evidence of nothing. (@shardul0701 on #392.)
+        """
+        out = self._book(method, instrument=instrument)
+        if out.get("LNG") is None or out.get("SRT") is None:
             pytest.skip("no trade produced")
-        assert out["SRT"] == pytest.approx(out["LNG"], rel=0.01), (method, out)
+        assert out["SRT"] == pytest.approx(out["LNG"], rel=0.01), (
+            method, instrument, out)
 
     def test_fixed_contracts_no_longer_diverges_33x(self):
         """The widest of the five, and the one the banner originally excluded
