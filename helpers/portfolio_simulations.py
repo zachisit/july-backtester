@@ -5,7 +5,9 @@ import pandas as pd
 import numpy as np
 from config import CONFIG
 from .simulations import calculate_advanced_metrics
-from helpers.position_sizing import calculate_position_size, check_portfolio_heat
+from helpers.position_sizing import (calculate_position_size, check_portfolio_heat,
+                                    notional_ceiling_will_bind)
+from helpers.sizing_diagnostics import SizingDiagnostics as _SizingDiagnostics
 from helpers import instruments as _inst
 from helpers import intrabar as _intrabar
 
@@ -186,6 +188,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
     execution_time = CONFIG.get("execution_time", "open").lower()
     htb_rate_annual = CONFIG.get("htb_rate_annual", 0.0)
+
+    # #387: one account of every entry that did not get the configured size.
+    # Per-run, not module state -- this function is called once per portfolio
+    # per strategy across worker processes, so a module accumulator would mix
+    # runs together and need resetting from a fixture, which is the maintenance
+    # shape the #372 banner just cost us.
+    _sizing_diag = _SizingDiagnostics()
 
     # (The #372 banner that warned this book was sized by two different
     # methods depending on direction lived here. #386 made the equity short
@@ -1562,6 +1571,35 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                 # sites agreeing is worth more than the line.
                                 _rp_stop_dist_pts = float(raw_entry_price - _sb_lvl)
 
+                    # #387: name the condition rather than letting a missing
+                    # number become a silent zero. Two kinds, not one -- a stop
+                    # type this ladder has no branch for is an engine gap
+                    # (derivable, merely absent), while {"type": "none"} is a
+                    # genuinely absent distance and a config choice. Reporting
+                    # them as one would mislabel whichever the user has.
+                    if not _rp_stop_dist_pts or _rp_stop_dist_pts <= 0:
+                        _sizing_diag.record(
+                            "no_stop_distance" if _stype_sz == "none"
+                            else "unsupported_stop_type", symbol)
+                    elif (inst.margin_mode != _inst.INITIAL_MARGIN
+                          and raw_entry_price > 0
+                          and notional_ceiling_will_bind(
+                              CONFIG, _rp_stop_dist_pts / raw_entry_price)):
+                        # Not a defect: below that threshold the budget is
+                        # genuinely unreachable without leverage, so the clamped
+                        # value is correct. Reported because "delivered less
+                        # than configured, on purpose" and "delivered less than
+                        # configured, by accident" are indistinguishable from
+                        # outside otherwise.
+                        #
+                        # The predicate lives in position_sizing, not here. The
+                        # first version inlined it and
+                        # test_no_inline_sizing_copies_remain caught it --
+                        # correctly, since reconstructing a sizing decision in
+                        # this file is the fifth copy of what #384 consolidated
+                        # regardless of whether the caller only wanted to log.
+                        _sizing_diag.record("clamped_by_notional_ceiling", symbol)
+
                     sizing_kwargs["stop_distance_points"] = _rp_stop_dist_pts
                     sizing_kwargs["point_value"] = inst.point_value
                     # #385: the integer floor and max_contracts_cap are contract-
@@ -1659,6 +1697,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # was rejected entering short and admitted entering long.
                 if not check_portfolio_heat({**positions, **short_positions},
                                             new_position_risk, total_equity, max_heat):
+                    _sizing_diag.record("rejected_by_heat", symbol)
                     continue
 
                 # Cash constraint (equity full-notional pre-clamp; futures clamp on margin below)
@@ -1666,6 +1705,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     capital_needed = _inst.margin_required(inst, shares, entry_price)
                     if capital_needed > cash:
                         shares = cash / entry_price
+                        _sizing_diag.record("clamped_by_cash", symbol)
 
                 # --- VOLUME-BASED LIQUIDITY FILTER ---
                 max_pct_adv = CONFIG.get('max_pct_adv') or 0
@@ -1674,7 +1714,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     if pd.notna(adv_20) and adv_20 > 0:
                         max_shares_allowed = adv_20 * max_pct_adv
                         if max_shares_allowed <= 0:
+                            _sizing_diag.record("skipped_zero_volume", symbol)
                             continue
+                        if max_shares_allowed < shares:
+                            _sizing_diag.record("clamped_by_adv", symbol)
                         shares = min(shares, max_shares_allowed)
 
                 # --- VOLUME-BASED MARKET IMPACT ---
@@ -2119,7 +2162,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # --- END: MARK-TO-MARKET LOGIC ---
 
     pnl_list = [t['Profit'] for t in trade_log]
-    if not pnl_list: return None
+    if not pnl_list:
+        # #387: report BEFORE the early return, not after it. The zero-trade
+        # run is the case this whole mechanism exists for -- "select a sizing
+        # method and change nothing else" produces exactly this, and it reads
+        # as a strategy finding. Logging only on the success path would have
+        # left the headline case silent, which is the defect being fixed.
+        # Caught by this ticket's own tests, not by inspection.
+        _sizing_diag.log_report()
+        return None
 
     # --- SURVIVORSHIP BIAS: CORRECT EQUITY CURVE FOR DELISTED POSITIONS ---
     # The daily loop marked each now-delisted position to market for every bar
@@ -2160,6 +2211,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         final_pnl_percent = (portfolio_timeline.dropna().iloc[-1] / initial_capital) - 1
     metrics = calculate_advanced_metrics(pnl_list, portfolio_timeline.dropna(), duration_list)
 
+    # #387. Logged once per run rather than per site: the ADV cap is armed by
+    # default and fires per entry, so a per-site warning is thousands of lines
+    # on a thin universe and gets filtered out within a day. The counts also go
+    # on the result, so a test asserts them instead of scraping a log.
+    _sizing_diag.log_report()
+
     return {**metrics, "pnl_percent": final_pnl_percent, "Trades": len(pnl_list),
             "trade_pnl_list": pnl_list, "trade_log": trade_log, "initial_capital": initial_capital,
-            "portfolio_timeline": portfolio_timeline.dropna(), **survivorship_stats}
+            "portfolio_timeline": portfolio_timeline.dropna(),
+            "sizing_diagnostics": _sizing_diag.as_dict(), **survivorship_stats}
