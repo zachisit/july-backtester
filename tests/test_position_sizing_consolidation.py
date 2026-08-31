@@ -340,16 +340,31 @@ class TestSizeMultStaysAtTheCallSite:
         assert half == pytest.approx(full * 0.5), (
             "long leg dropped size_mults for %s" % method)
 
-    def test_futures_short_leg_does_not_and_that_is_pinned_not_endorsed(self):
-        """Pre-existing asymmetry, deliberately unchanged by #384 — closing it
-        is #386. If this starts failing because the short leg gained
-        `size_mults`, that is the right fix arriving in the wrong ticket."""
+    def test_futures_short_leg_now_honours_it_too(self):
+        """FLIPPED by #386, which is the ticket that was supposed to flip it.
+
+        #384 pinned the short leg's failure to scale as-is rather than fixing
+        it, with the note: *"If this starts failing because the short leg
+        gained `size_mults`, that is the right fix arriving in the wrong
+        ticket. Flip it here, don't delete it."* This is that flip — the
+        assertion is inverted and the test kept, so the transition is visible
+        in the history rather than a test quietly disappearing.
+
+        NOT an exact ratio, and for the same reason the long-leg ratio test
+        uses an equity: `round_units` floors a futures position to whole
+        contracts, so 3 x 0.5 = 1.5 lands at **1**, not 1.5. Asserting
+        `full * 0.5` here fails on a correct fix — which it did on the first
+        draft of this flip. The ratio property belongs on the equity leg; what
+        is assertable here is that the multiplier is applied at all, and that
+        it is applied before the rounding rather than after.
+        """
         full = self._shares("MESM6", "fixed_contracts", -2, 1.0)
         half = self._shares("MESM6", "fixed_contracts", -2, 0.5)
-        # 3 contracts either way, so the futures rounding that confounds an
-        # exact-ratio assertion on the long leg cannot mask the result here.
         assert full == pytest.approx(3.0)
-        assert half == pytest.approx(full)
+        assert half == pytest.approx(1.0), (
+            "expected floor(3 x 0.5) = 1; got %s. 3.0 means the futures short "
+            "leg still drops size_mults, 1.5 means it is applied after "
+            "round_units instead of before" % half)
 
 
 class TestUnitCountMethodsSkipConversion:

@@ -1,4 +1,51 @@
 {
+  "equity_short_non_fixed_method": {
+    "equity_curve": [
+      100000.0,
+      100000.0,
+      100948.5,
+      101948.5,
+      102948.5,
+      103948.5,
+      102948.5,
+      102898.5,
+      102898.5,
+      102898.5
+    ],
+    "equity_len": 10,
+    "scalars": {
+      "Trades": 1,
+      "avg_trade_duration": 7.0,
+      "calmar_ratio": 156.66308,
+      "initial_capital": 100000.0,
+      "max_drawdown": 0.010101,
+      "pnl_percent": 0.028985,
+      "profit_factor": null,
+      "sharpe_ratio": 6.93355,
+      "win_rate": 1.0
+    },
+    "trade_log": [
+      {
+        "EntryDate": "2023-01-03T00:00:00",
+        "EntryPrice": 98.9505,
+        "ExitDate": "2023-01-10T00:00:00",
+        "ExitPrice": 96.048,
+        "ExitReason": "Short Cover",
+        "HoldDuration": 7,
+        "InitialRisk": 4.95,
+        "MAE_pct": 0.010505,
+        "MFE_pct": 0.049525,
+        "Profit": 2898.5,
+        "ProfitPct": 0.029292,
+        "RMultiple": 0.585556,
+        "Shares": 1000.0,
+        "Symbol": "NNN",
+        "Trade": "Short 1",
+        "VolumeImpact_bps": 0.0,
+        "is_win": 1
+      }
+    ]
+  },
   "exclude_open": {
     "equity_curve": [
       100000.0,
@@ -89,6 +136,53 @@
         "Shares": 3.0,
         "Symbol": "MESM6",
         "Trade": "Long 1",
+        "VolumeImpact_bps": 0.0,
+        "is_win": 1
+      }
+    ]
+  },
+  "futures_short_non_fixed_method": {
+    "equity_curve": [
+      100000.0,
+      100000.0,
+      104228.75,
+      109203.75,
+      114178.75,
+      119153.75,
+      124128.75,
+      123382.5,
+      123382.5,
+      123382.5
+    ],
+    "equity_len": 10,
+    "scalars": {
+      "Trades": 1,
+      "avg_trade_duration": 7.0,
+      "calmar_ratio": 178080.244971,
+      "initial_capital": 100000.0,
+      "max_drawdown": 0.006012,
+      "pnl_percent": 0.233825,
+      "profit_factor": null,
+      "sharpe_ratio": 15.528681,
+      "win_rate": 1.0
+    },
+    "trade_log": [
+      {
+        "EntryDate": "2023-01-03T00:00:00",
+        "EntryPrice": 994.75,
+        "ExitDate": "2023-01-10T00:00:00",
+        "ExitPrice": 970.25,
+        "ExitReason": "Short Cover",
+        "HoldDuration": 7,
+        "InitialRisk": 49.75,
+        "MAE_pct": 0.010254,
+        "MFE_pct": 0.034632,
+        "Profit": 23382.5,
+        "ProfitPct": 0.023624,
+        "RMultiple": 0.472362,
+        "Shares": 199.0,
+        "Symbol": "MESM6",
+        "Trade": "Short 1",
         "VolumeImpact_bps": 0.0,
         "is_win": 1
       }
@@ -661,6 +755,71 @@
         "Shares": 101.060631,
         "Symbol": "DDD",
         "Trade": "Short 1",
+        "VolumeImpact_bps": 0.0,
+        "is_win": 1
+      }
+    ]
+  },
+  "size_mults_both_legs": {
+    "equity_curve": [
+      100000.0,
+      100000.0,
+      100094.810504,
+      100194.82103,
+      100294.831556,
+      100394.842082,
+      100393.791977,
+      100388.544049
+    ],
+    "equity_len": 8,
+    "scalars": {
+      "Trades": 2,
+      "avg_trade_duration": 7.0,
+      "calmar_ratio": 2716.905584,
+      "initial_capital": 100000.0,
+      "max_drawdown": 6.3e-05,
+      "pnl_percent": 0.003885,
+      "profit_factor": null,
+      "sharpe_ratio": 10.630084,
+      "win_rate": 1.0
+    },
+    "trade_log": [
+      {
+        "EntryDate": "2023-01-03T00:00:00",
+        "EntryPrice": 101.0505,
+        "ExitDate": "2023-01-10T00:00:00",
+        "ExitPrice": 105.947,
+        "ExitReason": "Strategy Exit",
+        "HoldDuration": 7,
+        "InitialRisk": 1.010505,
+        "MAE_pct": -0.010495,
+        "MFE_pct": 0.05947,
+        "PosSizeMult": 0.5,
+        "Profit": 242.081929,
+        "ProfitPct": 0.048416,
+        "RMultiple": 4.841639,
+        "Shares": 49.48021,
+        "Symbol": "LONG",
+        "Trade": "Long 1",
+        "VolumeImpact_bps": 0.0,
+        "is_win": 1
+      },
+      {
+        "EntryDate": "2023-01-03T00:00:00",
+        "EntryPrice": 98.9505,
+        "ExitDate": "2023-01-10T00:00:00",
+        "ExitPrice": 96.048,
+        "ExitReason": "Short Cover",
+        "HoldDuration": 7,
+        "InitialRisk": 0.0,
+        "MAE_pct": 0.010505,
+        "MFE_pct": 0.049525,
+        "Profit": 146.46212,
+        "ProfitPct": 0.029292,
+        "RMultiple": null,
+        "Shares": 50.530316,
+        "Symbol": "SHRT",
+        "Trade": "Short 2",
         "VolumeImpact_bps": 0.0,
         "is_win": 1
       }
