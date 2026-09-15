@@ -1,5 +1,30 @@
 # Norgate → Parquet Export Guide
 
+> **Norgate is frozen at 2026-04-22, and the day-to-day refresh no longer lives
+> here.** The Polygon continuation feed that actually keeps `parquet_data/`
+> current — `polygon_daily_update.py`, `polygon_new_listings.py` and their tests —
+> moved into the data repo itself, [`july-backtester-norgate-data`][data-repo],
+> and now runs there on a schedule. Nobody needs to run it by hand.
+>
+> That repo is this repo's `parquet_data/` submodule, so a normal checkout still
+> has the scripts — one directory deeper:
+>
+> ```bash
+> python parquet_data/scripts/polygon_daily_update.py --dry-run
+> ```
+>
+> `--data-dir` resolves from the script's own location, so that works from any
+> working directory. See the [data repo README][data-repo] for the schedule,
+> secrets and the manual-backfill command.
+>
+> **Everything below is the full Norgate re-export**, which still lives here. It
+> only runs on a machine with a Norgate licence and the **Norgate Data Updater
+> desktop app** (Windows/macOS) running locally — `norgatedata` talks to that app
+> over a local socket, so it cannot run on a server or in CI.
+
+[data-repo]: https://github.com/zachisit/july-backtester-norgate-data
+
+
 ## Full database dump (recommended)
 
 To get a complete 1:1 copy of all Norgate data locally, run these three commands in order.
@@ -20,6 +45,12 @@ python scripts/norgate_to_parquet.py --database "US Indices" --output-dir parque
 `--skip-existing` on Steps 2 and 3 skips any file already written — no duplicate work.
 
 ## Refreshing data
+
+> For **day-to-day** refreshes, do nothing — the scheduled Polygon job in the
+> [data repo][data-repo] handles it. The command below is a full Norgate
+> re-export and is only meaningful on a licensed machine; since the 2026-04-22
+> freeze it would also *overwrite* the newer Polygon bars with Norgate's last
+> ones, so do not run it casually.
 
 To update existing files with the latest bars, re-run without `--skip-existing`.
 Omitting the flag overwrites every file with fresh data from Norgate.
