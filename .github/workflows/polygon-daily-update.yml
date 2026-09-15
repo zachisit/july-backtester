@@ -1,0 +1,215 @@
+# Polygon → Parquet data update (Issue #191).
+#
+# Keeps the `parquet_data` submodule (zachisit/july-backtester-norgate-data)
+# current. Norgate froze at 2026-04-22; Polygon is the continuation feed, and
+# scripts/norgate_to_parquet.py cannot run here at all — it drives the licensed
+# Norgate Data Updater desktop app, which is Windows/macOS only.
+#
+# Two schedules, one job:
+#   * daily  — scripts/polygon_daily_update.sh: appends new bars to files that
+#     already exist, then commits the submodule and bumps its pointer on main.
+#   * weekly — scripts/polygon_new_listings.py first, so brand-new IPOs get a
+#     file at all. It runs BEFORE the daily step on purpose: the daily updater
+#     only ever touches symbols that already have a file, and running the scan
+#     first means both land in the single commit the daily wrapper makes.
+#
+# Required repo secrets (this workflow fails loudly at step 1 without them):
+#   POLYGON_API_KEY  — Polygon key with grouped-aggregates access.
+#   DATA_REPO_TOKEN  — PAT with `repo` scope on the PRIVATE data submodule.
+#                      GITHUB_TOKEN cannot reach another repository, so it
+#                      cannot clone the submodule, let alone push to it.
+#   DISCORD_WEBHOOK_URL — already present; used only for failure alerts.
+name: Polygon data update
+
+on:
+  schedule:
+    # Times are UTC — GitHub Actions cron has no timezone support, so the ET
+    # offset drifts an hour across DST. 10:00 UTC is 06:00 ET under EDT and
+    # 05:00 ET under EST; both are comfortably after Polygon settles the prior
+    # session, so the drift is harmless here. Do not "fix" it with a TZ field.
+    - cron: "0 10 * * *"
+    - cron: "30 10 * * 6"
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "Backfill start YYYY-MM-DD (skips the lookback clamp entirely)"
+        required: false
+        type: string
+      max_lookback_days:
+        description: "Cap on the auto-computed start, in days (default 30, 0 disables)"
+        required: false
+        default: "30"
+        type: string
+      new_listings:
+        description: "Also run the new-listings scan"
+        required: false
+        default: false
+        type: boolean
+      dry_run:
+        description: "Plan only — fetch and report, write and commit nothing"
+        required: false
+        default: false
+        type: boolean
+
+# A backfill can outlast the next daily tick. Queue instead of cancelling: a
+# half-finished run has already written parquet files, and cancelling it would
+# leave them uncommitted for the next run to re-derive.
+concurrency:
+  group: polygon-data-update
+  cancel-in-progress: false
+
+permissions:
+  contents: read   # every push here uses DATA_REPO_TOKEN, never GITHUB_TOKEN
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    # Generous: the daily pass reads all ~36k parquet files and rewrites ~14k of
+    # them, then moves ~1.9 GB of LFS objects. Observed runs are far shorter —
+    # this is a ceiling so a wedged run fails instead of burning the 6h default.
+    timeout-minutes: 120
+
+    env:
+      POLYGON_API_KEY: ${{ secrets.POLYGON_API_KEY }}
+      # `inputs.*` is null on a schedule event, and `false || null` renders as an
+      # EMPTY string, not "false". Compare explicitly so this is always a real boolean.
+      RUN_NEW_LISTINGS: ${{ github.event.schedule == '30 10 * * 6' || inputs.new_listings == true }}
+
+    steps:
+      - name: Verify required secrets are set
+        env:
+          HAS_POLYGON: ${{ secrets.POLYGON_API_KEY != '' }}
+          HAS_TOKEN: ${{ secrets.DATA_REPO_TOKEN != '' }}
+        run: |
+          fail=0
+          if [ "$HAS_POLYGON" != "true" ]; then
+            echo "::error::POLYGON_API_KEY is not set. Run: gh secret set POLYGON_API_KEY --repo ${{ github.repository }}"
+            fail=1
+          fi
+          if [ "$HAS_TOKEN" != "true" ]; then
+            echo "::error::DATA_REPO_TOKEN is not set. It needs 'repo' scope on the private parquet_data submodule. Run: gh secret set DATA_REPO_TOKEN --repo ${{ github.repository }}"
+            fail=1
+          fi
+          exit $fail
+
+      - name: Checkout (with the private parquet_data submodule + LFS)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+          # Must be the PAT, not GITHUB_TOKEN: it authenticates the submodule
+          # clone AND is what persists as the credential the pushes below use.
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          # pandas_market_calendars is optional in _business_days, but without it
+          # the fallback is weekday-only and every market holiday costs a wasted
+          # grouped call that returns nothing.
+          pip install "pandas" "numpy<2.0" pyarrow requests python-dotenv pandas_market_calendars
+
+      - name: Put the submodule on its branch tip
+        # actions/checkout leaves the submodule detached at the PINNED pointer,
+        # which may already be behind the data repo's own master (data can be
+        # pushed without bumping the pointer). Starting from the pointer would
+        # then re-derive bars that already exist upstream and push a
+        # non-fast-forward. Start from the real tip instead.
+        working-directory: parquet_data
+        run: |
+          git fetch origin master
+          git checkout -B master origin/master
+          git lfs install --local
+          git lfs pull
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C parquet_data config user.name "github-actions[bot]"
+          git -C parquet_data config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Report starting state
+        run: |
+          echo "Disk:"; df -h . | tail -1
+          echo "parquet files: $(ls parquet_data/data | wc -l)"
+          echo "parquet bytes: $(du -sh parquet_data/data | cut -f1)"
+          echo "submodule HEAD: $(git -C parquet_data rev-parse --short HEAD)"
+          echo "run new listings: ${RUN_NEW_LISTINGS}"
+
+      - name: New-listings scan
+        if: env.RUN_NEW_LISTINGS == 'true'
+        env:
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: |
+          args=""
+          if [ "$DRY_RUN" = "true" ]; then args="--dry-run"; fi
+          python scripts/polygon_new_listings.py $args
+
+      - name: Daily update (writes, commits and pushes)
+        # Inputs arrive as env vars and are validated here rather than being
+        # interpolated into the script text, which would let a dispatch input
+        # inject shell. They are also format-checked so a typo fails the run
+        # instead of silently reaching argparse as a nonsense date.
+        env:
+          START: ${{ inputs.start }}
+          MAX_LOOKBACK: ${{ inputs.max_lookback_days }}
+          DRY_RUN: ${{ inputs.dry_run == true }}
+        run: |
+          args=""
+          if [ -n "$START" ]; then
+            if ! printf '%s' "$START" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
+              echo "::error::start must be YYYY-MM-DD, got: $START"; exit 1
+            fi
+            args="$args --start $START"
+          fi
+          if [ -n "$MAX_LOOKBACK" ]; then
+            if ! printf '%s' "$MAX_LOOKBACK" | grep -Eq '^[0-9]+$'; then
+              echo "::error::max_lookback_days must be a non-negative integer, got: $MAX_LOOKBACK"; exit 1
+            fi
+            args="$args --max-lookback-days $MAX_LOOKBACK"
+          fi
+          if [ "$DRY_RUN" = "true" ]; then args="$args --dry-run"; fi
+          echo "Running: scripts/polygon_daily_update.sh $args"
+          bash scripts/polygon_daily_update.sh $args
+
+      - name: Report ending state
+        if: always()
+        run: |
+          echo "Disk:"; df -h . | tail -1
+          echo "submodule HEAD: $(git -C parquet_data rev-parse --short HEAD 2>/dev/null || echo unknown)"
+
+      - name: Upload run log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: polygon-update-log-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Alert Discord on failure
+        # The whole point of automating this is that nobody is watching it. A
+        # silent scheduled job that stops working is indistinguishable from one
+        # that has nothing to do, which is how the data went 3 months stale.
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "::warning::DISCORD_WEBHOOK_URL not set — failure went unannounced."
+            exit 0
+          fi
+          payload=$(jq -n \
+            --arg title "❌ Polygon data update failed" \
+            --arg desc "The scheduled parquet_data refresh did not complete. The dataset is now one day staler than it should be." \
+            --arg url "$RUN_URL" \
+            '{embeds: [{title: $title, description: $desc, url: $url, color: 15548997}]}')
+          curl -sf -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"

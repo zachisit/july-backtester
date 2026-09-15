@@ -29,6 +29,11 @@ Usage:
     python scripts/polygon_daily_update.py --dry-run        # plan only, no writes
     python scripts/polygon_daily_update.py --limit 50       # process first 50 files (testing)
     python scripts/polygon_daily_update.py --only AAPL,MSFT,\\$VIX   # subset
+
+Unattended runs: the auto-computed start is bounded by --max-lookback-days
+(default 30). Without that bound the auto start is the oldest DELISTED symbol's
+last bar (1990), not the live universe's — see _clamp_lookback. An explicit
+--start always wins and is never clamped.
 """
 
 import os
@@ -59,6 +64,7 @@ API_BASE = "https://api.polygon.io"
 DEFAULT_DATA_DIR = os.path.join("parquet_data", "data")
 SEAM_DATE = "2026-04-23"          # first day Norgate did NOT cover (last Norgate bar = 2026-04-22)
 CANONICAL_COLS = ["Open", "High", "Low", "Close", "Volume"]
+DEFAULT_MAX_LOOKBACK_DAYS = 30   # bound on the AUTO-computed grouped start; see _clamp_lookback
 _RATE_LIMIT_SLEEP = 0.0           # seconds between per-ticker index calls; bumped on HTTP 429
 
 
@@ -244,6 +250,37 @@ def _business_days(start: str, end: str) -> list[str]:
         return [d.strftime("%Y-%m-%d") for d in pd.bdate_range(start=start, end=end)]
 
 
+def _clamp_lookback(start: str, end: str, max_lookback_days: int) -> str:
+    """Bound an AUTO-computed grouped start to ``max_lookback_days`` before ``end``.
+
+    Why this exists: the auto start is ``min()`` over every equity file's last
+    bar, and that minimum is dominated by *delisted* symbols. Two thirds of the
+    universe (~20,873 of 35,069 equity files) are delisted and frozen as far back
+    as 1990-01-26 — they will never receive another bar, but they still drag the
+    minimum down. Unclamped, an unattended run therefore asks ``_business_days``
+    for every NYSE session since 1990 (~9,000 grouped calls) and accumulates
+    35k symbols x 9k days in one in-memory dict, which is why this script has
+    only ever been run by hand with an explicit ``--start``.
+
+    The clamp makes an unattended run's cost a function of the SCHEDULE rather
+    than of the oldest delisting: a daily cron fetches ~1 day, and a cron that
+    has been down recovers up to ``max_lookback_days`` on its own. Anything older
+    is a deliberate backfill and must pass ``--start`` explicitly, which skips
+    this clamp entirely.
+
+    Note this bounds only the *fetch* window. Per-symbol writes stay append-only
+    (each symbol's rows are still filtered to ``> its own last bar``), so a wider
+    or narrower window can never rewrite history — only change how much is
+    fetched. ``0`` disables the clamp.
+    """
+    if max_lookback_days <= 0:
+        return start
+    floor = (datetime.strptime(end, "%Y-%m-%d")
+             - timedelta(days=max_lookback_days)).strftime("%Y-%m-%d")
+    # ISO-8601 dates compare lexicographically == chronologically.
+    return max(start, floor)
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────────────────────────────────────
@@ -256,6 +293,15 @@ def main(argv=None) -> int:
     ap.add_argument("--limit", type=int, default=0, help="Process only the first N files (testing)")
     ap.add_argument("--only", help="Comma-separated symbol filter, e.g. 'AAPL,MSFT,$VIX'")
     ap.add_argument("--no-adjust", action="store_true", help="Fetch unadjusted bars (default: split-adjusted)")
+    ap.add_argument(
+        "--max-lookback-days", type=int, default=DEFAULT_MAX_LOOKBACK_DAYS,
+        help=(
+            "Cap how far back the AUTO-computed equity start may reach, in calendar "
+            f"days before the end date (default: {DEFAULT_MAX_LOOKBACK_DAYS}; 0 disables). "
+            "Ignored when --start is given. Required for unattended runs — without it "
+            "the auto start is pinned to the oldest DELISTED symbol (1990)."
+        ),
+    )
     args = ap.parse_args(argv)
 
     adjusted = not args.no_adjust
@@ -300,8 +346,16 @@ def main(argv=None) -> int:
             grouped_start = args.start
         else:
             valid = [d for d in eq_last.values() if d is not None]
-            grouped_start = ((min(valid) + timedelta(days=1)).strftime("%Y-%m-%d")
-                             if valid else SEAM_DATE)
+            auto_start = ((min(valid) + timedelta(days=1)).strftime("%Y-%m-%d")
+                          if valid else SEAM_DATE)
+            grouped_start = _clamp_lookback(auto_start, end_date, args.max_lookback_days)
+            if grouped_start != auto_start:
+                logger.info(
+                    "Auto start %s clamped to %s (--max-lookback-days=%d). The unclamped "
+                    "value tracks the oldest DELISTED symbol, not the live universe; pass "
+                    "--start explicitly to backfill further.",
+                    auto_start, grouped_start, args.max_lookback_days,
+                )
         days = _business_days(grouped_start, end_date)
         logger.info("Equities: fetching %d grouped day(s) from %s to %s.", len(days), grouped_start, end_date)
 

@@ -305,3 +305,96 @@ class TestMainOrchestration:
         assert rc == 0
         aapl = pd.read_parquet(os.path.join(tmp_path, "AAPL.parquet"))
         assert len(aapl) == 1  # dry-run: seed file unchanged
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Bounded auto-start — what makes an UNATTENDED run possible at all
+# ──────────────────────────────────────────────────────────────────────────────
+class TestClampLookback:
+    def test_clamps_a_start_older_than_the_window(self):
+        assert pdu._clamp_lookback("1990-01-27", "2026-09-15", 30) == "2026-08-16"
+
+    def test_leaves_a_recent_start_alone(self):
+        # Already inside the window — the clamp is a floor, never a forced start.
+        assert pdu._clamp_lookback("2026-09-12", "2026-09-15", 30) == "2026-09-12"
+
+    def test_zero_disables_the_clamp(self):
+        assert pdu._clamp_lookback("1990-01-27", "2026-09-15", 0) == "1990-01-27"
+
+    def test_negative_disables_the_clamp(self):
+        assert pdu._clamp_lookback("1990-01-27", "2026-09-15", -1) == "1990-01-27"
+
+    def test_boundary_date_is_not_clamped(self):
+        assert pdu._clamp_lookback("2026-08-16", "2026-09-15", 30) == "2026-08-16"
+
+
+class TestUnattendedStartSelection:
+    """A delisted symbol frozen in 1990 must not set the fetch window.
+
+    Two thirds of the equity universe is delisted and will never receive another
+    bar, but they still participate in the ``min()`` that picks the auto start.
+    Unclamped, a cron with no ``--start`` asks for every session since 1990.
+    """
+
+    def _seed(self, tmp_path, live_last="2026-09-12", dead_last="1990-01-26"):
+        for name, last in (("AAPL.parquet", live_last), ("FNBF-199001.parquet", dead_last)):
+            idx = pd.to_datetime([last], utc=True)
+            df = pd.DataFrame({"Open": [1], "High": [1], "Low": [1], "Close": [1], "Volume": [10]}, index=idx)
+            df.index.name = "Datetime"
+            df.to_parquet(os.path.join(tmp_path, name))
+
+    def _run_capturing_days(self, tmp_path, monkeypatch, argv):
+        seen: list[str] = []
+        monkeypatch.setattr(pdu, "get_api_key", lambda: "KEY")
+        monkeypatch.setattr(pdu, "last_trading_day", lambda *a, **k: "2026-09-15")
+        monkeypatch.setattr(pdu, "fetch_ticker_range", lambda *a, **k: [])
+
+        def fake_grouped(session, key, ds, adjusted):
+            seen.append(ds)
+            return {}
+
+        monkeypatch.setattr(pdu, "fetch_grouped_day", fake_grouped)
+        rc = pdu.main(["--data-dir", str(tmp_path), "--end", "2026-09-15"] + argv)
+        assert rc == 0
+        return seen
+
+    def test_default_lookback_bounds_the_fetch(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        seen = self._run_capturing_days(tmp_path, monkeypatch, [])
+        # ~30 calendar days of sessions, not ~9,000.
+        assert len(seen) <= 25, f"fetched {len(seen)} days — the clamp is not applied"
+        assert min(seen) >= "2026-08-16"
+
+    def test_without_the_clamp_it_reaches_1990(self, tmp_path, monkeypatch):
+        """Pins the failure mode itself, so a regression is visible as a number."""
+        self._seed(tmp_path)
+        seen = self._run_capturing_days(tmp_path, monkeypatch, ["--max-lookback-days", "0"])
+        assert min(seen) == "1990-01-29", min(seen)   # first session after the dead symbol's last bar
+        assert len(seen) > 8000, f"expected the full 1990-onward sweep, got {len(seen)}"
+
+    def test_explicit_start_is_never_clamped(self, tmp_path, monkeypatch):
+        self._seed(tmp_path)
+        seen = self._run_capturing_days(tmp_path, monkeypatch, ["--start", "2026-06-17"])
+        assert min(seen) == "2026-06-17"
+        assert len(seen) > 30   # the 3-month backfill window, well past the 30-day clamp
+
+    def test_clamp_never_rewrites_history(self, tmp_path, monkeypatch):
+        """The clamp bounds the FETCH window only; writes stay append-only.
+
+        A wide window re-offers bars a symbol already has. Those must be dropped
+        by the per-symbol ``> last`` filter, not written back over the seed.
+        """
+        self._seed(tmp_path)
+        monkeypatch.setattr(pdu, "get_api_key", lambda: "KEY")
+        monkeypatch.setattr(pdu, "last_trading_day", lambda *a, **k: "2026-09-15")
+        monkeypatch.setattr(pdu, "fetch_ticker_range", lambda *a, **k: [])
+        # Offer AAPL a bar on EVERY day in the window, including days it already has.
+        monkeypatch.setattr(pdu, "fetch_grouped_day",
+                            lambda s, k, ds, adj: {"AAPL": {"o": 9, "h": 9, "l": 9, "c": 9, "v": 1}})
+
+        rc = pdu.main(["--data-dir", str(tmp_path), "--end", "2026-09-15", "--start", "2026-08-01"])
+        assert rc == 0
+        aapl = pd.read_parquet(os.path.join(tmp_path, "AAPL.parquet"))
+        # The 2026-09-12 seed row is untouched; only strictly-newer bars appended.
+        assert aapl.loc[pd.Timestamp("2026-09-12", tz="UTC"), "Close"] == 1
+        assert aapl.index.min() == pd.Timestamp("2026-09-12", tz="UTC")

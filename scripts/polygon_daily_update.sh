@@ -53,15 +53,33 @@ cd "$REPO_ROOT/parquet_data"
 
 # Submodules are often in detached HEAD — land on a real branch before committing,
 # and remember which one so the push is explicit (not the ambiguous `HEAD`).
+#
+# Under CI the LOCAL branch does not exist at all (actions/checkout leaves every
+# submodule detached with only remote-tracking refs), so a bare `git checkout master`
+# fails, SUB_BRANCH stays empty, and the `${SUB_BRANCH:-master}` fallback then pushes
+# a local ref that was never created — the commit is stranded on a detached HEAD and
+# the run reports success. Create the branch from its remote-tracking ref when it is
+# missing locally. `-B <b> origin/<b>` is a no-op move when HEAD already points there,
+# so freshly written parquet files in the working tree are preserved either way.
 SUB_BRANCH=""
-if git checkout master 2>/dev/null; then SUB_BRANCH="master"
-elif git checkout main 2>/dev/null; then SUB_BRANCH="main"; fi
+for b in master main; do
+    if git show-ref --verify --quiet "refs/heads/$b"; then
+        git checkout "$b" && SUB_BRANCH="$b" && break
+    elif git show-ref --verify --quiet "refs/remotes/origin/$b"; then
+        git checkout -B "$b" "origin/$b" && SUB_BRANCH="$b" && break
+    fi
+done
+
+if [[ -z "$SUB_BRANCH" ]]; then
+    log "ERROR: could not resolve a branch in parquet_data (no local or origin master/main)."
+    exit 1
+fi
 
 if [[ -n "$(git status --porcelain data/)" ]]; then
     COUNT="$(git status --porcelain data/ | wc -l | tr -d ' ')"
     git add data/
     git commit -m "chore: polygon daily update ${STAMP} (${COUNT} files)" | tee -a "$LOG"
-    git push origin "${SUB_BRANCH:-master}" | tee -a "$LOG"
+    git push origin "$SUB_BRANCH" | tee -a "$LOG"
 
     cd "$REPO_ROOT"
     git add parquet_data
