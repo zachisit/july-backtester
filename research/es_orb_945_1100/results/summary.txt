@@ -1,0 +1,203 @@
+==============================================================================
+LEG 1 -- ES (E-mini S&P 500), Polygon futures 1-min, front-month stitched
+==============================================================================
+bars 707,967 | RTH bars 197,621 | sessions 516
+span 2024-09-16 20:00:00-04:00 -> 2026-09-17 13:05:00-04:00
+contracts used: ['ESH5', 'ESH6', 'ESM5', 'ESM6', 'ESU5', 'ESU6', 'ESZ4', 'ESZ5', 'ESZ6']
+pre-registered OOS boundary: 2026-01-01
+
+--- ES full sample (1 contract, gap-aware fills, $2.50 RT commission, 1 tick slip) ---
+                                label split  trades  win_rate  avg_r  expectancy_usd   total_usd  profit_factor  max_dd_usd  sharpe  t_stat_r
+OR15m/cut1100/exit1100/TE/both/follow  full     514     0.459  0.001         -34.431 -17,697.500          0.919 -48,325.000  -0.509     0.022
+OR15m/cut1100/exit1100/1R/both/follow  full     514     0.498 -0.027         -50.409 -25,910.000          0.877 -53,155.000  -0.860    -0.684
+OR15m/cut1100/exit1100/2R/both/follow  full     514     0.459  0.013         -25.360 -13,035.000          0.940 -44,825.000  -0.380     0.291
+OR15m/cut1100/exit1559/TE/both/follow  full     514     0.372  0.007         -32.704 -16,810.000          0.943 -57,612.500  -0.355     0.109
+OR15m/cut1100/exit1559/1R/both/follow  full     514     0.510 -0.011         -30.661 -15,760.000          0.935 -41,767.500  -0.459    -0.259
+OR15m/cut1100/exit1559/2R/both/follow  full     514     0.411  0.058          14.134   7,265.000          1.026 -35,387.500   0.164     0.996
+OR30m/cut1100/exit1100/TE/both/follow  full     491     0.503  0.015          -9.348  -4,590.000          0.973 -25,077.500  -0.156     0.445
+OR30m/cut1100/exit1100/1R/both/follow  full     491     0.511 -0.000         -10.596  -5,202.500          0.969 -28,265.000  -0.176    -0.014
+OR30m/cut1100/exit1100/2R/both/follow  full     491     0.503  0.011          -9.807  -4,815.000          0.972 -25,165.000  -0.164     0.335
+OR30m/cut1100/exit1559/TE/both/follow  full     491     0.432  0.024         -23.656 -11,615.000          0.962 -42,022.500  -0.235     0.422
+OR30m/cut1100/exit1559/1R/both/follow  full     491     0.507 -0.019         -35.418 -17,390.000          0.938 -37,495.000  -0.414    -0.450
+OR30m/cut1100/exit1559/2R/both/follow  full     491     0.432 -0.009         -36.716 -18,027.500          0.940 -44,810.000  -0.380    -0.175
+
+==============================================================================
+LEG 2 -- MNQ/NQ (Nasdaq-100 futures), Databento 1-min RTH, 16-year regime check
+==============================================================================
+bars 1,589,712 | sessions 4139
+span 2010-06-07 09:30:00-04:00 -> 2026-07-16 15:59:00-04:00
+pre-registered OOS boundary: 2021-01-01
+
+--- MNQ full sample (1 contract, gap-aware fills, $1.04 RT commission, 1 tick slip) ---
+                                label split  trades  win_rate  avg_r  expectancy_usd  total_usd  profit_factor  max_dd_usd  sharpe  t_stat_r
+OR15m/cut1100/exit1100/TE/both/follow  full    4084     0.459 -0.028          -0.698 -2,850.360          0.979  -7,633.260  -0.100    -1.846
+OR15m/cut1100/exit1100/1R/both/follow  full    4084     0.493 -0.042          -1.453 -5,933.860          0.956  -6,880.260  -0.233    -3.329
+OR15m/cut1100/exit1100/2R/both/follow  full    4084     0.462 -0.027          -0.623 -2,542.860          0.982  -7,686.260  -0.091    -1.868
+OR15m/cut1100/exit1559/TE/both/follow  full    4084     0.374 -0.007           2.435  9,945.140          1.048  -9,027.480   0.221    -0.305
+OR15m/cut1100/exit1559/1R/both/follow  full    4084     0.494 -0.050          -0.858 -3,503.860          0.980 -11,737.980  -0.111    -3.365
+OR15m/cut1100/exit1559/2R/both/follow  full    4084     0.401 -0.009           1.837  7,500.640          1.037  -9,119.800   0.190    -0.481
+OR30m/cut1100/exit1100/TE/both/follow  full    3825     0.483 -0.021          -0.585 -2,236.000          0.979  -6,335.180  -0.093    -1.933
+OR30m/cut1100/exit1100/1R/both/follow  full    3825     0.490 -0.028          -0.398 -1,521.500          0.986  -6,482.180  -0.064    -2.775
+OR30m/cut1100/exit1100/2R/both/follow  full    3825     0.484 -0.022          -0.455 -1,740.000          0.984  -6,254.240  -0.072    -2.071
+OR30m/cut1100/exit1559/TE/both/follow  full    3825     0.433  0.001           4.134 15,812.000          1.079  -9,548.140   0.348     0.054
+OR30m/cut1100/exit1559/1R/both/follow  full    3825     0.505 -0.016           2.477  9,475.000          1.053 -10,042.140   0.264    -1.118
+OR30m/cut1100/exit1559/2R/both/follow  full    3825     0.443 -0.006           3.221 12,319.000          1.063  -9,592.620   0.297    -0.363
+
+==============================================================================
+ES -- in-sample vs out-of-sample (every config shown, not just the winner)
+==============================================================================
+                                       avg_r          total_usd             trades     
+split                                     IS    OOS          IS         OOS     IS  OOS
+label                                                                                  
+OR15m/cut1100/exit1100/1R/both/follow  0.012 -0.095  -1,337.500 -24,572.500    330  184
+OR15m/cut1100/exit1100/2R/both/follow  0.043 -0.040   5,200.000 -18,235.000    330  184
+OR15m/cut1100/exit1100/TE/both/follow  0.042 -0.073   4,875.000 -22,572.500    330  184
+OR15m/cut1100/exit1559/1R/both/follow  0.010 -0.049  -1,600.000 -14,160.000    330  184
+OR15m/cut1100/exit1559/2R/both/follow  0.096 -0.011  18,187.500 -10,922.500    330  184
+OR15m/cut1100/exit1559/TE/both/follow  0.032 -0.037   2,875.000 -19,685.000    330  184
+OR30m/cut1100/exit1100/1R/both/follow  0.024 -0.045   7,760.000 -12,962.500    316  175
+OR30m/cut1100/exit1100/2R/both/follow  0.039 -0.039   7,860.000 -12,675.000    316  175
+OR30m/cut1100/exit1100/TE/both/follow  0.051 -0.050  11,047.500 -15,637.500    316  175
+OR30m/cut1100/exit1559/1R/both/follow -0.013 -0.028 -10,765.000  -6,625.000    316  175
+OR30m/cut1100/exit1559/2R/both/follow  0.029 -0.077   3,460.000 -21,487.500    316  175
+OR30m/cut1100/exit1559/TE/both/follow  0.082 -0.079  11,397.500 -23,012.500    316  175
+
+==============================================================================
+MNQ -- in-sample vs out-of-sample (every config shown, not just the winner)
+==============================================================================
+                                       avg_r         total_usd            trades      
+split                                     IS   OOS          IS        OOS     IS   OOS
+label                                                                                 
+OR15m/cut1100/exit1100/1R/both/follow -0.070 0.010  -4,320.640 -1,613.220   2666  1418
+OR15m/cut1100/exit1100/2R/both/follow -0.054 0.024  -3,116.640    573.780   2666  1418
+OR15m/cut1100/exit1100/TE/both/follow -0.058 0.028  -3,870.640  1,020.280   2666  1418
+OR15m/cut1100/exit1559/1R/both/follow -0.101 0.045 -11,134.640  7,630.780   2666  1418
+OR15m/cut1100/exit1559/2R/both/follow -0.060 0.085  -7,959.640 15,460.280   2666  1418
+OR15m/cut1100/exit1559/TE/both/follow -0.061 0.095  -8,173.640 18,118.780   2666  1418
+OR30m/cut1100/exit1100/1R/both/follow -0.050 0.014  -3,002.900  1,481.400   2485  1340
+OR30m/cut1100/exit1100/2R/both/follow -0.044 0.019  -3,052.900  1,312.900   2485  1340
+OR30m/cut1100/exit1100/TE/both/follow -0.043 0.019  -3,274.400  1,038.400   2485  1340
+OR30m/cut1100/exit1559/1R/both/follow -0.060 0.065  -7,588.900 17,063.900   2485  1340
+OR30m/cut1100/exit1559/2R/both/follow -0.055 0.085  -7,443.900 19,762.900   2485  1340
+OR30m/cut1100/exit1559/TE/both/follow -0.050 0.096  -7,547.900 23,359.900   2485  1340
+
+==============================================================================
+DIRECTION SPLIT -- long-only vs short-only (no target, i.e. hold to the exit time)
+==============================================================================
+--- ES ---
+                                 label  trades  win_rate  avg_r   total_usd  profit_factor  sharpe
+ OR15m/cut1100/exit1100/TE/long/follow     361     0.507  0.008     160.000          1.001   0.006
+OR15m/cut1100/exit1100/TE/short/follow     344     0.419 -0.030 -20,310.000          0.860  -0.766
+ OR15m/cut1100/exit1559/TE/long/follow     361     0.382  0.013   2,135.000          1.011   0.058
+OR15m/cut1100/exit1559/TE/short/follow     344     0.346  0.036   4,402.500          1.022   0.095
+ OR30m/cut1100/exit1100/TE/long/follow     302     0.560  0.031   4,820.000          1.053   0.220
+OR30m/cut1100/exit1100/TE/short/follow     269     0.450 -0.005  -6,135.000          0.936  -0.289
+ OR30m/cut1100/exit1559/TE/long/follow     302     0.454 -0.007  -8,880.000          0.949  -0.257
+OR30m/cut1100/exit1559/TE/short/follow     269     0.387  0.036   3,977.500          1.023   0.089
+
+--- MNQ ---
+                                 label  trades  win_rate  avg_r  total_usd  profit_factor  sharpe
+ OR15m/cut1100/exit1100/TE/long/follow    2715     0.482 -0.039 -2,643.100          0.967  -0.128
+OR15m/cut1100/exit1100/TE/short/follow    2609     0.434 -0.018   -631.860          0.993  -0.027
+ OR15m/cut1100/exit1559/TE/long/follow    2715     0.403  0.011 10,719.400          1.084   0.308
+OR15m/cut1100/exit1559/TE/short/follow    2609     0.338 -0.024  2,858.640          1.021   0.076
+ OR30m/cut1100/exit1100/TE/long/follow    2278     0.495 -0.037 -5,182.120          0.911  -0.313
+OR30m/cut1100/exit1100/TE/short/follow    2061     0.465 -0.008  1,173.560          1.019   0.063
+ OR30m/cut1100/exit1559/TE/long/follow    2278     0.465  0.001  7,594.380          1.069   0.233
+OR30m/cut1100/exit1559/TE/short/follow    2061     0.386 -0.023  4,334.560          1.038   0.122
+
+==============================================================================
+CONTROL -- does the breakout beat simply being in the market over the same hours?
+==============================================================================
+Enter every session at the open of the first bar after the opening range, exit at
+the same time the ORB variant does. No breakout test, no stop. 1 contract.
+
+leg  or_minutes time_exit      control  control_trades  control_total_usd  control_win_rate  orb_trades  orb_total_usd
+ ES          15     11:00  always_long             516          22,735.00              0.54         514     -17,697.50
+ ES          15     11:00 always_short             516         -51,115.00              0.43         514     -17,697.50
+ ES          15     15:59  always_long             516          16,222.50              0.53         514     -16,810.00
+ ES          15     15:59 always_short             516         -44,602.50              0.46         514     -16,810.00
+ ES          30     11:00  always_long             516           8,797.50              0.52         491      -4,590.00
+ ES          30     11:00 always_short             516         -37,177.50              0.44         491      -4,590.00
+ ES          30     15:59  always_long             516           2,285.00              0.53         491     -11,615.00
+ ES          30     15:59 always_short             516         -30,665.00              0.46         491     -11,615.00
+MNQ          15     11:00  always_long            4139          -8,034.56              0.51        4084      -2,850.36
+MNQ          15     11:00 always_short            4139          -8,852.56              0.45        4084      -2,850.36
+MNQ          15     15:59  always_long            4139           7,003.44              0.53        4084       9,945.14
+MNQ          15     15:59 always_short            4139         -23,890.56              0.43        4084       9,945.14
+MNQ          30     11:00  always_long            4139         -14,712.56              0.50        3825      -2,236.00
+MNQ          30     11:00 always_short            4139          -2,174.56              0.45        3825      -2,236.00
+MNQ          30     15:59  always_long            4139             325.44              0.54        3825      15,812.00
+MNQ          30     15:59 always_short            4139         -17,212.56              0.43        3825      15,812.00
+
+==============================================================================
+GATE 2 -- how much of the P&L is an execution artifact?
+==============================================================================
+ES OR15m/cut1100/exit1559/TE/both/follow: honest $-16,810 | fantasy-fill $-16,810 | artifact $0 (0.0% of fantasy P&L)
+     entries that gapped through the trigger: 0.0%
+MNQ OR15m/cut1100/exit1559/TE/both/follow: honest $9,945 | fantasy-fill $9,981 | artifact $36 (0.4% of fantasy P&L)
+     entries that gapped through the trigger: 0.2%
+
+==============================================================================
+PLACEBO -- is the breakout direction informative, or just exposure?
+==============================================================================
+Same bars, same trigger prices, matched risk of one OR width: follow the break vs
+fade it. Both fully simulated. If the sign carries no information, the paired
+difference is indistinguishable from zero.
+
+ES OR15m exit 11:00:
+    follow:   514 trades  avg R -0.0102  total $    -20,585  t -0.21
+    fade  :   514 trades  avg R -0.0478  total $        515  t -1.00
+    paired follow-minus-fade: $-41.05/session over 514 sessions, t = -0.46
+ES OR15m exit 15:59:
+    follow:   514 trades  avg R +0.0043  total $    -16,435  t +0.06
+    fade  :   514 trades  avg R -0.0607  total $     -8,198  t -0.81
+    paired follow-minus-fade: $-16.03/session over 514 sessions, t = -0.14
+ES OR30m exit 11:00:
+    follow:   491 trades  avg R +0.0176  total $     -3,852  t +0.51
+    fade  :   491 trades  avg R -0.0612  total $    -19,128  t -1.87
+    paired follow-minus-fade: $+31.11/session over 491 sessions, t = +0.37
+ES OR30m exit 15:59:
+    follow:   491 trades  avg R +0.0314  total $     -8,890  t +0.54
+    fade  :   491 trades  avg R -0.0746  total $    -27,452  t -1.33
+    paired follow-minus-fade: $+37.81/session over 491 sessions, t = +0.28
+
+MNQ OR15m exit 11:00:
+    follow:  4084 trades  avg R -0.0267  total $     -2,386  t -1.74
+    fade  :  4084 trades  avg R -0.0652  total $     -8,166  t -4.32
+    paired follow-minus-fade: $+1.42/session over 4084 sessions, t = +0.43
+MNQ OR15m exit 15:59:
+    follow:  4084 trades  avg R -0.0038  total $     10,673  t -0.16
+    fade  :  4084 trades  avg R -0.0442  total $      2,072  t -1.91
+    paired follow-minus-fade: $+2.11/session over 4084 sessions, t = +0.44
+MNQ OR30m exit 11:00:
+    follow:  3825 trades  avg R -0.0214  total $     -2,169  t -1.94
+    fade  :  3825 trades  avg R -0.0593  total $    -14,293  t -5.54
+    paired follow-minus-fade: $+3.17/session over 3825 sessions, t = +1.04
+MNQ OR30m exit 15:59:
+    follow:  3825 trades  avg R +0.0022  total $     16,162  t +0.11
+    fade  :  3825 trades  avg R -0.0550  total $    -18,598  t -2.86
+    paired follow-minus-fade: $+9.09/session over 3825 sessions, t = +1.72
+
+==============================================================================
+MNQ -- year by year (the question 500 ES sessions cannot answer)
+==============================================================================
+      trades  win_rate  avg_r  total_usd
+year                                    
+2010     147     0.395 -0.109   -381.380
+2011     251     0.335 -0.109   -851.040
+2012     252     0.333 -0.163   -593.080
+2013     249     0.333 -0.088   -409.960
+2014     248     0.343 -0.104   -342.920
+2015     255     0.318 -0.124 -1,496.700
+2016     255     0.376  0.005   -150.700
+2017     252     0.377 -0.051   -638.080
+2018     256     0.359  0.092    859.760
+2019     249     0.386 -0.006    488.040
+2020     252     0.373 -0.040 -4,657.580
+2021     254     0.496  0.161  4,297.340
+2022     257     0.397  0.148  5,145.220
+2023     257     0.354  0.013  1,461.220
+2024     257     0.370  0.143  2,670.720
+2025     254     0.441  0.105  8,731.340
+2026     139     0.388 -0.082 -4,187.060

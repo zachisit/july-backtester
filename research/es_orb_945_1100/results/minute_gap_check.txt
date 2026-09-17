@@ -1,0 +1,19 @@
+--- ES  (Polygon futures 1-min, RTH): 197,105 interior 1-min bar boundaries ---
+  |gap| == 0 ticks : 55.416%
+  |gap| <= 1 tick  : 99.626%
+  |gap| <= 2 ticks : 99.963%
+  |gap|  > 4 ticks :  0.005%  (count 10)
+  max |gap|        : 52.0 ticks
+  mean |gap|       : 0.4506 ticks
+
+--- MNQ (Databento 1-min, RTH): 1,585,573 interior 1-min bar boundaries ---
+  |gap| == 0 ticks : 42.292%
+  |gap| <= 1 tick  : 87.000%
+  |gap| <= 2 ticks : 96.536%
+  |gap|  > 4 ticks :  0.427%  (count 6,774)
+  max |gap|        : 306.0 ticks
+  mean |gap|       : 0.7642 ticks
+
+A stop can only be jumped at a bar boundary. With essentially every boundary at
+0-1 ticks, a resting stop inside RTH fills at its level, so honest and fantasy
+fills coincide. The artifact is absent by construction, not by omission.

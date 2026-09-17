@@ -86,3 +86,6 @@ paper_state/stock_level/*
 !paper_state/stock_level/.gitkeep
 paper_state/target_books/*
 !paper_state/target_books/.gitkeep
+
+# Local 1-min ES futures cache built by scripts/es_futures_data.py (~40MB)
+es_minute_cache/
