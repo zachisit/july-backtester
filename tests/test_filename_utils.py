@@ -1134,7 +1134,7 @@ class TestReadPathListIsDerived:
         found = _derive_read_paths()
         assert len(found) == 4, (
             f"read-path coverage changed: {len(found)} modules now import a "
-            f"filename helper, not 6.\n{found}\n\n"
+            f"filename helper, not 4.\n{found}\n\n"
             f"THIS IS A TRIPWIRE, NOT A FAILURE. If you legitimately added a "
             f"read path, raise this number DELIBERATELY and add the module to "
             f"the floor list in TestReadPathListIsDerived — do not bump it "

@@ -17,7 +17,7 @@
 
 ## 1. Proven facts from source inspection (not assumptions)
 
-Established by `scripts/inspect_norgate_schema.py` and `scripts/probe_adjustment_basis.py` (read-only):
+Established by read-only inspection of the Norgate parquet files themselves (schema dump + adjustment-basis probe over 6 sampled symbols), 2026-04. The throwaway probe scripts were never committed to this repository, so re-run the inspection against the vendor files rather than looking for them here:
 
 | Fact | Evidence |
 |---|---|
@@ -90,15 +90,14 @@ Code (created only after sign-off): `scripts/update_market_data.py`, `scripts/bu
 
 ---
 
-## 5b. Norgate source directory (rationale + migration note)
+## 5b. Norgate source directory (rationale)
 
 `NORGATE_ROOT` (`src/data/pipeline/paths.py`) reads Norgate history from a local
 directory of per-symbol parquet files, supplied by the operator via the
 `NORGATE_DATA_ROOT` environment variable. This repository ships no dataset and no
-longer vendors one as a submodule, so there is nothing pinned here — whatever
-snapshot you point it at is the snapshot you get.
+longer vendors one as a submodule.
 
-**Why the pin is safe (not load-bearing for correctness):** `_norgate_history()`
+**Why NOT pinning is safe (this argument is now load-bearing):** `_norgate_history()`
 (`src/data/pipeline/merge.py`) always slices Norgate input to `<= paths.ANCHOR`
 (2026-04-22, §5) before it reaches the merge. Any rows added to the source
 directory after the anchor are discarded by that slice regardless — a newer
