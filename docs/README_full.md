@@ -157,7 +157,7 @@ Five data providers are supported. Set `data_provider` in `config.py`:
 # "data_provider": "norgate", # Norgate Data — requires local Norgate installation
 # "data_provider": "yahoo",   # Yahoo Finance via yfinance (free, no API key needed)
 # "data_provider": "csv",     # Local CSV files (see CSV Data Provider section below)
-# "data_provider": "parquet", # Pre-exported Norgate Parquet files (see Parquet Data Provider section below)
+# "data_provider": "parquet", # Local .parquet files you supply (see Parquet Data Provider section below)
 ```
 
 #### Polygon.io (default)
@@ -247,16 +247,16 @@ Extra columns (e.g. `VWAP`, `Turnover`) are silently ignored. The date column ma
 
 #### Parquet Data Provider
 
-Reads pre-exported Norgate data from local `.parquet` files. This is the recommended provider for teams where only one member has a Norgate license — the license holder exports once, the files are shared via the `parquet_data/` git submodule, and teammates run backtests without any Norgate installation.
+Reads local `.parquet` files, one per symbol. Source-agnostic — it does not care whether the files came from a Norgate export, a Polygon pull, or anything else that writes the expected shape. **This repository ships no dataset and bundles no data source**; point `parquet_data_dir` at a directory you supply.
 
 ```python
 "data_provider": "parquet",
-"parquet_data_dir": "parquet_data/data",   # folder containing .parquet files (relative to project root)
+"parquet_data_dir": "/path/to/your/parquet/files",   # folder containing .parquet files
 ```
 
 **No Norgate license or NDU process required** once the files are exported.
 
-**File naming:** one file per symbol, named `{SYMBOL}.parquet` (e.g. `parquet_data/data/AAPL.parquet`).
+**File naming:** one file per symbol, named `{SYMBOL}.parquet` (e.g. `<your-dir>/AAPL.parquet`).
 
 **Exporting from Norgate:** Run the three export commands once on a machine with a Norgate license (full dump is ~36,000 symbols, ~2.5 GB):
 
@@ -270,20 +270,6 @@ Then validate the export:
 
 ```bash
 python scripts/validate_norgate_export.py
-```
-
-See [scripts/NORGATE_EXPORT.md](../scripts/NORGATE_EXPORT.md) for the full export and validation guide.
-
-**Accessing via submodule (interns / no-license teammates):** The exported dataset lives in the `parquet_data/` git submodule. Clone with:
-
-```bash
-git clone --recurse-submodules https://github.com/zachisit/july-backtester.git
-```
-
-Or initialise the submodule in an existing clone:
-
-```bash
-git submodule update --init parquet_data
 ```
 
 ### Backtest Period

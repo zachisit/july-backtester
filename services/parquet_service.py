@@ -16,8 +16,9 @@ Configuration key:
     config["parquet_data_dir"]  — path to the directory containing the Parquet files.
                                   Relative paths are resolved from the project root
                                   (the directory that contains config.py).
-                                  Defaults to "parquet_data/data" (the data/ subdirectory
-                                  inside the parquet_data git submodule).
+                                  Defaults to "parquet_data/data". Bring your own
+                                  directory of {SYMBOL}.parquet files — this repo
+                                  ships no dataset and assumes no particular source.
 """
 
 import logging
@@ -40,6 +41,8 @@ _CANONICAL_COLS = ["Open", "High", "Low", "Close", "Volume"]
 
 def _resolve_dir(config: dict) -> str:
     """Return the absolute path to the parquet data directory."""
+    # Default kept for backwards compatibility with existing configs. Nothing in
+    # this repo creates or populates it — point --parquet-dir wherever your data is.
     raw = config.get("parquet_data_dir", "parquet_data/data")
     if os.path.isabs(raw):
         return raw

@@ -90,11 +90,13 @@ Code (created only after sign-off): `scripts/update_market_data.py`, `scripts/bu
 
 ---
 
-## 5b. `parquet_data` submodule pin (rationale + migration note)
+## 5b. Norgate source directory (rationale + migration note)
 
 `NORGATE_ROOT` (`src/data/pipeline/paths.py`) reads Norgate history from a local
-checkout of the `parquet_data` submodule (private repo `july-backtester-norgate-data`,
-pinned to a specific commit rather than tracking that repo's `master`).
+directory of per-symbol parquet files, supplied by the operator via the
+`NORGATE_DATA_ROOT` environment variable. This repository ships no dataset and no
+longer vendors one as a submodule, so there is nothing pinned here — whatever
+snapshot you point it at is the snapshot you get.
 
 **Why the pin is safe (not load-bearing for correctness):** `_norgate_history()`
 (`src/data/pipeline/merge.py`) always slices Norgate input to `<= paths.ANCHOR`
@@ -113,13 +115,11 @@ merged store — check out the pinned commit only if you need bit-identical
 sync to the pin:
 
 ```bash
-git -C parquet_data fetch origin
-git -C parquet_data checkout bffb9e06
+export NORGATE_DATA_ROOT=/path/to/your/norgate/parquet/files
 ```
 
-If `parquet_data/` is missing or stale after a normal `git pull`, run
-`git submodule update --init parquet_data` first (see the "Accessing the
-exported data" section in the top-level README).
+The snapshot is whatever that directory contains. This repository no longer
+vendors the dataset, so there is no submodule to initialise or pin.
 
 ---
 
