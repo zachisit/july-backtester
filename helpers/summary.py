@@ -6,6 +6,28 @@ from config import CONFIG
 import numpy as np
 from helpers.aws_utils import upload_file_to_s3
 from helpers.correlation import compute_avg_correlations, DEFAULT_THRESHOLD
+from helpers.filename_utils import sanitize_symbol_for_filename
+
+
+def _safe_strategy_name(strategy_name):
+    """Strategy name made safe for use in an output filename.
+
+    Applies the historical cosmetic transforms (drop spaces/parens) so existing
+    legal filenames are byte-for-byte unchanged, then runs the result through the
+    shared ``sanitize_symbol_for_filename`` so ANY Windows-illegal character is
+    handled — not just the ``/ ( ) : space`` this site used to strip by hand.
+
+    A strategy named ``EMA_PB-A3_ADX>20`` previously kept its ``>`` and produced
+    a filename Windows cannot write, which aborted ``git checkout`` for every
+    Windows contributor once the file was committed. The shared sanitizer maps
+    ``>``/``<`` to distinct ``_gt_``/``_lt_`` tokens, so comparison-sweep variants
+    stay distinct instead of colliding.
+    """
+    cosmetic = (
+        str(strategy_name)
+        .replace('/', '_').replace(' ', '_').replace('(', '').replace(')', '').replace(':', '')
+    )
+    return sanitize_symbol_for_filename(cosmetic)
 
 # Default drawdown filter shared by all four summary functions, so the value
 # cannot drift between copies again (issue #319 was one copy defaulting to
@@ -135,7 +157,7 @@ def save_trades_to_csv(result, local_folder, run_id):
         return
     
     # Sanitize names for filenames/paths
-    strategy_name_safe = result['Strategy'].replace('/', '_').replace(' ', '_').replace('(', '').replace(')', '').replace(':', '')
+    strategy_name_safe = _safe_strategy_name(result['Strategy'])
     portfolio_name_safe = result.get('Portfolio', 'Portfolio').replace(" ", "_")
     symbol = result.get('Asset', portfolio_name_safe)
 
@@ -646,7 +668,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_
     for result in portfolio_results:
         if not result.get('trade_log') or len(result['trade_log']) == 0:
             continue
-        strategy_name_safe = result['Strategy'].replace('/', '_').replace(' ', '_').replace('(', '').replace(')', '').replace(':', '')
+        strategy_name_safe = _safe_strategy_name(result['Strategy'])
         raw_df = pd.DataFrame(result['trade_log'])
         mapped_df = raw_df.rename(columns=COLUMN_MAP)
         # Convert fractional values to percentages for the analyzer
