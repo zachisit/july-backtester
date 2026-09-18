@@ -167,6 +167,61 @@ def _walk_back(prev_dates, date, n):
     return date
 
 
+def _build_entry_edge_masks(signals):
+    """
+    Precompute, per symbol, the bars on which a signal series TRANSITIONS INTO
+    an entry state -- long (1) or short (-2).
+
+    Returns ``{symbol: {1: BoolSeries, -2: BoolSeries}}``. A bar is an edge when
+    it holds the entry value and the PRECEDING BAR IN THAT SERIES does not, so
+    the first bar of a series counts as an edge (a transition from nothing).
+
+    A NaN BREAKS THE HOLD RUN, deliberately: ``NaN != entry_value``, so the bar
+    after a gap re-counts as an edge. That is the right reading for a signal
+    series with holes in it -- a hold whose evidence is missing is not a hold
+    that continued -- and it is why an all-NaN series yields no edges at all.
+
+    Built once up front rather than resolved inside the date loop: that loop runs
+    bars x symbols, and a positional lookup there would be both O(n) per hit and
+    easy to get wrong at series boundaries.
+    """
+    masks = {}
+    for sym, s in signals.items():
+        per_value = {}
+        for entry_value in (1, -2):
+            is_entry = (s == entry_value)
+            per_value[entry_value] = is_entry & ~is_entry.shift(1, fill_value=False)
+        masks[sym] = per_value
+    return masks
+
+
+def _is_entry_bar(signals, edge_masks, symbol, sig_date, entry_value):
+    """
+    True when ``symbol`` may be ENTERED on ``sig_date`` for ``entry_value``
+    (1 = long, -2 = short).
+
+    ``edge_masks`` is None in the default "level" mode, where this reduces to the
+    original equality test byte-for-byte. In "edge" mode the bar must ALSO be a
+    transition into the entry state.
+    """
+    if pd.isna(sig_date) or symbol not in signals:
+        return False
+    _s = signals[symbol]
+    if sig_date not in _s.index or _s.loc[sig_date] != entry_value:
+        return False
+    if edge_masks is None:
+        return True
+    # Guard `edge_masks` exactly as `signals` is guarded above. In-tree the two
+    # are always built from the same dict so a miss cannot happen -- but the
+    # asymmetry becomes reachable the moment masks are built for a subset, and
+    # it would surface as a KeyError deep in the date loop rather than as a
+    # skipped entry. Caught by @zachisit on review.
+    _sym_masks = edge_masks.get(symbol)
+    if _sym_masks is None or entry_value not in _sym_masks:
+        return False
+    return bool(_sym_masks[entry_value].loc[sig_date])
+
+
 def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config, size_mults=None, delisting_dates=None, intrabar_data=None):
     """
     Runs a portfolio simulation with integrated stop-loss handling and logs
@@ -186,6 +241,22 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # Sub-bar resolution: opt-in and requires finer-resolution data to be supplied.
     # Off / no data -> stop fills behave exactly as before (no-op).
     _intrabar_on = bool(CONFIG.get("intrabar_resolution", False)) and intrabar_data is not None
+
+    # --- ENTRY TRIGGER MODE: level (default) vs edge ---
+    # "level" enters on ANY bar whose signal reads the entry value. A strategy
+    # that emits a forward-filled *state* series -- 1 on every bar of a hold, as
+    # custom_strategies/bull_flag.py does via .replace(0, np.nan).ffill() --
+    # therefore makes every hold bar entry-eligible. Capacity starvation then
+    # silently becomes a LATE entry at a worse price instead of a skipped trade,
+    # and which bar gets taken is a function of book size: on the Bull Flag live
+    # window this engine reproduces 10/27 forward entries at allocation 0.10 and
+    # 26/27 at 0.01, with the strategy and the data held constant.
+    # "edge" enters only on the transition INTO the entry state, which is how the
+    # live SignalDeck scanner triggers (`last == 1 and prev != 1`).
+    # Default stays "level": flipping it would move every strategy in the repo
+    # and void tests/test_engine_characterization.py, so it is opt-in per run.
+    _entry_trigger = str(CONFIG.get("entry_trigger", "level")).lower()
+    _edge_masks = _build_entry_edge_masks(signals) if _entry_trigger == "edge" else None
 
     # Dynamic HTB rate compounding based on timeframe (fixes issue #55)
     bars_per_year = get_bars_per_year(CONFIG)
@@ -841,8 +912,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 if date not in _df.index:
                     return (1, "", sym)
                 sd = prev_trading_dates[sym].get(date) if execution_time == "open" else date
-                if (pd.notna(sd) and sym in signals and sd in signals[sym].index
-                        and signals[sym].loc[sd] == -2):
+                if _is_entry_bar(signals, _edge_masks, sym, sd, -2):
                     return (0, str(sd), sym)
                 return (1, "", sym)
             _short_items = sorted(portfolio_data.items(), key=_short_sig_key)
@@ -859,7 +929,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     or _pit_flag(symbol, date, '_pit_force_exit', False)):
                 continue
             sig_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
-            if pd.notna(sig_date) and sig_date in signals[symbol].index and signals[symbol].loc[sig_date] == -2:
+            if _is_entry_bar(signals, _edge_masks, symbol, sig_date, -2):
                 ep = df.loc[date].get('Open' if execution_time == 'open' else 'Close')
                 if pd.isna(ep) or ep <= 0:
                     continue
@@ -1123,8 +1193,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 if date not in _df.index:
                     return (1, "", sym)
                 sd = prev_trading_dates[sym].get(date) if execution_time == "open" else date
-                if (pd.notna(sd) and sym in signals and sd in signals[sym].index
-                        and signals[sym].loc[sd] == 1):
+                if _is_entry_bar(signals, _edge_masks, sym, sd, 1):
                     return (0, str(sd), sym)
                 return (1, "", sym)
             _entry_items = sorted(portfolio_data.items(), key=_long_sig_key)
@@ -1154,7 +1223,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 continue
             raw_entry_price, entry_exec_date = np.nan, pd.NaT
             signal_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
-            if pd.notna(signal_date) and signal_date in signals[symbol].index and signals[symbol].loc[signal_date] == 1:
+            if _is_entry_bar(signals, _edge_masks, symbol, signal_date, 1):
                 raw_entry_price = df.loc[date].get('Open' if execution_time == 'open' else 'Close')
                 entry_exec_date = date
 
