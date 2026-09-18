@@ -100,19 +100,18 @@ snapshot you point it at is the snapshot you get.
 
 **Why the pin is safe (not load-bearing for correctness):** `_norgate_history()`
 (`src/data/pipeline/merge.py`) always slices Norgate input to `<= paths.ANCHOR`
-(2026-04-22, §5) before it reaches the merge. Any rows added to `parquet_data`
-on `master` after the pinned commit fall after the anchor and are discarded by
-that slice regardless of which commit is checked out — a newer-than-pinned
-checkout is a harmless input, not a correctness risk. The pin exists purely for
+(2026-04-22, §5) before it reaches the merge. Any rows added to the source
+directory after the anchor are discarded by that slice regardless — a newer
+snapshot is a harmless input, not a correctness risk. The former pin existed for
 **build reproducibility** (so a re-run of `build_merged_dataset.py` on two
 machines reads byte-identical Norgate source rows), not to freeze data the
 merge actually depends on.
 
-**Migration note for collaborators on an older `parquet_data` checkout**
-(e.g. `5ce3ca03` / tracking `master`): no action is required to reproduce the
-merged store — check out the pinned commit only if you need bit-identical
-`polygon_raw`/`audit` output when re-running the build pipeline yourself. To
-sync to the pin:
+**Note for collaborators:** there is no pinned checkout any more — this repo no
+longer vendors the dataset, so whatever directory `NORGATE_DATA_ROOT` points at
+is the snapshot you get. Reproducing bit-identical `polygon_raw`/`audit` output
+across machines therefore requires agreeing on that directory's contents
+out-of-band. To set it:
 
 ```bash
 export NORGATE_DATA_ROOT=/path/to/your/norgate/parquet/files

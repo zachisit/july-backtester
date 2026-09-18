@@ -258,19 +258,11 @@ Reads local `.parquet` files, one per symbol. Source-agnostic — it does not ca
 
 **File naming:** one file per symbol, named `{SYMBOL}.parquet` (e.g. `<your-dir>/AAPL.parquet`).
 
-**Exporting from Norgate:** Run the three export commands once on a machine with a Norgate license (full dump is ~36,000 symbols, ~2.5 GB):
-
-```bash
-python scripts/norgate_to_parquet.py --database "US Equities"          --output-dir parquet_data/data --start-date 1990-01-01
-python scripts/norgate_to_parquet.py --database "US Equities Delisted" --output-dir parquet_data/data --start-date 1990-01-01 --skip-existing
-python scripts/norgate_to_parquet.py --database "US Indices"           --output-dir parquet_data/data --start-date 1990-01-01 --skip-existing
-```
-
-Then validate the export:
-
-```bash
-python scripts/validate_norgate_export.py
-```
+**Producing the files:** any exporter that writes the shape above will do. The
+Norgate export tooling that used to live in this repo was removed — it existed to
+maintain a specific private dataset rather than to serve this project, and it
+required a Norgate license plus the Windows/macOS-only Norgate Data Updater
+desktop app, so it could never run in CI or on a server.
 
 ### Backtest Period
 
