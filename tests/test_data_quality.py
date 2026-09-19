@@ -61,7 +61,12 @@ class TestValidateOHLCV:
         assert any("Duplicate" in issue for issue in issues)
 
     def test_negative_prices_detected(self):
-        """Negative prices are detected and heavily penalized."""
+        """Negative prices are detected and heavily penalized.
+
+        Wording widened to "Non-positive" with #369 -- the check now covers
+        `<= 0`, and "Negative Close prices" would be actively wrong on a
+        series whose problem is that they are zero. See TestNonPositivePrices.
+        """
         dates = pd.date_range("2020-01-01", periods=5, freq="D")
         df = pd.DataFrame({
             "Open": [100, -5, 102, 103, 104],  # Negative Open
@@ -73,8 +78,8 @@ class TestValidateOHLCV:
 
         score, issues = validate_ohlcv(df, "AAPL", "D")
         assert score < 100.0  # Penalty applied
-        assert any("Negative" in issue and "Open" in issue for issue in issues)
-        assert any("Negative" in issue and "Low" in issue for issue in issues)
+        assert any("Non-positive" in issue and "Open" in issue for issue in issues)
+        assert any("Non-positive" in issue and "Low" in issue for issue in issues)
 
     def test_high_less_than_low_detected(self):
         """High < Low violations are detected."""
@@ -302,7 +307,7 @@ class TestQualityReport:
 
         issues_str = report.iloc[0]["issues"]
         assert ";" in issues_str  # Multiple issues joined
-        assert "Negative" in issues_str
+        assert "Non-positive" in issues_str
         assert "High < Low" in issues_str or "Zero volume" in issues_str
 
 
@@ -329,3 +334,196 @@ class TestIntegrationWithConfig:
         score, issues = validate_ohlcv(df, "AAPL", "D")
         assert score == 100.0
         assert issues == []
+
+
+# ---------------------------------------------------------------------------
+# CHECK 2 — non-positive prices (#369)
+# ---------------------------------------------------------------------------
+
+# PROVENANCE: transcribed by @shardul0701 from
+#   data/market_data/merged/UFMC-200512.parquet
+# during the corpus census on issue #369 (2026-08-30), and posted there in
+# full. These are READ VALUES, not constructed ones -- stated explicitly so a
+# later reader can tell a deliberate transcription from a made-up number,
+# which is not otherwise recoverable once the source is out of reach.
+#
+# The six zero-carrying bars of UFMC-200512, TRANSCRIBED rather than read.
+# `data/market_data/merged/` is gitignored, so a test that opens the parquet
+# passes here and errors on a fresh clone and in CI -- the same convention
+# tests/test_rule_based_universe.py follows with its synthetic corpus. These
+# are not synthetic: they are the tape, as literals. Census + bars from
+# @shardul0701 on #369.
+#
+#             open   high    low  close  volume
+# 1998-07-02   0.0  6.875  6.875  6.875     100   <- open-only zero
+# 1998-07-29   0.0  0.000  0.000  0.000     900   <- fully zero
+# 1998-09-02   0.0  0.000  0.000  0.000    1300   <- fully zero
+# 2000-12-21   0.0  0.750  0.750  0.750     500   <- open-only zero
+# 2001-09-19   0.0  1.300  1.300  1.300    1000   <- open-only zero
+# 2002-07-10   0.0  0.000  0.000  0.000     100   <- fully zero
+#
+# 1,277 bars total; open ==0 -> 6, high/low/close ==0 -> 3 each. All six carry
+# source="norgate": these are PROVENANCED bars with a bad value, NOT the
+# null-source trailing-bar class of #365/#371. Different defect, different fix.
+
+_UFMC_FULLY_ZERO = (0.0, 0.0, 0.0, 0.0)            # 1998-07-29, 1998-09-02, 2002-07-10
+_UFMC_OPEN_ONLY_ZERO = (0.0, 6.875, 6.875, 6.875)  # 1998-07-02 (single-print day)
+
+_CLEAN = (10.0, 10.5, 9.5, 10.0)
+
+
+def _bars(rows):
+    """rows: list of (open, high, low, close) on a contiguous business index."""
+    idx = pd.bdate_range("2020-01-01", periods=len(rows))
+    return pd.DataFrame({
+        "Open":  [r[0] for r in rows],
+        "High":  [r[1] for r in rows],
+        "Low":   [r[2] for r in rows],
+        "Close": [r[3] for r in rows],
+        "Volume": [1_000_000] * len(rows),
+    }, index=idx)
+
+
+class TestNonPositivePrices:
+    """CHECK 2 guarded `< 0`, a shape that has never occurred: zero negative
+    prices in all 35,309 series of the corpus. The one real instance of the
+    defect family it exists to catch is a ZERO, which is the shape it did not
+    test for. The check was dead code, and narrow in the only direction that
+    ever occurs.
+    """
+
+    def test_a_fully_zero_bar_is_invisible_to_check_3(self):
+        """The structural reason CHECK 2 has to widen, pinned by the data.
+
+        On a 0/0/0/0 bar every relationship holds -- `High >= Low` is `0 >= 0`,
+        and both Open and Close sit inside `[0, 0]`. A relationship check
+        cannot see a value that agrees with all of its relations, so CHECK 3
+        is not missing these by oversight and no tightening of it would help.
+        """
+        _, issues = validate_ohlcv(_bars([_CLEAN, _UFMC_FULLY_ZERO, _CLEAN]), "UFMC", "D")
+        relational = [i for i in issues
+                      if "High < Low" in i or "outside H/L range" in i]
+        assert not relational, (
+            f"CHECK 3 saw a fully-zero bar; the premise of this fix is that it "
+            f"cannot: {relational}")
+
+    def test_an_open_only_zero_bar_is_caught_by_check_3(self):
+        """The paired control, and the other half of the same file.
+
+        1998-07-02 is a single-print day (high == low == close) whose open was
+        never recorded. Here the zero DISAGREES with its neighbours, so
+        `Open < Low` fires and CHECK 3 sees it. Same series, same defect
+        family, opposite outcome -- the difference is purely whether the zero
+        contradicts anything.
+        """
+        _, issues = validate_ohlcv(_bars([_CLEAN, _UFMC_OPEN_ONLY_ZERO, _CLEAN]), "UFMC", "D")
+        assert any("Open outside H/L range" in i for i in issues), issues
+
+    @pytest.mark.parametrize("col,row", [
+        ("Open",  (0.0, 10.5, 9.5, 10.0)),
+        ("High",  (10.0, 0.0, 0.0, 0.0)),
+        ("Low",   (10.0, 10.5, 0.0, 10.0)),
+        ("Close", (10.0, 10.5, 9.5, 0.0)),
+    ])
+    def test_a_zero_price_is_charged_as_non_positive(self, col, row):
+        """The fix: `<= 0`, not `< 0`, on each of the four price columns."""
+        _, issues = validate_ohlcv(_bars([_CLEAN, row, _CLEAN]), "UFMC", "D")
+        assert any("Non-positive" in i and col in i for i in issues), (
+            f"a zero {col} was not charged by CHECK 2: {issues}")
+
+    def test_negative_prices_are_still_charged(self):
+        """No-regression: widening the operator must not stop catching the
+        shape the check was originally written for."""
+        _, issues = validate_ohlcv(_bars([_CLEAN, (-5.0, 10.5, 9.5, 10.0), _CLEAN]), "X", "D")
+        assert any("Non-positive" in i and "Open" in i for i in issues), issues
+
+    def test_zero_volume_is_not_charged_by_check_2(self):
+        """Volume is deliberately untouched. A zero-volume session is real and
+        common; a zero PRICE is not."""
+        df = _bars([_CLEAN, _CLEAN, _CLEAN])
+        df["Volume"] = [1_000_000, 0, 1_000_000]
+        _, issues = validate_ohlcv(df, "X", "D")
+        assert not any("Non-positive Volume" in i for i in issues), issues
+
+    def test_the_open_only_bars_are_charged_by_both_checks(self):
+        """The double-charge is correct, not a bug.
+
+        After the widening an open-only-zero bar is charged by CHECK 3 (the
+        open contradicts H/L) AND by CHECK 2 (the open is non-positive). Both
+        are true statements about that bar. Pinned so nobody later "fixes" the
+        apparent duplication by suppressing one of them.
+        """
+        _, issues = validate_ohlcv(_bars([_CLEAN, _UFMC_OPEN_ONLY_ZERO, _CLEAN]), "UFMC", "D")
+        assert any("Open outside H/L range" in i for i in issues), issues
+        assert any("Non-positive" in i and "Open" in i for i in issues), issues
+
+    def test_the_30_point_cap_actually_binds(self):
+        """The cap must be reachable, and reaching it must not floor the score.
+
+        With the charge inside the column loop, `min(30, ...)` capped each
+        COLUMN, so a single check could contribute 4 x 30 = 120 on a 100-point
+        budget. The cap sat above the whole budget and could never bind: on an
+        otherwise-perfect 10,000-bar series, 5 fully-zero bars (0.05%) scored
+        0.0 -- identical to 1,000 of them (10%).
+
+        Charging once per bar makes the cap mean what it says. Asserted as a
+        PLATEAU rather than a specific number: 20 bad bars and 1,000 bad bars
+        must score the same, and that score must be above zero, because the
+        check's own ceiling is 30 of 100. @shardul0701 on #379.
+        """
+        import numpy as np
+        n = 10_000
+
+        def series(n_bad):
+            idx = pd.bdate_range("1990-01-01", periods=n)
+            o = np.full(n, 10.0); h = np.full(n, 10.5)
+            lo = np.full(n, 9.5); c = np.full(n, 10.0)
+            o[:n_bad] = h[:n_bad] = lo[:n_bad] = c[:n_bad] = 0.0
+            return pd.DataFrame({"Open": o, "High": h, "Low": lo, "Close": c,
+                                 "Volume": np.full(n, 1e6)}, index=idx)
+
+        s20, _ = validate_ohlcv(series(20), "T", "D")
+        s1000, _ = validate_ohlcv(series(1000), "T", "D")
+        assert s20 == pytest.approx(s1000), (
+            f"20 bad bars scored {s20} and 1000 scored {s1000}; the cap is not "
+            f"binding, so the charge is unbounded in practice")
+        assert s20 > 0.0, (
+            f"score floored at {s20} with a check whose own cap is 30/100 — "
+            f"the per-column charge is back")
+
+    def test_a_few_bad_bars_do_not_destroy_a_long_series(self):
+        """Severity must scale with the defect, not sit at maximum.
+
+        Five bad bars in ten thousand is 0.05% of a series. Pre-fix that
+        scored 0.0 -- unusable, and indistinguishable from a series that is
+        10% zeros.
+        """
+        import numpy as np
+        n = 10_000
+        idx = pd.bdate_range("1990-01-01", periods=n)
+        o = np.full(n, 10.0); h = np.full(n, 10.5)
+        lo = np.full(n, 9.5); c = np.full(n, 10.0)
+        o[:5] = h[:5] = lo[:5] = c[:5] = 0.0
+        df = pd.DataFrame({"Open": o, "High": h, "Low": lo, "Close": c,
+                           "Volume": np.full(n, 1e6)}, index=idx)
+        score, _ = validate_ohlcv(df, "T", "D")
+        assert score > 50.0, (
+            f"0.05% bad bars scored {score}; the charge is not proportionate")
+
+    def test_one_bar_is_charged_once_however_many_columns_are_zero(self):
+        """A fully-zero bar makes ONE statement -- this bar has no price -- and
+        was charged four times for it, while an open-only zero (an internally
+        CONTRADICTORY bar, arguably the more suspicious shape) was charged once.
+
+        Asserted on the issue text rather than the score, because the two
+        shapes legitimately differ in score: the open-only bar also trips
+        CHECK 3, which is correct and is pinned separately above.
+        """
+        df = _bars([_CLEAN, _UFMC_FULLY_ZERO, _CLEAN])
+        _, issues = validate_ohlcv(df, "UFMC", "D")
+        nonpos = [i for i in issues if "Non-positive" in i]
+        assert len(nonpos) == 1, (
+            f"expected one non-positive issue for one bad bar, got "
+            f"{len(nonpos)}: {nonpos}")
+        # ...and it names every column it found, so nothing is lost by folding.
+        assert all(c in nonpos[0] for c in ("Open", "High", "Low", "Close")), nonpos[0]
