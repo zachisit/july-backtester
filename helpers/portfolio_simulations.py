@@ -1,3 +1,4 @@
+import logging
 import random as _random
 
 import pandas as pd
@@ -7,6 +8,12 @@ from .simulations import calculate_advanced_metrics
 from helpers.position_sizing import calculate_position_size, check_portfolio_heat
 from helpers import instruments as _inst
 from helpers import intrabar as _intrabar
+
+logger = logging.getLogger(__name__)
+
+# Sizing methods already warned about on the short side (#372). Module-level so
+# the banner is once per process rather than once per portfolio per strategy.
+_WARNED_SHORT_SIZING = set()
 
 
 def _hold_duration_days(entry_dt, exit_dt):
@@ -183,6 +190,67 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
     execution_time = CONFIG.get("execution_time", "open").lower()
     htb_rate_annual = CONFIG.get("htb_rate_annual", 0.0)
+
+    # The equity SHORT entry path sizes as alloc/fill unconditionally -- it never
+    # calls calculate_position_size -- so a run configured risk_parity, kelly,
+    # vol_parity or risk_pct_capped silently gets FIXED allocation on every
+    # short while the long side honours the setting. The book is then sized by
+    # two different methods depending on direction, and nothing says so (#372).
+    #
+    # Warned rather than wired: routing shorts through calculate_position_size
+    # changes short-side share counts for every existing run using a non-fixed
+    # method, which is a behavioural change that wants its own PR and its own
+    # golden master. Making the gap audible costs nothing and stops it being
+    # discovered from a results discrepancy months later, which is how the
+    # neighbouring defects in this file were all found.
+    _sizing_method_cfg = CONFIG.get("position_sizing_method", "fixed")
+    # ONLY `fixed` is excluded. `fixed_contracts` was on this list because it
+    # reads as a fixed method by name -- but the equity short leg does not
+    # implement it either, and it is the WIDEST divergence of the five:
+    #
+    #                    method   long shares   short shares
+    #                     fixed         99.95         100.05   legs agree
+    #           fixed_contracts          3.00         100.05   33x, and silent
+    #
+    # So it was the one configuration that diverges most and got no banner.
+    # @shardul0701 on #381.
+    if _sizing_method_cfg not in ("fixed",):
+        # `-2` is the ONLY short entry. `-1` is exit-long as well as
+        # cover-short, and `-1 < s < 0` is a scaled partial exit, so a guard
+        # keyed on `s < 0` is true for any long book that closes a position:
+        # 39 of the signal functions in helpers/indicators.py emit -1 and
+        # exactly 2 emit -2. `s < 0` would fire on essentially every run.
+        # ...and only for an EQUITY short. The gap is the `cash_full` branch
+        # at :1031; the futures short leg DOES dispatch on
+        # position_sizing_method (:1010 onward), so on a futures book both
+        # legs agree and the banner was a false alarm:
+        #
+        #     futures, fixed_contracts   LONG 1.0   SHORT 1.0   banner fired
+        #
+        # The message's middle clause ("equity short entries always size as
+        # allocation/fill") was always exact; the first and third were written
+        # from the equity path and over-claimed. A futures user reading it
+        # would go hunting for an inconsistency that isn't there.
+        # @shardul0701 on #381.
+        # NB resolve_instrument here rather than reading `instruments`, which
+        # is not built until :361 -- below this block.
+        _has_shorts = any(
+            (s == -2).any()
+            and _inst.resolve_instrument(sym, CONFIG).margin_mode
+                != _inst.INITIAL_MARGIN
+            for sym, s in signals.items()
+            if s is not None and len(s))
+        # Once per method per process, not once per run_portfolio_simulation
+        # call -- that is once per portfolio per strategy, so a 20-strategy
+        # book prints 20 identical lines. Workers are separate processes and
+        # each keeps its own set, which is the intended granularity.
+        if _has_shorts and _sizing_method_cfg not in _WARNED_SHORT_SIZING:
+            _WARNED_SHORT_SIZING.add(_sizing_method_cfg)
+            logger.warning(
+                "position_sizing_method=%r is honoured on the LONG side only; "
+                "equity short entries always size as allocation/fill (#372). "
+                "This book contains short signals, so it is sized by two "
+                "different methods depending on direction.", _sizing_method_cfg)
     # Sub-bar resolution: opt-in and requires finer-resolution data to be supplied.
     # Off / no data -> stop fills behave exactly as before (no-op).
     _intrabar_on = bool(CONFIG.get("intrabar_resolution", False)) and intrabar_data is not None
@@ -1232,6 +1300,31 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _pv = stop_config.get("value")
                         if _pv is not None and _pv > 0 and raw_entry_price > 0:
                             sizing_kwargs["stop_distance_pct"] = float(_pv) / raw_entry_price
+                    elif stop_type == "signal_bar":
+                        # Also known before entry: the level is the signal bar's own
+                        # extreme, which is exactly what the stop path computes at
+                        # :1520 via signal_bar_stop_level(). Deriving it here rather
+                        # than falling through to the 3xATR proxy keeps sizing and
+                        # the stop on the SAME number -- the disagreement that put
+                        # 20% of the book at risk on the atr branch (#324).
+                        #
+                        # `bars_back` is honoured for the same reason: the stop path
+                        # walks back through _walk_back(), so sizing must walk the
+                        # same distance or it sizes against a bar the stop is not on.
+                        _sb_d = _walk_back(prev_trading_dates[symbol], signal_date,
+                                           stop_config.get("bars_back", 0))
+                        if pd.notna(_sb_d) and _sb_d in df.index and raw_entry_price > 0:
+                            _sb_row = df.loc[_sb_d]
+                            _sb_lvl = _inst.signal_bar_stop_level(
+                                _sb_row.get('High'), _sb_row.get('Low'),
+                                stop_config.get("buffer", 0.0), side="long")
+                            # Only when the level is actually protective. A next-open
+                            # that gaps through the signal-bar low leaves the level
+                            # ABOVE entry, the stop path declines to arm it, and a
+                            # negative distance here would size a nonsense position.
+                            if _sb_lvl is not None and _sb_lvl < raw_entry_price:
+                                sizing_kwargs["stop_distance_pct"] = (
+                                    (raw_entry_price - _sb_lvl) / raw_entry_price)
 
                 # For kelly: compute rolling stats from completed trades so sizing
                 # actually adapts to the strategy's live performance.
