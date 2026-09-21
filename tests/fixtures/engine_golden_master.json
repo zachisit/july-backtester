@@ -47,6 +47,53 @@
       }
     ]
   },
+  "fixed_contracts_futures": {
+    "equity_curve": [
+      100000.0,
+      100000.0,
+      100138.75,
+      100288.75,
+      100438.75,
+      100588.75,
+      100738.75,
+      100727.5,
+      100727.5
+    ],
+    "equity_len": 9,
+    "scalars": {
+      "Trades": 1,
+      "avg_trade_duration": 7.0,
+      "calmar_ratio": 2714.259302,
+      "initial_capital": 100000.0,
+      "max_drawdown": 0.000112,
+      "pnl_percent": 0.007275,
+      "profit_factor": null,
+      "sharpe_ratio": 14.452573,
+      "win_rate": 1.0
+    },
+    "trade_log": [
+      {
+        "EntryDate": "2023-01-03T00:00:00",
+        "EntryPrice": 1010.25,
+        "ExitDate": "2023-01-10T00:00:00",
+        "ExitPrice": 1059.75,
+        "ExitReason": "Strategy Exit",
+        "HoldDuration": 7,
+        "InitialRisk": 50.75,
+        "MAE_pct": -0.010245,
+        "MFE_pct": 0.059738,
+        "PosSizeMult": 1.0,
+        "Profit": 727.5,
+        "ProfitPct": 0.048008,
+        "RMultiple": 0.955665,
+        "Shares": 3.0,
+        "Symbol": "MESM6",
+        "Trade": "Long 1",
+        "VolumeImpact_bps": 0.0,
+        "is_win": 1
+      }
+    ]
+  },
   "long_atr_stop": {
     "equity_curve": [
       100000.0,
@@ -327,6 +374,103 @@
         "RMultiple": 0.968328,
         "Shares": 395.841683,
         "Symbol": "FFF",
+        "Trade": "Long 1",
+        "VolumeImpact_bps": 0.0,
+        "is_win": 1
+      }
+    ]
+  },
+  "risk_pct_capped_cap": {
+    "equity_curve": [
+      100000.0,
+      100000.0,
+      100018.95,
+      100038.95,
+      100058.95,
+      100078.95,
+      100098.95,
+      100097.85,
+      100097.85,
+      100097.85
+    ],
+    "equity_len": 10,
+    "scalars": {
+      "Trades": 1,
+      "avg_trade_duration": 7.0,
+      "calmar_ratio": 3003.680277,
+      "initial_capital": 100000.0,
+      "max_drawdown": 1.1e-05,
+      "pnl_percent": 0.000978,
+      "profit_factor": null,
+      "sharpe_ratio": -12.744538,
+      "win_rate": 1.0
+    },
+    "trade_log": [
+      {
+        "EntryDate": "2023-01-03T00:00:00",
+        "EntryPrice": 101.0505,
+        "ExitDate": "2023-01-10T00:00:00",
+        "ExitPrice": 105.947,
+        "ExitReason": "Strategy Exit",
+        "HoldDuration": 7,
+        "InitialRisk": 5.052525,
+        "MAE_pct": -0.010495,
+        "MFE_pct": 0.05947,
+        "PosSizeMult": 1.0,
+        "Profit": 97.85,
+        "ProfitPct": 0.048416,
+        "RMultiple": 0.968328,
+        "Shares": 20.0,
+        "Symbol": "JJJ",
+        "Trade": "Long 1",
+        "VolumeImpact_bps": 0.0,
+        "is_win": 1
+      }
+    ]
+  },
+  "risk_pct_capped_heat": {
+    "equity_curve": [
+      100000.0,
+      100000.0,
+      100000.0,
+      100119.808,
+      100279.808,
+      100439.808,
+      100599.808,
+      100759.808,
+      100919.808,
+      100879.136,
+      100879.136
+    ],
+    "equity_len": 11,
+    "scalars": {
+      "Trades": 1,
+      "avg_trade_duration": 8.0,
+      "calmar_ratio": 636.5428,
+      "initial_capital": 100000.0,
+      "max_drawdown": 0.000403,
+      "pnl_percent": 0.008791,
+      "profit_factor": null,
+      "sharpe_ratio": 12.637786,
+      "win_rate": 1.0
+    },
+    "trade_log": [
+      {
+        "EntryDate": "2023-01-04T00:00:00",
+        "EntryPrice": 5022.51,
+        "ExitDate": "2023-01-12T00:00:00",
+        "ExitPrice": 5077.46,
+        "ExitReason": "Strategy Exit",
+        "HoldDuration": 8,
+        "InitialRisk": 60.0,
+        "MAE_pct": -0.010495,
+        "MFE_pct": 0.021561,
+        "PosSizeMult": 1.0,
+        "Profit": 879.136,
+        "ProfitPct": 0.01094,
+        "RMultiple": 0.915767,
+        "Shares": 16.0,
+        "Symbol": "III",
         "Trade": "Long 1",
         "VolumeImpact_bps": 0.0,
         "is_win": 1

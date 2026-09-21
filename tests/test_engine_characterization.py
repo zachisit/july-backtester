@@ -34,6 +34,35 @@ Regression map — scenario -> engine behaviour proven unchanged
   trailing_atr_equity  trailing_atr stop on an equity (CASH_FULL) symbol — anchors
                        stop/target/breakeven floor to slipped entry_price, not raw
                        (#240 fix); arm + trail + floor all exercise the equity path
+  risk_pct_capped_heat risk_pct_capped WITH the portfolio heat check live — pins
+                       that method's SECOND output, the stop fraction the heat
+                       check reads. Cap deliberately not binding here (#384)
+  risk_pct_capped_cap  risk_pct_capped where max_contracts_cap DOES bind: 200
+                       units wanted, 20 delivered (#384)
+  fixed_contracts_futures  fixed_contracts on a MARGINED instrument — a unit
+                       count that must skip the point_value / margin conversion.
+                       Futures on purpose: on an equity that conversion is a
+                       no-op, so an equity scenario cannot fail on it (#384)
+
+Coverage note (#384): before those last three, this fixture pinned exactly TWO of
+the six position_sizing_method values — `fixed` via _BASE_CFG and `risk_parity`
+via one override. It was therefore structurally unable to fail a change to the
+other four, which makes "the golden master is byte-identical" a valid necessary
+condition and an invalid sufficient one.
+
+Two traps when adding a method here, both hit on the first draft of the three
+above and both of which produce a scenario that passes every mutant:
+
+  1. Put the CLAMPS at real values, not _BASE_CFG's disabled ones. Disabling
+     heat and the ADV cap is right for isolating core arithmetic, but it also
+     switches off the only consumer of risk_pct_capped's second output — with
+     max_portfolio_heat at 1.0 that output can be deleted outright and this
+     fixture will not move.
+  2. Use a FUTURES symbol for anything about the unit-count/dollar distinction.
+     The point_value / margin_required conversion is identity on a cash equity.
+
+Every scenario added for #384 was verified by mutation — each one moves for a
+specific defect and the others do not.
 
 Regenerate the fixture (ONLY when an intended behaviour change is reviewed):
     REGEN_GOLDEN=1 .venv/bin/python -m pytest tests/test_engine_characterization.py -q
@@ -180,6 +209,67 @@ def _scenario(name):
                 {"type": "trailing_atr", "stop_mult": 1.0, "trail_mult": 1.0,
                  "t1_mult": 2.0, "floor": "breakeven"}, {})
 
+    if name == "risk_pct_capped_heat":
+        # #384: before this scenario existed, `grep -c 'risk_pct_capped\|
+        # fixed_contracts' <this file>` returned 0 -- the base config pins
+        # position_sizing_method="fixed" and the only override in the set is
+        # risk_parity, so neither method was ever selected and the fixture was
+        # byte-identical whether their implementation was right or wrong.
+        # "Any diff means it's wrong" held; "no diff means it's right" did not.
+        #
+        # Clamps are deliberately NOT at _BASE_CFG's disabled values here.
+        # risk_pct_capped's second output (sizing_kwargs["stop_distance_pct"])
+        # is read ONLY by the heat check, so a fixture with max_portfolio_heat
+        # at 1.0 cannot see it. price 5000 + point_cap 60 gives a real stop
+        # fraction of 1.2%, and heat 0.01 falls between that and the flat 2%
+        # target_risk_per_trade proxy the check silently reverts to if the
+        # output is dropped.  (@shardul0701 on #384.)
+        closes = [5000 + 10 * i for i in range(11)]
+        df = _df(closes, atr=[100.0] * len(closes))
+        sig = _sig(df, {2: 1, 8: -1})
+        return ({"III": df}, {"III": sig},
+                {"position_sizing_method": "risk_pct_capped",
+                 "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "max_portfolio_heat": 0.01, "max_pct_adv": 0.05},
+                {"type": "trailing_atr", "stop_mult": 1.0, "trail_mult": 1.0,
+                 "t1_mult": 2.0, "point_cap": 60, "floor": "breakeven"}, {})
+
+    if name == "risk_pct_capped_cap":
+        # Sibling of risk_pct_capped_heat, which deliberately does NOT bind the
+        # cap (16 of 20 units) because its job is the heat side output. This one
+        # binds it: $1,000 budget / $5 stop = 200 units wanted, 20 delivered.
+        # Verified by mutation -- removing the clamp moves this scenario and not
+        # the other, and vice versa for dropping the side output.
+        df = _df([100, 101, 102, 103, 104, 105, 106, 107, 108, 109])
+        sig = _sig(df, {1: 1, 6: -1})
+        return ({"JJJ": df}, {"JJJ": sig},
+                {"position_sizing_method": "risk_pct_capped",
+                 "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "max_portfolio_heat": 1.0, "max_pct_adv": 0.05},
+                {"type": "percentage", "value": 0.05}, {})
+
+    if name == "fixed_contracts_futures":
+        # The other method #384 hoists, on a MARGINED instrument -- which is
+        # where it matters. fixed_contracts answers in units, so it must skip
+        # the point_value / margin_required conversion the four dollar-answering
+        # methods get. On an EQUITY that conversion is a no-op (point_value 1.0,
+        # CASH_FULL), so an equity scenario cannot fail on it: measured, the
+        # first draft of this scenario used a cash equity and the mutant that
+        # deletes the gate passed it 12/12. On MES the same mutant doubles the
+        # position, 3 contracts -> 6.
+        df = _df([1000 + 10 * i for i in range(9)])
+        sig = _sig(df, {1: 1, 6: -1})
+        return ({"MESM6": df}, {"MESM6": sig},
+                {"position_sizing_method": "fixed_contracts",
+                 "fixed_contracts_per_trade": 3,
+                 "max_portfolio_heat": 0.10, "max_pct_adv": 0.05,
+                 "instruments": {"default_asset_class": "equity",
+                                 "futures_initial_margin_pct": 0.10,
+                                 "futures_commission_per_contract": 2.50,
+                                 "futures_slippage_ticks": 1.0,
+                                 "overrides": {}}},
+                {"type": "percentage", "value": 0.05}, {})
+
     raise ValueError(name)
 
 
@@ -187,6 +277,8 @@ SCENARIOS = [
     "long_basic", "long_pct_stop", "long_atr_stop", "short_borrow",
     "vol_impact", "risk_parity_stop", "exclude_open", "multi_symbol",
     "trailing_atr_equity",
+    # #384 -- the two methods the fixture was structurally unable to fail on.
+    "risk_pct_capped_heat", "risk_pct_capped_cap", "fixed_contracts_futures",
 ]
 
 

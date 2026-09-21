@@ -1034,22 +1034,24 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     _s_entry_fill = _inst.apply_slippage(inst_se, ep, "sell")
                     _free = cash - reserved_margin
                     _s_sizing_method = CONFIG.get('position_sizing_method', 'fixed')
-                    if _s_sizing_method == "risk_pct_capped":
-                        # Mirror of the long-side risk_pct_capped branch. _s_ir
-                        # (initial risk in points) is already computed above,
-                        # before this dispatch -- unlike the long path, the
-                        # short path sets its stop before sizing.
-                        if _s_ir and _s_ir > 0:
-                            _risk_budget = max(total_equity, 0.0) * CONFIG.get("risk_pct_per_trade", 0.01)
-                            _raw_contracts = np.floor(_risk_budget / (_s_ir * inst_se.point_value))
-                            _cap = CONFIG.get("max_contracts_cap", 20)
-                            shares = max(0.0, min(_raw_contracts, _cap))
-                        else:
-                            shares = 0.0
-                    elif _s_sizing_method == "fixed_contracts":
-                        # Mirror of the long-side fixed_contracts branch: a fixed
-                        # contract count every trade, never equity-scaled.
-                        shares = float(CONFIG.get("fixed_contracts_per_trade", 1))
+                    if _s_sizing_method in ("risk_pct_capped", "fixed_contracts"):
+                        # Same two methods the long path dispatches, now through the
+                        # same function (#384). These were open-coded mirrors of the
+                        # long branches; the copy has drifted from its original twice
+                        # in this file already. _s_ir (initial risk in POINTS) is
+                        # computed above, before this dispatch -- unlike the long
+                        # path, the short path sets its stop before sizing.
+                        shares = calculate_position_size(
+                            method=_s_sizing_method,
+                            equity=total_equity,
+                            price=_s_entry_fill,
+                            symbol_data=portfolio_data[symbol].loc[
+                                :(sig_date if pd.notna(sig_date) else date)],
+                            config=CONFIG,
+                            allocation_pct=allocation_pct,
+                            stop_distance_points=_s_ir,
+                            point_value=inst_se.point_value,
+                        )
                     else:
                         alloc = min(total_equity * allocation_pct, _free)
                         if alloc <= 0:
@@ -1341,11 +1343,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # full history would use a future ATR value on early simulation dates.
                 inst = instruments[symbol]
                 if sizing_method == "risk_pct_capped":
-                    # Compounding risk-percent sizing: risk risk_pct_per_trade of
-                    # CURRENT (compounding) equity per trade, contracts = floor(
-                    # risk_budget / (stop_dist_pts * point_value)), hard-capped at
-                    # max_contracts_cap. This compounds with account growth --
-                    # unlike fixed_contracts, which never scales.
+                    # Resolve the stop distance IN POINTS and hand it to
+                    # position_sizing._risk_pct_capped, which owns the arithmetic
+                    # (#384). Only the resolution stays here: it reads the ATR at
+                    # the signal bar and the live stop_config, neither of which the
+                    # sizing module has.
                     _rp_stop_dist_pts = None
                     _stype_sz = stop_config.get("type", "none")
                     if _stype_sz == "trailing_atr":
@@ -1380,11 +1382,9 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                     _eff_sz = min(_eff_sz, _pc_sz)
                                 _rp_stop_dist_pts = _eff_sz
 
+                    sizing_kwargs["stop_distance_points"] = _rp_stop_dist_pts
+                    sizing_kwargs["point_value"] = inst.point_value
                     if _rp_stop_dist_pts and _rp_stop_dist_pts > 0:
-                        _risk_budget = max(total_equity, 0.0) * CONFIG.get("risk_pct_per_trade", 0.01)
-                        _raw_contracts = np.floor(_risk_budget / (_rp_stop_dist_pts * inst.point_value))
-                        _cap = CONFIG.get("max_contracts_cap", 20)
-                        shares = max(0.0, min(_raw_contracts, _cap)) * _size_mult
                         # The portfolio heat check below falls back to the flat
                         # target_risk_per_trade (2%) proxy when stop_distance_pct is
                         # absent from sizing_kwargs. For risk_pct_capped the position
@@ -1401,58 +1401,58 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         # raw_entry_price (not the slipped entry_price) to match the
                         # anchor _rp_stop_dist_pts was computed against above.
                         sizing_kwargs["stop_distance_pct"] = _rp_stop_dist_pts / raw_entry_price
-                    else:
-                        shares = 0.0
-                elif sizing_method == "fixed_contracts":
-                    # Fixed contract-count sizing: EXACTLY N contracts every
-                    # trade, forever -- never scaled to equity. This is already
-                    # a contract count, not a dollar-notional target, so it
-                    # bypasses calculate_position_size and the point_value/
-                    # margin conversion below entirely.
-                    shares = float(CONFIG.get("fixed_contracts_per_trade", 1)) * _size_mult
-                else:
-                    shares = calculate_position_size(
-                        method=sizing_method,
-                        equity=total_equity,
-                        price=entry_price,
-                        # Slice to the SIGNAL bar, not the fill bar (#324 review).
-                        # Both consumers take .iloc[-1] of this frame:
-                        # _volatility_parity (position_sizing.py:173) and the
-                        # risk_parity ATR fallback (:205). Sliced to `date` that
-                        # last row is the FILL bar, so under execution_time="open"
-                        # sizing reads a bar the signal never saw -- same-bar
-                        # look-ahead -- and the modes diverge 5x on shares. A
-                        # sizing decision may only use information available at
-                        # the signal.
-                        symbol_data=df.loc[:(signal_date if pd.notna(signal_date) else date)],
-                        config=CONFIG,
-                        allocation_pct=allocation_pct,  # honour the caller's allocation, not CONFIG only
-                        **sizing_kwargs
-                    )
 
-                    # Apply the per-signal size multiplier (entry-queue / ML band)
-                    # to the sized position before the heat check.
-                    shares = shares * _size_mult
+                shares = calculate_position_size(
+                    method=sizing_method,
+                    equity=total_equity,
+                    price=entry_price,
+                    # Slice to the SIGNAL bar, not the fill bar (#324 review).
+                    # Both consumers take .iloc[-1] of this frame:
+                    # _volatility_parity (position_sizing.py) and the
+                    # risk_parity ATR fallback. Sliced to `date` that
+                    # last row is the FILL bar, so under execution_time="open"
+                    # sizing reads a bar the signal never saw -- same-bar
+                    # look-ahead -- and the modes diverge 5x on shares. A
+                    # sizing decision may only use information available at
+                    # the signal.
+                    symbol_data=df.loc[:(signal_date if pd.notna(signal_date) else date)],
+                    config=CONFIG,
+                    allocation_pct=allocation_pct,  # honour the caller's allocation, not CONFIG only
+                    **sizing_kwargs
+                )
 
-                    # Futures size in contracts: the sizing methods return a dollar-notional
-                    # based size; dividing out $/point converts it to contracts (pv=1 for equities).
-                    if inst.margin_mode == _inst.INITIAL_MARGIN:
-                        # Margined (leveraged) futures: the sizing target is a dollar
-                        # amount of equity to commit. Converting it via point_value
-                        # treats that dollar amount as full unlevered notional, so as
-                        # price appreciates the position size keeps shrinking below 1
-                        # contract and, once it floors to 0, equity never moves again
-                        # and it never recovers. Size off margin_required() instead,
-                        # which is what the account actually posts to hold the contract.
-                        # Checked BEFORE point_value (rather than nested inside a
-                        # `point_value != 1.0` gate) so a margined instrument whose
-                        # point_value happens to be 1.0 still gets margin-based sizing
-                        # instead of silently falling through as if it were unlevered.
-                        _target_dollars = shares * entry_price
-                        _per_contract_margin = _inst.margin_required(inst, 1, entry_price)
-                        shares = _target_dollars / _per_contract_margin if _per_contract_margin > 0 else 0.0
-                    elif inst.point_value != 1.0:
-                        shares = shares / inst.point_value
+                # Apply the per-signal size multiplier (entry-queue / ML band)
+                # to the sized position before the heat check.
+                shares = shares * _size_mult
+
+                # risk_pct_capped and fixed_contracts already answer in UNITS
+                # (contracts/shares); the other four answer in dollars. Only the
+                # dollar answers get the conversion below -- putting a contract
+                # count through margin_required() or point_value re-scales a
+                # number that is already in the right units. This method check is
+                # the one piece of the old three-way dispatch that is load-bearing
+                # rather than duplication, so it survives #384 as an explicit gate.
+                if sizing_method in ("risk_pct_capped", "fixed_contracts"):
+                    pass
+                # Futures size in contracts: the sizing methods return a dollar-notional
+                # based size; dividing out $/point converts it to contracts (pv=1 for equities).
+                elif inst.margin_mode == _inst.INITIAL_MARGIN:
+                    # Margined (leveraged) futures: the sizing target is a dollar
+                    # amount of equity to commit. Converting it via point_value
+                    # treats that dollar amount as full unlevered notional, so as
+                    # price appreciates the position size keeps shrinking below 1
+                    # contract and, once it floors to 0, equity never moves again
+                    # and it never recovers. Size off margin_required() instead,
+                    # which is what the account actually posts to hold the contract.
+                    # Checked BEFORE point_value (rather than nested inside a
+                    # `point_value != 1.0` gate) so a margined instrument whose
+                    # point_value happens to be 1.0 still gets margin-based sizing
+                    # instead of silently falling through as if it were unlevered.
+                    _target_dollars = shares * entry_price
+                    _per_contract_margin = _inst.margin_required(inst, 1, entry_price)
+                    shares = _target_dollars / _per_contract_margin if _per_contract_margin > 0 else 0.0
+                elif inst.point_value != 1.0:
+                    shares = shares / inst.point_value
 
                 # --- PORTFOLIO HEAT CHECK ---
                 # Compute the dollar risk this position adds. For methods with a
