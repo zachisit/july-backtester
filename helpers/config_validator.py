@@ -238,7 +238,7 @@ def validate_config(config: dict) -> list[str]:
     if et is not None and str(et).lower() not in {"level", "edge"}:
         msg = (f"WARNING: entry_trigger '{et}' is not a known mode "
                f"(expected 'level' or 'edge') -- the run will fall back to "
-               f"'level', i.e. entry on ANY bar holding the signal value")
+               f"'edge', i.e. entry only on the TRANSITION into the signal value")
         warnings.append(msg)
         logger.warning(msg)
 

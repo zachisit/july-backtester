@@ -255,7 +255,9 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # live SignalDeck scanner triggers (`last == 1 and prev != 1`).
     # Default stays "level": flipping it would move every strategy in the repo
     # and void tests/test_engine_characterization.py, so it is opt-in per run.
-    _entry_trigger = str(CONFIG.get("entry_trigger", "level")).lower()
+    # Fallback matches the shipped default (#401): a config missing the key must
+    # not silently get the behaviour the default was flipped away from.
+    _entry_trigger = str(CONFIG.get("entry_trigger", "edge")).lower()
     _edge_masks = _build_entry_edge_masks(signals) if _entry_trigger == "edge" else None
 
     # Dynamic HTB rate compounding based on timeframe (fixes issue #55)

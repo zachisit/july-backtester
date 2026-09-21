@@ -180,13 +180,31 @@ def _scenario(name):
                 {"type": "trailing_atr", "stop_mult": 1.0, "trail_mult": 1.0,
                  "t1_mult": 2.0, "floor": "breakeven"}, {})
 
+    if name == "hold_state_stop":
+        # #401 / review of #373. Every OTHER scenario in this file builds its
+        # signal with _sig(df, {i: v}) -- an isolated pulse on a zero series --
+        # and 0 -> 1 is a transition under BOTH entry_trigger semantics. So the
+        # fixture was structurally blind to level-vs-edge: injecting
+        # entry_trigger into _BASE_CFG changed nothing, and a config key that is
+        # silently IGNORED produces the identical "10 passed".
+        #
+        # This is the missing coverage: same bars as long_pct_stop, same 5% stop,
+        # signal forward-filled instead of pulsed. Under "level" the stop closes
+        # the position and the still-held 1 re-enters; under "edge" it does not.
+        # Pins the semantics in both directions so neither default can be flipped
+        # again without a test moving.
+        df = _df([100, 101, 102, 101, 100, 94, 95, 96, 97, 98])
+        sig = pd.Series(0, index=df.index, dtype=int)
+        sig.iloc[1:] = 1                                  # enter and STAY 1
+        return {"BBB": df}, {"BBB": sig}, {}, {"type": "percentage", "value": 0.05}, {}
+
     raise ValueError(name)
 
 
 SCENARIOS = [
     "long_basic", "long_pct_stop", "long_atr_stop", "short_borrow",
     "vol_impact", "risk_parity_stop", "exclude_open", "multi_symbol",
-    "trailing_atr_equity",
+    "trailing_atr_equity", "hold_state_stop",
 ]
 
 

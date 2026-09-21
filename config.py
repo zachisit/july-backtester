@@ -213,12 +213,21 @@ CONFIG = {
     "entry_random_seed": 42,
 
     # Whether a bar qualifies as an ENTRY at all.
-    # "level" (default) — enter on any bar whose signal reads the entry value.
+    # "edge" (default)  — enter only on the transition INTO the entry state,
+    #                     matching how the live scanner triggers
+    #                     (`last == 1 and prev != 1`).
+    # "level"           — enter on any bar whose signal reads the entry value.
     #                     Strategies emitting a forward-filled state series make
     #                     every hold bar entry-eligible under this mode.
-    # "edge"            — enter only on the transition INTO the entry state,
-    #                     matching how the live scanner triggers. Opt-in: the
-    #                     default is unchanged so existing results are stable.
+    #
+    # DEFAULT FLIPPED TO "edge" (#401). Under "level" a forward-filled state
+    # series re-enters on the SAME BAR a stop closed the position — measured
+    # 2 trades where the strategy emitted one decision — and WHICH bar gets
+    # taken becomes a function of book size. 29 of 50 functions in
+    # helpers/indicators.py forward-fill, so the default library is hold-state
+    # and was exposed by default. This key is read ONCE PER RUN, so opting
+    # individual strategies in was never expressible; the only two options were
+    # "everyone" or "nobody", and "nobody" meant stable-but-wrong numbers.
     #
     # TWO CONSEQUENCES OF "edge" BEYOND THE LATE-ENTRY FIX, both intended:
     #   * A STOPPED-OUT POSITION DOES NOT RE-ENTER while the state signal is
@@ -236,7 +245,7 @@ CONFIG = {
     #     books (5 symbols x 120 bars): 20 of the 80 had at least one symbol
     #     trading more often under edge (25 of 400 book-symbol cells), while
     #     book totals fell 1564 -> 1434. Net subtraction, but not a filter.
-    "entry_trigger": "level",
+    "entry_trigger": "edge",
 
     # ============================================================
     # SECTION 21: VERBOSE SUMMARY TABLE
