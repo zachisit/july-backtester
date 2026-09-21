@@ -194,7 +194,7 @@ Per-bar resolution is deliberately *not* offered: `resolve_universe` costs ~10s/
 2. **`$` and `#` prefixes are not investable.** 1,160 index series (`$NYA`, `$DJITR`) and 455 breadth series (`#NYSEAD`) carry price and volume columns, so no liquidity screen rejects them — and they out-rank everything on notional dollar volume. Before this filter a top-100 universe came back as *almost entirely indices*. Excluded by default.
 3. **Ticker reuse.** `WB` is Wachovia (`WB-200812`) until 2008 and Weibo (`WB`) from 2014; `V` was Vivendi (`V-200608`) before Visa (`V`). Resolution is by **security ID**, never bare ticker — which also sidesteps `parquet_service`'s ambiguous `_multi_` bare-ticker fallback, since `WB-200812.parquet` matches exactly.
 
-**Performance:** a metadata-only span index over all 36,684 securities builds in **~8.5s**, cached to `parquet_data/.span_index.parquet`; universe resolution is then ~10s per date.
+**Performance:** a metadata-only span index over all 36,684 securities builds in **~8.5s**, cached to `<parquet_data_dir>/../.span_index.parquet`; universe resolution is then ~10s per date.
 
 **What it is NOT:** the S&P 500, Russell, or any index. If a thesis depends on index membership *itself* — reconstitution flow, inclusion effects, benchmark-relative mandates — this does not substitute. **Results produced on this universe must say so.**
 

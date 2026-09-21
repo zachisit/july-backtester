@@ -16,8 +16,9 @@ Configuration key:
     config["parquet_data_dir"]  — path to the directory containing the Parquet files.
                                   Relative paths are resolved from the project root
                                   (the directory that contains config.py).
-                                  Defaults to "parquet_data/data" (the data/ subdirectory
-                                  inside the parquet_data git submodule).
+                                  Defaults to "parquet_data/data". Bring your own
+                                  directory of {SYMBOL}.parquet files — this repo
+                                  ships no dataset and assumes no particular source.
 """
 
 import logging
@@ -40,6 +41,8 @@ _CANONICAL_COLS = ["Open", "High", "Low", "Close", "Volume"]
 
 def _resolve_dir(config: dict) -> str:
     """Return the absolute path to the parquet data directory."""
+    # Default kept for backwards compatibility with existing configs. Nothing in
+    # this repo creates or populates it — point --parquet-dir wherever your data is.
     raw = config.get("parquet_data_dir", "parquet_data/data")
     if os.path.isabs(raw):
         return raw
@@ -50,9 +53,20 @@ def _find_parquet(symbol: str, parquet_dir: str) -> str | None:
     """
     Find the Parquet file for *symbol* with case-insensitive lookup.
     Returns the full file path, or None if not found.
+
     Also checks for Norgate-style date-suffixed files (e.g. ALTR-201512.parquet)
-    used for delisted/acquired tickers; returns the sentinel "_multi_" string
-    when multiple date-suffix files exist (caller must use _find_parquet_multi).
+    used for delisted/acquired tickers:
+      - exactly one dated file, no live bare file -> returned directly.
+      - more than one dated file -> returns the sentinel "_multi_|<dir>|<safe>".
+        These are DISTINCT SECURITIES that happen to share a bare ticker
+        (Norgate's TICKER-YYYYMM suffix names the month a security stopped
+        trading, and different companies have reused the same bare ticker
+        over time — see issue #395). The caller (get_price_data) must refuse
+        to merge them, not concatenate.
+      - a live bare file exists alongside dated file(s) -> the live file wins
+        (existing behaviour), but a warning is logged naming the delisted
+        history that is being masked, since it would otherwise be dropped
+        with no indication anything was hidden (issue #395 item 3).
     """
     if not os.path.isdir(parquet_dir):
         logger.warning(f"Parquet data directory does not exist: {parquet_dir}")
@@ -65,21 +79,51 @@ def _find_parquet(symbol: str, parquet_dir: str) -> str | None:
     # Looking only for "_CON" returns None and drops the symbol silently.
     spellings = _filename_candidates(symbol)
 
+    listing = os.listdir(parquet_dir)
+
     # Try exact match first, then case-insensitive
+    exact_path, exact_safe = None, None
     for safe in spellings:
         for candidate in [f"{safe}.parquet", f"{safe.upper()}.parquet",
                           f"{safe.lower()}.parquet"]:
             path = os.path.join(parquet_dir, candidate)
             if os.path.isfile(path):
-                return path
+                exact_path, exact_safe = path, safe
+                break
+        if exact_path:
+            break
 
     # Brute-force case-insensitive scan
-    listing = os.listdir(parquet_dir)
-    for safe in spellings:
-        target = f"{safe.upper()}.parquet"
-        for fname in listing:
-            if fname.upper() == target:
-                return os.path.join(parquet_dir, fname)
+    if exact_path is None:
+        for safe in spellings:
+            target = f"{safe.upper()}.parquet"
+            for fname in listing:
+                if fname.upper() == target:
+                    exact_path, exact_safe = os.path.join(parquet_dir, fname), safe
+                    break
+            if exact_path:
+                break
+
+    if exact_path is not None:
+        # issue #395 item 3: a live/exact bare file can mask delisted history
+        # filed under date-suffixed names for the same bare ticker (e.g. ABI
+        # resolves to a 228-bar live file while ABI-199908/ABI-200811 sit
+        # right next to it, silently dropped). Warn so this is visible.
+        prefix = exact_safe.upper() + "-"
+        masked = sorted(
+            fname for fname in listing
+            if fname.upper().startswith(prefix) and fname.upper().endswith(".PARQUET")
+        )
+        if masked:
+            candidates = [os.path.splitext(f)[0] for f in masked]
+            logger.warning(
+                f"'{symbol}' resolved to '{os.path.basename(exact_path)}', but "
+                f"{len(masked)} delisted date-suffixed file(s) sharing this bare "
+                f"ticker exist and are being masked/dropped: {candidates}. "
+                f"If that history is needed, request the security ID directly "
+                f"(e.g. '{candidates[0]}')."
+            )
+        return exact_path
 
     # Fallback: Norgate date-suffixed files e.g. ALTR-201512.parquet
     for safe in spellings:
@@ -91,7 +135,9 @@ def _find_parquet(symbol: str, parquet_dir: str) -> str | None:
         if len(dated) == 1:
             return os.path.join(parquet_dir, dated[0])
         if len(dated) > 1:
-            # Signal to caller that multiple period files exist
+            # issue #395: more than one distinct security shares this bare
+            # ticker. Signal ambiguity to the caller, which must refuse to
+            # merge rather than concatenate them.
             return "_multi_|" + parquet_dir + "|" + safe
 
     return None
@@ -187,7 +233,12 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
         )
         return None
 
-    # Handle multiple date-suffix period files (Norgate delisted format)
+    # Multiple date-suffix period files under one bare ticker (Norgate
+    # delisted format) means distinct securities reused the same bare
+    # ticker at different times. issue #395: there is no correct way to
+    # merge them from a bare ticker alone (their spans can overlap, and
+    # even end-to-end splices splice two unrelated companies into one
+    # series) — refuse rather than guess.
     if filepath.startswith("_multi_|"):
         _, fdir, safe = filepath.split("|", 2)
         prefix = safe.upper() + "-"
@@ -195,16 +246,14 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
             f for f in os.listdir(fdir)
             if f.upper().startswith(prefix) and f.upper().endswith(".PARQUET")
         )
-        frames = []
-        for part in parts:
-            try:
-                frames.append(pd.read_parquet(os.path.join(fdir, part)))
-            except Exception as e:
-                logger.warning(f"Could not read '{part}': {e}")
-        if not frames:
-            return None
-        df = pd.concat(frames).sort_index()
-        df = df[~df.index.duplicated(keep="first")]
+        candidates = [os.path.splitext(f)[0] for f in parts]
+        logger.error(
+            f"'{symbol}' is ambiguous: {len(candidates)} distinct delisted "
+            f"securities share this bare ticker ({candidates}). Refusing to "
+            f"merge them into one series (see issue #395) — pass one of the "
+            f"security IDs above instead of the bare ticker."
+        )
+        return None
     else:
         try:
             df = pd.read_parquet(filepath)

@@ -167,58 +167,34 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full plugin reference including p
 
 ## Norgate Data
 
-If you have a Norgate license, you can either query Norgate live on every run **or** export the full database to local Parquet files once and share access with teammates who don't have a license.
+If you have a Norgate license you can query Norgate live on every run, or point the
+Parquet provider at a directory you exported yourself.
 
 | Setting | What it does | Requires |
 |---|---|---|
-| `data_provider: "norgate"` | Calls Norgate API live on every run | Norgate license + NDU running |
-| `data_provider: "parquet"` | Reads pre-exported local Parquet files | Submodule only — no license needed |
+| `data_provider: "norgate"` | Calls the Norgate API live on every run | Norgate license + NDU running |
+| `data_provider: "parquet"` | Reads local `{SYMBOL}.parquet` files from a directory you supply | Nothing — no license, no API key |
 
-### Pipeline
+### Parquet provider
 
-```mermaid
-%%{init: {'theme': 'neutral'}}%%
-graph LR
-    A[Norgate API\nNDU running] -->|norgate_to_parquet.py| B[(parquet_data/data/\n~36 000 .parquet files)]
-    B -->|data_provider: parquet| C[Backtester]
-    A -->|data_provider: norgate| C
-```
-
-### Exporting Norgate data to Parquet
-
-Run the three export commands once (full dump, ~36 000 symbols, ~2.5 GB):
+The Parquet provider is source-agnostic: it reads one file per symbol, named
+`{SYMBOL}.parquet`, with columns `Open, High, Low, Close, Volume` and a
+`DatetimeIndex`. It does not care how those files were produced — a Norgate export,
+a Polygon pull, or anything else that writes that shape.
 
 ```bash
-python scripts/norgate_to_parquet.py --database "US Equities"          --output-dir parquet_data/data --start-date 1990-01-01
-python scripts/norgate_to_parquet.py --database "US Equities Delisted" --output-dir parquet_data/data --start-date 1990-01-01 --skip-existing
-python scripts/norgate_to_parquet.py --database "US Indices"           --output-dir parquet_data/data --start-date 1990-01-01 --skip-existing
+python main.py --provider parquet --parquet-dir /path/to/your/parquet/files
 ```
 
-Validate that every Norgate symbol has a local file:
+Or set it in `config.py`:
 
-```bash
-python scripts/validate_norgate_export.py
+```python
+"data_provider": "parquet",
+"parquet_data_dir": "/path/to/your/parquet/files",
 ```
 
-See [scripts/NORGATE_EXPORT.md](scripts/NORGATE_EXPORT.md) for the full export and validation guide.
-
-### Accessing the exported data (interns / no-license teammates)
-
-The exported dataset lives in the `parquet_data/` git submodule (private repo: `july-backtester-norgate-data`). Clone it alongside the main repo:
-
-```bash
-git clone --recurse-submodules https://github.com/zachisit/july-backtester.git
-```
-
-Or, if you already cloned without `--recurse-submodules`:
-
-```bash
-git submodule update --init parquet_data
-```
-
-Then set `data_provider: "parquet"` in `config.py`. No Norgate license or NDU process required.
-
----
+> **This repository ships no market data and depends on no external dataset.**
+> Bring your own directory. Symbols with no matching file are simply skipped.
 
 ### The Backtesting Lifecycle
 
