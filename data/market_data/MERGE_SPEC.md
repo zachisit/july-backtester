@@ -17,7 +17,7 @@
 
 ## 1. Proven facts from source inspection (not assumptions)
 
-Established by `scripts/inspect_norgate_schema.py` and `scripts/probe_adjustment_basis.py` (read-only):
+Established by read-only inspection of the Norgate parquet files themselves (schema dump + adjustment-basis probe over 6 sampled symbols), 2026-04. The throwaway probe scripts were never committed to this repository, so re-run the inspection against the vendor files rather than looking for them here:
 
 | Fact | Evidence |
 |---|---|
@@ -90,36 +90,34 @@ Code (created only after sign-off): `scripts/update_market_data.py`, `scripts/bu
 
 ---
 
-## 5b. `parquet_data` submodule pin (rationale + migration note)
+## 5b. Norgate source directory (rationale)
 
 `NORGATE_ROOT` (`src/data/pipeline/paths.py`) reads Norgate history from a local
-checkout of the `parquet_data` submodule (private repo `july-backtester-norgate-data`,
-pinned to a specific commit rather than tracking that repo's `master`).
+directory of per-symbol parquet files, supplied by the operator via the
+`NORGATE_DATA_ROOT` environment variable. This repository ships no dataset and no
+longer vendors one as a submodule.
 
-**Why the pin is safe (not load-bearing for correctness):** `_norgate_history()`
+**Why NOT pinning is safe (this argument is now load-bearing):** `_norgate_history()`
 (`src/data/pipeline/merge.py`) always slices Norgate input to `<= paths.ANCHOR`
-(2026-04-22, §5) before it reaches the merge. Any rows added to `parquet_data`
-on `master` after the pinned commit fall after the anchor and are discarded by
-that slice regardless of which commit is checked out — a newer-than-pinned
-checkout is a harmless input, not a correctness risk. The pin exists purely for
+(2026-04-22, §5) before it reaches the merge. Any rows added to the source
+directory after the anchor are discarded by that slice regardless — a newer
+snapshot is a harmless input, not a correctness risk. The former pin existed for
 **build reproducibility** (so a re-run of `build_merged_dataset.py` on two
 machines reads byte-identical Norgate source rows), not to freeze data the
 merge actually depends on.
 
-**Migration note for collaborators on an older `parquet_data` checkout**
-(e.g. `5ce3ca03` / tracking `master`): no action is required to reproduce the
-merged store — check out the pinned commit only if you need bit-identical
-`polygon_raw`/`audit` output when re-running the build pipeline yourself. To
-sync to the pin:
+**Note for collaborators:** there is no pinned checkout any more — this repo no
+longer vendors the dataset, so whatever directory `NORGATE_DATA_ROOT` points at
+is the snapshot you get. Reproducing bit-identical `polygon_raw`/`audit` output
+across machines therefore requires agreeing on that directory's contents
+out-of-band. To set it:
 
 ```bash
-git -C parquet_data fetch origin
-git -C parquet_data checkout bffb9e06
+export NORGATE_DATA_ROOT=/path/to/your/norgate/parquet/files
 ```
 
-If `parquet_data/` is missing or stale after a normal `git pull`, run
-`git submodule update --init parquet_data` first (see the "Accessing the
-exported data" section in the top-level README).
+The snapshot is whatever that directory contains. This repository no longer
+vendors the dataset, so there is no submodule to initialise or pin.
 
 ---
 

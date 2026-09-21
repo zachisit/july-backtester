@@ -28,9 +28,12 @@ AUDIT = os.path.join(MARKET_DATA, "audit")
 LOGS = os.path.join(MARKET_DATA, "logs")
 METADATA = os.path.join(MARKET_DATA, "metadata")
 
-# Norgate per-symbol parquet repo (read-only master). env first, then known path.
-NORGATE_ROOT = os.environ.get("NORGATE_DATA_ROOT") or \
-    r"c:\Users\shard\Light Water Internship\july-backtester-norgate-data\data"
+# Directory of per-symbol Norgate parquet files (read-only source), supplied by the
+# operator. No default: this repository ships no dataset and must not assume one
+# exists at any particular path. Previously fell back to a contributor's personal
+# Windows path, which was both machine-specific and a private-repo reference in a
+# public repo.
+NORGATE_ROOT = os.environ.get("NORGATE_DATA_ROOT", "")
 
 # Cached reference tables produced by the certification scan (reused, not re-scanned).
 NORGATE_LAST_DATES_CSV = os.path.join(ROOT, "scripts", "norgate_symbol_last_dates.csv")
@@ -96,5 +99,16 @@ def get_logger(name="merge_pipeline", run_id=None):
 
 
 def norgate_path(symbol):
-    """Path to a Norgate per-symbol parquet (symbol as stored, e.g. 'AAPL')."""
+    """Path to a Norgate per-symbol parquet (symbol as stored, e.g. 'AAPL').
+
+    Raises if NORGATE_DATA_ROOT is unset. os.path.join("", "AAPL.parquet") returns
+    a RELATIVE path, so an unset root would silently resolve against the current
+    working directory and report "file not found" for every symbol — a
+    configuration error wearing the costume of an empty dataset.
+    """
+    if not NORGATE_ROOT:
+        raise RuntimeError(
+            "NORGATE_DATA_ROOT is not set. This repository ships no dataset; point "
+            "it at your own directory of per-symbol Norgate parquet files."
+        )
     return os.path.join(NORGATE_ROOT, f"{symbol}.parquet")
