@@ -538,7 +538,7 @@ class TestColumnNameCaseInsensitivity:
              "volume": [1_000_000.0] * n},
             index=_IDX[:n])
         _, issues = validate_ohlcv(df, "NEG", "D")
-        assert any("Negative" in i for i in issues), issues
+        assert any("Non-positive" in i for i in issues), issues
 
     def test_uppercase_columns_also_work(self):
         n = 300

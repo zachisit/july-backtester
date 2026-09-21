@@ -7,7 +7,7 @@ Detects common data issues that silently corrupt backtest results:
 2. Price jumps >20% (potential unadjusted splits)
 3. Zero volume days
 4. OHLC relationship violations
-5. Negative prices
+5. Non-positive prices (zero or negative — see CHECK 2, issue #369)
 6. Duplicate timestamps
 """
 
@@ -271,13 +271,52 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
         issues.append(f"Duplicate timestamps: {duplicates} bars")
         demerits += min(20, duplicates * 2)  # Cap at 20 points
 
-    # --- CHECK 2: Negative prices ---
-    for col in ["Open", "High", "Low", "Close"]:
-        if col in named.columns:
-            negative_count = (named[col] < 0).sum()
-            if negative_count > 0:
-                issues.append(f"Negative {col} prices: {negative_count} bars")
-                demerits += min(30, negative_count * 5)  # Severe issue
+    # --- CHECK 2: Non-positive prices ---
+    # `<= 0`, not `< 0`. Corpus census over all 35,309 series: ZERO negative
+    # prices anywhere, and exactly one series with a close of 0.0
+    # (UFMC-200512, 3 bars of 1,277). So the strict form guarded a shape that
+    # has never occurred while missing the only real instance of the family --
+    # the check was dead code, and narrow in the only direction that happens.
+    #
+    # CHECK 3 is NOT a backstop for this. A 0/0/0/0 bar is internally
+    # CONSISTENT -- High >= Low holds as 0 >= 0, and Open and Close both sit
+    # inside [0, 0] -- so every relationship test reads False. A relationship
+    # check cannot see a value that agrees with all of its relations. UFMC's
+    # own file shows both halves: its 3 open-only zeros DO trip CHECK 3
+    # (the open contradicts H/L), its 3 fully-zero bars do not.
+    #
+    # An open-only-zero bar is therefore charged by CHECK 3 and CHECK 2 both.
+    # That double-charge is correct -- both statements are true of the bar --
+    # not a duplication to be suppressed later.
+    #
+    # Volume is deliberately excluded: a zero-volume session is real and
+    # common, a zero PRICE is not.
+    # ONE CHARGE PER BAR, not per column. With the charge inside the column
+    # loop `min(30, ...)` caps each COLUMN, so the effective ceiling for this
+    # single check was 4 x 30 = 120 on a 100-point budget -- above the whole
+    # budget, so the cap could never bind on any input. Measured on an
+    # otherwise-perfect 10,000-bar series: 5 fully-zero bars (0.05%) scored
+    # 0.0, identical to 1,000 of them (10%). That is #378's saturation shape
+    # arriving in a new check.
+    #
+    # Per-column charging also inverted the severity ordering. The same three
+    # bad bars scored 38.0 spelled 0/0/0/0 and 79.0 spelled open-only -- four
+    # charges for one statement ("this bar has no price") against one charge
+    # for an internally CONTRADICTORY bar (a zero open inside a valid H/L
+    # range), which is the more suspicious shape of the two.
+    #
+    # Charging per bar makes min(30, ...) mean what it says. @shardul0701 on
+    # #379.
+    _price_cols = [c for c in ("Open", "High", "Low", "Close") if c in named.columns]
+    if _price_cols:
+        _bad = (named[_price_cols] <= 0).any(axis=1)
+        _n_bad = int(_bad.sum())
+        if _n_bad > 0:
+            _hit = [c for c in _price_cols if bool((named[c] <= 0).any())]
+            _pct = _n_bad / len(named) * 100.0 if len(named) else 0.0
+            issues.append(f"Non-positive prices: {_n_bad} bars ({_pct:.2f}%) "
+                          f"in {', '.join(_hit)}")
+            demerits += min(30, _n_bad * 5)  # Severe issue
 
     # --- CHECK 3: OHLC relationship violations ---
     if all(c in named.columns for c in ["Open", "High", "Low", "Close"]):
