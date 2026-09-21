@@ -17,10 +17,6 @@ from helpers.filename_utils import (
     sanitize_symbol_for_filename,
 )
 
-# First entry of scripts/validate_norgate_export.DATABASES — the stub in
-# TestReadPathsFindALegacyUnguardedFile answers symbols for this one only.
-_FIRST_DB = "US Equities"
-
 # Names whose import marks a module as a filename read path.
 _SANITIZER_IMPORTS = {"sanitize_symbol_for_filename", "filename_candidates",
                       "resolve_existing"}
@@ -744,312 +740,6 @@ class TestReadPathsFindALegacyUnguardedFile:
         assert caching.get_cached_data(
             "CON", "2024-01-01", "2024-06-01", "day", 1) is None
 
-    # ---- scripts/norgate_to_parquet.py --------------------------------------
-
-    def test_export_symbol_skips_a_legacy_reserved_name(self, tmp_path):
-        """`--skip-existing` must treat a legacy `CON.parquet` as present.
-
-        Pre-fix (and still true on the first revision of this PR, which fixed
-        only the `main()` call site) this re-exported every reserved-name symbol
-        and left both spellings on disk.
-        """
-        import scripts.norgate_to_parquet as n2p
-
-        self._write_parquet(tmp_path / "CON.parquet")
-
-        called = []
-
-        def _boom(*a, **k):
-            called.append(1)
-            raise AssertionError("re-exported a symbol that is already present")
-
-        # export_symbol imports get_price_data lazily from services.norgate_service
-        import sys
-        import types
-        stub = types.ModuleType("services.norgate_service")
-        stub.get_price_data = _boom
-        monkey_prev = sys.modules.get("services.norgate_service")
-        sys.modules["services.norgate_service"] = stub
-        try:
-            ok = n2p.export_symbol("CON", tmp_path, {}, skip_existing=True)
-        finally:
-            if monkey_prev is None:
-                sys.modules.pop("services.norgate_service", None)
-            else:
-                sys.modules["services.norgate_service"] = monkey_prev
-
-        assert ok is True
-        assert not called, "fetched data for a symbol already on disk"
-
-    def test_export_symbol_still_exports_an_absent_symbol(self, tmp_path):
-        """The counter-case, and it is load-bearing.
-
-        Gutting `export_symbol` to an unconditional `return True` passed the
-        ENTIRE test file — verified. Every assertion about it was of the form
-        "returned True and did not fetch", which a do-nothing exporter
-        satisfies perfectly while silently exporting nothing at all. A skip
-        test without an export test proves only half the contract, and the half
-        it omits is the one that destroys a corpus.
-        """
-        import sys
-        import types
-        import scripts.norgate_to_parquet as n2p
-
-        fetched = []
-        frame = pd.DataFrame(
-            {"Open": [1.0], "High": [1.0], "Low": [1.0],
-             "Close": [1.0], "Volume": [100]},
-            index=pd.DatetimeIndex([pd.Timestamp("2024-01-02", tz="UTC")],
-                                   name="Datetime"))
-
-        def _fetch(symbol, *a, **k):
-            fetched.append(symbol)
-            return frame
-
-        stub = types.ModuleType("services.norgate_service")
-        stub.get_price_data = _fetch
-        prev = sys.modules.get("services.norgate_service")
-        sys.modules["services.norgate_service"] = stub
-        try:
-            ok = n2p.export_symbol(
-                "NOSUCH", tmp_path,
-                {"start_date": "2024-01-01", "end_date": "2024-06-01"},
-                skip_existing=True)
-        finally:
-            if prev is None:
-                sys.modules.pop("services.norgate_service", None)
-            else:
-                sys.modules["services.norgate_service"] = prev
-
-        assert fetched == ["NOSUCH"], (
-            "export_symbol did not fetch a symbol that is absent from the "
-            "corpus — it exports nothing")
-        assert ok is True
-        assert (tmp_path / "NOSUCH.parquet").is_file(), (
-            "export_symbol reported success without writing the file")
-
-    def test_export_symbol_writes_the_guarded_reserved_spelling(self, tmp_path):
-        """The export write guard, pinned directly for the same reason as the
-        cache one: the tolerant readers mask its removal, so dropping
-        `guard_reserved` here passes the entire suite. Verified."""
-        import sys
-        import types
-        import scripts.norgate_to_parquet as n2p
-
-        frame = pd.DataFrame(
-            {"Open": [1.0], "High": [1.0], "Low": [1.0],
-             "Close": [1.0], "Volume": [100]},
-            index=pd.DatetimeIndex([pd.Timestamp("2024-01-02", tz="UTC")],
-                                   name="Datetime"))
-        stub = types.ModuleType("services.norgate_service")
-        stub.get_price_data = lambda *a, **k: frame
-        prev = sys.modules.get("services.norgate_service")
-        sys.modules["services.norgate_service"] = stub
-        try:
-            n2p.export_symbol(
-                "CON", tmp_path,
-                {"start_date": "2024-01-01", "end_date": "2024-06-01"})
-        finally:
-            if prev is None:
-                sys.modules.pop("services.norgate_service", None)
-            else:
-                sys.modules["services.norgate_service"] = prev
-
-        names = [p.name for p in tmp_path.iterdir()]
-        assert "_CON.parquet" in names, (
-            f"export WROTE the unguarded reserved spelling: {names}")
-        assert "CON.parquet" not in names, names
-
-    def test_main_skip_existing_honours_a_legacy_reserved_name(
-            self, tmp_path, monkeypatch, caplog):
-        """`main()`'s OWN skip decision — measured at main(), not downstream.
-
-        History worth keeping, because the first version of this test was
-        decoration and its docstring said otherwise:
-
-        Reverting main()'s skip check to a guarded-spelling probe does NOT
-        re-export anything, because `export_symbol` runs its own
-        `resolve_existing` and skips there instead. So a test that only asserts
-        "nothing was fetched" passes on a broken main() and measures
-        export_symbol's fix twice. Verified: with main() reverted, that
-        assertion still passed and only the AST scan caught it.
-
-        This version stubs `export_symbol` so main()'s decision is the only
-        thing observed, and asserts on the skip COUNT main() itself reports.
-        """
-        import sys
-        import types
-        import scripts.norgate_to_parquet as n2p
-
-        self._write_parquet(tmp_path / "CON.parquet")
-
-        exported = []
-        stub = types.ModuleType("services.norgate_service")
-        stub.get_price_data = lambda *a, **k: None
-
-        # Stub export_symbol so main()'s OWN skip decision is what is measured.
-        # Without this, export_symbol's separate resolve_existing absorbs the
-        # defect and this test passes on a broken main().
-        def _reached(symbol, *a, **k):
-            exported.append(symbol)
-            return True
-
-        monkeypatch.setattr(n2p, "export_symbol", _reached)
-        # main() imports norgatedata for its availability check; the package is
-        # not installable here (no subscription), so it is stubbed rather than
-        # skipped -- a skipped test on the one call site that had no coverage
-        # would leave exactly the hole this test exists to close.
-        nd = types.ModuleType("norgatedata")
-        nd.status = lambda: "OK"
-        nd.database_symbols = lambda db: ["CON"]
-        nd.StockPriceAdjustmentType = types.SimpleNamespace(TOTALRETURN=1)
-        nd.PaddingType = types.SimpleNamespace(
-            NONE=0, ALLMARKETDAYS=1, ALLWEEKDAYS=2, ALLCALENDARDAYS=3)
-        prev_svc = sys.modules.get("services.norgate_service")
-        prev_nd = sys.modules.get("norgatedata")
-        sys.modules["services.norgate_service"] = stub
-        sys.modules["norgatedata"] = nd
-        monkeypatch.setattr(
-            sys, "argv",
-            ["norgate_to_parquet.py", "--tickers", "CON",
-             "--output-dir", str(tmp_path), "--skip-existing"])
-        try:
-            with caplog.at_level("INFO", logger="scripts.norgate_to_parquet"):
-                n2p.main()
-        finally:
-            for key, prev in (("services.norgate_service", prev_svc),
-                              ("norgatedata", prev_nd)):
-                if prev is None:
-                    sys.modules.pop(key, None)
-                else:
-                    sys.modules[key] = prev
-
-        assert not exported, (
-            f"main() passed {exported} to export_symbol despite a legacy "
-            f"CON.parquet already on disk — main()'s own skip check did not "
-            f"resolve the unguarded spelling (#345)")
-        # The skip/export ACCOUNTING is the only observable produced solely by
-        # main()'s own check — export_symbol's backstop cannot fake it.
-        summary = "\n".join(r.message for r in caplog.records)
-        assert "0 exported, 0 failed, 1 skipped" in summary, (
-            "main() did not count the symbol as skipped — its own check did "
-            "not resolve the legacy unguarded spelling:\n" + summary)
-
-    def test_main_skip_existing_still_exports_an_absent_symbol(
-            self, tmp_path, monkeypatch):
-        """The counter-case. Without it, `if args.skip_existing:` — skip
-        EVERYTHING, unconditionally — passes, and so does a main() that never
-        exports at all. A skip test that only proves skipping is half a
-        contract."""
-        import sys
-        import types
-        import scripts.norgate_to_parquet as n2p
-
-        exported = []
-        stub = types.ModuleType("services.norgate_service")
-        stub.get_price_data = lambda *a, **k: None
-        monkeypatch.setattr(
-            n2p, "export_symbol",
-            lambda symbol, *a, **k: (exported.append(symbol), True)[1])
-
-        nd = types.ModuleType("norgatedata")
-        nd.status = lambda: "OK"
-        nd.database_symbols = lambda db: ["NOSUCH"]
-        nd.StockPriceAdjustmentType = types.SimpleNamespace(TOTALRETURN=1)
-        nd.PaddingType = types.SimpleNamespace(
-            NONE=0, ALLMARKETDAYS=1, ALLWEEKDAYS=2, ALLCALENDARDAYS=3)
-        prev_svc = sys.modules.get("services.norgate_service")
-        prev_nd = sys.modules.get("norgatedata")
-        sys.modules["services.norgate_service"] = stub
-        sys.modules["norgatedata"] = nd
-        monkeypatch.setattr(
-            sys, "argv",
-            ["norgate_to_parquet.py", "--tickers", "NOSUCH",
-             "--output-dir", str(tmp_path), "--skip-existing"])
-        try:
-            n2p.main()
-        finally:
-            for key, prev in (("services.norgate_service", prev_svc),
-                              ("norgatedata", prev_nd)):
-                if prev is None:
-                    sys.modules.pop(key, None)
-                else:
-                    sys.modules[key] = prev
-
-        assert exported == ["NOSUCH"], (
-            "main() skipped a symbol that is NOT on disk — --skip-existing "
-            "skipped everything")
-
-    # ---- scripts/validate_norgate_export.py ---------------------------------
-
-    def test_validator_does_not_report_a_legacy_name_as_missing(
-            self, tmp_path, capsys):
-        """The validator's most load-bearing cell. Pre-fix, a corpus containing
-        `CON.parquet` was reported as MISSING it."""
-        import sys
-        import types
-        import importlib
-
-        stub = types.ModuleType("norgatedata")
-        stub.database_symbols = lambda db: ["CON"] if db == _FIRST_DB else []
-        prev = sys.modules.get("norgatedata")
-        sys.modules["norgatedata"] = stub
-        try:
-            v = importlib.import_module("scripts.validate_norgate_export")
-            self._write_parquet(tmp_path / "CON.parquet")
-            v.validate(tmp_path)
-            out = capsys.readouterr().out
-        finally:
-            if prev is None:
-                sys.modules.pop("norgatedata", None)
-            else:
-                sys.modules["norgatedata"] = prev
-
-        # POSITIVE assertions first. Asserting only `"MISSING" not in out` was
-        # vacuous: the final QA round gutted validate() to a bare `return` --
-        # checking nothing, printing nothing -- and this test still passed. It
-        # also could not detect its own fixture rotting; renaming DATABASES[0]
-        # makes the stub answer [] for every database, so CON is never checked,
-        # and the negative assertion holds just as well.
-        assert f"[{_FIRST_DB}]" in out, (
-            f"validator never ran the {_FIRST_DB!r} block — the stub's database "
-            f"name has drifted from scripts.validate_norgate_export.DATABASES, "
-            f"so this test is checking nothing:\n{out}")
-        assert "Local parquet   : 1" in out, (
-            "validator did not count the legacy CON.parquet as present:\n" + out)
-        assert "TOTAL missing   : 0" in out, out
-        assert "MISSING" not in out, (
-            "validator reported a symbol as missing from a corpus that has it "
-            "under the legacy unguarded spelling:\n" + out
-        )
-
-    def test_validator_does_report_a_genuinely_absent_symbol(
-            self, tmp_path, capsys):
-        """The counter-case. Forcing `missing = []` inside validate() passed —
-        verified. For a VALIDATOR the missing-report is the entire product, so
-        a test suite that only proves it stays quiet proves nothing."""
-        import sys
-        import types
-        import importlib
-
-        stub = types.ModuleType("norgatedata")
-        stub.database_symbols = lambda db: ["NOSUCH"] if db == _FIRST_DB else []
-        prev = sys.modules.get("norgatedata")
-        sys.modules["norgatedata"] = stub
-        try:
-            v = importlib.import_module("scripts.validate_norgate_export")
-            v.validate(tmp_path)          # empty corpus — nothing on disk
-            out = capsys.readouterr().out
-        finally:
-            if prev is None:
-                sys.modules.pop("norgatedata", None)
-            else:
-                sys.modules["norgatedata"] = prev
-
-        assert "MISSING 1" in out, out
-        assert "TOTAL missing   : 1" in out, out
-        assert "- NOSUCH" in out, out
-
     # ---- services/csv_service.py --------------------------------------------
 
     def test_csv_service_reads_a_legacy_reserved_name(self, tmp_path):
@@ -1369,8 +1059,6 @@ class TestReadPathListIsDerived:
         # the five known read paths, as a floor
         for expected in ["helpers/caching.py", "services/parquet_service.py",
                          "services/csv_service.py",
-                         "scripts/norgate_to_parquet.py",
-                         "scripts/validate_norgate_export.py",
                          # joined the set in #355: the merged provider now
                          # imports filename_candidates, so the derivation sees
                          # it. Its arrival here IS the fix being real.
@@ -1424,6 +1112,15 @@ class TestReadPathListIsDerived:
         filename_candidates, so the derivation sees it. That is the fix being
         real, not the number being bumped to get green.
 
+        Lowered 6 -> 4 when scripts/norgate_to_parquet.py and
+        scripts/validate_norgate_export.py were removed from this repo (the
+        private-dataset decoupling). Two read paths genuinely stopped existing —
+        no surviving module lost its guard and no coverage was silently dropped.
+        The four that remain are helpers/caching.py, services/csv_service.py,
+        services/parquet_service.py and src/data/unified_market_data_provider.py.
+        This is the case the tripwire is FOR: it fired, and the reason was
+        checked rather than assumed.
+
         I published "234 modules" on this PR; the real coverage is 5, and 234
         came from a walk over a polluted working tree. This exists so a change
         in coverage is noticed rather than assumed.
@@ -1435,9 +1132,9 @@ class TestReadPathListIsDerived:
         below rather than a bare assert.
         """
         found = _derive_read_paths()
-        assert len(found) == 6, (
+        assert len(found) == 4, (
             f"read-path coverage changed: {len(found)} modules now import a "
-            f"filename helper, not 6.\n{found}\n\n"
+            f"filename helper, not 4.\n{found}\n\n"
             f"THIS IS A TRIPWIRE, NOT A FAILURE. If you legitimately added a "
             f"read path, raise this number DELIBERATELY and add the module to "
             f"the floor list in TestReadPathListIsDerived — do not bump it "
@@ -1468,8 +1165,8 @@ class TestNoReadPathBuildsItsOwnFilename:
     SAFE = {"resolve_existing", "_resolve_existing",
             "filename_candidates", "_filename_candidates"}
     # `is_file`/`isdir`/`is_dir` close the pathlib gap: report.py already has
-    # is_file() sites and norgate_to_parquet.py -- where the fourth violator
-    # lived -- is itself pathlib.
+    # is_file() sites, and the pathlib-native exporter where the fourth violator
+    # lived has since been removed from this repo.
     EXIST_ATTRS = {"exists", "isfile", "is_file", "isdir", "is_dir"}
     # Directory listings are existence tests wearing different clothes;
     # parquet_service.py already uses the listdir idiom.
@@ -2632,10 +2329,10 @@ class TestNoReadPathBuildsItsOwnFilename:
             "    df.to_parquet(p)\n    assert os.path.exists(p)\n",
         # --- second QA round: pathlib and keyword write spellings -----------
         # `written` collected names from positional args only, so every
-        # receiver-based pathlib write flagged its own verification. This file
-        # covers norgate_to_parquet.py, which is ALREADY pathlib — the first
-        # write-then-verify refactor there would have tripped the contract
-        # test on correct code.
+        # receiver-based pathlib write flagged its own verification. The case is
+        # kept because a pathlib-native writer's first write-then-verify refactor
+        # would trip the contract test on correct code; it was originally found
+        # against an exporter that has since been removed from this repo.
         "pathlib_write_text_then_verify":
             "def f(s,d):\n    p=d/(_sanitize_filename(s)+'.parquet')\n"
             "    p.write_text('x')\n    assert p.exists()\n",

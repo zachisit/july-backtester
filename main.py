@@ -190,6 +190,39 @@ def _build_intrabar_data(portfolio_data, config):
 
 # --------------------------------------------------------------------
 
+def _build_strat_name(name, stop_config):
+    """Build the display name for a strategy given its stop-loss config.
+
+    Percentage and ATR stops get a descriptive suffix; every other stop
+    type (``none``, ``points``, ``signal_bar``, ``trailing_atr`` …) — and a
+    config with no ``type`` key at all — leaves the base name unchanged,
+    matching the engine, which resolves the type via ``.get("type", "none")``.
+
+    This helper must never raise on a config the *engine* would happily run,
+    otherwise the label crashes the worker before the simulation starts and
+    the whole run completes with zero results (issue #309). It therefore
+    mirrors the engine's own defaults for every key it reads:
+
+    - ATR ``period`` defaults to 14 — the engine always uses the ``ATR_14``
+      column; the documented shape ``{"type": "atr", "multiplier": 2.0}``
+      carries no ``period`` (only the CLI shorthand ``atr:14:3.0`` injects
+      one). Reading ``stop_config['period']`` unconditionally was the #309
+      crash.
+    - ATR ``multiplier`` defaults to 3.0 (``portfolio_simulations`` uses the
+      same default at its sizing/stop-level sites).
+    - percentage ``value`` defaults to 0.05 (ditto).
+    """
+    stop_type = stop_config.get('type')
+    if stop_type == 'percentage':
+        return f"{name} w/ {stop_config.get('value', 0.05):.0%} SL"
+    if stop_type == 'atr':
+        multiplier = stop_config.get('multiplier', 3.0)
+        period = stop_config.get('period', 14)
+        return f"{name} w/ {multiplier}x ATR({period}) SL"
+    return name
+
+# --------------------------------------------------------------------
+
 def run_single_simulation(args):
     """
     Function to run one combination of (portfolio, strategy, stop-loss).
@@ -211,11 +244,7 @@ def run_single_simulation(args):
     tnx_df_local = comparison_dfs_global.get(dependency_map_global.get("tnx"))
 
     try:
-        strat_name = name
-        if stop_config['type'] == 'percentage':
-            strat_name = f"{name} w/ {stop_config['value']:.0%} SL"
-        elif stop_config['type'] == 'atr':
-            strat_name = f"{name} w/ {stop_config['multiplier']}x ATR({stop_config['period']}) SL"
+        strat_name = _build_strat_name(name, stop_config)
 
         base_signals_with_dfs = {}
         for symbol, df in portfolio_data.items():
@@ -831,9 +860,11 @@ def main():
                 # --- FEATURE ENGINEERING ---
                 # These columns are captured at trade entry time for each
                 # position and stored in the trade log for later analysis.
-                # All calculations use .shift(1) where needed to ensure
-                # no look-ahead bias — indicators are based only on data
-                # available at the close of the previous bar.
+                # Each column reflects its own bar's close/volume; the engine
+                # captures them from the SIGNAL bar (the bar before the fill
+                # under execution_time="open"), so no look-ahead reaches the
+                # entry_* features — see the capture sites in
+                # helpers/portfolio_simulations.py (issue #310).
 
                 # RSI (14-period)
                 _delta = df['Close'].diff()

@@ -289,8 +289,9 @@ def build_span_index(data_dir: str, cache_path: str | None = None,
 
     if not os.path.isdir(data_dir):
         raise FileNotFoundError(
-            f"Parquet corpus not found at '{data_dir}'. This is a git submodule — "
-            "run 'git submodule update --init parquet_data'."
+            f"Parquet corpus not found at '{data_dir}'. This repository ships no "
+            "dataset — point `parquet_data_dir` (or --parquet-dir) at your own "
+            "directory of {SYMBOL}.parquet files."
         )
 
     rows = []

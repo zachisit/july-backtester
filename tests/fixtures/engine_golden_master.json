@@ -337,42 +337,43 @@
     "equity_curve": [
       100000.0,
       100000.0,
-      100100.808081,
-      100201.032332,
-      100301.256584,
-      100401.480836,
-      100395.694986,
-      100395.694986
+      100095.856009,
+      100196.130791,
+      100296.405573,
+      100396.680355,
+      100390.892004,
+      100390.892004
     ],
     "equity_len": 8,
     "scalars": {
       "Trades": 1,
       "avg_trade_duration": 6.0,
-      "calmar_ratio": 3016.408664,
+      "calmar_ratio": 2975.469792,
       "initial_capital": 100000.0,
       "max_drawdown": 5.8e-05,
-      "pnl_percent": 0.003957,
+      "pnl_percent": 0.003909,
       "profit_factor": null,
-      "sharpe_ratio": 10.775195,
+      "sharpe_ratio": 10.697557,
       "win_rate": 1.0
     },
     "trade_log": [
       {
         "EntryDate": "2023-01-03T00:00:00",
-        "EntryPrice": 99.0,
+        "EntryPrice": 98.9505,
         "ExitDate": "2023-01-09T00:00:00",
         "ExitPrice": 95.0475,
         "ExitReason": "Short Cover",
         "HoldDuration": 6,
         "InitialRisk": 0.0,
-        "MAE_pct": 0.01,
-        "MFE_pct": 0.05,
-        "Profit": 395.694986,
-        "ProfitPct": 0.039569,
+        "MAE_pct": 0.010505,
+        "MFE_pct": 0.049525,
+        "Profit": 390.892004,
+        "ProfitPct": 0.039089,
         "RMultiple": null,
-        "Shares": 101.010101,
+        "Shares": 101.060631,
         "Symbol": "DDD",
         "Trade": "Short 1",
+        "VolumeImpact_bps": 0.0,
         "is_win": 1
       }
     ]

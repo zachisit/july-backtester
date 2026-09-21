@@ -131,8 +131,20 @@ class TestSpanIndex:
         pd.testing.assert_frame_equal(a, b)
 
     def test_missing_corpus_raises_actionable_error(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="submodule"):
-            build_span_index(str(tmp_path / "nope"))
+        """The message must tell the operator what to DO, not just what failed.
+
+        It used to say "run 'git submodule update --init parquet_data'". That
+        instruction died with the submodule, so the assertion moved to what the
+        message must now carry: the offending path, and the fact that a directory
+        has to be supplied. Asserting on the path as well means a message that
+        degrades to a bare "not found" fails here.
+        """
+        missing = str(tmp_path / "nope")
+        with pytest.raises(FileNotFoundError, match="parquet") as exc:
+            build_span_index(missing)
+        msg = str(exc.value)
+        assert missing in msg
+        assert "parquet_data_dir" in msg or "--parquet-dir" in msg
 
 
 class TestResolveUniverse:

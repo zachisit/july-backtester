@@ -194,7 +194,7 @@ Per-bar resolution is deliberately *not* offered: `resolve_universe` costs ~10s/
 2. **`$` and `#` prefixes are not investable.** 1,160 index series (`$NYA`, `$DJITR`) and 455 breadth series (`#NYSEAD`) carry price and volume columns, so no liquidity screen rejects them — and they out-rank everything on notional dollar volume. Before this filter a top-100 universe came back as *almost entirely indices*. Excluded by default.
 3. **Ticker reuse.** `WB` is Wachovia (`WB-200812`) until 2008 and Weibo (`WB`) from 2014; `V` was Vivendi (`V-200608`) before Visa (`V`). Resolution is by **security ID**, never bare ticker — which also sidesteps `parquet_service`'s ambiguous `_multi_` bare-ticker fallback, since `WB-200812.parquet` matches exactly.
 
-**Performance:** a metadata-only span index over all 36,684 securities builds in **~8.5s**, cached to `parquet_data/.span_index.parquet`; universe resolution is then ~10s per date.
+**Performance:** a metadata-only span index over all 36,684 securities builds in **~8.5s**, cached to `<parquet_data_dir>/../.span_index.parquet`; universe resolution is then ~10s per date.
 
 **What it is NOT:** the S&P 500, Russell, or any index. If a thesis depends on index membership *itself* — reconstitution flow, inclusion effects, benchmark-relative mandates — this does not substitute. **Results produced on this universe must say so.**
 
@@ -320,7 +320,7 @@ The engine is instrument-aware: **`helpers/instruments.py`** resolves a per-symb
 - **Data path:** `services/futures_service.py` (Polygon dedicated `/futures/v1/aggs`), plus CSV/Parquet for pre-built continuous series; `services/__init__.py` dispatches futures tickers to the futures endpoint. `helpers/continuous_contract.py` builds back-adjusted continuous series (panama/ratio + volume-roll). `helpers/data_quality.py` missing-bar check is calendar-aware (skipped for `CME_ETH`).
 - **Config:** SECTION 27 `instruments` (asset-class defaults, per-root point-value/tick tables, per-symbol overrides), SECTION 28 `intrabar_resolution`/`intrabar_timeframe`/`intrabar_multiplier`, SECTION 29 `maintenance_margin_pct`.
 - **Exit configs (v1.11.0, issue #234):**
-  - `{"type":"trailing_atr","stop_mult":..,"trail_mult":..,"t1_mult":..,"point_cap":N,"floor":"breakeven"}` — Sleeve A mechanic: ATR **locked at the breakout bar** (the signal bar, `prev_trading_dates[entry_exec_date]` — assumes `execution_time="open"`); initial stop `entry - min(stop_mult*atr, point_cap)`; arms the trail when price reaches `entry + eff_stop_dist*(t1_mult/stop_mult)` (target is R:R off the *capped* stop); post-arm ratchets `running-max High - trail_mult*atr_locked` (trail leg uncapped), floored at literal entry. **Bidirectional** — `side="long"`/`"short"` mirror in `_update_trailing_atr_stop`; the short entry/cover loops wire the full stop/target/trail + margin-call + real InitialRisk/RMultiple, and open shorts are marked-to-market at end-of-backtest.
+  - `{"type":"trailing_atr","stop_mult":..,"trail_mult":..,"t1_mult":..,"point_cap":N,"floor":"breakeven"}` — Sleeve A mechanic: ATR **locked at the breakout bar** (the signal bar — resolved from `signal_date` on the long path and `sig_date` on the short, correct under both `execution_time` modes and in both directions; both previously anchored to the bar before the fill and were wrong under `"close"`); initial stop `entry - min(stop_mult*atr, point_cap)`; arms the trail when price reaches `entry + eff_stop_dist*(t1_mult/stop_mult)` (target is R:R off the *capped* stop); post-arm ratchets `running-max High - trail_mult*atr_locked` (trail leg uncapped), floored at literal entry. **Bidirectional** — `side="long"`/`"short"` mirror in `_update_trailing_atr_stop`; the short entry/cover loops wire the full stop/target/trail + margin-call + real InitialRisk/RMultiple, and open shorts are marked-to-market at end-of-backtest.
     - Known conservative assumptions (issue #234 review): on a bar hitting both init-stop and target, the engine resolves stop-first (pre-arm); maintenance-margin uses entry-price notional (calls marginally early).
   - `{"type":"atr","multiplier":..,"point_cap":N}` — ATR stop distance clipped at `N` points per trade (`instruments.atr_stop_level(point_cap=)`).
   - `maintenance_margin_pct` (SECTION 29): per-bar force-liquidation of a futures position when `margin + unrealized_pnl < notional*pct`, logged `ExitReason "Margin Call"`. `0.0` = disabled.
@@ -345,9 +345,19 @@ printed extreme. The level is **static — it does not trail**.
   start of the series yields `NaT` → no stop for that trade.
 - **Wiring**: both entry paths in `helpers/portfolio_simulations.py` resolve the signal bar
   from the loop's existing `signal_date` / `sig_date` variable — the bar *before* the fill under
-  `execution_time="open"`, the fill bar itself under `"close"`. This differs from the `atr`
-  branch, which hard-codes `prev_trading_dates[entry_exec_date]` and therefore assumes
-  `execution_time="open"`. No look-ahead either way: the level is known at entry.
+  `execution_time="open"`, the fill bar itself under `"close"`. **Every `atr` /
+  `trailing_atr` anchor on BOTH entry paths now does the same** — they previously
+  hard-coded the bar before the fill (`prev_trading_dates[entry_exec_date]` on the long
+  path, `prev_trading_dates[date]` on the short one), which is the signal bar only under
+  `execution_time="open"`; under `"close"` they read one bar too early (a measured 10x
+  difference in stop distance on identical inputs). Fixed at **seven** sites — long: the
+  `atr` stop level, `atr`/`trailing_atr`/`risk_parity` sizing, the `trailing_atr` locked
+  ATR; short: the `atr` stop level and the `trailing_atr` locked ATR. The first fix
+  covered only the long five, because the guard that was supposed to prove completeness
+  keyed on `entry_exec_date` — a name the short block does not use — and so was blind to
+  half the file. Provably a no-op under `"open"`, where the two expressions coincide by
+  construction; the golden master is unchanged. No look-ahead either way: the level is
+  known at entry.
 - **Next-Day Activation interaction (important for short holds):** a position is not
   stop-checked until the bar *after* entry. Under `execution_time="open"` a one-session trade
   (enter next open, exit the open after) is therefore unprotected for its entire holding
@@ -421,7 +431,20 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 
 **Plan history caps**: Polygon limits available history based on plan tier. A starter plan capped at ~2021; a paid plan extends that (confirmed: ~2016 on current plan). The `Actual Data Period` line in the run summary shows the true start Polygon returned — if it lags the configured `start_date`, the plan tier is the constraint. There is no pagination bug in `polygon_service.py` — the single page with 50,000-bar limit returns all available bars correctly.
 
-**Cache validation bug (issue #123)**: The local Parquet cache keys data by *requested* date range, not actual returned range. If Polygon returns plan-capped data (e.g. 2016–now) for a 2004 request, the cache stores that truncated result under a key named `SPY_2004-01-01_..._day_1.parquet`. After a plan upgrade, subsequent runs still serve the old capped data from cache — silently — until the cache entry is manually deleted or expires. **Fix**: add start-date validation in the `helpers/caching.py` read path; if `df.index.min()` lags the requested start by >30 days, treat as a cache miss and re-fetch. See issue #123 for the full implementation spec.
+**Cache request-lag: what it means, and why it is NOT invalidated (issues #123, #315)**: The local Parquet cache keys data by *requested* date range, not actual returned range. If Polygon returns plan-capped data (e.g. 2016–now) for a 2004 request, the cache stores that truncated result under a key named `SPY_2004-01-01_..._day_1.parquet`.
+
+A cached frame that **starts later than the requested start** has two indistinguishable causes, and the cache alone cannot tell them apart:
+
+1. the symbol **listed after** `start_date` — an IPO, where re-fetching returns the identical first bar; or
+2. provider **plan-capping**.
+
+The #123 fix invalidated on request-lag (`df.index.min()` lagging the request by >30 days → treat as a miss). That was **removed in #315**, because cause 1 is overwhelmingly the common one: the heuristic mis-fired on *every* late-listed symbol, forcing a full API re-fetch of it on **every run** — the cache never hit for any IPO in the universe.
+
+**Current behaviour** (`helpers/caching.py` read path): request-lag does **not** invalidate. A large lag is logged at `INFO` so plan-capping stays visible without thrashing the cache. A genuine plan upgrade is recovered by the **24h TTL**, or immediately by deleting `data_cache/`.
+
+**The residual**: within 24h of a plan upgrade, capped data is still served, and only an INFO line says so. That is the accepted trade against re-fetching every late-listed symbol on every run. If you have just upgraded a plan and want the new history now, clear the cache directory rather than waiting out the TTL.
+
+A separate integrity guard *does* invalidate: a cache file whose index is not a `DatetimeIndex` is discarded and re-fetched (this was an accident of the pre-#315 try/except; #315 made it explicit).
 
 **Index history cap is separate and tighter than the equities cap (issue #261)**: `I:VIX` and `I:TNX` (the two comparison-ticker dependencies most strategies rely on for regime gates) only return data from **2023-02-14 onward** on the current plan — confirmed for both symbols directly against the API, independent of the equities ~5yr rolling cap described above. Requesting an earlier `start_date` returns an empty result (HTTP 200, zero bars), not an error. Because `spy_df`/`vix_df` are injected as `None` when the fetch fails, and the None-guards added for issue-empty-comparison-tickers make `None` a *silent no-op* rather than a crash, any strategy whose regime/filter logic ANDs on `vix_df` (e.g. `MA Confluence (Full Stack) w/ Regime Filter`) will fail its gate closed for the whole requested window — **zero trades, no error, no warning** prior to this fix. `main.py`'s comparison-ticker fetch loop now logs an explicit warning when a failed fetch backs an active dependency (see the `dep_keys` check next to the `Failed to fetch data for comparison ticker` warning), but the underlying data-availability gap is a Polygon plan-tier limit, not a bug in this codebase — **use `data_provider = "yahoo"` (`^VIX`/`^TNX`, full history) for any backtest whose window starts before 2023-02-14 and depends on VIX/TNX-gated strategies.**
 
