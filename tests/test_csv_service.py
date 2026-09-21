@@ -359,10 +359,16 @@ class TestFilenameSanitization:
         assert _sanitize_filename("^VIX") == "^VIX"
 
     def test_all_illegal_chars_replaced(self):
-        """Every illegal Windows filename character is replaced."""
+        """Every illegal Windows filename character is neutralized. Comparison
+        operators '<'/'>' map to distinct '_lt_'/'_gt_' tokens (issue #193) so
+        paired sweep configs like ADX>20 / ADX<20 don't collide on one filename;
+        the remaining illegal chars collapse to '_'."""
+        operator_expected = {"<": "A_lt_B", ">": "A_gt_B"}
         for ch in r'\/:*?"<>|':
             result = _sanitize_filename(f"A{ch}B")
-            assert result == "A_B", f"char {ch!r} was not replaced: got {result!r}"
+            expected = operator_expected.get(ch, "A_B")
+            assert result == expected, f"char {ch!r}: got {result!r}, expected {expected!r}"
+            assert ch not in result, f"illegal char {ch!r} survived in {result!r}"
 
     def test_multiple_illegal_chars(self):
         assert _sanitize_filename("A:B/C") == "A_B_C"

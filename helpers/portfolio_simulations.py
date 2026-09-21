@@ -373,6 +373,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         nonlocal cash, reserved_margin, trade_counter
         inst_c = instruments[symbol]
         cover_slip = _inst.apply_slippage(inst_c, raw_cover_price, "buy")
+        # Cover-leg market impact (mirror of the strategy-cover path, #312 QA).
+        _cover_impact_bps = 0.0
+        _cov_coeff = CONFIG.get('volume_impact_coeff', 0.0)
+        if _cov_coeff > 0 and 'Volume' in portfolio_data[symbol].columns:
+            _cov_adv = _daily_adv(portfolio_data[symbol]['Volume'], exit_date, symbol)
+            if pd.notna(_cov_adv) and _cov_adv > 0:
+                _cov_imp = _cov_coeff * np.sqrt(spos['shares'] / _cov_adv)
+                cover_slip = cover_slip * (1 + _cov_imp)
+                _cover_impact_bps = round(_cov_imp * 10000, 1)
         commission = _inst.commission(inst_c, spos['shares'])
         _gross = (spos['shares'] * (spos['entry_price'] - cover_slip)) * inst_c.point_value
         net_pnl = _gross - (2 * commission) - spos.get('total_borrow_cost', 0.0)
@@ -401,6 +410,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             'ExitReason': cover_reason,
             'InitialRisk': _s_ir if (_s_ir and _s_ir > 0) else 0.0,
             'RMultiple': _s_rm,
+            'VolumeImpact_bps': round(spos.get('entry_impact_bps', 0.0) + _cover_impact_bps, 1),
         })
         trade_log[-1].update(spos.get('features', {}))
 
@@ -411,28 +421,35 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         value = df.at[date, column]
         return default if pd.isna(value) else bool(value)
 
+    def _mtm_close(df, at_date):
+        """Close used to mark a held position to market on `at_date`: the bar's
+        own Close when present and non-NaN, else the most recent prior non-NaN
+        Close, else None. Symmetric across long and short (issue #320): the long
+        missing-bar fallback previously had no NaN guard (a NaN last-known Close
+        propagated NaN into equity, then got dropped, shortening the return
+        series), and the short side had no fallback at all (its MTM silently
+        dropped to 0 on a missing bar, spiking equity by the whole open P&L)."""
+        if at_date in df.index:
+            c = df.at[at_date, 'Close']
+            if pd.notna(c):
+                return c
+        # Rare fallback (missing/NaN bar only): last non-NaN Close at or before.
+        prior = df.loc[:at_date, 'Close'].dropna()
+        return prior.iloc[-1] if len(prior) else None
+
     for date in portfolio_timeline.index:
         # --- EQUITY CALCULATION ---
         current_market_value = 0.0
         for symbol, pos in positions.items():
-            # <-- NEW CHECK: Make sure the date exists for this symbol before getting its price
-            if date in portfolio_data[symbol].index:
-                close_price = portfolio_data[symbol].loc[date]['Close']
-                if pd.notna(close_price):
-                    current_market_value += _equity_contribution(instruments[symbol], pos, close_price, side="long")
-            else:
-                # If date doesn't exist, use the last known price for a more stable equity curve
-                # This is an edge case, but good practice.
-                last_valid_date = portfolio_data[symbol].index[portfolio_data[symbol].index < date][-1]
-                close_price = portfolio_data[symbol].loc[last_valid_date]['Close']
+            close_price = _mtm_close(portfolio_data[symbol], date)
+            if close_price is not None:
                 current_market_value += _equity_contribution(instruments[symbol], pos, close_price, side="long")
 
         for symbol, spos in short_positions.items():
-            if date in portfolio_data[symbol].index:
-                cur = portfolio_data[symbol].loc[date].get('Close')
-                if pd.notna(cur):
-                    current_market_value += _inst.unrealized_pnl(
-                        instruments[symbol], spos['shares'], spos['entry_price'], cur, side="short")
+            cur = _mtm_close(portfolio_data[symbol], date)
+            if cur is not None:
+                current_market_value += _inst.unrealized_pnl(
+                    instruments[symbol], spos['shares'], spos['entry_price'], cur, side="short")
 
         total_equity = cash + current_market_value
         portfolio_timeline[date] = total_equity
@@ -566,6 +583,12 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     }
                     _plog.update(pos.get('features', {}))
                     trade_log.append(_plog)
+                    # Scale the position's registered heat risk down with the
+                    # remaining size (issue #317): a partial scale-out reduced the
+                    # shares, so its contribution to the portfolio-heat pot must
+                    # shrink proportionally or later entries are over-rejected.
+                    if pos['shares'] > 0 and 'risk' in pos:
+                        pos['risk'] *= (pos['shares'] - _pexit_shares) / pos['shares']
                     pos['shares'] -= _pexit_shares
 
             # --- MAINTENANCE MARGIN / MARGIN CALL (futures only) ---
@@ -762,6 +785,18 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
             # --- EXECUTE COVER ---
             cover_slip = _inst.apply_slippage(inst_c, cover_raw, "buy")
+            # Market impact on the cover buy-back: fills HIGHER as size grows
+            # (mirror of the long exit, sign-flipped for a buy). Summed with the
+            # entry impact into VolumeImpact_bps so the short column is round-trip
+            # like the long trade's (#312 QA).
+            _cover_impact_bps = 0.0
+            _cov_coeff = CONFIG.get('volume_impact_coeff', 0.0)
+            if _cov_coeff > 0 and 'Volume' in portfolio_data[symbol].columns:
+                _cov_adv = _daily_adv(portfolio_data[symbol]['Volume'], date, symbol)
+                if pd.notna(_cov_adv) and _cov_adv > 0:
+                    _cov_imp = _cov_coeff * np.sqrt(spos['shares'] / _cov_adv)
+                    cover_slip = cover_slip * (1 + _cov_imp)
+                    _cover_impact_bps = round(_cov_imp * 10000, 1)
             commission = _inst.commission(inst_c, spos['shares'])
             _gross = (spos['shares'] * (spos['entry_price'] - cover_slip)) * inst_c.point_value
             net_pnl = _gross - (2 * commission) - spos.get('total_borrow_cost', 0.0)
@@ -791,6 +826,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 'ExitReason': cover_reason,
                 'InitialRisk': _s_ir if (_s_ir and _s_ir > 0) else 0.0,
                 'RMultiple': _s_rm,
+                'VolumeImpact_bps': round(spos.get('entry_impact_bps', 0.0) + _cover_impact_bps, 1),
             })
             trade_log[-1].update(spos.get('features', {}))
             short_exited.append(symbol)
@@ -836,7 +872,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 if _sc_type in ('percentage', 'points'):
                     _s_stop = _inst.stop_level(inst_se, ep, stop_config, side="short")
                 elif _sc_type == 'atr':
-                    _dbe = prev_trading_dates[symbol].get(date)
+                    # Signal bar, not prev(fill bar). `sig_date` (L861) already
+                    # carries the execution_time ternary -- the `signal_bar`
+                    # branch below uses it and says so. Sites 6 and 7 of the
+                    # #310 class; the long-path fix missed them because the
+                    # short block names the fill bar `date`, not
+                    # `entry_exec_date`.
+                    _dbe = sig_date
                     if pd.notna(_dbe) and _dbe in df.index:
                         _ab, _cb = df.loc[_dbe].get('ATR_14'), df.loc[_dbe].get('Close')
                         if pd.notna(_ab) and pd.notna(_cb):
@@ -859,7 +901,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if _lvl is not None and _lvl > ep:
                             _s_stop = _lvl
                 elif _sc_type == 'trailing_atr':
-                    _dbe = prev_trading_dates[symbol].get(date)
+                    # Signal bar -- as above. This is the LOCKED ATR, fixed for
+                    # the whole trade, so stop/target/trail all inherited the
+                    # wrong bar under execution_time="close".
+                    _dbe = sig_date
                     _ab = df.loc[_dbe].get('ATR_14') if (pd.notna(_dbe) and _dbe in df.index) else np.nan
                     if pd.notna(_ab):
                         _s_atr = float(_ab)
@@ -868,14 +913,14 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _pc = stop_config.get("point_cap")
                         if _pc is not None and _pc > 0:
                             _eff = min(_eff, _pc)
-                        # Anchor mirrors the long-side margin_mode gate: futures
-                        # (INITIAL_MARGIN) use the raw pre-slippage price; equities
-                        # (CASH_FULL) use the fill price. For equity shorts the fill
-                        # price equals ep (no slippage applied on that path), so the
-                        # gate is consistent even though the values coincide today.
-                        _s_trail_anchor = (
-                            ep if inst_se.margin_mode == _inst.INITIAL_MARGIN
-                            else ep)   # equity fill = ep (no short slippage on CASH_FULL path)
+                        # Anchor: both arms use the RAW pre-slippage `ep`. After
+                        # #312 the equity short fill is slipped below `ep`, so this
+                        # no longer matches the long-side #238 convention (equity
+                        # stops anchor to the slipped fill). Aligning the equity
+                        # short stop anchor to the fill is tracked as #332; kept raw
+                        # here to avoid re-baselining stop-bearing short scenarios in
+                        # this PR. Futures (INITIAL_MARGIN) correctly use raw `ep`.
+                        _s_trail_anchor = ep
                         _s_stop = _s_trail_anchor + _eff
                         _t1 = stop_config.get("t1_mult", 0.0)
                         if _sm > 0 and _t1 > 0:
@@ -883,21 +928,34 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 _s_ir = float(_s_stop - ep) if (pd.notna(_s_stop) and _s_stop > ep) else None
 
                 # --- CAPTURE FEATURES AT ENTRY (mirror of the long entry block) ---
+                # Read from the SIGNAL bar (sig_date), not the fill bar (issue
+                # #310): under execution_time="open" the fill bar's same-day
+                # close/volume were not known when the short was decided.
                 _s_features = {}
                 try:
-                    _s_features['entry_RSI_14'] = df.loc[date, 'RSI_14']
-                    _s_features['entry_ATR_14_pct'] = df.loc[date, 'ATR_14_pct']
-                    _s_features['entry_SMA200_dist_pct'] = df.loc[date, 'SMA200_dist_pct']
-                    _s_features['entry_Volume_Spike'] = df.loc[date, 'Volume_Spike']
-                    if spy_df is not None:
-                        _s_features['entry_SPY_RSI_14'] = spy_df.loc[date, 'RSI_14']
-                        _s_features['entry_SPY_SMA200_dist_pct'] = spy_df.loc[date, 'SMA200_dist_pct']
-                    if vix_df is not None:
-                        _s_features['entry_VIX_Close'] = vix_df.loc[date, 'Close']
-                    if tnx_df is not None:
-                        _s_features['entry_TNX_Close'] = tnx_df.loc[date, 'Close']
+                    _s_features['entry_RSI_14'] = df.loc[sig_date, 'RSI_14']
+                    _s_features['entry_ATR_14_pct'] = df.loc[sig_date, 'ATR_14_pct']
+                    _s_features['entry_SMA200_dist_pct'] = df.loc[sig_date, 'SMA200_dist_pct']
+                    _s_features['entry_Volume_Spike'] = df.loc[sig_date, 'Volume_Spike']
                 except KeyError:
                     pass
+                # Per-frame guards (see the long-entry block, issue #310).
+                if spy_df is not None:
+                    try:
+                        _s_features['entry_SPY_RSI_14'] = spy_df.loc[sig_date, 'RSI_14']
+                        _s_features['entry_SPY_SMA200_dist_pct'] = spy_df.loc[sig_date, 'SMA200_dist_pct']
+                    except KeyError:
+                        pass
+                if vix_df is not None:
+                    try:
+                        _s_features['entry_VIX_Close'] = vix_df.loc[sig_date, 'Close']
+                    except KeyError:
+                        pass
+                if tnx_df is not None:
+                    try:
+                        _s_features['entry_TNX_Close'] = tnx_df.loc[sig_date, 'Close']
+                    except KeyError:
+                        pass
 
                 if inst_se.margin_mode == _inst.INITIAL_MARGIN:
                     # Futures short: integer contracts, reserve initial margin, pay commission.
@@ -936,6 +994,23 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         shares = _inst.round_units(inst_se, alloc / _s_per_contract_margin) if _s_per_contract_margin > 0 else 0.0
                     if shares < 1:
                         continue
+                    # Portfolio-heat gate (#324 QA / issue #331). The equity short
+                    # branch below gained this in #312; the futures branch did not,
+                    # so a futures short was admitted regardless of book heat AND
+                    # registered no 'risk', contributing 0 to every later entry's
+                    # gate. Prefer the real per-contract risk (_s_ir is the stop
+                    # distance in points) over the target_risk_per_trade proxy the
+                    # equity path must use, since futures set their stop before sizing.
+                    _fs_stop_dist_pts = _s_ir if (_s_ir and _s_ir > 0) else None
+                    if _fs_stop_dist_pts is not None:
+                        _fs_new_risk = _fs_stop_dist_pts * inst_se.point_value * shares
+                    else:
+                        _fs_new_risk = (_inst.notional(inst_se, shares, _s_entry_fill)
+                                        * CONFIG.get("target_risk_per_trade", 0.02))
+                    _fs_max_heat = CONFIG.get("max_portfolio_heat", 1.0)
+                    if not check_portfolio_heat({**positions, **short_positions},
+                                                _fs_new_risk, total_equity, _fs_max_heat):
+                        continue
                     _s_margin = _inst.margin_required(inst_se, shares, _s_entry_fill)
                     commission = _inst.commission(inst_se, shares)
                     if _s_margin + commission > cash - reserved_margin:
@@ -950,22 +1025,78 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         'trail_target': _s_target, 'atr_locked': _s_atr,
                         'trail_anchor': _s_trail_anchor,
                         'trail_armed': False, 'initial_risk': _s_ir, 'features': _s_features,
+                        'risk': _fs_new_risk,  # registered for the portfolio-heat pot (#324 QA)
                     }
                 else:
+                    # Equity cash_full short. Mirror the long entry's four cost
+                    # mechanics (issue #312), none of which the short path used
+                    # before — so every equity short was overstated by one side
+                    # of slippage, unbounded vs ADV, paid no market impact, and
+                    # ignored the portfolio-heat budget.
+                    #
+                    # `ep` stays the RAW anchor for the stop/target levels already
+                    # computed from it above; the slipped/impacted price is only
+                    # the realized fill used for notional / P&L accounting.
+                    _s_entry_fill = _inst.apply_slippage(inst_se, ep, "sell")
                     alloc = min(total_equity * allocation_pct, cash)
                     if alloc <= 0:
                         continue
-                    shares = alloc / ep
+                    shares = alloc / _s_entry_fill
+
+                    # Portfolio heat gate (mirror of the long path). Fall back to
+                    # target_risk_per_trade for the stop-distance proxy like the
+                    # long fixed-sizing path. NOTE: like the long side, this uses
+                    # the pre-ADV-cap `shares` — the pre-clamp over-statement is
+                    # tracked for both sites as issue #317.
+                    _s_stop_dist = CONFIG.get("target_risk_per_trade", 0.02)
+                    _s_new_risk = _inst.notional(inst_se, shares, _s_entry_fill) * _s_stop_dist
+                    _s_max_heat = CONFIG.get("max_portfolio_heat", 1.0)
+                    # Gate against BOTH open longs and open shorts, and register
+                    # this short's own risk below so subsequent entries see it —
+                    # otherwise a shorts-only book never accumulates heat (#312 QA).
+                    if not check_portfolio_heat({**positions, **short_positions},
+                                                _s_new_risk, total_equity, _s_max_heat):
+                        continue
+
+                    # ADV liquidity cap (mirror of the long path).
+                    _s_max_pct_adv = CONFIG.get('max_pct_adv') or 0
+                    if _s_max_pct_adv > 0 and 'Volume' in df.columns:
+                        _s_adv20 = _daily_adv(df['Volume'], date, symbol)
+                        if pd.notna(_s_adv20) and _s_adv20 > 0:
+                            _s_max_shares = _s_adv20 * _s_max_pct_adv
+                            if _s_max_shares <= 0:
+                                continue
+                            shares = min(shares, _s_max_shares)
+
+                    # Market impact: a short SALE fills LOWER as size grows
+                    # (mirror of the long buy, sign-flipped).
+                    _s_entry_impact_bps = 0.0
+                    _s_impact_coeff = CONFIG.get('volume_impact_coeff', 0.0)
+                    if _s_impact_coeff > 0 and 'Volume' in df.columns:
+                        _s_adv_imp = _daily_adv(df['Volume'], date, symbol)
+                        if pd.notna(_s_adv_imp) and _s_adv_imp > 0:
+                            _s_order_pct = shares / _s_adv_imp
+                            _s_impact_add = _s_impact_coeff * np.sqrt(_s_order_pct)
+                            _s_entry_fill = _s_entry_fill * (1 - _s_impact_add)
+                            _s_entry_impact_bps = round(_s_impact_add * 10000, 1)
+
+                    if shares <= 0:
+                        continue
                     commission = _inst.commission(inst_se, shares)
                     cash -= commission   # proceeds and collateral cancel; only commission is a real cash cost
+                    # Recompute registered heat risk from the FINAL post-ADV-cap
+                    # share count (#317), mirroring the long path.
+                    _s_new_risk = _inst.notional(inst_se, shares, _s_entry_fill) * _s_stop_dist
                     short_positions[symbol] = {
-                        'entry_date': date, 'entry_price': ep,
-                        'shares': shares, 'notional': shares * ep, 'total_borrow_cost': 0.0,
+                        'entry_date': date, 'entry_price': _s_entry_fill, 'raw_entry_price': ep,
+                        'shares': shares, 'notional': shares * _s_entry_fill, 'total_borrow_cost': 0.0,
                         'margin': 0.0,
                         'stop_loss_level': _s_stop, 'initial_stop_loss_level': _s_stop,
                         'trail_target': _s_target, 'atr_locked': _s_atr,
                         'trail_anchor': _s_trail_anchor,
                         'trail_armed': False, 'initial_risk': _s_ir, 'features': _s_features,
+                        'entry_impact_bps': _s_entry_impact_bps,
+                        'risk': _s_new_risk,  # registered for the portfolio-heat pot (#312 QA)
                     }
 
                 # --- ENTRY-BAR EVALUATION (opt-in, mirror of the long entry-bar check) ---
@@ -1009,7 +1140,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             if date not in df.index:
                 continue
 
-            if symbol in positions: continue
+            # Mirror the short-entry guard: never open a long while a short is
+            # still open on the same symbol (issue #313). A signal of 1 does not
+            # cover a short (only <= -1 covers), so without this the long would
+            # stack on top of the open short — a hedged double position the
+            # strategy never intended. A flip is still expressible as a two-bar
+            # sequence: -1 on one bar covers the short, then 1 on a later bar
+            # enters the long (same-bar stop/margin/PIT covers also free the
+            # symbol before this loop, so a 1 that bar can enter).
+            if symbol in positions or symbol in short_positions: continue
             if (not _pit_flag(symbol, date, '_pit_member', True)
                     or _pit_flag(symbol, date, '_pit_force_exit', False)):
                 continue
@@ -1044,14 +1183,55 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     stop_type = stop_config.get("type", "none")
                     if stop_type == "percentage":
                         sizing_kwargs["stop_distance_pct"] = stop_config.get("value", 0.05)
+                    elif stop_type == "trailing_atr":
+                        # trailing_atr had NO branch here, so stop_distance_pct was
+                        # never set and risk_parity fell through to the fallback in
+                        # position_sizing.py:205 -- symbol_data["ATR_14"].iloc[-1],
+                        # the last row of whatever slice the caller passed, which is
+                        # execution-mode dependent. Found by the parametrised
+                        # invariant test, not by inspection: 10x share divergence on
+                        # long/trailing_atr/risk_parity. Setting it explicitly here
+                        # means the ATR-family paths never reach that fallback.
+                        if pd.notna(signal_date) and signal_date in df.index and "ATR_14" in df.columns:
+                            _atr_tp = df.loc[signal_date, 'ATR_14']
+                            _close_tp = df.loc[signal_date, 'Close']
+                            if pd.notna(_atr_tp) and pd.notna(_close_tp) and _close_tp > 0:
+                                _eff_tp = float(_atr_tp) * stop_config.get("stop_mult", 1.0)
+                                _pc_tp = stop_config.get("point_cap")
+                                if _pc_tp is not None and _pc_tp > 0:
+                                    _eff_tp = min(_eff_tp, _pc_tp)
+                                sizing_kwargs["stop_distance_pct"] = _eff_tp / float(_close_tp)
                     elif stop_type == "atr":
-                        _day_before = prev_trading_dates[symbol].get(entry_exec_date)
+                        # Signal bar, not prev(fill bar) -- see the `atr` stop
+                        # anchor below. A FOURTH instance of the same defect,
+                        # in risk_parity sizing; caught by the AST regression
+                        # guard in tests/test_heat_gate_symmetry.py rather than
+                        # by inspection, which is why that guard scans for the
+                        # pattern instead of listing known sites.
+                        _day_before = signal_date
                         if _day_before is not None and _day_before in df.index and "ATR_14" in df.columns:
                             _atr = df.loc[_day_before, 'ATR_14']
                             _close = df.loc[_day_before, 'Close']
                             if pd.notna(_atr) and pd.notna(_close) and _close > 0:
-                                sizing_kwargs["stop_distance_pct"] = _inst.atr_stop_distance_pct(
-                                    _atr, stop_config.get("multiplier", 3.0), _close)
+                                # point_cap applied here too, because the stop LEVEL
+                                # applies it (atr_stop_level) and atr_stop_distance_pct
+                                # has no cap parameter. Uncapped sizing against a capped
+                                # stop is a 6x UNDER-size when the cap binds (0.34% of
+                                # book against a 2% target) -- wrong in the safe
+                                # direction, and mode-INDEPENDENT, so the execution-mode
+                                # invariant cannot see it. Pinned by a value test.
+                                _eff_ap = float(_atr) * stop_config.get("multiplier", 3.0)
+                                _pc_ap = stop_config.get("point_cap")
+                                if _pc_ap is not None and _pc_ap > 0:
+                                    _eff_ap = min(_eff_ap, _pc_ap)
+                                sizing_kwargs["stop_distance_pct"] = _eff_ap / float(_close)
+                    elif stop_type == "points":
+                        # The distance is KNOWN for a points stop and there was no
+                        # branch, so risk_parity fell through to the 3xATR proxy at
+                        # position_sizing.py:205 and ignored a number it already had.
+                        _pv = stop_config.get("value")
+                        if _pv is not None and _pv > 0 and raw_entry_price > 0:
+                            sizing_kwargs["stop_distance_pct"] = float(_pv) / raw_entry_price
 
                 # For kelly: compute rolling stats from completed trades so sizing
                 # actually adapts to the strategy's live performance.
@@ -1076,7 +1256,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     _rp_stop_dist_pts = None
                     _stype_sz = stop_config.get("type", "none")
                     if _stype_sz == "trailing_atr":
-                        _dbe_sz = prev_trading_dates[symbol].get(entry_exec_date)
+                        # Signal bar, not prev(fill bar) -- see the `atr` stop
+                        # anchor below. Wrong under execution_time="close", and
+                        # here it sets the SHARE COUNT.
+                        _dbe_sz = signal_date
                         if pd.notna(_dbe_sz) and _dbe_sz in df.index:
                             _atr_sz = df.loc[_dbe_sz].get('ATR_14')
                             if pd.notna(_atr_sz):
@@ -1093,7 +1276,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         # distance than the one the position is actually stopped at.
                         _rp_stop_dist_pts = stop_config.get("value", 0.05) * raw_entry_price
                     elif _stype_sz == "atr":
-                        _dbe_sz = prev_trading_dates[symbol].get(entry_exec_date)
+                        # Signal bar, not prev(fill bar) -- as above.
+                        _dbe_sz = signal_date
                         if pd.notna(_dbe_sz) and _dbe_sz in df.index:
                             _atr_sz = df.loc[_dbe_sz].get('ATR_14')
                             if pd.notna(_atr_sz):
@@ -1138,7 +1322,16 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         method=sizing_method,
                         equity=total_equity,
                         price=entry_price,
-                        symbol_data=df.loc[:date],
+                        # Slice to the SIGNAL bar, not the fill bar (#324 review).
+                        # Both consumers take .iloc[-1] of this frame:
+                        # _volatility_parity (position_sizing.py:173) and the
+                        # risk_parity ATR fallback (:205). Sliced to `date` that
+                        # last row is the FILL bar, so under execution_time="open"
+                        # sizing reads a bar the signal never saw -- same-bar
+                        # look-ahead -- and the modes diverge 5x on shares. A
+                        # sizing decision may only use information available at
+                        # the signal.
+                        symbol_data=df.loc[:(signal_date if pd.notna(signal_date) else date)],
                         config=CONFIG,
                         allocation_pct=allocation_pct,  # honour the caller's allocation, not CONFIG only
                         **sizing_kwargs
@@ -1176,7 +1369,16 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 _stop_dist = sizing_kwargs.get("stop_distance_pct") or CONFIG.get("target_risk_per_trade", 0.02)
                 new_position_risk = _inst.notional(inst, shares, entry_price) * _stop_dist
                 max_heat = CONFIG.get("max_portfolio_heat", 1.0)
-                if not check_portfolio_heat(positions, new_position_risk, total_equity, max_heat):
+                # Gate against BOTH open longs and open shorts. Before #312 an
+                # equity short carried no 'risk' key, so passing `positions`
+                # alone here was inert. #312 registers short risk -- and only
+                # the short-entry gate (see the {**positions, **short_positions}
+                # call above) was updated to read it. That left the cap
+                # breachable through the long side, with admit/reject depending
+                # on entry ORDER and DIRECTION: 2.0% of risk against a 1.5% cap
+                # was rejected entering short and admitted entering long.
+                if not check_portfolio_heat({**positions, **short_positions},
+                                            new_position_risk, total_equity, max_heat):
                     continue
 
                 # Cash constraint (equity full-notional pre-clamp; futures clamp on margin below)
@@ -1236,21 +1438,41 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # Final check: Ensure we can afford the trade and it's a meaningful size
                 if can_afford:
                     # --- CAPTURE FEATURES AT ENTRY ---
+                    # Read from the SIGNAL bar, not the fill bar (issue #310).
+                    # ``signal_date`` is the bar before the fill under
+                    # execution_time="open" (whose close/volume were known when
+                    # the entry was decided) and the fill bar itself under
+                    # "close". Reading the fill bar (entry_exec_date) leaked the
+                    # fill bar's same-day close/volume into the entry_* features,
+                    # contaminating ml_features.parquet under open execution.
                     features = {}
                     try:
-                        features['entry_RSI_14'] = df.loc[entry_exec_date, 'RSI_14']
-                        features['entry_ATR_14_pct'] = df.loc[entry_exec_date, 'ATR_14_pct']
-                        features['entry_SMA200_dist_pct'] = df.loc[entry_exec_date, 'SMA200_dist_pct']
-                        features['entry_Volume_Spike'] = df.loc[entry_exec_date, 'Volume_Spike']
-                        if spy_df is not None:
-                            features['entry_SPY_RSI_14'] = spy_df.loc[entry_exec_date, 'RSI_14']
-                            features['entry_SPY_SMA200_dist_pct'] = spy_df.loc[entry_exec_date, 'SMA200_dist_pct']
-                        if vix_df is not None:
-                            features['entry_VIX_Close'] = vix_df.loc[entry_exec_date, 'Close']
-                        if tnx_df is not None:
-                            features['entry_TNX_Close'] = tnx_df.loc[entry_exec_date, 'Close']
+                        features['entry_RSI_14'] = df.loc[signal_date, 'RSI_14']
+                        features['entry_ATR_14_pct'] = df.loc[signal_date, 'ATR_14_pct']
+                        features['entry_SMA200_dist_pct'] = df.loc[signal_date, 'SMA200_dist_pct']
+                        features['entry_Volume_Spike'] = df.loc[signal_date, 'Volume_Spike']
                     except KeyError:
                         pass
+                    # Per-frame guards: a comparison frame that starts later than
+                    # the symbol (e.g. Polygon caps I:VIX/I:TNX at 2023-02-14) may
+                    # not contain signal_date at a boundary. Isolate each read so
+                    # a miss on one frame does not drop the others (issue #310).
+                    if spy_df is not None:
+                        try:
+                            features['entry_SPY_RSI_14'] = spy_df.loc[signal_date, 'RSI_14']
+                            features['entry_SPY_SMA200_dist_pct'] = spy_df.loc[signal_date, 'SMA200_dist_pct']
+                        except KeyError:
+                            pass
+                    if vix_df is not None:
+                        try:
+                            features['entry_VIX_Close'] = vix_df.loc[signal_date, 'Close']
+                        except KeyError:
+                            pass
+                    if tnx_df is not None:
+                        try:
+                            features['entry_TNX_Close'] = tnx_df.loc[signal_date, 'Close']
+                        except KeyError:
+                            pass
                     
                     # --- STRATEGIC DECISION: ATR TRAILING STOP CALCULATION METHOD ---
                     #
@@ -1308,8 +1530,20 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             instruments[symbol], _stop_anchor, stop_config, side="long")
 
                     elif _stype == 'atr':
-                        # Get the data from the day BEFORE entry (the signal day)
-                        day_before_entry = prev_trading_dates[symbol].get(entry_exec_date)
+                        # Anchor to the SIGNAL bar. `signal_date` is already
+                        # execution-aware (:1147): the bar before the fill under
+                        # execution_time="open", the fill bar itself under "close".
+                        #
+                        # This previously read prev_trading_dates[entry_exec_date],
+                        # which is only the signal bar under "open" -- under
+                        # "close" entry_exec_date == signal_date, so it read one
+                        # bar too EARLY. Same defect class as #310, but this one
+                        # moves P&L rather than exported features: it sets the
+                        # exit level and InitialRisk, hence every R-multiple,
+                        # expectancy and SQN downstream. Measured 10x difference
+                        # in stop distance (97.00 vs 70.00) on identical inputs,
+                        # from the execution mode alone.
+                        day_before_entry = signal_date
 
                         if pd.notna(day_before_entry) and day_before_entry in df.index:
                             day_before_data = df.loc[day_before_entry]
@@ -1362,7 +1596,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         # propagates into the target:
                         #   eff_stop_dist = min(stop_mult*atr, point_cap)
                         #   target_dist   = eff_stop_dist * (t1_mult / stop_mult)
-                        _dbe = prev_trading_dates[symbol].get(entry_exec_date)
+                        # Signal bar ("the breakout bar"), not prev(fill bar).
+                        # A FIFTH instance of the #310 defect class -- this one
+                        # was documented in CLAUDE.md as "assumes
+                        # execution_time='open'", which is exactly what made it
+                        # invisible: a known limitation nobody had ticketed.
+                        # Under "close" it locked the ATR of the bar BEFORE the
+                        # breakout, and that value is fixed for the whole trade
+                        # (stop, target and trail all derive from it).
+                        _dbe = signal_date
                         _atr_b = df.loc[_dbe].get('ATR_14') if (pd.notna(_dbe) and _dbe in df.index) else np.nan
                         if pd.notna(_atr_b):
                             _atr_locked = float(_atr_b)
@@ -1383,6 +1625,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             if _stop_mult > 0 and _t1_mult > 0:
                                 _trail_target = _trail_anchor + _eff_stop_dist * (_t1_mult / _stop_mult)
 
+                    # Recompute risk from the FINAL post-clamp share count (#317):
+                    # new_position_risk was computed pre-ADV-cap / pre-round_units /
+                    # pre-affordability-clamp, so storing it overstated open risk and
+                    # made check_portfolio_heat over-reject later entries.
+                    _final_risk = _inst.notional(inst, shares, entry_price) * _stop_dist
                     positions[symbol] = {
                         'shares': shares, 'entry_price': entry_price,
                         'raw_entry_price': raw_entry_price,
@@ -1391,7 +1638,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         'initial_stop_loss_level': stop_loss_level,
                         'entry_impact_bps': entry_impact_bps,
                         'size_mult': _size_mult,
-                        'risk': new_position_risk,
+                        'risk': _final_risk,
                         'trail_armed': False,
                         'trail_target': _trail_target,
                         'atr_locked': _atr_locked,
@@ -1520,9 +1767,12 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     last_date = all_dates[-1]
     if positions and not exclude_open:
         for symbol, pos in list(positions.items()):
-            # Get the closing price on the very last day of the backtest
-            last_price = portfolio_data[symbol]['Close'].get(last_date)
-            if pd.notna(last_price):
+            # Value at the last-known non-NaN close (issue #320): if the symbol
+            # has no bar on the union's last_date, the daily loop still valued
+            # this position there, so the EoB trade must be logged to match the
+            # equity curve (otherwise headline P&L diverges from the trade log).
+            last_price = _mtm_close(portfolio_data[symbol], last_date)
+            if last_price is not None:
                 exit_date = last_date
                 exit_reason = "End of Backtest"
 
@@ -1554,8 +1804,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # trade, run returns None), even though the equity curve already carries its MTM.
     if short_positions and not exclude_open:
         for symbol, spos in list(short_positions.items()):
-            last_price = portfolio_data[symbol]['Close'].get(last_date)
-            if pd.isna(last_price):
+            last_price = _mtm_close(portfolio_data[symbol], last_date)  # last-known close (#320)
+            if last_price is None:
                 continue
             _s_inst = instruments[symbol]
             cover_slip = _inst.apply_slippage(_s_inst, last_price, "buy")
@@ -1583,6 +1833,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 'HoldDuration': _hold_duration_days(spos['entry_date'], last_date),
                 'MAE_pct': _s_mae, 'MFE_pct': _s_mfe, 'ExitReason': "End of Backtest",
                 'InitialRisk': _s_ir if (_s_ir and _s_ir > 0) else 0.0, 'RMultiple': _s_rm,
+                'VolumeImpact_bps': round(spos.get('entry_impact_bps', 0.0), 1),
             })
             trade_log[-1].update(spos.get('features', {}))
     # --- END: MARK-TO-MARKET LOGIC ---
@@ -1607,13 +1858,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             for dt in portfolio_timeline.index[mask]:
                 if pd.isna(portfolio_timeline.loc[dt]):
                     continue
-                # What the daily loop added for this symbol on this date.
-                if dt in sym_df.index:
-                    mtm_close = sym_df.loc[dt, 'Close']
-                else:
-                    prior_idx = sym_df.index[sym_df.index < dt]
-                    mtm_close = sym_df.loc[prior_idx[-1], 'Close'] if len(prior_idx) else np.nan
-                if pd.isna(mtm_close):
+                # What the daily loop added for this symbol on this date — must
+                # use the SAME valuation as the loop (issue #320), otherwise this
+                # correction skips exactly the missing/NaN bars the loop now
+                # values at the last non-NaN close, leaving phantom MTM in the
+                # post-delisting equity curve.
+                mtm_close = _mtm_close(sym_df, dt)
+                if mtm_close is None:
                     continue
                 # x point_value: the daily loop's contribution was $/point-scaled
                 # (unrealized_pnl for futures, market value with pv=1 for equities),

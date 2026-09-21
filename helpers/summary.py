@@ -4,9 +4,14 @@ import pandas as pd
 import os
 from config import CONFIG
 import numpy as np
-
 from helpers.aws_utils import upload_file_to_s3
 from helpers.correlation import compute_avg_correlations, DEFAULT_THRESHOLD
+
+# Default drawdown filter shared by all four summary functions, so the value
+# cannot drift between copies again (issue #319 was one copy defaulting to
+# -9999.0). 1.0 = allow up to 100% max drawdown. max_drawdown is a positive
+# fraction, so `max_drawdown <= 1.0` admits every ordinary equity strategy.
+_DEFAULT_MAX_ACCEPTABLE_DD = 1.0
 
 # ---------------------------------------------------------------------------
 # Benchmark Column Builder
@@ -174,7 +179,7 @@ def generate_single_asset_summary_report(symbol_results, benchmark_returns, symb
         return
 
     summary_df = pd.DataFrame(symbol_results)
-    max_dd_filter = CONFIG.get("max_acceptable_drawdown", 1.0)
+    max_dd_filter = CONFIG.get("max_acceptable_drawdown", _DEFAULT_MAX_ACCEPTABLE_DD)
     mc_score_min = CONFIG.get("mc_score_min_to_show_in_summary", -999)
     min_pnl = CONFIG.get("min_pandl_to_show_in_summary", -999.0)
     min_calmar = CONFIG.get("min_calmar_to_show_in_summary", -999.0)
@@ -318,7 +323,11 @@ def generate_final_summary(all_results, benchmark_returns):
     mc_score_min = CONFIG.get("mc_score_min_to_show_in_summary", -999)
     min_pnl = CONFIG.get("min_pandl_to_show_in_summary", -999.0)
     min_calmar = CONFIG.get("min_calmar_to_show_in_summary", -999.0)
-    max_dd_filter = CONFIG.get("max_acceptable_drawdown", -9999.0)
+    # Shared default (allow up to 100% DD), matching the other three summary
+    # functions. max_drawdown is a positive magnitude, so the old -9999.0 default
+    # made `max_drawdown <= max_dd_filter` unsatisfiable and dropped every
+    # strategy whenever the key was absent from the config (issue #319).
+    max_dd_filter = CONFIG.get("max_acceptable_drawdown", _DEFAULT_MAX_ACCEPTABLE_DD)
     min_trades = CONFIG.get("min_trades_for_mc", 15)
 
     # Build filter mask
@@ -466,7 +475,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_
     # --- Step 2: Create a separate, FILTERED DataFrame for DISPLAY purposes only ---
     # Legacy config keys (min_performance_vs_spy, min_performance_vs_qqq) are still supported for backward compatibility
     # They apply to the first two benchmarks if present
-    max_dd_filter = CONFIG.get("max_acceptable_drawdown", 1.0)
+    max_dd_filter = CONFIG.get("max_acceptable_drawdown", _DEFAULT_MAX_ACCEPTABLE_DD)
     mc_score_min = CONFIG.get("mc_score_min_to_show_in_summary", -999)
     min_pnl = CONFIG.get("min_pandl_to_show_in_summary", -999.0)
     min_calmar = CONFIG.get("min_calmar_to_show_in_summary", -999.0)
@@ -722,7 +731,7 @@ def generate_portfolio_summary_report(all_results, benchmark_returns, duration_s
     mc_score_min = CONFIG.get("mc_score_min_to_show_in_summary", -999)
     min_pnl = CONFIG.get("min_pandl_to_show_in_summary", -999.0)
     min_calmar = CONFIG.get("min_calmar_to_show_in_summary", -999.0)
-    max_dd_filter = CONFIG.get("max_acceptable_drawdown", 1.0)
+    max_dd_filter = CONFIG.get("max_acceptable_drawdown", _DEFAULT_MAX_ACCEPTABLE_DD)
 
     if duration_seconds is not None:
         print(f"Total Backtest Runtime: {format_duration(duration_seconds)}".center(80))

@@ -2,6 +2,8 @@
 
 > **RTK RULE — NON-NEGOTIABLE**: Every terminal command MUST be prefixed with `rtk`. No exceptions. This includes `rtk git`, `rtk grep`, `rtk pytest`, `rtk ls`, `rtk read`, etc. Bare `grep`, `git`, `pytest`, `find` etc. are FORBIDDEN in this project.
 
+> **GH POSTING RULE — NON-NEGOTIABLE**: Never pass comment/issue/review text as a shell argument. Use `python3 scripts/gh_post.py` for every GitHub comment, review, issue creation, and issue-body edit. `gh issue comment --body "..."` and `gh api -f body=@file` are FORBIDDEN — both have silently destroyed real comments in this project. See [Posting to GitHub](#posting-to-github).
+
 ## What This Is
 Python backtesting engine for US equities. Tests 20+ technical strategies across single symbols or large portfolios (Nasdaq, S&P 500, etc.) with Monte Carlo robustness scoring.
 
@@ -33,6 +35,7 @@ helpers/ml_export.py               # ML trade feature export (export_trade_featu
 helpers/sensitivity.py             # Parameter sensitivity sweep (build_param_grid, label_for_params, is_sweep_enabled)
 helpers/regime.py                  # VIX regime heatmap (build_regime_heatmap, print_regime_heatmap, classify_vix_regime)
 helpers/point_in_time.py           # Point-in-time index universe resolver for portfolios like "pit:nq100" and "pit:sp500"
+helpers/rule_based_universe.py     # Survivorship-free universe from the delisted-inclusive Parquet corpus ("rule:top500") — needs no index membership
 helpers/init_wizard.py             # First-time setup wizard invoked via python main.py --init
 helpers/correlation.py             # Strategy correlation matrix (run_correlation_analysis, compute_avg_correlations)
 helpers/caching.py                 # Local Parquet cache (24h TTL)
@@ -49,7 +52,46 @@ tickers_to_scan/                   # JSON ticker lists (nasdaq_100.json, sp-500.
 scripts/                           # One-off diagnostic and utility scripts (NOT part of the pipeline)
 scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run with: python scripts/debug_data.py
 scripts/build_research_index.py    # Consolidates all output/runs/ summaries + llm_verdict.json into output/research_index.csv
+scripts/gh_post.py                 # REQUIRED for all GitHub comments/reviews/issues — posts then verifies content landed intact (see "Posting to GitHub")
 ```
+
+## Posting to GitHub
+
+**Always:**
+
+```bash
+python3 scripts/gh_post.py comment   --repo O/R --number 302 --file reply.md
+python3 scripts/gh_post.py review    --repo O/R --number 302 --file r.md [--event APPROVE]
+python3 scripts/gh_post.py create    --repo O/R --title "..." --file body.md [--label backlog]
+python3 scripts/gh_post.py edit-body --repo O/R --number 109 --file body.md
+```
+
+> **Portability:** the script is **stdlib-only** and has **no `rtk` dependency** — it runs under any Python 3 with no venv and no pip install, so remote contributors are not blocked. Its only external requirement is the GitHub CLI (`gh`), and if that is missing or unauthenticated it says so with install/login instructions rather than a traceback. If you work on this machine, prefix `rtk` per the RTK rule above; everyone else runs it as written.
+
+Write the body to a file first (the scratchpad is fine), then pass `--file`.
+
+| Exit | Meaning | What to do |
+|---|---|---|
+| `0` | posted **and** verified byte-for-byte | nothing |
+| `1` | **nothing was posted** (bad usage, `gh` missing/unauthenticated, API rejected it) | fix and re-run |
+| `2` | **posted, but not confirmed intact** — content mismatched, *or* it landed and the read-back failed | open the printed URL and check. **Do not just re-run** — it posted |
+
+The `2` case covers "posted but unverifiable", not only "mangled". Re-running on a `2` is how you get a duplicate comment on top of the one already live.
+
+`--file` is required except for `review --event APPROVE`, where a bodyless approve is allowed (there is nothing to verify).
+
+**Never:**
+
+| Forbidden | Why |
+|---|---|
+| `gh issue comment --body "...\`path\`..."` | The shell runs command substitution **before `gh` sees it**. Backticks and `$(...)` are executed. This stripped file paths out of a real comment on #292 and created a stray file named `cash` |
+| `gh api -f body=@file` | `-f` sends the value **literally** — it posted `@C:/Users/.../gh_comment_106.md` as a comment body and the real reply was never sent |
+
+Both failures are **silent**: `gh` exits 0 and prints a URL. Nothing tells you the content was destroyed. That is why the tool verifies by reading the comment back rather than trusting the exit code.
+
+`--body-file` alone is *not* sufficient as a rule — the second failure above came from someone already trying to pass a file. Use the script; it removes the inline-body option entirely and checks the result.
+
+**Cross-repo refs:** a bare `#123` in a private-repo comment resolves against the *private* repo. When referring to a public issue from the private repo (or vice versa) always write it fully qualified: `zachisit/july-backtester#302`.
 
 ## Scripts Directory
 
@@ -111,6 +153,69 @@ scripts/build_research_index.py    # Consolidates all output/runs/ summaries + l
 **Dynamic benchmark columns:** `helpers/summary.py` uses `_build_benchmark_columns(benchmark_returns)` to generate column names, display names, format specs, and short names dynamically from the `benchmark_returns` dict passed to summary functions. This allows summary reports to display arbitrary benchmark tickers (not just hardcoded SPY/QQQ). All 4 summary functions (`generate_per_portfolio_summary`, `generate_single_asset_summary_report`, `generate_final_summary`, `generate_portfolio_summary_report`) accept a `benchmark_returns` dict parameter (e.g., `{"SPY": 0.12, "QQQ": 0.15, "XLF": 0.08}`) and dynamically build result keys like `vs_spy_benchmark`, `vs_qqq_benchmark`, `vs_xlf_benchmark`. The first benchmark appears in Table 1 (Core Performance), remaining benchmarks appear in Table 2 (Extended Metrics). Filtering logic supports backward compatibility: the first two benchmarks respect `min_performance_vs_spy` and `min_performance_vs_qqq` config keys; additional benchmarks default to `-9999.0` threshold (show all).
 
 **Datetime index normalization (Phase 4 of #55):** All data providers return `pd.DatetimeIndex` regardless of timeframe. Daily data (`timeframe="D"`) is normalized to midnight timestamps (00:00:00 UTC) via `.normalize()` to ensure consistent datetime handling across timeframes. Intraday data (`timeframe="H"` or `"MIN"`) preserves hour/minute precision. Trade logs store `EntryDate` and `ExitDate` as ISO 8601 strings (`.isoformat()`) supporting both date-only (`"2024-01-15"`) and datetime (`"2024-01-15T10:30:00"`) formats. WFA functions convert these strings to `pd.Timestamp` for chronological comparisons, ensuring robust datetime handling for mixed daily/intraday backtests.
+
+## Rule-Based Point-in-Time Universe (`"rule:..."`)
+
+A survivorship-free investable set derived from **observable liquidity**, requiring **no index-membership data**. Membership history is the vendor-locked part of PIT (`norgatedata.index_constituent_timeseries()` needs a Windows-only Norgate Data Updater); this sidesteps it.
+
+```python
+"portfolios": {"US Liquid 500": "rule:us_liquid_500"}   # or "rule:top250"
+```
+
+```
+universe(D) = { s : s has bars on D
+                and close(s, D)             >= universe_min_price
+                and dollar_volume_20d(s, D) >= universe_min_dollar_volume
+                and history(s, D)           >= universe_min_bars }
+```
+capped to `universe_top_n` by dollar volume.
+
+**Why it is survivorship-free:** the Parquet corpus carries **36,684 securities, 20,911 of them delisted**, named `TICKER-YYYYMM` — Bear Stearns is `BSC-200805`, Lehman `LEHMQ-201203`, Enron `ENRNQ-200411`. They are present with the dates they failed and drop out on their real last bar. Verified: `BSC-200805` **is** in the 2007-06-29 universe and **is not** in the 2008-12-31 one. The later-delisted share of a top-500 universe decays 45.0% (2004) → 32.8% (2008) → 20.2% (2015) → 1.0% (2024) — the correct signature.
+
+**Why there is no look-ahead:** every screen reads only bars `<= D`.
+
+**The universe is re-based periodically, not resolved once.** `universe(D)` is date-varying, but resolving it a single time at `start_date` and freezing it introduces a **start-date selection bias** of the same shape as the survivorship bug this feature removes, pointing the other way — the set can only shrink as names delist, so nothing can ever enter it. A 2004–2024 run frozen at 2004 never trades NVDA, TSLA, META or GOOGL, because none were top-500-liquidity names in 2004.
+
+`build_rule_schedule(spec, start, end, config)` therefore resolves at evenly-spaced dates and returns `(union, schedule)` — the **same pair shape** the `pit:` branch produces, so it reuses the existing per-bar membership masking (`pit_members_on`) with no engine change. The union is what gets fetched; the schedule is what keeps it causal, gating a name out of the tradeable set before it qualified.
+
+| `universe_rebase` | Resolutions over 20y | Note |
+|---|---|---|
+| `"annual"` **(default)** | 21 | tractable; closes most of the gap |
+| `"quarterly"` | 81 | finer, ~4× the cost |
+| `"monthly"` | 241 | rarely worth it |
+| `"none"` | 1 | **frozen at `start_date` — logs a warning; the biased behaviour, kept reachable for A/B** |
+
+Per-bar resolution is deliberately *not* offered: `resolve_universe` costs ~10s/date because it reopens real Parquet files, so ~5,000 trading days is ~14 hours just to build the schedule. `pit:`'s per-bar mask is cheap only because it reads pre-existing membership YAML rather than price data. The span index is built **once** and reused across re-base dates — rebuilding it per date multiplies the expensive part by `len(dates)`.
+
+**Config keys:** `universe_min_price` (5.0), `universe_min_dollar_volume` (1e6), `universe_min_bars` (252), `universe_top_n` (None), `universe_adv_window` (20), `universe_exclude_prefixes` (`("$", "#")`), `universe_exclude_symbols` (`()`), `universe_rebase` (`"annual"`).
+
+**Three traps this handles, each of which silently corrupts results:**
+1. **`Datetime` is not column 0** (order is `Open, High, Low, Close, Volume, Datetime` — it is the pandas index). Locating it by position reads float OHLC as nanosecond timestamps and yields **1970** dates. It is located by *name*.
+2. **`$` and `#` prefixes are not investable.** 1,160 index series (`$NYA`, `$DJITR`) and 455 breadth series (`#NYSEAD`) carry price and volume columns, so no liquidity screen rejects them — and they out-rank everything on notional dollar volume. Before this filter a top-100 universe came back as *almost entirely indices*. Excluded by default.
+3. **Ticker reuse.** `WB` is Wachovia (`WB-200812`) until 2008 and Weibo (`WB`) from 2014; `V` was Vivendi (`V-200608`) before Visa (`V`). Resolution is by **security ID**, never bare ticker — which also sidesteps `parquet_service`'s ambiguous `_multi_` bare-ticker fallback, since `WB-200812.parquet` matches exactly.
+
+**Performance:** a metadata-only span index over all 36,684 securities builds in **~8.5s**, cached to `<parquet_data_dir>/../.span_index.parquet`; universe resolution is then ~10s per date.
+
+**What it is NOT:** the S&P 500, Russell, or any index. If a thesis depends on index membership *itself* — reconstitution flow, inclusion effects, benchmark-relative mandates — this does not substitute. **Results produced on this universe must say so.**
+
+**ETFs are excluded by default** (`universe_exclude_etfs: True`). An unfiltered liquidity-ranked universe is materially ETFs — measured on the real corpus:
+
+| As of | top-100 | top-500 |
+|---|---|---|
+| 2004 | 4.0% | 2.6% |
+| 2010 | 24.0% | 13.6% |
+| 2020 | 26.0% | 19.0% |
+| 2024 | 21.0% | 16.6% |
+
+A stock-selection strategy holding SPY is partly holding the benchmark it's measured against, and no metric reveals it. Set `universe_exclude_etfs: False` to keep them.
+
+**Why a list and not a classifier.** The corpus carries no `securitytype` field. A statistical classifier was tried and **does not work** — recorded so it isn't re-attempted. R² of daily returns vs SPY, on 89 known ETFs vs 52 known stocks: threshold 0.80 catches 34.8% of ETFs at 0% false positives; threshold 0.50 catches 65.2% at **25%** false positives. It fails because commodity/currency/bond ETFs aren't equity baskets at all (GLD 0.018, SLV 0.0005, UUP 0.003, TLT 0.12). Counting idiosyncratic 5σ jumps separates better (ETF median 0, stock median 2 — no earnings) but still misclassifies ~25% of stocks. Neither is precise enough to silently drop names.
+
+**Why a list is nevertheless sufficient.** The screen is dollar-volume ranked, so the problem is self-limiting: not "how many ETFs exist" (hundreds) but "how many are liquid enough to hold a top-N slot" (~20 in a top-100). `ETF_TICKERS` (~230 names) spans broad/sector/style/bond/commodity/currency/country/leveraged/inverse/volatility/thematic and takes the measured contamination above to **0%**. Matching is on the bare ticker, so a closed ETF (`TVIX-202007`) is excluded too.
+
+It is curated, not exhaustive — a new or obscure ETF can pass. **`etf_report(universe)`** returns `{etfs, n_etfs, n_total, pct}` so that gap is visible rather than assumed away.
+
+**Tests:** `tests/test_rule_based_universe.py` — 31 tests on a synthetic corpus (no submodule dependency): security identity incl. share-class-vs-delisting (`BRK-A` vs `BRK-199001`), the 1970 trap, mixed tz-aware/naive files, each screen, ticker-reuse resolution, and survivorship present-then-absent.
 
 ## Adding a Strategy (Plugin System)
 
@@ -215,7 +320,7 @@ The engine is instrument-aware: **`helpers/instruments.py`** resolves a per-symb
 - **Data path:** `services/futures_service.py` (Polygon dedicated `/futures/v1/aggs`), plus CSV/Parquet for pre-built continuous series; `services/__init__.py` dispatches futures tickers to the futures endpoint. `helpers/continuous_contract.py` builds back-adjusted continuous series (panama/ratio + volume-roll). `helpers/data_quality.py` missing-bar check is calendar-aware (skipped for `CME_ETH`).
 - **Config:** SECTION 27 `instruments` (asset-class defaults, per-root point-value/tick tables, per-symbol overrides), SECTION 28 `intrabar_resolution`/`intrabar_timeframe`/`intrabar_multiplier`, SECTION 29 `maintenance_margin_pct`.
 - **Exit configs (v1.11.0, issue #234):**
-  - `{"type":"trailing_atr","stop_mult":..,"trail_mult":..,"t1_mult":..,"point_cap":N,"floor":"breakeven"}` — Sleeve A mechanic: ATR **locked at the breakout bar** (the signal bar, `prev_trading_dates[entry_exec_date]` — assumes `execution_time="open"`); initial stop `entry - min(stop_mult*atr, point_cap)`; arms the trail when price reaches `entry + eff_stop_dist*(t1_mult/stop_mult)` (target is R:R off the *capped* stop); post-arm ratchets `running-max High - trail_mult*atr_locked` (trail leg uncapped), floored at literal entry. **Bidirectional** — `side="long"`/`"short"` mirror in `_update_trailing_atr_stop`; the short entry/cover loops wire the full stop/target/trail + margin-call + real InitialRisk/RMultiple, and open shorts are marked-to-market at end-of-backtest.
+  - `{"type":"trailing_atr","stop_mult":..,"trail_mult":..,"t1_mult":..,"point_cap":N,"floor":"breakeven"}` — Sleeve A mechanic: ATR **locked at the breakout bar** (the signal bar — resolved from `signal_date` on the long path and `sig_date` on the short, correct under both `execution_time` modes and in both directions; both previously anchored to the bar before the fill and were wrong under `"close"`); initial stop `entry - min(stop_mult*atr, point_cap)`; arms the trail when price reaches `entry + eff_stop_dist*(t1_mult/stop_mult)` (target is R:R off the *capped* stop); post-arm ratchets `running-max High - trail_mult*atr_locked` (trail leg uncapped), floored at literal entry. **Bidirectional** — `side="long"`/`"short"` mirror in `_update_trailing_atr_stop`; the short entry/cover loops wire the full stop/target/trail + margin-call + real InitialRisk/RMultiple, and open shorts are marked-to-market at end-of-backtest.
     - Known conservative assumptions (issue #234 review): on a bar hitting both init-stop and target, the engine resolves stop-first (pre-arm); maintenance-margin uses entry-price notional (calls marginally early).
   - `{"type":"atr","multiplier":..,"point_cap":N}` — ATR stop distance clipped at `N` points per trade (`instruments.atr_stop_level(point_cap=)`).
   - `maintenance_margin_pct` (SECTION 29): per-bar force-liquidation of a futures position when `margin + unrealized_pnl < notional*pct`, logged `ExitReason "Margin Call"`. `0.0` = disabled.
@@ -240,9 +345,19 @@ printed extreme. The level is **static — it does not trail**.
   start of the series yields `NaT` → no stop for that trade.
 - **Wiring**: both entry paths in `helpers/portfolio_simulations.py` resolve the signal bar
   from the loop's existing `signal_date` / `sig_date` variable — the bar *before* the fill under
-  `execution_time="open"`, the fill bar itself under `"close"`. This differs from the `atr`
-  branch, which hard-codes `prev_trading_dates[entry_exec_date]` and therefore assumes
-  `execution_time="open"`. No look-ahead either way: the level is known at entry.
+  `execution_time="open"`, the fill bar itself under `"close"`. **Every `atr` /
+  `trailing_atr` anchor on BOTH entry paths now does the same** — they previously
+  hard-coded the bar before the fill (`prev_trading_dates[entry_exec_date]` on the long
+  path, `prev_trading_dates[date]` on the short one), which is the signal bar only under
+  `execution_time="open"`; under `"close"` they read one bar too early (a measured 10x
+  difference in stop distance on identical inputs). Fixed at **seven** sites — long: the
+  `atr` stop level, `atr`/`trailing_atr`/`risk_parity` sizing, the `trailing_atr` locked
+  ATR; short: the `atr` stop level and the `trailing_atr` locked ATR. The first fix
+  covered only the long five, because the guard that was supposed to prove completeness
+  keyed on `entry_exec_date` — a name the short block does not use — and so was blind to
+  half the file. Provably a no-op under `"open"`, where the two expressions coincide by
+  construction; the golden master is unchanged. No look-ahead either way: the level is
+  known at entry.
 - **Next-Day Activation interaction (important for short holds):** a position is not
   stop-checked until the bar *after* entry. Under `execution_time="open"` a one-session trade
   (enter next open, exit the open after) is therefore unprotected for its entire holding
@@ -316,7 +431,20 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 
 **Plan history caps**: Polygon limits available history based on plan tier. A starter plan capped at ~2021; a paid plan extends that (confirmed: ~2016 on current plan). The `Actual Data Period` line in the run summary shows the true start Polygon returned — if it lags the configured `start_date`, the plan tier is the constraint. There is no pagination bug in `polygon_service.py` — the single page with 50,000-bar limit returns all available bars correctly.
 
-**Cache validation bug (issue #123)**: The local Parquet cache keys data by *requested* date range, not actual returned range. If Polygon returns plan-capped data (e.g. 2016–now) for a 2004 request, the cache stores that truncated result under a key named `SPY_2004-01-01_..._day_1.parquet`. After a plan upgrade, subsequent runs still serve the old capped data from cache — silently — until the cache entry is manually deleted or expires. **Fix**: add start-date validation in the `helpers/caching.py` read path; if `df.index.min()` lags the requested start by >30 days, treat as a cache miss and re-fetch. See issue #123 for the full implementation spec.
+**Cache request-lag: what it means, and why it is NOT invalidated (issues #123, #315)**: The local Parquet cache keys data by *requested* date range, not actual returned range. If Polygon returns plan-capped data (e.g. 2016–now) for a 2004 request, the cache stores that truncated result under a key named `SPY_2004-01-01_..._day_1.parquet`.
+
+A cached frame that **starts later than the requested start** has two indistinguishable causes, and the cache alone cannot tell them apart:
+
+1. the symbol **listed after** `start_date` — an IPO, where re-fetching returns the identical first bar; or
+2. provider **plan-capping**.
+
+The #123 fix invalidated on request-lag (`df.index.min()` lagging the request by >30 days → treat as a miss). That was **removed in #315**, because cause 1 is overwhelmingly the common one: the heuristic mis-fired on *every* late-listed symbol, forcing a full API re-fetch of it on **every run** — the cache never hit for any IPO in the universe.
+
+**Current behaviour** (`helpers/caching.py` read path): request-lag does **not** invalidate. A large lag is logged at `INFO` so plan-capping stays visible without thrashing the cache. A genuine plan upgrade is recovered by the **24h TTL**, or immediately by deleting `data_cache/`.
+
+**The residual**: within 24h of a plan upgrade, capped data is still served, and only an INFO line says so. That is the accepted trade against re-fetching every late-listed symbol on every run. If you have just upgraded a plan and want the new history now, clear the cache directory rather than waiting out the TTL.
+
+A separate integrity guard *does* invalidate: a cache file whose index is not a `DatetimeIndex` is discarded and re-fetched (this was an accident of the pre-#315 try/except; #315 made it explicit).
 
 **Index history cap is separate and tighter than the equities cap (issue #261)**: `I:VIX` and `I:TNX` (the two comparison-ticker dependencies most strategies rely on for regime gates) only return data from **2023-02-14 onward** on the current plan — confirmed for both symbols directly against the API, independent of the equities ~5yr rolling cap described above. Requesting an earlier `start_date` returns an empty result (HTTP 200, zero bars), not an error. Because `spy_df`/`vix_df` are injected as `None` when the fetch fails, and the None-guards added for issue-empty-comparison-tickers make `None` a *silent no-op* rather than a crash, any strategy whose regime/filter logic ANDs on `vix_df` (e.g. `MA Confluence (Full Stack) w/ Regime Filter`) will fail its gate closed for the whole requested window — **zero trades, no error, no warning** prior to this fix. `main.py`'s comparison-ticker fetch loop now logs an explicit warning when a failed fetch backs an active dependency (see the `dep_keys` check next to the `Failed to fetch data for comparison ticker` warning), but the underlying data-availability gap is a Polygon plan-tier limit, not a bug in this codebase — **use `data_provider = "yahoo"` (`^VIX`/`^TNX`, full history) for any backtest whose window starts before 2023-02-14 and depends on VIX/TNX-gated strategies.**
 

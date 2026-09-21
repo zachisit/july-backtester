@@ -33,8 +33,19 @@ def _run(*args, extra_env=None):
         [sys.executable, MAIN, *args],
         capture_output=True,
         text=True,
+        # main.py:27-28 reconfigures its streams to UTF-8; the locale default
+        # is cp1252 on Windows, which cannot decode the U+2501 in its banner.
+        # subprocess raises inside _readerthread, so stderr comes back None and
+        # every assertion becomes a TypeError. ASCII-only --dry-run output makes
+        # this benign here TODAY, which is incidental, not structural (#362).
+        encoding="utf-8",
+        errors="replace",
         env=env,
         cwd=PROJECT_ROOT,
+        # The only bare subprocess.run left in these four modules. A wrapper
+        # that hangs with no ceiling hangs the DEFAULT suite forever, which is
+        # strictly worse than the 120s-then-skip that hid #362.
+        timeout=120,
     )
 
 
@@ -50,9 +61,17 @@ def _run_with_config_patch(tmp_path, patches: dict, cli_args=("--dry-run",), ext
     ]
     for k, v in patches.items():
         lines.append(f"config.CONFIG[{repr(k)}] = {repr(v)}")
-    lines.append(f"sys.argv = {repr(['main.py'] + list(cli_args))}")
     lines.append("import main")
-    lines.append("main.main()")
+    # main.main() MUST sit under a __main__ guard (#362): main.py builds a
+    # multiprocessing Pool, and under the spawn start method every worker
+    # re-imports the parent __main__ — this wrapper — so an unguarded call
+    # re-enters main.main() during bootstrap and deadlocks the parent. Safe
+    # here only while every call site passes --dry-run and exits before the
+    # Pool; the first one that does not would hang the suite. The CONFIG
+    # patches stay at module scope so spawn children re-apply them.
+    lines.append('if __name__ == "__main__":')
+    lines.append(f"    sys.argv = {repr(['main.py'] + list(cli_args))}")
+    lines.append("    main.main()")
 
     wrapper = tmp_path / "run_patched.py"
     wrapper.write_text("\n".join(lines), encoding="utf-8")
@@ -64,7 +83,15 @@ def _run_with_config_patch(tmp_path, patches: dict, cli_args=("--dry-run",), ext
     return subprocess.run(
         [sys.executable, str(wrapper)],
         capture_output=True, text=True,
+        # main.py:27-28 reconfigures its streams to UTF-8; the locale default
+        # is cp1252 on Windows, which cannot decode the U+2501 in its banner.
+        # subprocess raises inside _readerthread, so stderr comes back None and
+        # every assertion becomes a TypeError. ASCII-only --dry-run output makes
+        # this benign here TODAY, which is incidental, not structural (#362).
+        encoding="utf-8",
+        errors="replace",
         env=env, cwd=PROJECT_ROOT,
+        timeout=120,
     )
 
 

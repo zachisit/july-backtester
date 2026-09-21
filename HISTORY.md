@@ -4,6 +4,22 @@
 
 **Norgate → Parquet pipeline + private data submodule**
 
+> **Superseded.** Everything in this release's "Added" section was removed from this
+> repository in 2026-09: the Norgate export scripts, the export guide, and the
+> `parquet_data/` submodule. The export tooling existed to maintain a specific
+> private dataset rather than to serve this project, and the submodule made that
+> dataset a hard dependency of a public repo.
+>
+> Note this does NOT apply to `custom_strategies/private`, which is deliberately
+> retained even though it is also a private submodule: nothing here clones with
+> `--recurse-submodules` unprompted (the README gates it behind "for interns with
+> private strategies" and no workflow checks out submodules), and it holds
+> strategies this project actually runs rather than tooling for maintaining a
+> dataset.
+> The Parquet data provider remains and is source-agnostic — supply your own
+> directory of `{SYMBOL}.parquet` files via `parquet_data_dir` / `--parquet-dir`.
+> This entry is left intact as a record of what shipped, not as instructions.
+
 ### Added
 - **`--database` flag** in `norgate_to_parquet.py` — export every symbol in an entire Norgate database (`US Equities`, `US Equities Delisted`, `US Indices`) without needing a watchlist. Enables a complete 1:1 local dump of all 36,418 Norgate symbols in three commands.
 - **`validate_norgate_export.py`** — cross-checks all three Norgate databases against local `parquet_data/` and reports missing symbols per-database. Run after export to confirm `STATUS: ALL PRESENT`.

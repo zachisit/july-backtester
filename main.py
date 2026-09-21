@@ -190,6 +190,39 @@ def _build_intrabar_data(portfolio_data, config):
 
 # --------------------------------------------------------------------
 
+def _build_strat_name(name, stop_config):
+    """Build the display name for a strategy given its stop-loss config.
+
+    Percentage and ATR stops get a descriptive suffix; every other stop
+    type (``none``, ``points``, ``signal_bar``, ``trailing_atr`` …) — and a
+    config with no ``type`` key at all — leaves the base name unchanged,
+    matching the engine, which resolves the type via ``.get("type", "none")``.
+
+    This helper must never raise on a config the *engine* would happily run,
+    otherwise the label crashes the worker before the simulation starts and
+    the whole run completes with zero results (issue #309). It therefore
+    mirrors the engine's own defaults for every key it reads:
+
+    - ATR ``period`` defaults to 14 — the engine always uses the ``ATR_14``
+      column; the documented shape ``{"type": "atr", "multiplier": 2.0}``
+      carries no ``period`` (only the CLI shorthand ``atr:14:3.0`` injects
+      one). Reading ``stop_config['period']`` unconditionally was the #309
+      crash.
+    - ATR ``multiplier`` defaults to 3.0 (``portfolio_simulations`` uses the
+      same default at its sizing/stop-level sites).
+    - percentage ``value`` defaults to 0.05 (ditto).
+    """
+    stop_type = stop_config.get('type')
+    if stop_type == 'percentage':
+        return f"{name} w/ {stop_config.get('value', 0.05):.0%} SL"
+    if stop_type == 'atr':
+        multiplier = stop_config.get('multiplier', 3.0)
+        period = stop_config.get('period', 14)
+        return f"{name} w/ {multiplier}x ATR({period}) SL"
+    return name
+
+# --------------------------------------------------------------------
+
 def run_single_simulation(args):
     """
     Function to run one combination of (portfolio, strategy, stop-loss).
@@ -211,11 +244,7 @@ def run_single_simulation(args):
     tnx_df_local = comparison_dfs_global.get(dependency_map_global.get("tnx"))
 
     try:
-        strat_name = name
-        if stop_config['type'] == 'percentage':
-            strat_name = f"{name} w/ {stop_config['value']:.0%} SL"
-        elif stop_config['type'] == 'atr':
-            strat_name = f"{name} w/ {stop_config['multiplier']}x ATR({stop_config['period']}) SL"
+        strat_name = _build_strat_name(name, stop_config)
 
         base_signals_with_dfs = {}
         for symbol, df in portfolio_data.items():
@@ -698,7 +727,10 @@ def main():
             value = "pit:nq100"
             logger.info(f"  -> '{portfolio_name}': normalised 'nq100_pit' → 'pit:nq100'")
 
-        _current_pit_schedule = None  # reset each portfolio; set only for pit: portfolios
+        # Reset each portfolio. Set for pit: portfolios (index membership) AND
+        # for rule: portfolios (periodic liquidity re-basing) — both emit the
+        # same [(date, frozenset)] shape, so both feed the masking below.
+        _current_membership_schedule = None
 
         # --- Data fetching for the current portfolio (no changes) ---
         # (Your existing code to get symbols and build `portfolio_data` is perfect)
@@ -721,12 +753,54 @@ def main():
              file_path = os.path.join("tickers_to_scan", value)
              with open(file_path, 'rb') as f:
                  symbols = orjson.loads(f.read())
+        elif isinstance(value, str) and value.lower().startswith("rule:"):
+            # Rule-based point-in-time universe (#70). Needs no index-membership
+            # data: the investable set is derived from observable liquidity over
+            # the delisted-inclusive Parquet corpus, so it is survivorship-free
+            # by construction.
+            #
+            # Resolved PERIODICALLY, not once. Resolving only at start_date and
+            # freezing the result reintroduced a selection bias of the same shape
+            # as the survivorship bug this feature removes, pointing the other
+            # way: a 2004-2024 run would never trade NVDA, TSLA, META or GOOGL,
+            # because none were top-500-liquidity names in 2004. Yields the same
+            # (union, schedule) pair as the pit: branch below, so it reuses the
+            # existing per-bar membership masking with no engine change.
+            from helpers.rule_based_universe import build_rule_schedule
+            # .lower() because rebase_dates() lowercases before dispatching, so
+            # "None"/"NONE" already FREEZE the universe. Comparing verbatim here
+            # meant those spellings froze it while skipping the warning AND
+            # leaving the mask built from the frozen snapshot rather than
+            # disabled -- i.e. it failed in exactly the case the warning exists
+            # for: a user who deliberately opted into freezing.
+            _rebase = str(CONFIG.get("universe_rebase", "annual") or "annual").lower()
+            try:
+                symbols, _current_membership_schedule = build_rule_schedule(
+                    value, CONFIG["start_date"], CONFIG["end_date"], CONFIG,
+                    progress=lambda i, n, d, k: logger.info(
+                        f"     re-base {i}/{n} @ {d}: {k} securities"),
+                )
+                if _rebase == "none":
+                    _current_membership_schedule = None   # opt out of masking
+                    logger.warning(
+                        f"  -> universe_rebase='none': '{value}' is frozen at "
+                        f"{CONFIG['start_date']} for the whole run. Securities "
+                        f"that become investable later will NEVER be traded."
+                    )
+                logger.info(
+                    f"  -> Resolved {len(symbols)} securities from '{value}' "
+                    f"across {CONFIG['start_date']}..{CONFIG['end_date']} "
+                    f"(rebase={_rebase}, survivorship-free; NOT an index)"
+                )
+            except Exception as e:
+                logger.error(f"  -> ERROR resolving rule universe '{value}': {e}")
+                continue
         elif isinstance(value, str) and value.startswith("pit:"):
             from helpers.point_in_time import tickers_union_for_period as _pit_union, build_membership_schedule as _pit_schedule_build
             _pit_index_name = value.split(":", 1)[1]
             try:
                 symbols = _pit_union(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
-                _current_pit_schedule = _pit_schedule_build(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
+                _current_membership_schedule = _pit_schedule_build(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
             except Exception as e:
                 logger.error(f"  -> ERROR resolving PIT portfolio '{value}' for '{portfolio_name}': {e}")
                 continue
@@ -786,9 +860,11 @@ def main():
                 # --- FEATURE ENGINEERING ---
                 # These columns are captured at trade entry time for each
                 # position and stored in the trade log for later analysis.
-                # All calculations use .shift(1) where needed to ensure
-                # no look-ahead bias — indicators are based only on data
-                # available at the close of the previous bar.
+                # Each column reflects its own bar's close/volume; the engine
+                # captures them from the SIGNAL bar (the bar before the fill
+                # under execution_time="open"), so no look-ahead reaches the
+                # entry_* features — see the capture sites in
+                # helpers/portfolio_simulations.py (issue #310).
 
                 # RSI (14-period)
                 _delta = df['Close'].diff()
@@ -863,12 +939,18 @@ def main():
             else:
                 logger.info(f"  -> No delisted symbols found (or provider doesn't support delisting data).")
 
-        # --- PIT MEMBERSHIP MASKS (precomputed once per portfolio) ---
-        # For pit: portfolios, build a boolean Series per symbol marking which
-        # trading dates the symbol was an index member.  Workers apply this mask
-        # to gate entry signals and inject exit signals — zero per-simulation
-        # overhead beyond a vectorised lookup.
-        if _current_pit_schedule is not None:
+        # --- MEMBERSHIP MASKS (precomputed once per portfolio) ---
+        # Build a boolean Series per symbol marking which trading dates the
+        # symbol was a member of the tradeable universe.  Workers apply this
+        # mask to gate entry signals and inject exit signals — zero
+        # per-simulation overhead beyond a vectorised lookup.
+        #
+        # Two producers, one shape:
+        #   pit:  -> index membership from the PIT YAML
+        #   rule: -> periodic liquidity re-basing (annual by default)
+        # The rule: case is what stops a liquidity universe being frozen at
+        # start_date, which would bar every name that qualified later.
+        if _current_membership_schedule is not None:
             from helpers.point_in_time import pit_members_on as _pit_members_on
             from helpers.pit_enforcement import (
                 build_member_mask as _pit_build_member_mask,
@@ -880,7 +962,7 @@ def main():
                 _dates = _df.index
                 _date_strs = [str(d)[:10] for d in _dates]
                 _pit_member_masks[_sym] = pd.Series(
-                    [_sym in _pit_members_on(_current_pit_schedule, d) for d in _date_strs],
+                    [_sym in _pit_members_on(_current_membership_schedule, d) for d in _date_strs],
                     index=_dates,
                     dtype=bool,
                 )
