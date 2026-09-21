@@ -1,17 +1,22 @@
 # tests/test_gap_proximity_harness.py
 """Tests for the #298 research harness scripts.
 
-PR #298 added 408 lines across four scripts with **zero tests**. These cover the
-two that are unit-testable:
+PR #298 added research harness scripts with no tests. These cover:
 
 * ``scripts/gap_proximity_scan.py`` - ``qualifying`` / ``read_ohlcv`` / ``resolve``
 * ``scripts/make_tearsheet.py``     - ``load_equity`` / ``stats`` / ``annual``
 
-``check_annual.py`` and ``check_leverage.py`` are deliberately NOT covered: both
-are top-level scripts with no functions and hardcoded Windows paths into one
-contributor's ``output/runs/2026-08-06_10-35-14`` directory. They execute on
-import, so they cannot be imported without side effects, let alone asserted on.
-Testing them requires refactoring them into functions first.
+CORRECTED 2026-09-21: this docstring previously said ``check_annual.py`` and
+``check_leverage.py`` were "deliberately NOT covered" because they had no
+functions, hardcoded Windows paths and executed on import. That was true of an
+earlier revision and is false on this one -- the same PR refactored both into
+functions behind a ``__main__`` guard taking a run directory as an argument, and
+they ARE tested, in ``tests/test_run_diagnostics.py``. It also quoted a stale
+"408 lines across four scripts".
+
+Left as a note rather than deleted, because a test file that describes coverage
+it does not have is worse than one that says nothing, and the way this survived
+is that nobody re-read the prose after the code moved underneath it.
 
 The tests are written as invariants where the script's own docstrings make a
 claim - the trailing average excluding the current bar, Sharpe being an excess
