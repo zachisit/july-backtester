@@ -1051,6 +1051,14 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             allocation_pct=allocation_pct,
                             stop_distance_points=_s_ir,
                             point_value=inst_se.point_value,
+                            # Always True here -- this block is inside the
+                            # INITIAL_MARGIN branch -- but written as the
+                            # expression rather than the literal so it stays
+                            # correct when #386 routes equity shorts through
+                            # the same call. A hardcoded True would silently
+                            # apply the contract cap to equities at that point.
+                            margined=(inst_se.margin_mode
+                                      == _inst.INITIAL_MARGIN),
                         )
                     else:
                         alloc = min(total_equity * allocation_pct, _free)
@@ -1381,9 +1389,93 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                 if _pc_sz is not None and _pc_sz > 0:
                                     _eff_sz = min(_eff_sz, _pc_sz)
                                 _rp_stop_dist_pts = _eff_sz
+                    elif _stype_sz == "points":
+                        # THE one stop type whose distance is natively expressed
+                        # in the unit this ladder asks for -- and the one it could
+                        # not get (#385; @shardul0701's "second ladder" on #388).
+                        #
+                        # The engine resolves the same physical quantity twice in
+                        # this entry block, ~90 lines apart, with different
+                        # coverage: the risk_parity FRACTION ladder above handles
+                        # five stop types, this POINTS ladder handled three. The
+                        # fraction ladder even reads stop_config["value"] and
+                        # DIVIDES it by raw_entry_price to manufacture a fraction
+                        # -- out of the number this branch needed verbatim.
+                        #
+                        # `points` + risk_pct_capped is the futures-native pairing
+                        # and long-only it took ZERO trades for a whole backtest,
+                        # silently. Matched pair differing only in side (MES,
+                        # points stop, price 1000): long None, short 20 contracts.
+                        # The short leg is right because it is handed the REALISED
+                        # initial risk instead of re-deriving a subset of it.
+                        _pv_sz = stop_config.get("value")
+                        if _pv_sz is not None and _pv_sz > 0:
+                            _rp_stop_dist_pts = float(_pv_sz)
+                    elif _stype_sz == "signal_bar":
+                        # Same gap, same fix. The level is the signal bar's own
+                        # extreme, known before entry -- signal_bar_stop_level is
+                        # what the stop path itself calls, so deriving it here
+                        # keeps sizing and the stop on the SAME number.
+                        #
+                        # `bars_back` MUST be walked, exactly as the fraction
+                        # ladder does ~100 lines up and as the stop path does at
+                        # :1732. The first version of this branch anchored to
+                        # `signal_date` directly and pinned the share count at
+                        # 100.00 regardless of bars_back -- insensitivity to the
+                        # parameter being the signature. The resulting error is
+                        # UNBOUNDED in the gap between the trigger low and the
+                        # walked-back low (2x at lead_low=80, 5x at 50) and it is
+                        # OVER-risk, which #384's cap never was. The heat gate
+                        # cannot catch it either: :1468 hands it
+                        # `_rp_stop_dist_pts / raw_entry_price`, so the sizer and
+                        # the guard that exists to check the sizer read the same
+                        # wrong number. Measured admitting a 5.005% position under
+                        # a 1.1% cap. (@shardul0701 on #390.)
+                        #
+                        # This is the SECOND parameter of the stop this ladder
+                        # omitted -- stop type first, anchor bar now, and `buffer`
+                        # survives only because it happened to be carried. The
+                        # root is that the long path sizes ~250 lines BEFORE it
+                        # sets the stop, so it has to predict it; the short leg
+                        # cannot have this class of bug because it is handed the
+                        # REALISED distance. Hoisting the stop resolution above
+                        # the sizing call deletes both ladders instead of
+                        # synchronising them -- tracked separately, not here.
+                        _sb_sz = _walk_back(prev_trading_dates[symbol],
+                                            signal_date,
+                                            stop_config.get("bars_back", 0))
+                        if pd.notna(_sb_sz) and _sb_sz in df.index:
+                            _sb_bar = df.loc[_sb_sz]
+                            _sb_lvl = _inst.signal_bar_stop_level(
+                                _sb_bar.get('High'), _sb_bar.get('Low'),
+                                stop_config.get("buffer", 0.0), "long")
+                            if _sb_lvl is not None and _sb_lvl < raw_entry_price:
+                                # Protective side only: a next-open that gaps
+                                # through the extreme leaves the level ABOVE the
+                                # fill, so raw - lvl is negative.
+                                #
+                                # REDUNDANT for the share count and kept anyway.
+                                # `_risk_pct_capped` rejects `<= 0` itself, so
+                                # both paths reach zero units -- removing this
+                                # guard passes every test, which is how I found
+                                # out rather than by reasoning. What it does
+                                # change is what leaves this block: without it a
+                                # NEGATIVE distance is written into
+                                # sizing_kwargs, where the next reader of that
+                                # key has no way to tell it from a real one. The
+                                # stop path guards the same way at :1520; the two
+                                # sites agreeing is worth more than the line.
+                                _rp_stop_dist_pts = float(raw_entry_price - _sb_lvl)
 
                     sizing_kwargs["stop_distance_points"] = _rp_stop_dist_pts
                     sizing_kwargs["point_value"] = inst.point_value
+                    # #385: the integer floor and max_contracts_cap are contract-
+                    # shaped and apply to margined instruments only; the
+                    # unmargined path gets a notional ceiling instead. Resolved
+                    # here because position_sizing.py must not import the
+                    # instruments enum.
+                    sizing_kwargs["margined"] = (
+                        inst.margin_mode == _inst.INITIAL_MARGIN)
                     if _rp_stop_dist_pts and _rp_stop_dist_pts > 0:
                         # The portfolio heat check below falls back to the flat
                         # target_risk_per_trade (2%) proxy when stop_distance_pct is

@@ -417,6 +417,54 @@ class TestRiskParitySizesOffTheSignalBarStop:
         assert risk_per_share == pytest.approx(20.05, rel=0.02), risk_per_share
         assert shares == pytest.approx(99.95, rel=0.02), shares
 
+    @pytest.mark.parametrize("lead_low,expect_risk", [(80, 20.05), (50, 50.05)])
+    def test_risk_pct_capped_also_honours_bars_back(self, lead_low, expect_risk):
+        """The same assertion, one argument different — and it caught a bug.
+
+        `_sized` was already parameterised on `sizing_method` and all four call
+        sites passed `risk_parity`, so the whole class exercised ONE of the two
+        stop-distance ladders. #385 added a `signal_bar` branch to the other one
+        and anchored it to `signal_date` directly, without walking `bars_back`:
+
+            stop                        method            shares   $ risk   %eq
+            bars_back=0                 risk_parity       199.90  2009.00  2.01%
+            bars_back=0                 risk_pct_capped   100.00  1005.00  1.01%
+            bars_back=1 lead_low=80     risk_parity        99.95  2004.00  2.00%
+            bars_back=1 lead_low=80     risk_pct_capped   100.00  2005.00  2.01%  <- 1% target
+            bars_back=1 lead_low=50     risk_parity        39.98  2001.00  2.00%
+            bars_back=1 lead_low=50     risk_pct_capped   100.00  5005.00  5.01%  <- 1% target
+
+        The share count pinned at 100.00 across all three is the signature:
+        completely insensitive to the parameter. The error is UNBOUNDED in the
+        gap between the trigger low and the walked-back low, and it is
+        OVER-risk. The heat gate cannot catch it — the sizer and the guard that
+        checks the sizer are handed the same number. (@shardul0701 on #390.)
+
+        Parameterised over two lead lows because a single one is satisfied by
+        any anchor that happens to give the right answer once; two different
+        gaps require the walk itself.
+        """
+        cfg = {"type": "signal_bar", "buffer": 0.0, "bars_back": 1}
+        out = self._sized(cfg, "risk_pct_capped", lead_low=lead_low)
+        if out is None:
+            pytest.skip("no trade produced")
+        shares, risk_per_share = out
+        assert risk_per_share == pytest.approx(expect_risk, rel=0.02)
+        # risk_pct_per_trade defaults to 1% of $100k = $1,000.
+        assert shares * risk_per_share == pytest.approx(1_000.0, rel=0.02), (
+            "sizing anchored to a bar the stop is not on: %.2f shares x %.2f "
+            "= $%.2f against a $1,000 budget"
+            % (shares, risk_per_share, shares * risk_per_share))
+
+    def test_risk_pct_capped_matches_risk_parity_on_the_default_anchor(self):
+        """Control for the two above: at `bars_back=0` the ladders agree, so a
+        divergence there would mean something other than the walk."""
+        rp = self._sized(self.CFG, "risk_parity")
+        rc = self._sized(self.CFG, "risk_pct_capped")
+        if rp is None or rc is None:
+            pytest.skip("no trade produced")
+        assert rp[1] == pytest.approx(rc[1], rel=0.01), (rp, rc)
+
     def test_sizing_honours_buffer(self):
         """`buffer` widens the level, so it must widen the risk and shrink the
         size. Hardcoding it to 0.0 survives every other test in this class.

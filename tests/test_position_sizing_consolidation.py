@@ -104,14 +104,17 @@ class TestRiskPctCappedArithmetic:
         assert got == pytest.approx(20.0)  # 1000 / (10 * 5)
 
     def test_cap_binds(self):
-        got = _risk_pct_capped(100_000.0, _CFG,
+        # margined=True: the cap is a CONTRACT count and #385 gates it on
+        # margin_mode. On the unmargined path it no longer applies.
+        got = _risk_pct_capped(100_000.0, _CFG, margined=True,
                                stop_distance_points=1.0, point_value=1.0)
         assert got == 20  # 1000 units wanted, capped
 
     def test_result_is_floored_not_rounded(self):
         cfg = {**_CFG, "max_contracts_cap": 1000}
-        # 1000 / 350.18 = 2.856 -> 2, not 3
-        got = _risk_pct_capped(100_000.0, cfg,
+        # 1000 / 350.18 = 2.856 -> 2, not 3.  floor() travels with the cap and
+        # is likewise margined-only (#385) -- a share count is not integral.
+        got = _risk_pct_capped(100_000.0, cfg, margined=True,
                                stop_distance_points=350.18, point_value=1.0)
         assert got == pytest.approx(2.0)
 
@@ -263,11 +266,17 @@ class TestRiskPctCappedHasTwoOutputs:
     """
 
     def test_heat_admits_on_the_real_fraction(self):
+        # Heat 0.015, not 0.01. #385 removed the 20-unit cap on the unmargined
+        # path, so this position is now sized to risk a genuine ~1.0% of equity
+        # instead of ~0.1%, and both the real fraction and the 2% proxy exceed a
+        # 1% heat budget -- the cap was doing the discriminating, not the
+        # fraction. At 1.5% the real risk (1.004%) is admitted and the proxy
+        # (1.674%) is not, which is the comparison this test is for.
         res = _run("AAA", "risk_pct_capped", _TRAILING_ATR, price=5000.0,
-                   max_portfolio_heat=0.01, max_pct_adv=0.05)
+                   max_portfolio_heat=0.015, max_pct_adv=0.05)
         assert res is not None and res["trade_log"], (
-            "the position risks 1.2% of a 1% heat budget on notional -- it must "
-            "be admitted; with the 2% proxy it is rejected and there is no trade")
+            "real risk is 1.004% of a 1.5% heat budget -- it must be admitted; "
+            "with the flat 2% proxy it reads as 1.674% and is rejected")
         assert res["trade_log"][0]["InitialRisk"] == pytest.approx(60.0)
 
     def test_heat_rejects_when_the_real_fraction_is_larger(self):
@@ -401,13 +410,33 @@ class TestLongAndShortShareTheFunction:
 
     def test_no_inline_sizing_copies_remain(self):
         """The four open-coded copies were the actual defect. This fails if a
-        fifth is ever added — the copy in this file has drifted twice already."""
+        fifth is ever added — the copy in this file has drifted twice already.
+
+        Scoped to CODE, not to the file text. The first version matched raw
+        source and so fired on a #385 comment that merely *names*
+        `max_contracts_cap` while explaining where the cap now lives — a
+        comment is the opposite of a re-inlined copy, and a guard that treats
+        documenting the rule as breaking it will get commented out rather than
+        satisfied. Parsing to an AST and reading string constants keeps the
+        tripwire and drops the false positive.
+        """
+        import ast
         src = open(os.path.join(PROJECT_ROOT, "helpers",
                                 "portfolio_simulations.py")).read()
-        assert "max_contracts_cap" not in src, (
+        literals = {
+            node.value
+            for node in ast.walk(ast.parse(src))
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        }
+        # Docstrings are string constants too, so exclude anything long enough
+        # to be prose — a config key read is a bare short literal.
+        keys = {s for s in literals if len(s) < 60}
+        assert "max_contracts_cap" not in keys, (
             "risk_pct_capped arithmetic is back in the engine")
-        assert "fixed_contracts_per_trade" not in src, (
+        assert "fixed_contracts_per_trade" not in keys, (
             "fixed_contracts arithmetic is back in the engine")
+        assert "risk_pct_per_trade" not in keys, (
+            "risk_pct_capped arithmetic is back in the engine")
 
 
 # ---------------------------------------------------------------------------
@@ -499,7 +528,8 @@ class TestModuleDefaultsAreLive:
 
     def test_max_contracts_cap_defaults_to_twenty(self):
         cfg = {"risk_pct_per_trade": 0.01}          # cap omitted
-        assert _risk_pct_capped(100_000.0, cfg, stop_distance_points=1.0,
+        assert _risk_pct_capped(100_000.0, cfg, margined=True,
+                                stop_distance_points=1.0,
                                 point_value=1.0) == 20
 
     def test_risk_pct_per_trade_defaults_to_one_percent(self):
@@ -515,3 +545,458 @@ class TestModuleDefaultsAreLive:
                                     point_value=1.0)
         assert omitted == pytest.approx(explicit)
         assert omitted == pytest.approx(100.0)
+
+
+# ---------------------------------------------------------------------------
+# #385 — the cap, the floor and the ceiling
+# ---------------------------------------------------------------------------
+_PRICES = (20.0, 100.0, 500.0, 1000.0, 7000.0)
+_STOP_FRACS = (0.002, 0.005, 0.01, 0.02, 0.05, 0.10)
+_EQUITIES = (10_000.0, 100_000.0, 10_000_000.0)
+
+
+def _expected_units(equity, price, stop_frac, risk_pct=0.01, ceiling_pct=1.0):
+    """Reimplemented from the SPEC, not from the code under test.
+
+    Derived independently on purpose: #384's first equivalence leg came out
+    circular because it built the expectation by dividing raw values by the
+    same ratio it was validating, so the ratio cancelled and a run with the
+    split missed entirely still passed. An expectation computed from the
+    function it is checking proves the function equals itself.
+    """
+    wanted = (equity * risk_pct) / (price * stop_frac)
+    ceiling = (equity * ceiling_pct) / price
+    return min(wanted, ceiling)
+
+
+class TestRiskPctCappedDeliversItsBudget:
+    """The #385 acceptance criterion, over all three axes at once.
+
+    > delivers `risk_pct_per_trade` of equity, measured through the real stop
+    > distance, whenever `stop_frac >= risk_pct_per_trade` — at ANY share
+    > price, ANY stop width and ANY account size; below that threshold it
+    > delivers the ceiling-clamped value.
+
+    The threshold clause is load-bearing and is asserted separately rather than
+    smoothed into a tolerance: below `stop_frac == risk_pct_per_trade` the
+    budget is genuinely unreachable without leverage, so a test written without
+    it fails on day one for a legitimate reason — and the natural response to
+    that is to loosen it, which re-admits the defect it was written to catch.
+    (@shardul0701 on #381 and #385.)
+
+    Note these are unit-level assertions against the sizing function, not
+    against `Shares × InitialRisk` from a trade log. Those two quantities are
+    anchored to DIFFERENT prices on an equity — sizing divides by
+    `raw_entry_price`, `InitialRisk` is measured off the slipped `entry_price`
+    because `_stop_anchor` gates on `margin_mode` — so an exact-equality
+    assertion over a trade log fails on a correct fix. The engine-level check
+    lives in `TestDeliveredRiskIsPriceInvariant` below with that drift called
+    out and bounded.
+    """
+
+    @pytest.mark.parametrize("equity", _EQUITIES)
+    @pytest.mark.parametrize("stop_frac", _STOP_FRACS)
+    @pytest.mark.parametrize("price", _PRICES)
+    def test_budget_delivered_or_ceiling_clamped(self, price, stop_frac, equity):
+        cfg = {"risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+               "risk_pct_capped_max_notional_pct": 1.0}
+        got = _risk_pct_capped(equity, cfg, price=price, margined=False,
+                               stop_distance_points=price * stop_frac,
+                               point_value=1.0)
+        assert got == pytest.approx(_expected_units(equity, price, stop_frac))
+
+        delivered = got * price * stop_frac          # $ risk at the stop
+        if stop_frac >= 0.01:
+            # Reachable: the full budget, exactly, on every axis.
+            assert delivered == pytest.approx(equity * 0.01)
+        else:
+            # Unreachable without leverage: the ceiling-clamped value, which is
+            # stop_frac of equity rather than risk_pct of it.
+            assert delivered == pytest.approx(equity * stop_frac)
+            assert delivered < equity * 0.01
+
+    def test_the_old_defect_is_gone_at_the_documented_prices(self):
+        """The ticket's headline table: a flat 20 shares at every price."""
+        cfg = {"risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+               "risk_pct_capped_max_notional_pct": 1.0}
+        risks = []
+        for price in (20.0, 100.0, 500.0, 1000.0, 2000.0):
+            units = _risk_pct_capped(100_000.0, cfg, price=price, margined=False,
+                                     stop_distance_points=price * 0.05,
+                                     point_value=1.0)
+            risks.append(units * price * 0.05)
+        assert all(r == pytest.approx(1000.0) for r in risks), risks
+        # Under the old code these were 20.01 / 100.05 / 500.25 / 1000.50 /
+        # 1000.50 — a 50x spread. Now flat.
+        assert max(risks) / min(risks) == pytest.approx(1.0)
+
+    def test_no_integer_floor_on_the_unmargined_path(self):
+        """A $7,000 name wanting 2.86 shares got 2 — a further 30% short."""
+        cfg = {"risk_pct_per_trade": 0.01, "max_contracts_cap": 100_000,
+               "risk_pct_capped_max_notional_pct": 1.0}
+        got = _risk_pct_capped(100_000.0, cfg, price=7000.0, margined=False,
+                               stop_distance_points=350.18, point_value=1.0)
+        assert got == pytest.approx(1000.0 / 350.18)
+        assert got != pytest.approx(2.0)
+
+    def test_margined_keeps_both_the_floor_and_the_cap(self):
+        """The gate is two-sided: futures behaviour must be unchanged."""
+        cfg = {"risk_pct_per_trade": 0.01, "max_contracts_cap": 20}
+        capped = _risk_pct_capped(100_000.0, cfg, price=1000.0, margined=True,
+                                  stop_distance_points=1.0, point_value=1.0)
+        assert capped == 20
+        floored = _risk_pct_capped(100_000.0, {**cfg, "max_contracts_cap": 1000},
+                                   price=7000.0, margined=True,
+                                   stop_distance_points=350.18, point_value=1.0)
+        assert floored == pytest.approx(2.0)
+
+
+class TestTheCeilingIsNotAllocationPerTrade:
+    """Reversal of #381-B's proposed ceiling, with the measurement behind it.
+
+    The ticket proposed `allocation_per_trade` "since it's what a reader
+    already believes is in force." Measured, that ceiling binds whenever
+    `stop_frac < risk_pct / allocation_pct` — at the defaults, any stop tighter
+    than 10%, which is very nearly all of them — and delivers 0.2-0.5% against
+    a configured 1%. That is the same defect the cap gating removes, wearing a
+    different number.
+    """
+
+    def test_an_allocation_sized_ceiling_would_re_break_it(self):
+        """Pins WHY the ceiling is 1.0. Not a test of shipped behaviour — a
+        test of the alternative, so the reasoning cannot be quietly undone."""
+        cfg = {"risk_pct_per_trade": 0.01,
+               "risk_pct_capped_max_notional_pct": 0.10}   # the rejected design
+        units = _risk_pct_capped(100_000.0, cfg, price=100.0, margined=False,
+                                 stop_distance_points=5.0, point_value=1.0)
+        delivered = units * 5.0
+        assert delivered == pytest.approx(500.0)        # 0.5%, not 1%
+        assert delivered < 1000.0
+
+    def test_the_ceiling_never_costs_a_deliverable_budget(self):
+        """At 1.0 the ceiling costs nothing whenever the budget is reachable.
+
+        Stated in terms of DELIVERED RISK rather than "did the clamp fire",
+        because at exactly `stop_frac == risk_pct_per_trade` the wanted size
+        and the ceiling are the same number — required notional is exactly
+        equity — so both descriptions are true at once and "clamped: yes/no" is
+        not a well-defined observable there. What IS well defined, and is the
+        property the ticket asks for, is whether the full budget arrived.
+        """
+        cfg = {"risk_pct_per_trade": 0.01,
+               "risk_pct_capped_max_notional_pct": 1.0}
+        budget = 100_000.0 * 0.01
+        for stop_frac in (0.005, 0.01, 0.02, 0.05):
+            units = _risk_pct_capped(100_000.0, cfg, price=100.0, margined=False,
+                                     stop_distance_points=100.0 * stop_frac,
+                                     point_value=1.0)
+            delivered = units * 100.0 * stop_frac
+            if stop_frac >= 0.01:
+                assert delivered == pytest.approx(budget), (stop_frac, delivered)
+                assert units * 100.0 <= 100_000.0 + 1e-6   # never levered
+            else:
+                # Unreachable without leverage. Delivered is the ceiling value,
+                # which is exactly stop_frac of equity.
+                assert delivered == pytest.approx(100_000.0 * stop_frac)
+                assert delivered < budget
+
+    def test_the_ceiling_still_bounds_participation(self):
+        """The reason a ceiling exists at all: an unbounded risk sizer takes
+        1,999 shares on a 0.1% stop, 100% of cash in one name, and later
+        signals get dropped for want of cash — a participation bug wearing the
+        costume of a concentration strategy."""
+        cfg = {"risk_pct_per_trade": 0.01,
+               "risk_pct_capped_max_notional_pct": 1.0}
+        units = _risk_pct_capped(100_000.0, cfg, price=50.0, margined=False,
+                                 stop_distance_points=0.05, point_value=1.0)
+        assert units * 50.0 == pytest.approx(100_000.0)   # not 1,000,000
+
+
+class TestDeliveredRiskIsPriceInvariant:
+    """End-to-end, through the real engine — the headline defect.
+
+    Asserts a RATIO across prices rather than an absolute value, because the
+    absolute is off by the raw-vs-slipped anchor drift: sizing divides by
+    `raw_entry_price` while `InitialRisk` is measured from the slipped
+    `entry_price`. That drift is mode-independent, so it cancels in the ratio
+    and shows up as a bounded absolute error, checked separately below.
+    """
+
+    def _delivered(self, price):
+        res = _run("AAA", "risk_pct_capped",
+                   {"type": "percentage", "value": 0.05}, price=price,
+                   max_portfolio_heat=1.0, max_pct_adv=0.0)
+        assert res is not None and res["trade_log"], (
+            "no trade at price %s -- assert the trade EXISTS before asserting "
+            "its size, or an empty log reads as agreement" % price)
+        t = res["trade_log"][0]
+        assert t["InitialRisk"] > 0, (
+            "InitialRisk fell back to the 1%-of-PRICE proxy, which is a "
+            "different quantity from 1% of EQUITY and lands in the same "
+            "numeric neighbourhood -- that reads as a pass")
+        return t["Shares"] * t["InitialRisk"]
+
+    def test_risk_does_not_vary_with_price(self):
+        risks = [self._delivered(p) for p in (20.0, 100.0, 1000.0, 5000.0)]
+        assert max(risks) / min(risks) == pytest.approx(1.0, abs=1e-6), risks
+
+    def test_delivered_risk_is_the_configured_budget_within_anchor_drift(self):
+        delivered = self._delivered(1000.0)
+        target = 100_000.0 * 0.01
+        # Tolerance is the anchor drift and nothing more: sizing divides by the
+        # raw price, InitialRisk is measured off the slipped fill, so the ratio
+        # is (1+slippage) = 1.0005 at the default 5 bp. Deliberately tight --
+        # a tolerance wide enough to absorb a real sizing error would also
+        # absorb the defect this ticket exists to fix.
+        assert delivered == pytest.approx(target, rel=0.002), (
+            delivered, target)
+
+    @pytest.mark.parametrize("equity", [50_000.0, 100_000.0, 2_000_000.0])
+    def test_risk_does_not_decay_as_the_account_grows(self, equity):
+        """The cap made this method `fixed_contracts` in disguise past the
+        point it bound: a 40x account growth took risk-per-trade from 0.90% to
+        0.05% of equity, because the threshold scales with equity and the cap
+        does not. So growing the account BROKE configurations that were correct.
+
+            equity        #384 units   risk       #385 units   risk
+                50,000          9.00   0.9041%          9.96   1.0005%
+               100,000         19.00   0.9543%         19.92   1.0005%
+             2,000,000         20.00   0.0502%        398.41   1.0005%
+
+        (@shardul0701 on #388 — the harness pinned equity at 100,000 while
+        encoding it in the key, so this axis had no coverage at all.)
+        """
+        from unittest.mock import patch
+        df = _frame(1000.0)
+        sig = pd.Series(0, index=df.index, dtype=int)
+        sig.iloc[2], sig.iloc[9] = 1, -1
+        cfg = {**_FUT_CFG, "position_sizing_method": "risk_pct_capped",
+               "max_portfolio_heat": 1.0, "max_pct_adv": 0.0}
+        with patch.dict("config.CONFIG", cfg, clear=False):
+            res = run_portfolio_simulation(
+                portfolio_data={"AAA": df}, signals={"AAA": sig},
+                initial_capital=equity, allocation_pct=0.10,
+                spy_df=None, vix_df=None, tnx_df=None,
+                stop_config={"type": "percentage", "value": 0.05})
+        assert res is not None and res["trade_log"]
+        t = res["trade_log"][0]
+        delivered = t["Shares"] * t["InitialRisk"] / equity
+        assert delivered == pytest.approx(0.01, rel=0.002), (equity, delivered)
+
+
+class TestBothStopLaddersCoverTheSameStopTypes:
+    """`risk_pct_capped` resolved a stop distance for 3 of 6 stop types.
+
+    The engine resolves the same physical quantity twice in one entry block,
+    ~90 lines apart, with different coverage: the risk_parity FRACTION ladder
+    handles five stop types, the risk_pct_capped POINTS ladder handled three.
+    `points` and `signal_bar` fell through to `None` and no position was taken.
+
+    `points` is the sting — it is the ONE stop type whose distance is natively
+    expressed in the unit the points ladder asks for, and the fraction ladder
+    reads `stop_config["value"]` and DIVIDES it by `raw_entry_price` to
+    manufacture a fraction out of exactly the number the points ladder needed
+    verbatim. Long-only, `points` + `risk_pct_capped` — the futures-native
+    pairing — took zero trades for an entire backtest, silently.
+
+    Framing and the matched-pair measurement are @shardul0701's on #388.
+    """
+
+    _POINTS = {"type": "points", "value": 5.0}
+    _SIGNAL_BAR = {"type": "signal_bar", "buffer": 0.005}
+
+    def test_futures_long_points_now_sizes_like_the_short_leg(self):
+        """The matched pair that showed the gap: identical but for `side`."""
+        lng = _run("MESM6", "risk_pct_capped", self._POINTS, direction="long",
+                   price=1000.0, max_portfolio_heat=1.0, max_pct_adv=0.0)
+        sht = _run("MESM6", "risk_pct_capped", self._POINTS, direction="short",
+                   price=1000.0, max_portfolio_heat=1.0, max_pct_adv=0.0)
+        assert lng is not None and lng["trade_log"], (
+            "long leg still declines on a `points` stop -- the shorter ladder")
+        assert sht is not None and sht["trade_log"]
+        # floor(1000 / (5 pts * $5/pt)) = 40 -> capped at 20, both sides.
+        assert lng["trade_log"][0]["Shares"] == pytest.approx(20.0)
+        assert lng["trade_log"][0]["Shares"] == pytest.approx(
+            sht["trade_log"][0]["Shares"])
+
+    def test_equity_long_points_takes_a_position(self):
+        res = _run("AAA", "risk_pct_capped", self._POINTS, direction="long",
+                   price=1000.0, max_portfolio_heat=1.0, max_pct_adv=0.0)
+        assert res is not None and res["trade_log"]
+        t = res["trade_log"][0]
+        # 5-point stop on a $1,000 name = 0.5% -- BELOW risk_pct_per_trade, so
+        # the budget is unreachable and the ceiling clamps. Delivered is the
+        # ceiling value, and it is not zero.
+        assert t["Shares"] > 0
+        assert t["Shares"] * t["InitialRisk"] == pytest.approx(
+            100_000.0 * 0.005, rel=0.01)
+
+    def test_signal_bar_long_takes_a_position(self):
+        res = _run("AAA", "risk_pct_capped", self._SIGNAL_BAR, direction="long",
+                   price=1000.0, max_portfolio_heat=1.0, max_pct_adv=0.0)
+        assert res is not None and res["trade_log"], (
+            "long leg still declines on a `signal_bar` stop")
+        t = res["trade_log"][0]
+        assert t["Shares"] > 0
+        # Sizing and the stop must agree on the SAME number: the distance used
+        # to size is the one InitialRisk reports, modulo the anchor drift.
+        assert t["InitialRisk"] > 0
+
+    def test_a_gap_through_entry_never_passes_a_negative_distance(self):
+        """The signal_bar protective-side guard.
+
+        Removing it passes every other test in this file — both paths reach a
+        zero share count, because `_risk_pct_capped` rejects `<= 0` itself. So
+        the guard is redundant for the SIZE. What it changes is what leaves the
+        block: unguarded, a negative distance is written into `sizing_kwargs`,
+        where the next reader of that key cannot distinguish it from a real one.
+        This asserts on the value handed over, not on the resulting size, which
+        is the only place the two versions differ.
+        """
+        from unittest.mock import patch
+        import helpers.portfolio_simulations as ps
+
+        seen = []
+        real = ps.calculate_position_size
+
+        def _spy(**kwargs):
+            if kwargs.get("method") == "risk_pct_capped":
+                seen.append(kwargs.get("stop_distance_points"))
+            return real(**kwargs)
+
+        # Bar 2 is the signal; bar 3 gaps DOWN through bar 2's low, so under
+        # execution_time="open" the fill is below the structural stop level and
+        # `raw_entry_price - level` is negative.
+        closes = [100, 101, 102, 80, 81, 82, 83, 84, 85, 86]
+        opens = [100, 100, 101, 80, 80, 81, 82, 83, 84, 85]
+        highs = [101, 102, 103, 82, 82, 83, 84, 85, 86, 87]
+        lows = [99, 100, 101, 79, 79, 80, 81, 82, 83, 84]
+        idx = pd.bdate_range(start="2023-01-02", periods=len(closes), freq="B")
+        idx.name = "Datetime"
+        df = pd.DataFrame({"Open": opens, "High": highs, "Low": lows,
+                           "Close": closes,
+                           "Volume": [5_000_000.0] * len(closes),
+                           "ATR_14": [2.0] * len(closes)}, index=idx,
+                          dtype=float)
+        sig = pd.Series(0, index=df.index, dtype=int)
+        sig.iloc[2], sig.iloc[8] = 1, -1
+        cfg = {**_FUT_CFG, "position_sizing_method": "risk_pct_capped",
+               "execution_time": "open", "max_portfolio_heat": 1.0,
+               "max_pct_adv": 0.0}
+        with patch.dict("config.CONFIG", cfg, clear=False):
+            with patch.object(ps, "calculate_position_size", _spy):
+                ps.run_portfolio_simulation(
+                    portfolio_data={"AAA": df}, signals={"AAA": sig},
+                    initial_capital=100_000.0, allocation_pct=0.10,
+                    spy_df=None, vix_df=None, tnx_df=None,
+                    stop_config=self._SIGNAL_BAR)
+
+        assert seen, "risk_pct_capped never reached the sizing call"
+        for dist in seen:
+            assert dist is None or dist > 0, (
+                "a negative stop distance reached sizing_kwargs -- the "
+                "protective-side guard is gone; the share count is still 0 "
+                "either way, which is why no size assertion catches this")
+
+    def test_the_two_ladders_now_cover_the_same_stop_types(self):
+        """Every stop type the fraction ladder resolves, the points ladder
+        resolves. Enumerated rather than spot-checked, so a sixth stop type
+        added to one and not the other fails here."""
+        for stop in ({"type": "percentage", "value": 0.05},
+                     {"type": "atr", "multiplier": 2.0},
+                     {"type": "trailing_atr", "stop_mult": 1.0,
+                      "trail_mult": 1.0, "t1_mult": 2.0, "point_cap": 60,
+                      "floor": "breakeven"},
+                     self._POINTS, self._SIGNAL_BAR):
+            res = _run("AAA", "risk_pct_capped", stop, direction="long",
+                       price=1000.0, max_portfolio_heat=1.0, max_pct_adv=0.0)
+            assert res is not None and res["trade_log"], (
+                "risk_pct_capped declined to size a %s stop" % stop["type"])
+            assert res["trade_log"][0]["Shares"] > 0, stop["type"]
+
+
+class TestTheCeilingOffSwitchIsNoneNotZero:
+    """`0.0` is falsy, so a bare truthiness guard made it mean "no ceiling".
+
+    That is the opposite of what the number reads as, and the first version of
+    the validator warned that it produced "a zero or NEGATIVE position size" —
+    measured, it produced the SAME position as 1.0, because the pre-existing
+    cash clamp lands in the same place. A message that is wrong about which way
+    a value fails is worse than no message. (@shardul0701 on #390.)
+    """
+
+    _CFG = {"risk_pct_per_trade": 0.01}
+
+    def test_none_disables_the_ceiling(self):
+        cfg = {**self._CFG, "risk_pct_capped_max_notional_pct": None}
+        got = _risk_pct_capped(100_000.0, cfg, price=100.0, margined=False,
+                               stop_distance_points=0.05, point_value=1.0)
+        assert got == pytest.approx(1000.0 / 0.05)      # unclamped
+
+    def test_zero_does_not_disable_it(self):
+        cfg = {**self._CFG, "risk_pct_capped_max_notional_pct": 0.0}
+        got = _risk_pct_capped(100_000.0, cfg, price=100.0, margined=False,
+                               stop_distance_points=0.05, point_value=1.0)
+        assert got == pytest.approx(0.0), (
+            "0.0 must not silently mean 'no ceiling' -- None is the off switch")
+
+    def test_validator_says_what_zero_actually_does(self):
+        from helpers.config_validator import validate_config
+        msgs = validate_config({"risk_pct_capped_max_notional_pct": 0.0})
+        assert any("takes NO" in m for m in msgs), msgs
+        assert not any("NEGATIVE position size" in m for m in msgs), (
+            "the inverted message is back", msgs)
+
+    def test_validator_accepts_none_for_the_ceiling_only(self):
+        from helpers.config_validator import validate_config
+        assert validate_config({"risk_pct_capped_max_notional_pct": None}) == []
+        assert validate_config({"max_contracts_cap": None}) != []
+
+
+class TestHeatEqualToRiskPctIsACliff:
+    """`max_portfolio_heat == risk_pct_per_trade` takes ZERO trades, silently.
+
+    The heat gate is shown `notional(SLIPPED entry) x stop_fraction(RAW entry)`,
+    so it evaluates `(1 + slippage_pct)` times the risk actually taken: a
+    position risking exactly 1.000000% presents as 1.000500% and a 1% cap
+    rejects it. Not a boundary tie — `max_portfolio_heat = 0.010001` still
+    rejects, and the same cell flips to admit at `slippage_pct = 0.0`.
+
+    Pre-existing at the call site, but newly REACHABLE: gating the contract cap
+    is what lets an equity position grow enough to reach the gate, and #385 is
+    what promoted both keys to documented dials. The drift itself is #381-D's.
+    (@shardul0701 on #390 — the PR body's original explanation of this was
+    wrong; a genuine 1.0% under a 1.0% cap is admitted.)
+    """
+
+    def test_equal_values_take_no_trade(self):
+        res = _run("AAA", "risk_pct_capped",
+                   {"type": "percentage", "value": 0.05}, price=1000.0,
+                   max_portfolio_heat=0.01, max_pct_adv=0.0)
+        assert res is None or not res.get("trade_log")
+
+    def test_zero_slippage_makes_the_same_config_trade(self):
+        """Pins the CAUSE, not just the symptom."""
+        res = _run("AAA", "risk_pct_capped",
+                   {"type": "percentage", "value": 0.05}, price=1000.0,
+                   max_portfolio_heat=0.01, max_pct_adv=0.0, slippage_pct=0.0)
+        assert res is not None and res["trade_log"], (
+            "with no slippage the presented and held risk coincide, so a "
+            "1% position under a 1% cap is admitted -- if this fails the "
+            "rejection has some other cause than the anchor drift")
+
+    def test_the_validator_warns_about_it(self):
+        from helpers.config_validator import validate_config
+        msgs = validate_config({"position_sizing_method": "risk_pct_capped",
+                                "risk_pct_per_trade": 0.01,
+                                "max_portfolio_heat": 0.01,
+                                "slippage_pct": 0.0005})
+        assert any("ZERO trades" in m for m in msgs), msgs
+
+    def test_no_warning_when_there_is_headroom(self):
+        from helpers.config_validator import validate_config
+        msgs = validate_config({"position_sizing_method": "risk_pct_capped",
+                                "risk_pct_per_trade": 0.01,
+                                "max_portfolio_heat": 0.05,
+                                "slippage_pct": 0.0005})
+        assert not any("ZERO trades" in m for m in msgs), msgs

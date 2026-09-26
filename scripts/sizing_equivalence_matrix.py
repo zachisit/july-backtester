@@ -77,7 +77,7 @@ _BASE = {
     "allocation_per_trade": 0.10,
     "risk_pct_per_trade": 0.01,
     "max_contracts_cap": 20,
-    "fixed_contracts_per_trade": 3,
+    "fixed_contracts_per_trade": 7,
     "instruments": {
         "default_asset_class": "equity",
         "futures_initial_margin_pct": 0.10,
@@ -104,6 +104,28 @@ STOPS = {
 # an MES future ($5/point, 10% initial margin). "AAA" resolves to a cash equity.
 SYMBOLS = ("AAA", "MESM6")
 
+# 4000, not 5000. At $5,000 the margin-based fallback sizes to exactly
+# `fixed_contracts_per_trade`, so the branch under test and the branch it
+# replaced AGREE BY ARITHMETIC and all 72 futures cells at that price go inert
+# — zero decisive, while still counting toward the total. `risk_pct_capped` was
+# dented the same way there. A collision, not a bug, but it makes the headline
+# cell count overstate what was actually tested. `fixed_contracts_per_trade` is
+# 7 rather than 3 for the same reason. (@shardul0701 on #388.)
+PRICES = (20.0, 100.0, 1000.0, 4000.0)
+
+# The equity axis. Every earlier revision of this harness encoded `equity` in
+# the key and then pinned it at 100,000 in the innermost loop — so there was
+# one equity level across the whole grid, and the key field read like coverage
+# that did not exist.
+#
+# It is the axis #385 is DEFINED on, twice over: `max_contracts_cap` makes
+# dollar risk stop compounding past the point it binds (a 100x account growth
+# took risk-per-trade from ~0.95% to 0.010% of equity), and the notional
+# ceiling is `equity * ceiling_pct / price`. A grid that cannot vary equity
+# pins the status quo rather than the fix. Three lines. (@shardul0701 on #388
+# and #390.)
+EQUITIES = (50_000.0, 100_000.0, 2_000_000.0)
+
 # "off" isolates the sizing arithmetic (the golden master's choice); "default"
 # turns on the two clamps the sized number actually flows into on a real run.
 # Only "default" can see risk_pct_capped's heat-check side output.
@@ -125,8 +147,18 @@ CLAMPS = {
 
 
 def _frame(base_price, n=14, atr_pct=2.0):
-    """Gently rising series — nothing stops out before the exit signal fires."""
+    """Gently rising series — nothing stops out before the exit signal fires.
+
+    ATR is RAMPED, not constant. `np.full(n, ...)` gave every bar the same ATR,
+    which makes the signal-bar-vs-fill-bar anchor unobservable: the two branches
+    that read `ATR_14` would return the same number whichever bar they picked,
+    so a grid built on a flat column cannot see an anchor defect at all. That
+    was correct for #384 (which does not touch the anchors) and wrong to carry
+    forward. A 5%-per-bar ramp makes adjacent bars distinguishable.
+    (@shardul0701 on #388.)
+    """
     closes = np.array([base_price * (1 + 0.002 * i) for i in range(n)])
+    atr0 = atr_pct * base_price / 100.0
     idx = pd.bdate_range(start="2023-01-02", periods=n, freq="B")
     idx.name = "Datetime"
     return pd.DataFrame({
@@ -135,7 +167,7 @@ def _frame(base_price, n=14, atr_pct=2.0):
         "Low": np.round(closes * 0.990, 6),
         "Close": closes,
         "Volume": np.full(n, 5_000_000.0),
-        "ATR_14": np.full(n, atr_pct * base_price / 100.0),
+        "ATR_14": np.array([atr0 * (1 + 0.05 * i) for i in range(n)]),
     }, index=idx)
 
 
@@ -191,14 +223,15 @@ def main(argv):
                 for clamps in CLAMPS:
                     for method in METHODS:
                         for stop_key in STOPS:
-                            for price in (20.0, 100.0, 1000.0, 5000.0):
-                                equity = 100_000.0
-                                key = "|".join([symbol, direction, exec_time,
-                                                clamps, method, stop_key,
-                                                str(price), str(equity)])
-                                out[key] = _cell(symbol, method, stop_key, price,
-                                                 equity, direction, exec_time,
-                                                 clamps)
+                            for price in PRICES:
+                                for equity in EQUITIES:
+                                    key = "|".join(
+                                        [symbol, direction, exec_time, clamps,
+                                         method, stop_key, str(price),
+                                         str(equity)])
+                                    out[key] = _cell(symbol, method, stop_key,
+                                                     price, equity, direction,
+                                                     exec_time, clamps)
     with open(argv[1], "w") as fh:
         json.dump(out, fh, indent=0, sort_keys=True)
     traded = sum(1 for v in out.values() if v.get("shares") is not None)

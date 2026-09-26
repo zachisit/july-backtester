@@ -58,8 +58,22 @@ class TestValidateConfig:
         assert warnings == []
 
     def test_all_known_keys_pass(self):
-        """A config containing every known key should produce zero warnings."""
+        """A config containing every known key should produce zero warnings.
+
+        `None` is a filler here — this test is about the key ALLOWLIST, not
+        about values. The four position-sizing numerics get real values because
+        they carry a separate value-domain check (#385): `None` for those is
+        precisely the input that raises a TypeError mid-backtest, so the
+        validator is supposed to warn about it. Filling them with `None` would
+        make this test assert that a genuine defect goes unreported.
+        """
         config = {key: None for key in KNOWN_KEYS}
+        config.update({
+            "risk_pct_per_trade": 0.01,
+            "max_contracts_cap": 20,
+            "risk_pct_capped_max_notional_pct": 1.0,
+            "fixed_contracts_per_trade": 1,
+        })
         warnings = validate_config(config)
         assert warnings == []
 

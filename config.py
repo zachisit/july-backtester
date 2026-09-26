@@ -284,6 +284,51 @@ CONFIG = {
     # 1.0 = no limit (allow full portfolio risk)
     "max_portfolio_heat": 0.10,
 
+    # --- "risk_pct_capped" method (issue #385) ---------------------------
+    # These three existed only in config_validator.KNOWN_KEYS, so the
+    # CONFIG.get(..., default) in helpers/position_sizing.py always applied
+    # and a user had no documented dial. Listed here with their real defaults.
+
+    # Fraction of CURRENT equity to risk per trade, measured through the
+    # actual stop distance. Unlike target_risk_per_trade (used by vol_parity /
+    # risk_parity, which derive their own distance), this one is delivered
+    # exactly whenever it is reachable -- see the ceiling below.
+    "risk_pct_per_trade": 0.01,
+
+    # Hard ceiling on the CONTRACT count. Applies to MARGINED instruments
+    # (futures) only -- it is a contract count, and applying it to a fractional
+    # share count was a unit error that pinned equities at a flat 20 shares
+    # regardless of price, stop width or account size (#385). The integer
+    # floor() travels with it and is gated the same way.
+    "max_contracts_cap": 20,
+
+    # Notional ceiling for risk_pct_capped on UNMARGINED instruments
+    # (equities), as a fraction of equity. 1.0 = no leverage. None = disabled.
+    # 0.0 is NOT "disabled" and is rejected -- use None.
+    #
+    # This is deliberately NOT allocation_per_trade. Required notional is
+    # risk_pct_per_trade / stop_frac of equity, so an allocation ceiling of
+    # 0.10 would bind for any stop tighter than 10% -- nearly all of them --
+    # and deliver ~0.2-0.5% against a configured 1%, which is the same defect
+    # the cap gating removes, wearing a different number.
+    #
+    # At the 1.0 default this rarely changes the size HELD: on a long-only book
+    # cash <= equity, so the pre-existing cash clamp is at least as tight. What
+    # it changes is WHEN -- it clamps before the portfolio heat check, so heat
+    # sees the position that will actually be held. It binds on size below 1.0,
+    # or once short proceeds push cash above equity.
+    "risk_pct_capped_max_notional_pct": 1.0,
+
+    # NOTE: setting max_portfolio_heat == risk_pct_per_trade takes ZERO trades
+    # on equities. The heat gate is shown notional(SLIPPED entry) x
+    # stop_fraction(RAW entry), so it evaluates (1 + slippage_pct) times the
+    # risk actually taken -- a position risking exactly 1.000% presents as
+    # 1.0005% and a 1% cap rejects it. The config validator warns; the
+    # underlying raw-vs-slipped drift is tracked on #381-D.
+
+    # Constant contract count for position_sizing_method="fixed_contracts".
+    "fixed_contracts_per_trade": 1,
+
     # ============================================================
     # SECTION 26: POINT-IN-TIME (PIT) MEMBERSHIP ENFORCEMENT
     # ============================================================
