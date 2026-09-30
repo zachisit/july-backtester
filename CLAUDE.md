@@ -217,6 +217,28 @@ It is curated, not exhaustive — a new or obscure ETF can pass. **`etf_report(u
 
 **Tests:** `tests/test_rule_based_universe.py` — 31 tests on a synthetic corpus (no submodule dependency): security identity incl. share-class-vs-delisting (`BRK-A` vs `BRK-199001`), the 1970 trap, mixed tz-aware/naive files, each screen, ticker-reuse resolution, and survivorship present-then-absent.
 
+## `pit:` + parquet resolves to SECURITY IDs (issue #158)
+
+`pit:` membership is expressed in **bare tickers**. The Norgate parquet corpus keys delisted securities as `TICKER-YYYYMM`, so a bare ticker is **not an identifier there**. Before this fix the membership year was discarded before `services/parquet_service.py::_find_parquet(symbol, parquet_dir)` — which takes no date — was called, with two silent failure modes:
+
+| Mode | Count | What happened |
+|---|---|---|
+| **Masking** | ~84 names | An exact bare `CB.parquet` wins the resolver's first branch, so the delisted `CB-201601` (Chubb Corp, the actual 2004–2015 member) is never considered and the run gets ACE Ltd's history instead. Verified: 0 of 2,769 identical days, 0.71 return correlation, 2008 −13.0% vs −4.1%. |
+| **Collision** | 46 names | No bare file + several dated files → `_find_parquet` returns the `"_multi_"` sentinel → `get_price_data` logs an error and returns `None` → the member is dropped from the run. |
+
+Both drop or swap **dead companies** — precisely what a point-in-time universe exists to include — so a `pit:` + parquet run carried survivorship bias while claiming to be free of it. `rule:` universes were never affected because they already resolve to security IDs before the loader.
+
+**The fix is at the universe layer, not the loader.** `services/parquet_service.py` is correct as it stands (post-#396): it refuses to guess and warns when a live file masks delisted history. #158 gives it something unambiguous to resolve. **Do not "fix" the loader.**
+
+- **Only when `config["data_provider"] == "parquet"`.** `CB-201601` is meaningless to Yahoo/Polygon/CSV; every other provider keeps bare tickers, byte-identical to before. (Five of the eight committed `pit:` runs used Yahoo.)
+- **Both entry points, same namespace.** `build_membership_schedule()` (the per-bar mask) and `tickers_union_for_period()` (the symbol list that gets fetched) must agree — the union is derived *from* the schedule so they agree by construction. A schedule of security IDs masked against a union of bare tickers would mask everything out on every bar and report zero trades with no error.
+- **Resolution rule.** Candidates for bare ticker `T` are every span-index security whose bare ticker is `T` (via `rule_based_universe.parse_security`, so `BRK-A` / `MER-K` are not mistaken for stamps). Keep those whose `[first_bar, last_bar]` covers the membership date; exactly one → done. **Several → ticker-tenure tie-break**, which the masking case requires: Norgate back-fills the *current* ticker onto a whole history, so live `CB.parquet` carries ACE Ltd from 1993 and overlaps `CB-201601` for 23 years. `TICKER-YYYYMM` means "held this ticker until YYYYMM", so the date's owner is the covering candidate with the **earliest tenure end at or after it** (a bare live file's tenure is open-ended). Zero survivors, or a tie the tenure rule cannot break, is unresolvable.
+- **Unresolvable members ABORT the run** — `PitResolutionError`, raised **once** with **every** offender across the whole schedule (an operator fixing 46 collisions must not need 46 runs). The message names each bare ticker, its membership date, and the candidate security IDs with their spans, and points at the remedy: request the security ID directly. `main.py` re-raises it rather than `continue`-ing, because skipping the portfolio is "drop the member" wearing a different hat.
+- **There is no opt-out flag, by owner decision (2026-09-30).** It would be set once and forgotten, and this failure silently reintroduces survivorship bias. If `pit:` + parquet is unusable until the corpus gaps are closed, that is the honest state and the run should say so. Note this includes roster names absent from the corpus entirely: zero candidates is zero survivors, so the run aborts rather than quietly shrinking the universe.
+- **`helpers/pit_enforcement.py::membership_intervals()` still keys on bare tickers** (it reads the same PIT YAML). `main.py` therefore falls back to `parse_security(_sym)[0]` when the security-ID lookup misses — otherwise `_pit_force_exit` would go silently all-False.
+
+**Tests:** `tests/test_pit_security_resolution_158.py` — 35 tests on a synthetic corpus + YAML in `tmp_path`: the CB masking case (fails on `main`, which returns `{"CB"}`), the AGN collision case both sides of the hand-over, abort-naming-every-offender, all four non-parquet providers unchanged, schedule/union namespace agreement, share classes, and live-only tickers.
+
 ## Adding a Strategy (Plugin System)
 
 `strategies.py` no longer exists. All active strategies live in `custom_strategies/`. No core files need editing.

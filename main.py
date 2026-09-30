@@ -796,11 +796,22 @@ def main():
                 logger.error(f"  -> ERROR resolving rule universe '{value}': {e}")
                 continue
         elif isinstance(value, str) and value.startswith("pit:"):
-            from helpers.point_in_time import tickers_union_for_period as _pit_union, build_membership_schedule as _pit_schedule_build
+            from helpers.point_in_time import (
+                tickers_union_for_period as _pit_union,
+                build_membership_schedule as _pit_schedule_build,
+                PitResolutionError as _PitResolutionError,
+            )
             _pit_index_name = value.split(":", 1)[1]
             try:
                 symbols = _pit_union(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
                 _current_membership_schedule = _pit_schedule_build(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
+            except _PitResolutionError:
+                # issue #158: members that cannot be mapped to a single parquet
+                # security must ABORT, not skip the portfolio. `continue` here
+                # would be "drop the member" wearing a different hat — the run
+                # would go on and report survivorship-free numbers it has not
+                # earned. Let it propagate.
+                raise
             except Exception as e:
                 logger.error(f"  -> ERROR resolving PIT portfolio '{value}' for '{portfolio_name}': {e}")
                 continue
@@ -952,6 +963,7 @@ def main():
         # start_date, which would bar every name that qualified later.
         if _current_membership_schedule is not None:
             from helpers.point_in_time import pit_members_on as _pit_members_on
+            from helpers.rule_based_universe import parse_security as _pit_parse_security
             from helpers.pit_enforcement import (
                 build_member_mask as _pit_build_member_mask,
                 build_forced_exit_mask as _pit_build_forced_exit_mask,
@@ -988,7 +1000,14 @@ def main():
             for _sym, _mask in _pit_member_masks.items():
                 _df = portfolio_data[_sym]
                 _df["_pit_member"] = _mask.reindex(_df.index, fill_value=False)
-                _sym_intervals = _pit_intervals.get(_sym, [])
+                # membership_intervals() keys on the BARE ticker (it reads the
+                # same PIT YAML the schedule comes from). Under the parquet
+                # provider `_sym` is a security ID (issue #158), so fall back to
+                # its bare ticker — otherwise every lookup misses and the
+                # forced-exit mask silently goes all-False.
+                _sym_intervals = _pit_intervals.get(_sym)
+                if _sym_intervals is None:
+                    _sym_intervals = _pit_intervals.get(_pit_parse_security(_sym)[0], [])
                 if _sym_intervals:
                     _force_mask = _pit_build_forced_exit_mask(
                         _df.index, _sym_intervals, _backtest_end, _exit_buffer
