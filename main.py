@@ -962,8 +962,11 @@ def main():
         # The rule: case is what stops a liquidity universe being frozen at
         # start_date, which would bar every name that qualified later.
         if _current_membership_schedule is not None:
-            from helpers.point_in_time import pit_members_on as _pit_members_on
-            from helpers.rule_based_universe import parse_security as _pit_parse_security
+            from helpers.point_in_time import (
+                pit_members_on as _pit_members_on,
+                SecuritySchedule as _PitSecuritySchedule,
+                security_intervals as _pit_security_intervals,
+            )
             from helpers.pit_enforcement import (
                 build_member_mask as _pit_build_member_mask,
                 build_forced_exit_mask as _pit_build_forced_exit_mask,
@@ -993,21 +996,22 @@ def main():
             # _pit_force_exit → True on the LAST available member bar when no timely
             #                 next-bar exists after index removal (e.g. sudden delisting).
             #                 The simulator closes at that bar's Close rather than waiting.
-            _pit_intervals = _pit_membership_intervals(value, CONFIG)
+            # Parquet (issue #158): symbols are security IDs, and one roster
+            # ticker can map to different securities over time, so spells must
+            # come from the resolved schedule itself, keyed by security. Every
+            # other provider keeps the roster-ticker intervals.
+            _backtest_end_str = CONFIG.get("end_date") or str(pd.Timestamp.now().normalize().date())
+            if isinstance(_current_membership_schedule, _PitSecuritySchedule):
+                _pit_intervals = _pit_security_intervals(_current_membership_schedule, _backtest_end_str)
+            else:
+                _pit_intervals = _pit_membership_intervals(value, CONFIG)
             _exit_buffer = CONFIG.get("pit_exit_buffer_days", 10)
             _backtest_end = CONFIG.get("end_date") or str(pd.Timestamp.now().normalize().date())
             _n_forced = 0
             for _sym, _mask in _pit_member_masks.items():
                 _df = portfolio_data[_sym]
                 _df["_pit_member"] = _mask.reindex(_df.index, fill_value=False)
-                # membership_intervals() keys on the BARE ticker (it reads the
-                # same PIT YAML the schedule comes from). Under the parquet
-                # provider `_sym` is a security ID (issue #158), so fall back to
-                # its bare ticker — otherwise every lookup misses and the
-                # forced-exit mask silently goes all-False.
-                _sym_intervals = _pit_intervals.get(_sym)
-                if _sym_intervals is None:
-                    _sym_intervals = _pit_intervals.get(_pit_parse_security(_sym)[0], [])
+                _sym_intervals = _pit_intervals.get(_sym, [])
                 if _sym_intervals:
                     _force_mask = _pit_build_forced_exit_mask(
                         _df.index, _sym_intervals, _backtest_end, _exit_buffer
