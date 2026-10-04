@@ -917,7 +917,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 return (1, "", sym)
             _short_items = sorted(portfolio_data.items(), key=_short_sig_key)
         elif _priority == "random_seed":
-            _rng_short = _random.Random(CONFIG.get("entry_random_seed", 42))
+            # Seeded per bar from (seed, date, side): a different order every
+            # bar, identical across runs with the same seed (#412). One RNG
+            # built from the bare seed on every bar gave the SAME permutation
+            # every day, i.e. a fixed arbitrary priority, not a random one.
+            _rng_short = _random.Random(f"{CONFIG.get('entry_random_seed', 42)}|{date}|short")
             _short_items = sorted(portfolio_data.items(), key=lambda x: x[0])
             _rng_short.shuffle(_short_items)
         else:
@@ -1198,7 +1202,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 return (1, "", sym)
             _entry_items = sorted(portfolio_data.items(), key=_long_sig_key)
         elif _priority == "random_seed":
-            _rng_long = _random.Random(CONFIG.get("entry_random_seed", 42))
+            # Per-bar seed, see the short-entry block above (#412).
+            _rng_long = _random.Random(f"{CONFIG.get('entry_random_seed', 42)}|{date}|long")
             _entry_items = sorted(portfolio_data.items(), key=lambda x: x[0])
             _rng_long.shuffle(_entry_items)
         else:
