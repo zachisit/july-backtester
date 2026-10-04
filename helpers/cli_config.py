@@ -280,6 +280,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Upload reports to the configured S3 bucket",
     )
 
+    parser.add_argument(
+        "--workers", dest="max_workers", type=int, metavar="N",
+        help="Cap the simulation pool at N workers (each holds a copy of the data). 1 = serial",
+    )
+
     # ---- ESCAPE HATCH ----
     parser.add_argument(
         "--set", dest="overrides", action="append", metavar="KEY=VALUE",
@@ -309,7 +314,7 @@ _DIRECT_KEYS = [
     "num_mc_simulations", "min_trades_for_mc", "mc_sampling",
     "save_individual_trades", "save_only_filtered_trades",
     "noise_injection_pct", "rolling_sharpe_window",
-    "export_ml_features", "upload_to_s3",
+    "export_ml_features", "upload_to_s3", "max_workers",
 ]
 
 
@@ -597,6 +602,14 @@ _SECTIONS: list[tuple[str, str, list[dict]]] = [
         },
     ]),
     ("output", "OUTPUT & MISC", [
+        {
+            "flag": "--workers <int>",
+            "config_key": "max_workers",
+            "desc": "Cap the simulation pool. Each worker holds its own copy of the price data, "
+                    "so wide universes may need 1-2. None = min(cpu_count(), tasks).",
+            "options": None,
+            "example": "python main.py --workers 1",
+        },
         {
             "flag": "--save-trades / --no-save-trades",
             "config_key": "save_individual_trades",
