@@ -1,5 +1,19 @@
 # Release History
 
+## [Unreleased]
+
+### Fixed
+- **`pit:` rosters: an unquoted `ON` parsed as a boolean (all data providers).** PyYAML reads an
+  unquoted `- ON` as `True`, so in the NQ100 2023–2025 rosters ON Semiconductor became the ticker
+  `TRUE` and a `pit:nq100` run traded TrueCar in its place, whichever `data_provider` was set.
+  Rosters are now read with `load_roster_yaml()`, which keeps every entry a string. Shipped in #407.
+- **`pit:` + `data_provider = "parquet"`: delisted members were dropped or swapped for another
+  company.** Membership is now resolved to parquet security IDs (`TICKER-YYYYMM` for delisted
+  securities) before the loader, so a dead member is no longer masked by a live file that reuses
+  its ticker, or dropped when several dated files match. Runs abort, naming each member, if one
+  cannot be resolved. Other providers are unchanged. #407.
+- **Parquet span-index cache now rebuilds when the corpus changes** (#409).
+
 ## [1.3.0] — 2026-04-07
 
 **Norgate → Parquet pipeline + private data submodule**

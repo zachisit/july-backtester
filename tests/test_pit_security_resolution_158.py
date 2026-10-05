@@ -1,5 +1,5 @@
 # tests/test_pit_security_resolution_158.py
-"""PIT membership must resolve to parquet SECURITY IDs, not bare tickers (#158).
+"""PIT membership must resolve to parquet SECURITY IDs, not bare tickers (#407).
 
 Background
 ----------

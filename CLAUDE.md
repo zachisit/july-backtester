@@ -217,7 +217,7 @@ It is curated, not exhaustive — a new or obscure ETF can pass. **`etf_report(u
 
 **Tests:** `tests/test_rule_based_universe.py` — 31 tests on a synthetic corpus (no submodule dependency): security identity incl. share-class-vs-delisting (`BRK-A` vs `BRK-199001`), the 1970 trap, mixed tz-aware/naive files, each screen, ticker-reuse resolution, and survivorship present-then-absent.
 
-## `pit:` + parquet resolves to SECURITY IDs (issue #158)
+## `pit:` + parquet resolves to SECURITY IDs (#407)
 
 `pit:` membership is expressed in **bare tickers**. The Norgate parquet corpus keys delisted securities as `TICKER-YYYYMM`, so a bare ticker is **not an identifier there**. Before this fix the membership year was discarded before `services/parquet_service.py::_find_parquet(symbol, parquet_dir)` — which takes no date — was called, with two silent failure modes:
 
@@ -228,7 +228,7 @@ It is curated, not exhaustive — a new or obscure ETF can pass. **`etf_report(u
 
 Both drop or swap **dead companies** — precisely what a point-in-time universe exists to include — so a `pit:` + parquet run carried survivorship bias while claiming to be free of it. `rule:` universes were never affected because they already resolve to security IDs before the loader.
 
-**The fix is at the universe layer, not the loader.** `services/parquet_service.py` is correct as it stands (post-#396): it refuses to guess and warns when a live file masks delisted history. #158 gives it something unambiguous to resolve. **Do not "fix" the loader.**
+**The fix is at the universe layer, not the loader.** `services/parquet_service.py` is correct as it stands (post-#396): it refuses to guess and warns when a live file masks delisted history. This change gives it something unambiguous to resolve. **Do not "fix" the loader.**
 
 - **Only when `config["data_provider"] == "parquet"`.** `CB-201601` is meaningless to Yahoo/Polygon/CSV; every other provider keeps bare tickers, byte-identical to before. (Five of the eight committed `pit:` runs used Yahoo.)
 - **Both entry points, same namespace.** `build_membership_schedule()` (the per-bar mask) and `tickers_union_for_period()` (the symbol list that gets fetched) must agree — the union is derived *from* the schedule so they agree by construction. A schedule of security IDs masked against a union of bare tickers would mask everything out on every bar and report zero trades with no error.

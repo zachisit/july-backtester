@@ -806,7 +806,7 @@ def main():
                 symbols = _pit_union(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
                 _current_membership_schedule = _pit_schedule_build(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
             except _PitResolutionError:
-                # issue #158: members that cannot be mapped to a single parquet
+                # #407: members that cannot be mapped to a single parquet
                 # security must ABORT, not skip the portfolio. `continue` here
                 # would be "drop the member" wearing a different hat — the run
                 # would go on and report survivorship-free numbers it has not
@@ -996,7 +996,7 @@ def main():
             # _pit_force_exit → True on the LAST available member bar when no timely
             #                 next-bar exists after index removal (e.g. sudden delisting).
             #                 The simulator closes at that bar's Close rather than waiting.
-            # Parquet (issue #158): symbols are security IDs, and one roster
+            # Parquet (#407): symbols are security IDs, and one roster
             # ticker can map to different securities over time, so spells must
             # come from the resolved schedule itself, keyed by security. Every
             # other provider keeps the roster-ticker intervals.
