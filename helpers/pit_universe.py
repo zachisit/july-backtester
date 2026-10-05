@@ -31,8 +31,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 # YAML 1.1 booleans that match real S&P 500 tickers (T=AT&T, ON=ON Semi, etc.)
-# We store these as quoted strings in the YAML, so yaml.safe_load returns them
-# as str — but keep this mapping handy for raw-text fallback parsing.
+# Rosters are loaded with load_roster_yaml(), which never coerces these to
+# booleans (the NQ100 files list ON unquoted) — kept for raw-text fallback parsing.
 _YAML_BOOL_TICKERS = {"true": "T", "false": "F", "on": "ON", "off": "OFF",
                       "yes": "Y", "no": "N"}
 
@@ -57,9 +57,11 @@ def _normalise(tickers: set) -> list:
 def _load_sp500_yaml(path: Path) -> dict:
     """Load a single sp500-ticker-changes-YYYY.yaml file safely."""
     try:
-        import yaml
+        # Not yaml.safe_load: it reads an unquoted ``ON`` as True (see
+        # helpers.point_in_time.load_roster_yaml).
+        from helpers.point_in_time import load_roster_yaml
         with open(path, encoding="utf-8") as fh:
-            return yaml.safe_load(fh) or {}
+            return load_roster_yaml(fh)
     except Exception as exc:
         logger.warning(f"[pit_universe] Could not load {path.name}: {exc}")
         return {}

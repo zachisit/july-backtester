@@ -796,11 +796,22 @@ def main():
                 logger.error(f"  -> ERROR resolving rule universe '{value}': {e}")
                 continue
         elif isinstance(value, str) and value.startswith("pit:"):
-            from helpers.point_in_time import tickers_union_for_period as _pit_union, build_membership_schedule as _pit_schedule_build
+            from helpers.point_in_time import (
+                tickers_union_for_period as _pit_union,
+                build_membership_schedule as _pit_schedule_build,
+                PitResolutionError as _PitResolutionError,
+            )
             _pit_index_name = value.split(":", 1)[1]
             try:
                 symbols = _pit_union(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
                 _current_membership_schedule = _pit_schedule_build(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
+            except _PitResolutionError:
+                # issue #158: members that cannot be mapped to a single parquet
+                # security must ABORT, not skip the portfolio. `continue` here
+                # would be "drop the member" wearing a different hat — the run
+                # would go on and report survivorship-free numbers it has not
+                # earned. Let it propagate.
+                raise
             except Exception as e:
                 logger.error(f"  -> ERROR resolving PIT portfolio '{value}' for '{portfolio_name}': {e}")
                 continue
@@ -951,7 +962,11 @@ def main():
         # The rule: case is what stops a liquidity universe being frozen at
         # start_date, which would bar every name that qualified later.
         if _current_membership_schedule is not None:
-            from helpers.point_in_time import pit_members_on as _pit_members_on
+            from helpers.point_in_time import (
+                pit_members_on as _pit_members_on,
+                SecuritySchedule as _PitSecuritySchedule,
+                security_intervals as _pit_security_intervals,
+            )
             from helpers.pit_enforcement import (
                 build_member_mask as _pit_build_member_mask,
                 build_forced_exit_mask as _pit_build_forced_exit_mask,
@@ -981,7 +996,15 @@ def main():
             # _pit_force_exit → True on the LAST available member bar when no timely
             #                 next-bar exists after index removal (e.g. sudden delisting).
             #                 The simulator closes at that bar's Close rather than waiting.
-            _pit_intervals = _pit_membership_intervals(value, CONFIG)
+            # Parquet (issue #158): symbols are security IDs, and one roster
+            # ticker can map to different securities over time, so spells must
+            # come from the resolved schedule itself, keyed by security. Every
+            # other provider keeps the roster-ticker intervals.
+            _backtest_end_str = CONFIG.get("end_date") or str(pd.Timestamp.now().normalize().date())
+            if isinstance(_current_membership_schedule, _PitSecuritySchedule):
+                _pit_intervals = _pit_security_intervals(_current_membership_schedule, _backtest_end_str)
+            else:
+                _pit_intervals = _pit_membership_intervals(value, CONFIG)
             _exit_buffer = CONFIG.get("pit_exit_buffer_days", 10)
             _backtest_end = CONFIG.get("end_date") or str(pd.Timestamp.now().normalize().date())
             _n_forced = 0
