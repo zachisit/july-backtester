@@ -294,6 +294,39 @@ def default_cache_path(data_dir: str) -> str:
     return os.path.join(os.path.dirname(abs_dir), f".span_index_{digest}.parquet")
 
 
+_FINGERPRINT_KEY = b"corpus_fingerprint"
+
+
+def corpus_fingerprint(data_dir: str) -> str:
+    """``"<files>:<total bytes>:<newest mtime ns>"`` over the corpus's parquet files.
+
+    Cheap (one ``scandir``, ~0.1s for 37k files) and changes whenever the corpus
+    does: a sync rewrites changed files with the source's modification time, a new
+    listing or a retired rename changes the count, and any rewrite changes size or
+    mtime.
+    """
+    n = size = newest = 0
+    with os.scandir(data_dir) as entries:
+        for e in entries:
+            if e.name.endswith(".parquet"):
+                st = e.stat()
+                n += 1
+                size += st.st_size
+                newest = max(newest, st.st_mtime_ns)
+    return f"{n}:{size}:{newest}"
+
+
+def _cached_fingerprint(cache_path: str) -> str | None:
+    import pyarrow.parquet as pq
+
+    try:
+        meta = pq.read_schema(cache_path).metadata or {}
+    except Exception:  # noqa: BLE001 - an unreadable cache is simply rebuilt
+        return None
+    raw = meta.get(_FINGERPRINT_KEY)
+    return raw.decode() if raw else None
+
+
 def build_span_index(data_dir: str, cache_path: str | None = None,
                      force: bool = False) -> pd.DataFrame:
     """Build (or load) the ``security -> [first_bar, last_bar, n_bars]`` index.
@@ -302,11 +335,22 @@ def build_span_index(data_dir: str, cache_path: str | None = None,
     Without this index, resolving a universe for a single date would re-open
     every file in the corpus.
 
+    The cache is reused only while the corpus is unchanged (see
+    :func:`corpus_fingerprint`). It used to be reused forever: the corpus now
+    refreshes daily from S3, so a cache built once kept every security's
+    ``last_bar`` frozen at that day and never saw files added later (new
+    listings, renamed or repaired securities) -- silently skewing both ``rule:``
+    universes and ``pit:`` security resolution.
+
     Returns a DataFrame indexed by security ID with columns
     ``ticker``, ``delisted``, ``first_bar``, ``last_bar``, ``n_bars``.
     """
+    fingerprint = corpus_fingerprint(data_dir) if os.path.isdir(data_dir) else None
     if cache_path and os.path.exists(cache_path) and not force:
-        return pd.read_parquet(cache_path)
+        cached = _cached_fingerprint(cache_path)
+        if cached is not None and cached == fingerprint:
+            return pd.read_parquet(cache_path)
+        logger.info("Span index cache is stale (corpus changed); rebuilding %s", cache_path)
 
     if not data_dir or not os.path.isdir(data_dir):
         raise FileNotFoundError(
@@ -336,8 +380,14 @@ def build_span_index(data_dir: str, cache_path: str | None = None,
     idx = pd.DataFrame(rows).set_index("security").sort_index()
 
     if cache_path:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
         os.makedirs(os.path.dirname(os.path.abspath(cache_path)), exist_ok=True)
-        idx.to_parquet(cache_path)
+        table = pa.Table.from_pandas(idx)
+        meta = dict(table.schema.metadata or {})
+        meta[_FINGERPRINT_KEY] = (fingerprint or "").encode()
+        pq.write_table(table.replace_schema_metadata(meta), cache_path)
     return idx
 
 
