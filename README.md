@@ -110,14 +110,23 @@ The engine runs every strategy in `custom_strategies/` against SPY, prints a res
 },
 ```
 
-Requires the ticker-history YAML data from these two public repos:
+The standard S3 data sync installs the ticker-history YAML beside the Parquet
+corpus and the backtester discovers it automatically:
+
+```bash
+parquet_data/scripts/sync_data.sh
+```
+
+This reads the independently refreshed private mirrors published under
+`s3://july-backtester-market-data/pit/{sp500,nq100}/`. You can alternatively
+use the public source repos directly:
 
 - Nasdaq 100 — https://github.com/shardul0701/NQ100-Survivorship-bias-data-2004-2026
 - S&P 500 — https://github.com/shardul0701/SP500-Survivorship-bias-data-2004-2026
 
-Clone each repo locally, then point this project at them via **one** of:
+For a separate clone, point this project at it via **one** of:
 
-1. Env vars (recommended — copy `.env.example` to `.env` and fill in): `NQ100_DATA_ROOT` / `SP500_DATA_ROOT`, each pointing at the repo root (not the `src/` subfolder — the loader appends that path itself).
+1. Env vars: `NQ100_DATA_ROOT` / `SP500_DATA_ROOT`, each pointing at the repo root (not the `src/` subfolder — the loader appends that path itself).
 2. Config keys in `config.py`: `nq100_pit_path` / `sp500_pit_path`.
 3. Drop the YAML files directly under `tickers_to_scan/point_in_time/nq100/` or `tickers_to_scan/point_in_time/sp500/`.
 

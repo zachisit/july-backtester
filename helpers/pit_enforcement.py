@@ -203,15 +203,25 @@ def membership_intervals(value: str, config: dict | None = None) -> dict:
     end = config.get("end_date")
     if not start or not end:
         return {}
+    from helpers.point_in_time import _candidate_roots
+
+    def synced_root(index: str) -> str:
+        for candidate in _candidate_roots(index, config):
+            if candidate.is_dir():
+                return str(candidate)
+        return ""
+
     if kind == "sp500":
-        repo = config.get("sp500_pit_path") or os.environ.get("SP500_DATA_ROOT", "")
+        repo = (config.get("sp500_pit_path") or os.environ.get("SP500_DATA_ROOT", "")
+                or synced_root("sp500"))
         return _sp500_intervals(start, end, repo) if repo else {}
 
     # nq100: prefer the survivorship-free change-event YAML repo (config key or
     # NQ100_DATA_ROOT env, symmetric with sp500). Fall back to the legacy
     # daily-snapshot parquet only when the YAML repo yields nothing, so users
     # without the data repo see unchanged behaviour.
-    repo = config.get("nq100_pit_path") or os.environ.get("NQ100_DATA_ROOT", "")
+    repo = (config.get("nq100_pit_path") or os.environ.get("NQ100_DATA_ROOT", "")
+            or synced_root("nq100"))
     if repo:
         yaml_intervals = _nq100_intervals_from_yaml(start, end, repo)
         if yaml_intervals:

@@ -151,6 +151,15 @@ def _candidate_roots(index: str, config: dict | None = None) -> list[Path]:
         if os.environ.get("NQ100_DATA_ROOT"):
             roots.append(Path(os.environ["NQ100_DATA_ROOT"]))
 
+    # The S3 corpus sync stores PIT rosters beside the configured price
+    # directory: <parent-of-parquet_data_dir>/pit/{sp500,nq100}. Prefer this
+    # automatically refreshed mirror after explicit config/env overrides.
+    parquet_raw = config.get("parquet_data_dir") or "parquet_data/data"
+    parquet_dir = Path(parquet_raw).expanduser()
+    if not parquet_dir.is_absolute():
+        parquet_dir = ROOT / parquet_dir
+    roots.append(parquet_dir.parent / "pit" / index)
+
     pit_base = ROOT / "tickers_to_scan" / "point_in_time"
     for name in INDEX_DIR_NAMES[index]:
         roots.append(pit_base / name)
