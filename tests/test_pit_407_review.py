@@ -115,6 +115,26 @@ class TestOverrides:
         # after the window, ordinary resolution: only live ES covers 2020
         assert resolve_security_id("ES", "2020-06-30", m)[0] == "ES"
 
+    def test_retired_override_target_follows_corpus_storage_rename(self, monkeypatch):
+        monkeypatch.setitem(pit.PIT_PARQUET_SECURITY_OVERRIDES, "OLD",
+                            [("2004-01-01", "2026-12-31", "MIDDLE")])
+        m = _map([("FINAL", "1990-01-02", "2026-09-28")])
+        assert resolve_security_id(
+            "OLD", "2010-06-30", m, corpus_renames={"MIDDLE": "FINAL"}
+        )[0] == "FINAL"
+
+    def test_retired_override_target_still_fails_when_renamed_file_has_no_bars(self, monkeypatch):
+        monkeypatch.setitem(pit.PIT_PARQUET_SECURITY_OVERRIDES, "OLD",
+                            [("2004-01-01", "2026-12-31", "MIDDLE")])
+        m = _map([("FINAL", "2020-01-02", "2026-09-28")])
+        assert resolve_security_id(
+            "OLD", "2010-06-30", m, corpus_renames={"MIDDLE": "FINAL"}
+        )[0] is None
+
+    def test_jc_penney_uses_its_bankruptcy_security(self):
+        m = _map([("CPPRQ-202102", "1990-01-02", "2021-02-01")])
+        assert resolve_security_id("JCP", "2010-06-30", m)[0] == "CPPRQ-202102"
+
     def test_every_override_window_is_ordered_and_names_a_security(self):
         for ticker, windows in pit.PIT_PARQUET_SECURITY_OVERRIDES.items():
             for start, end, target in windows:
