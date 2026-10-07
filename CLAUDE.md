@@ -119,6 +119,7 @@ Both failures are **silent**: `gh` exits 0 and prints a URL. Nothing tells you t
 "commission_per_share": 0.002
 "min_trades_for_mc": 50
 "num_mc_simulations": 1000
+"max_workers": None              # cap the simulation pool (--workers N); each worker copies portfolio_data, so wide universes may need 1-2 (#414)
 "wfa_split_ratio": 0.80          # 0.80 = 80% IS / 20% OOS; None or 0 = disabled
 "wfa_folds": None                # None = rolling WFA disabled; int >= 2 = number of folds
 "wfa_min_fold_trades": 5         # min OOS trades per fold to score it (rolling WFA only)

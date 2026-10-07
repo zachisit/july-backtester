@@ -43,10 +43,9 @@ def _resolve_dir(config: dict) -> str:
     """Return the absolute path to the parquet data directory."""
     # Default kept for backwards compatibility with existing configs. Nothing in
     # this repo creates or populates it — point --parquet-dir wherever your data is.
-    raw = config.get("parquet_data_dir", "parquet_data/data")
-    if os.path.isabs(raw):
-        return raw
-    return os.path.join(_PROJECT_ROOT, raw)
+    # Shared with the rule-universe resolver so the two cannot disagree (#413).
+    from helpers.rule_based_universe import resolve_parquet_dir
+    return resolve_parquet_dir(config)
 
 
 def _find_parquet(symbol: str, parquet_dir: str) -> str | None:

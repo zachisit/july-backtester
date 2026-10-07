@@ -439,6 +439,29 @@ def run_single_simulation(args):
         tqdm.write(f"\n--- FATAL ERROR IN WORKER ---\nStrategy: {name}\nPortfolio: {portfolio_name}\nTraceback:\n{traceback.format_exc()}\n---------------------------\n")
         return None
 
+
+def _pool_size(n_tasks: int, max_workers=None) -> int:
+    """Simulation pool size: ``min(cpu_count(), n_tasks, max_workers)``.
+
+    ``max_workers`` (config / ``--workers``) bounds memory, since every worker
+    receives its own copy of the portfolio's price data (#414). ``None`` or an
+    invalid value (non-int, < 1) leaves it unbounded, i.e. the old behaviour.
+    """
+    n = min(cpu_count(), n_tasks)
+    if isinstance(max_workers, int) and not isinstance(max_workers, bool) and max_workers >= 1:
+        n = min(n, max_workers)
+    return max(1, n)
+
+
+def _portfolio_data_mb(portfolio_data) -> float | None:
+    """Approximate in-memory size of the portfolio's DataFrames, in MB (shallow)."""
+    try:
+        total = sum(int(df.memory_usage(index=True, deep=False).sum())
+                    for df in portfolio_data.values() if hasattr(df, "memory_usage"))
+    except Exception:  # noqa: BLE001 - a size estimate must never break a run
+        return None
+    return total / 1e6
+
 def main():
     # --- ARGUMENT PARSING (full parser, applied before any CONFIG reads) ---
     from helpers.cli_config import build_parser, apply_overrides, print_help_config
@@ -1055,8 +1078,15 @@ def main():
 
         # --- Create a NEW Pool initialized with THIS portfolio's data ---
         logger.info("=" * 15 + f" RUNNING SIMULATIONS FOR '{portfolio_name}' " + "=" * 15)
-        _n_workers = min(cpu_count(), len(tasks_for_this_portfolio))
+        _n_workers = _pool_size(len(tasks_for_this_portfolio), CONFIG.get("max_workers"))
         logger.info(f"Found {len(tasks_for_this_portfolio)} tasks. Using up to {_n_workers} CPU cores.")
+        _data_mb = _portfolio_data_mb(portfolio_data)
+        if _data_mb is not None:
+            logger.info(
+                f"Price data ~{_data_mb:,.0f} MB; each worker holds a copy -> "
+                f"~{_data_mb * (_n_workers + 1):,.0f} MB peak for {_n_workers} worker(s) + parent "
+                f"(cap with --workers / max_workers)."
+            )
 
         # Sub-bar resolution: fetch intraday data per symbol only when enabled.
         _intrabar_data = (_build_intrabar_data(portfolio_data, CONFIG)
