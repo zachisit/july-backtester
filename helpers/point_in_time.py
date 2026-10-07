@@ -151,6 +151,14 @@ def _candidate_roots(index: str, config: dict | None = None) -> list[Path]:
         if os.environ.get("NQ100_DATA_ROOT"):
             roots.append(Path(os.environ["NQ100_DATA_ROOT"]))
 
+    from helpers.rule_based_universe import resolve_parquet_dir
+
+    # The S3 corpus sync stores PIT rosters beside the configured price
+    # directory: <parent-of-parquet_data_dir>/pit/{sp500,nq100}. Prefer this
+    # automatically refreshed mirror after explicit config/env overrides.
+    parquet_dir = Path(resolve_parquet_dir(config)).expanduser()
+    roots.append(parquet_dir.parent / "pit" / index)
+
     pit_base = ROOT / "tickers_to_scan" / "point_in_time"
     for name in INDEX_DIR_NAMES[index]:
         roots.append(pit_base / name)
@@ -566,8 +574,8 @@ def _parquet_corpus_dir(config: dict | None) -> str:
     ``helpers.rule_based_universe.resolve_universe``: ``parquet_data_dir``,
     default ``parquet_data/data``, relative paths taken from the project root.
     """
-    raw = (config or {}).get("parquet_data_dir") or "parquet_data/data"
-    return str(raw) if os.path.isabs(str(raw)) else str(ROOT / str(raw))
+    from helpers.rule_based_universe import resolve_parquet_dir
+    return resolve_parquet_dir(config)
 
 
 def _load_span_index(config: dict | None):
