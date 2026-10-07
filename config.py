@@ -207,8 +207,14 @@ CONFIG = {
     # Controls the order in which symbols are evaluated for entry when multiple
     # signals fire on the same bar and capital can only fill a subset.
     # "alphabetical" (default) — A→Z, reproducible and Alpaca-replicable
-    # "signal_date"            — earlier-signalling symbols get priority
-    # "random_seed"            — shuffle with a fixed seed (sensitivity testing)
+    # "signal_date"            — earlier-signalling symbols get priority. On
+    #                            daily bars every same-bar signal shares one
+    #                            signal_date, so ties fall through to the symbol:
+    #                            it is effectively ALPHABETICAL on same-bar ties.
+    # "random_seed"            — a different shuffle every bar, seeded from
+    #                            (entry_random_seed, date): reproducible for a
+    #                            given seed; run several seeds for a sensitivity
+    #                            distribution (#412)
     "entry_priority": "alphabetical",
     "entry_random_seed": 42,
 

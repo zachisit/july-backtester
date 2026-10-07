@@ -208,3 +208,57 @@ class TestEntryPrioritySignalDate:
         result = _run(pf, sig, allocation_pct=1.0, initial_capital=100.0,
                       entry_priority="signal_date")
         assert len(_filled_symbols(result)) == 1
+
+
+# ---------------------------------------------------------------------------
+# #412 — random_seed must reshuffle every bar, reproducibly
+# ---------------------------------------------------------------------------
+
+_SYMS_412 = ["AAPL", "AMZN", "GOOG", "META", "MSFT", "NFLX", "NVDA", "TSLA"]
+
+
+def _contested_every_other_bar(n=20):
+    """Every symbol enters on even bars and exits on odd bars, and capital
+    covers one fill: each entry bar is a fresh contest for the single slot."""
+    pf = {s: _price_df(100.0, n=n) for s in _SYMS_412}
+    pattern = [1 if i % 2 == 0 else -1 for i in range(n)]
+    sig = {s: pd.Series(pattern, index=df.index) for s, df in pf.items()}
+    return pf, sig
+
+
+def _winner_by_entry_bar(result):
+    """The symbol that got the full allocation on each entry bar. (Fractional
+    shares let the next symbol in the queue take the leftover cash too, so the
+    queue's head is the largest fill, not the only one.)"""
+    best = {}
+    for t in result["trade_log"]:
+        d = t["EntryDate"]
+        if d not in best or t["Shares"] > best[d]["Shares"]:
+            best[d] = t
+    return [best[d]["Symbol"] for d in sorted(best)]
+
+
+class TestRandomSeedReshufflesEachBar:
+
+    def _run_seed(self, seed):
+        pf, sig = _contested_every_other_bar()
+        return _run(pf, sig, allocation_pct=0.9, initial_capital=200.0,
+                    entry_priority="random_seed", extra_config={"entry_random_seed": seed})
+
+    def test_fill_order_differs_between_bars(self):
+        winners = _winner_by_entry_bar(self._run_seed(7))
+        assert len(winners) >= 8                       # one fill per entry bar
+        assert len(set(winners)) > 1, (
+            "random_seed gave the same winner on every bar: the RNG is being "
+            "re-seeded per bar with the same seed (#412)")
+
+    def test_same_seed_is_identical_across_runs(self):
+        assert _winner_by_entry_bar(self._run_seed(7)) == _winner_by_entry_bar(self._run_seed(7))
+
+    def test_different_seeds_give_different_fills(self):
+        assert _winner_by_entry_bar(self._run_seed(7)) != _winner_by_entry_bar(self._run_seed(8))
+
+    def test_alphabetical_still_fills_a_to_z_every_bar(self):
+        pf, sig = _contested_every_other_bar()
+        r = _run(pf, sig, allocation_pct=0.9, initial_capital=200.0)
+        assert set(_winner_by_entry_bar(r)) == {"AAPL"}
