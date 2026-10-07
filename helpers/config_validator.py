@@ -150,6 +150,8 @@ KNOWN_KEYS: set[str] = {
     # SECTION 30: Cross-sectional rotation (issue #294)
     "rotation",
     "max_position_pct",
+    # SECTION 31: Simulation workers (#414)
+    "max_workers",
     # SECTION 27: Deterministic Entry Queue
     "entry_priority",
     "entry_random_seed",
@@ -234,6 +236,13 @@ def validate_config(config: dict) -> list[str]:
     # option exists to switch OFF -- so the run silently produces the unfixed
     # numbers while the config file says otherwise. Same precedent as
     # universe_rebase and smoothness_profile above.
+    mw = config.get("max_workers")
+    if mw is not None and (isinstance(mw, bool) or not isinstance(mw, int) or mw < 1):
+        msg = (f"WARNING: max_workers {mw!r} is not a positive integer or None "
+               f"-- the run will ignore it and use min(cpu_count(), tasks)")
+        warnings.append(msg)
+        logger.warning(msg)
+
     et = config.get("entry_trigger")
     if et is not None and str(et).lower() not in {"level", "edge"}:
         msg = (f"WARNING: entry_trigger '{et}' is not a known mode "

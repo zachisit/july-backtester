@@ -439,4 +439,15 @@ CONFIG = {
     # deliberately NO absolute-dollar cap default — a dollar cap is scale-dependent
     # and silently changes behaviour when initial_capital changes.
     "max_position_pct": 1.0,
+
+    # ============================================================
+    # SECTION 31: SIMULATION WORKERS (#414)
+    # ============================================================
+    # Upper bound on the simulation pool. Every worker receives its own copy of
+    # the portfolio's price data, so peak memory is roughly
+    # (workers + 1) x portfolio_data: on a wide universe (e.g. rule:us_liquid_500,
+    # 2004-2026) four workers can exhaust a 16 GB machine. None (default) keeps
+    # min(cpu_count(), number of tasks); 1 runs every task serially in one
+    # invocation, keeping the combined summary. CLI: --workers N.
+    "max_workers": None,
 }

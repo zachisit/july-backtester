@@ -427,6 +427,7 @@ Pass any of these to override `config.py` for a single run:
 --rolling-sharpe <int>    Rolling Sharpe window in bars (0 = off)
 --export-ml / --no-export-ml
 --upload-s3 / --no-upload-s3
+--workers <int>           Cap the simulation pool (each worker copies the price data; 1 = serial)
 ```
 
 **Escape hatch — any config key not covered above**
