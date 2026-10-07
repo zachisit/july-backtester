@@ -345,7 +345,7 @@ def build_span_index(data_dir: str, cache_path: str | None = None,
     Returns a DataFrame indexed by security ID with columns
     ``ticker``, ``delisted``, ``first_bar``, ``last_bar``, ``n_bars``.
     """
-    fingerprint = corpus_fingerprint(data_dir) if os.path.isdir(data_dir) else None
+    fingerprint = corpus_fingerprint(data_dir) if data_dir and os.path.isdir(data_dir) else None
     if cache_path and os.path.exists(cache_path) and not force:
         cached = _cached_fingerprint(cache_path)
         if cached is not None and cached == fingerprint:
