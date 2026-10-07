@@ -19,7 +19,7 @@ build_membership_schedule(index, start_date, end_date, config)
 pit_members_on(schedule, date)
     Binary-search the schedule for membership on an ISO date string.
 
-Parquet security-ID resolution (issue #158)
+Parquet security-ID resolution (#407)
 -------------------------------------------
 ``pit:`` membership is expressed in *bare tickers*. The Norgate Parquet corpus
 keys delisted securities as ``TICKER-YYYYMM``, so a bare ticker is not a stable
@@ -128,7 +128,7 @@ def _raw_pit_ticker(symbol: str, date: str | None = None) -> str:
     Used instead of :func:`normalise_pit_ticker` under the parquet provider: the
     security resolver needs the *historical* ticker (``SYMC`` in 2008), because
     aliasing it to today's ticker first (``GEN``) makes the tenure rule pick
-    whoever held ``GEN`` back then -- GenOn, not Symantec (issue #158 review).
+    whoever held ``GEN`` back then -- GenOn, not Symantec (#407 review).
     Share-class punctuation is also kept, since the corpus spells it ``BRK.B``.
     """
     return str(symbol).strip().upper()
@@ -299,7 +299,7 @@ def tickers_union_for_period(
     list[str]
         Sorted list of unique tickers, or — when
         ``config["data_provider"] == "parquet"`` — of parquet **security IDs**
-        (see the module docstring and issue #158).
+        (see the module docstring and #407).
 
     Raises
     ------
@@ -308,7 +308,7 @@ def tickers_union_for_period(
         single security. Every offender is listed.
     """
     # Parquet: derive the union FROM the schedule rather than resolving the raw
-    # YAML union. A union entry carries no date, and the whole point of #158 is
+    # YAML union. A union entry carries no date, and the whole point of #407 is
     # that a bare ticker means nothing without one. Deriving it from the
     # schedule also makes the two agree by construction — a union of security
     # IDs masked against a schedule of bare tickers (or vice versa) would mask
@@ -366,7 +366,7 @@ def build_membership_schedule(
         ``config["data_provider"] == "parquet"`` the frozensets hold parquet
         **security IDs** resolved as of each snapshot's own date, so a ticker
         that changed hands resolves to the company that actually held it then
-        (see the module docstring and issue #158).
+        (see the module docstring and #407).
 
     Raises
     ------
@@ -447,7 +447,7 @@ def pit_members_on(schedule: list[tuple[str, frozenset]], date: str) -> frozense
 
 
 # ---------------------------------------------------------------------------
-# Parquet security-ID resolution (issue #158)
+# Parquet security-ID resolution (#407)
 # ---------------------------------------------------------------------------
 #
 # WHY THIS LIVES HERE AND NOT IN THE LOADER
@@ -522,7 +522,7 @@ def _format_pit_failures(failures) -> str:
         f"{len(by_ticker)} point-in-time member(s) could not be resolved to a "
         f"single parquet security. The run is aborted rather than dropping or "
         f"substituting them, because both silently reintroduce survivorship "
-        f"bias (issue #158).",
+        f"bias (#407).",
         "",
     ]
     for ticker in sorted(by_ticker):
@@ -759,7 +759,7 @@ def _describe(candidates) -> list[str]:
 def _resolve_bare(bare: str, when, candidate_map: dict, lag_days: int):
     """Resolve one bare ticker on one date. Returns ``(security | None, candidates)``.
 
-    The original #158 rule -- one covering span wins; several covering spans go
+    The original #407 rule -- one covering span wins; several covering spans go
     to the ticker-tenure tie-break -- plus the lag window for a lone near-miss.
     """
     import pandas as pd
@@ -796,7 +796,7 @@ def resolve_security_id(ticker: str, date, candidate_map: dict,
     ``None`` when the member is unresolvable, and the descriptions let the error
     message show the operator *why*.
 
-    Order (issue #158 review on #407):
+    Order (#407 review):
 
     0. **PIT_PARQUET_SECURITY_OVERRIDES**: an explicit, dated, reviewed mapping.
        If its window covers the date it decides -- and if its target has no bars
