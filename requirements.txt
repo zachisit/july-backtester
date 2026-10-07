@@ -10,8 +10,9 @@ boto3==1.40.2          # used for S3 report uploads only, not auth
 requests==2.32.3
 python-dotenv==1.1.1
 PyYAML==6.0.2
-pandas-ta==0.3.14b0
+ft-pandas-ta==0.3.16    # freqtrade fork of pandas-ta 0.3.x, imports as pandas_ta; 0.3.14b0 was pulled from PyPI (#415)
 orjson==3.11.1
 pyarrow==21.0.0
 yfinance==0.2.65       # required only when data_provider = "yahoo"
 matplotlib==3.10.1     # candlestick charts and PDF plot generation
+seaborn==0.13.2        # PDF report plots (trade_analyzer)
