@@ -710,6 +710,12 @@ def load_corpus_renames(config: dict | None) -> dict[str, str]:
     under the new ticker (``BK -> BNY``), and a stale duplicate maps to its dated
     security (``SEE -> SEE-202604``). Chains are followed to the end
     (``A -> B``, ``B -> C`` gives ``A -> C``). Absent or unreadable file -> ``{}``.
+    This is a **storage-location map**, not membership data. The dated roster is
+    still the sole authority for whether the company belongs to the index on a
+    date. Resolving a 2010 ``BK`` row to ``BNY.parquet`` does not put the future
+    ticker BNY into the 2010 roster; :class:`SecuritySchedule.roster_tickers`
+    retains ``BK`` while the engine uses ``BNY`` only as the security/file ID.
+    That distinction also keeps a position continuous across the rename.
     """
     import json
 
@@ -798,10 +804,11 @@ def resolve_security_id(ticker: str, date, candidate_map: dict,
     1. **The raw roster ticker**, in its own spelling and then the other
        share-class punctuation (``BRK.B`` / ``BRK-B``). The ticker the roster
        used *on that date* is the strongest evidence of which security it was.
-    2. **The corpus's own rename map** (``_renames.json``, see
+    2. **The corpus's own storage-location map** (``_renames.json``, see
        :func:`load_corpus_renames`): a ticker the corpus retired resolves to the
-       security that now holds its history -- the data source's record, so it
-       outranks the hand-kept alias table below.
+       security/file that now holds its history -- the data source's record, so
+       it outranks the hand-kept alias table below. The dated roster still
+       controls membership; this step never adds a member.
     3. **The PIT_TICKER_NORMALISATION alias, only if (1) and (2) failed**, preferring the
        target's *live bare file*: Norgate back-fills a renamed security's whole
        history under its current ticker, so ``SYMC`` lives in ``GEN.parquet``.

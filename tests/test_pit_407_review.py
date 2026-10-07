@@ -210,6 +210,39 @@ class TestCorpusRenames:
         cfg = _cfg(tmp_path, "2010-01-04", "2010-12-31")
         schedule = build_membership_schedule("nq100", "2010-01-04", "2010-12-31", cfg)
         assert pit_members_on(schedule, "2010-06-01") == frozenset({"BNY"})
+        # BNY is the storage security ID. The as-of roster identity remains BK;
+        # the future ticker was not injected into the historical membership.
+        assert schedule.roster_tickers == {"BNY": {"BK"}}
+
+    def test_rename_is_identity_continuity_not_a_forced_exit(self):
+        candidates = _map([("BNY", "1990-01-02", "2026-09-28")])
+        renames = {"BK": "BNY"}
+        failures = []
+        roster_tickers = {}
+        before = pit.resolve_members_to_securities(
+            {"BK"}, "2026-05-20", candidates, failures, roster_tickers, renames
+        )
+        after = pit.resolve_members_to_securities(
+            {"BNY"}, "2026-05-21", candidates, failures, roster_tickers, renames
+        )
+        schedule = SecuritySchedule(
+            [("2026-05-20", before), ("2026-05-21", after)], roster_tickers
+        )
+        assert failures == []
+        assert schedule.roster_tickers == {"BNY": {"BK", "BNY"}}
+        assert security_intervals(schedule, "2026-06-30") == {
+            "BNY": [(pd.Timestamp("2026-05-20"), pd.Timestamp("2026-06-30"))]
+        }
+
+    def test_storage_map_cannot_add_a_company_absent_from_the_roster(self):
+        candidates = _map([
+            ("BNY", "1990-01-02", "2026-09-28"),
+            ("MSFT", "1990-01-02", "2026-09-28"),
+        ])
+        resolved = pit.resolve_members_to_securities(
+            {"MSFT"}, "2010-06-01", candidates, [], corpus_renames={"BK": "BNY"}
+        )
+        assert resolved == frozenset({"MSFT"})
 
     def test_chains_are_followed(self, tmp_path):
         self._renames(tmp_path, [{"old": "A", "new": "B", "date": "2026-05-01"},
