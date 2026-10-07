@@ -1,5 +1,5 @@
 # tests/test_pit_407_review.py
-"""Regression tests for the #407 review of the #158 PIT -> parquet resolver.
+"""Regression tests for the #407 review of the PIT -> parquet resolver.
 
 Each class pins one finding, measured against the real corpus and rosters
 (2004-01-01 .. 2026-09-28) and reproduced here on a synthetic corpus:
