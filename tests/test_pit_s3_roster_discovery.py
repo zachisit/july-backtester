@@ -37,3 +37,22 @@ def test_daily_enforcement_discovers_s3_roster_without_env(tmp_path, monkeypatch
         {"start_date": "2004-01-02", "end_date": "2004-01-30", "parquet_data_dir": str(price_dir)},
     )
     assert "AAPL" in intervals
+
+
+def test_daily_enforcement_skips_empty_s3_mirror(tmp_path, monkeypatch):
+    monkeypatch.delenv("SP500_DATA_ROOT", raising=False)
+    empty_mirror = tmp_path / "pit" / "sp500"
+    empty_mirror.mkdir(parents=True)
+    valid_repo = tmp_path / "valid_sp500"
+    _write_year(valid_repo, "sp500", 2004, ["AAPL"])
+    monkeypatch.setattr(
+        point_in_time, "_candidate_roots",
+        lambda index, config: [empty_mirror, valid_repo],
+    )
+
+    intervals = pit_enforcement.membership_intervals(
+        "pit:sp500",
+        {"start_date": "2004-01-02", "end_date": "2004-01-30"},
+    )
+
+    assert "AAPL" in intervals

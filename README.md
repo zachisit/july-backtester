@@ -118,8 +118,13 @@ parquet_data/scripts/sync_data.sh
 ```
 
 This reads the independently refreshed private mirrors published under
-`s3://july-backtester-market-data/pit/{sp500,nq100}/`. You can alternatively
-use the public source repos directly:
+`s3://july-backtester-market-data/pit/{sp500,nq100}/`.
+
+The read-only AWS key used by the sync must include `s3:GetObject` and
+`s3:ListBucket` access for the `pit/` prefix as well as `parquet/`. An
+incomplete or empty roster mirror is ignored by the backtester.
+
+You can alternatively use the public source repos directly:
 
 - Nasdaq 100 — https://github.com/shardul0701/NQ100-Survivorship-bias-data-2004-2026
 - S&P 500 — https://github.com/shardul0701/SP500-Survivorship-bias-data-2004-2026

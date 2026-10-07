@@ -206,9 +206,21 @@ def membership_intervals(value: str, config: dict | None = None) -> dict:
     from helpers.point_in_time import _candidate_roots
 
     def synced_root(index: str) -> str:
+        layouts = {
+            "sp500": (("sp500_ticker_history", "sp500-ticker-changes"),),
+            "nq100": (
+                ("nasdaq_100_ticker_history", "n100-ticker-changes"),
+                ("nasdaq100_ticker_history", "n100-ticker-changes"),
+            ),
+        }
         for candidate in _candidate_roots(index, config):
-            if candidate.is_dir():
-                return str(candidate)
+            # The interval builder needs the 2004 seed file. Merely existing is
+            # insufficient: sync_data creates the destination before AWS runs,
+            # so a failed/unauthorised sync can leave an empty mirror behind.
+            for subdir, prefix in layouts[index]:
+                seed = candidate / "src" / subdir / f"{prefix}-2004.yaml"
+                if seed.is_file():
+                    return str(candidate)
         return ""
 
     if kind == "sp500":
