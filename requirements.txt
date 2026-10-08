@@ -15,3 +15,4 @@ orjson==3.11.1
 pyarrow==21.0.0
 yfinance==0.2.65       # required only when data_provider = "yahoo"
 matplotlib==3.10.1     # candlestick charts and PDF plot generation
+scipy==1.17.1           # scripts/dead_money_*.py only (scipy.stats)
