@@ -144,8 +144,17 @@ _STARVED_SIGS = {
 
 
 class TestLevelModeIsUnchanged:
-    def test_default_config_is_level(self):
-        assert str(CONFIG.get("entry_trigger", "level")).lower() == "level"
+    def test_default_config_is_edge(self):
+        """Flipped by #401. Both the shipped value AND the code fallback must be
+        'edge' -- a config missing the key must not get the old behaviour back."""
+        assert str(CONFIG.get("entry_trigger", "edge")).lower() == "edge"
+        import inspect
+
+        from helpers import portfolio_simulations as ps
+        src = inspect.getsource(ps.run_portfolio_simulation)
+        assert 'CONFIG.get("entry_trigger", "edge")' in src, (
+            "engine fallback still defaults to level; it must track the shipped default"
+        )
 
     def test_uncontested_entry_is_identical_in_both_modes(self):
         """With cash free on the breakout bar the two modes must agree exactly.
