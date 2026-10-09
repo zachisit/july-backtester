@@ -667,6 +667,7 @@ PIT_PARQUET_SECURITY_OVERRIDES: dict[str, list[tuple[str, str, str]]] = {
     "SHLD": [(*_ALL, "SHLDQ-202210")],
     "TUP": [(*_ALL, "TUPBQ-202506")],
     "WIN": [(*_ALL, "WINMQ-202009")],
+    "JCP": [(*_ALL, "CPPRQ-202102")],                 # J.C. Penney; full history is under bankruptcy ticker
     # renames / successors that keep the history under another ticker
     "ARNC": [("2004-01-01", "2020-04-01", "HWM")],        # Alcoa Inc -> Arconic -> Howmet
     "CBS": [(*_ALL, "PSKY")],                              # CBS -> ViacomCBS -> Paramount
@@ -799,8 +800,9 @@ def resolve_security_id(ticker: str, date, candidate_map: dict,
     Order (#407 review):
 
     0. **PIT_PARQUET_SECURITY_OVERRIDES**: an explicit, dated, reviewed mapping.
-       If its window covers the date it decides -- and if its target has no bars
-       then, the member fails rather than falling through to a guess.
+       The target follows ``_renames.json`` when the corpus later retires that
+       storage file. If the resulting target has no bars then, the member fails
+       rather than falling through to a guess.
     1. **The raw roster ticker**, in its own spelling and then the other
        share-class punctuation (``BRK.B`` / ``BRK-B``). The ticker the roster
        used *on that date* is the strongest evidence of which security it was.
@@ -832,14 +834,18 @@ def resolve_security_id(ticker: str, date, candidate_map: dict,
     # 0. explicit dated override -- validated, never trusted blindly
     for start, end, target in PIT_PARQUET_SECURITY_OVERRIDES.get(raw, ()):
         if pd.Timestamp(start) <= when <= pd.Timestamp(end):
-            bare = parse_security(target)[0]
-            match = [c for c in candidate_map.get(bare, []) if c[0] == target]
+            # Overrides name a security identity, while _renames.json names its
+            # current storage file.  A later corpus rename (PSKY -> SKYD,
+            # IAC -> PPLI) must not invalidate an older reviewed override.
+            storage_target = (corpus_renames or {}).get(target.upper(), target)
+            bare = parse_security(storage_target)[0]
+            match = [c for c in candidate_map.get(bare, []) if c[0] == storage_target]
             seen += match
             # An override is a reviewed decision, so it gets a wider window than
             # the heuristics: LMCA was added to NQ100 17 days before it listed.
             olag = pd.Timedelta(days=31)
             if match and match[0][1] - olag <= when <= match[0][2] + olag:
-                return target, _describe(seen)
+                return storage_target, _describe(seen)
             return None, _describe(seen)
 
     # 1. raw roster ticker, both share-class spellings
