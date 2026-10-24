@@ -39,13 +39,23 @@ def fetch_listings():
             df = df[df["Test Issue"] == "N"]
         if "ETF" in df.columns:
             df = df[df["ETF"] == "N"]
-        for s in df[symcol].dropna().astype(str):
-            s = s.strip().upper()
-            if not re.fullmatch(r"[A-Z][A-Z0-9-]*", s):
-                continue  # preferred / when-issued / index notation
-            if url == NASDAQ_URL and len(s) == 5 and s[-1] in "WRU":
-                continue  # NASDAQ warrant / right / unit suffix convention
-            symbols.add(s)
+        for _, row in df.iterrows():
+            if pd.isna(row[symcol]):
+                continue
+            s = str(row[symcol]).strip().upper()
+            # Keep common share classes in canonical dot notation. ACT's
+            # preferred/warrant suffix punctuation is not a share class.
+            if not re.fullmatch(r"[A-Z][A-Z0-9]*(?:[.-][A-Z])?", s):
+                continue
+            description = str(row.get("Security Name", "")).rsplit(" - ", 1)[-1]
+            if re.search(r"\b((?:preferred|preference)\s+(?:stock|shares|securities)|warrants?|rights?|units?|notes?|bonds?|debentures?)\b",
+                         description, re.IGNORECASE):
+                continue
+            # Nasdaq issue-type suffixes; other exchanges have distinct
+            # conventions. Source: Nasdaq's fifth-character specification.
+            if url == NASDAQ_URL and len(s) == 5 and s[-1] in "CGHILMNOPRTUVWXZ":
+                continue
+            symbols.add(s.replace("-", "."))
     return sorted(symbols)
 
 
@@ -53,10 +63,11 @@ def liquidity_filter(tickers, min_adv, chunk=300, *, stats=None):
     import yfinance as yf
 
     keep = {}
+    aliases = {symbol: symbol.replace(".", "-") for symbol in tickers}
     for i in range(0, len(tickers), chunk):
         batch = tickers[i : i + chunk]
         try:
-            raw = yf.download(batch, period="1mo", interval="1d", group_by="ticker",
+            raw = yf.download(list(dict.fromkeys(aliases[symbol] for symbol in batch)), period="1mo", interval="1d", group_by="ticker",
                               auto_adjust=True, threads=True, progress=False)
         except Exception as e:
             print(f"batch {i} failed: {e}")
@@ -65,7 +76,7 @@ def liquidity_filter(tickers, min_adv, chunk=300, *, stats=None):
             try:
                 if not isinstance(raw.columns, pd.MultiIndex) and len(batch) != 1:
                     continue
-                d = (raw[s] if isinstance(raw.columns, pd.MultiIndex) else raw).dropna(subset=["Close"])
+                d = (raw[aliases[s]] if isinstance(raw.columns, pd.MultiIndex) else raw).dropna(subset=["Close"])
             except (KeyError, IndexError):
                 continue
             if len(d) < 10:

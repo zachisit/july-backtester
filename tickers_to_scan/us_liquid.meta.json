@@ -1,7 +1,0 @@
-{
-  "snapshot_date": "2026-08-26",
-  "source": "Original PR #349 snapshot; date documented in its review discussion",
-  "min_dollar_adv": 2000000.0,
-  "selected": 3751,
-  "refresh_command": "python scripts/build_us_universe.py --min-adv 2e6"
-}

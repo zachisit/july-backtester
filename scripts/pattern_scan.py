@@ -115,6 +115,10 @@ def load_universe(universe_arg):
     if os.path.exists(universe_arg):
         with open(universe_arg, encoding="utf-8") as f:
             return json.load(f)
+    if universe_arg.lower().endswith(".json"):
+        raise FileNotFoundError(
+            f"Universe file not found: {universe_arg}. Generate us_liquid.json "
+            "with scripts/build_us_universe.py, or choose an existing universe.")
     return [t.strip().upper() for t in universe_arg.split(",") if t.strip()]
 
 
@@ -132,7 +136,12 @@ def _cut_frame(df, as_of=None, lookback_bars=None):
         df = df.loc[df.index <= end]
     if lookback_bars is not None:
         df = df.tail(lookback_bars)
-    return df[["Open", "High", "Low", "Close", "Volume"]].copy()
+    if df.index.hasnans or df.index.has_duplicates:
+        raise ValueError("price timestamps must be valid and unique")
+    result = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+    for column in result.columns:
+        result[column] = pd.to_numeric(result[column], errors="raise")
+    return result
 
 
 def fetch_yahoo(tickers, period="2y", chunk=300, *, as_of=None, errors=None):
@@ -141,6 +150,7 @@ def fetch_yahoo(tickers, period="2y", chunk=300, *, as_of=None, errors=None):
 
     out = {}
     tickers = list(dict.fromkeys(tickers))
+    aliases = {symbol: symbol.replace(".", "-") for symbol in tickers}
     window = {"period": period}
     if as_of is not None:
         end = pd.Timestamp(as_of)
@@ -150,7 +160,7 @@ def fetch_yahoo(tickers, period="2y", chunk=300, *, as_of=None, errors=None):
     for i in range(0, len(tickers), chunk):
         batch = tickers[i:i + chunk]
         try:
-            raw = yf.download(batch, interval="1d", group_by="ticker", auto_adjust=True,
+            raw = yf.download(list(dict.fromkeys(aliases[symbol] for symbol in batch)), interval="1d", group_by="ticker", auto_adjust=True,
                               threads=True, progress=False, **window)
         except Exception as exc:
             log.warning("Yahoo batch %d failed", i)
@@ -163,7 +173,7 @@ def fetch_yahoo(tickers, period="2y", chunk=300, *, as_of=None, errors=None):
             continue
         for symbol in batch:
             try:
-                frame = raw[symbol] if isinstance(raw.columns, pd.MultiIndex) else raw
+                frame = raw[aliases[symbol]] if isinstance(raw.columns, pd.MultiIndex) else raw
                 frame = _cut_frame(frame.dropna(subset=["Close"]), as_of)
                 if not frame.empty:
                     out[symbol] = frame
@@ -689,108 +699,113 @@ def render_chart(cand, show_bars=170):
 
     df = cand["df"]
     n = len(df)
-    start = max(0, n - show_bars)
+    start = max(0, min(n - show_bars, cand["base_start"] - 20))
     sub = df.iloc[start:]
     x = np.arange(len(sub))
     off = start  # index offset between full-df bar indices and plot x
 
     fig = plt.figure(figsize=(11.5, 5.8), dpi=105, facecolor=DARK_BG)
-    gs = fig.add_gridspec(2, 1, height_ratios=[4, 1], hspace=0.04)
-    ax = fig.add_subplot(gs[0])
-    axv = fig.add_subplot(gs[1], sharex=ax)
-    for a in (ax, axv):
-        a.set_facecolor(PANEL_BG)
-        a.grid(color=GRID, linewidth=0.5, alpha=0.6)
-        a.tick_params(colors=TEXT, labelsize=8)
-        for s in a.spines.values():
-            s.set_color(GRID)
+    try:
+        gs = fig.add_gridspec(2, 1, height_ratios=[4, 1], hspace=0.04)
+        ax = fig.add_subplot(gs[0])
+        axv = fig.add_subplot(gs[1], sharex=ax)
+        for a in (ax, axv):
+            a.set_facecolor(PANEL_BG)
+            a.grid(color=GRID, linewidth=0.5, alpha=0.6)
+            a.tick_params(colors=TEXT, labelsize=8)
+            for s in a.spines.values():
+                s.set_color(GRID)
 
-    o, h, l, c = (sub[col].values for col in ("Open", "High", "Low", "Close"))
-    up_mask = c >= o
-    ax.vlines(x, l, h, color=np.where(up_mask, UP, DOWN), linewidth=0.7)
-    ax.bar(x[up_mask], (c - o)[up_mask], bottom=o[up_mask], width=0.65, color=UP)
-    ax.bar(x[~up_mask], (o - c)[~up_mask], bottom=c[~up_mask], width=0.65, color=DOWN)
+        o, h, l, c = (sub[col].values for col in ("Open", "High", "Low", "Close"))
+        up_mask = c >= o
+        ax.vlines(x, l, h, color=np.where(up_mask, UP, DOWN), linewidth=0.7)
+        ax.bar(x[up_mask], (c - o)[up_mask], bottom=o[up_mask], width=0.65, color=UP)
+        ax.bar(x[~up_mask], (o - c)[~up_mask], bottom=c[~up_mask], width=0.65, color=DOWN)
 
-    for length, col in ((20, SMA20_C), (50, SMA50_C)):
-        sma = df["Close"].rolling(length).mean().iloc[start:]
-        ax.plot(x, sma.values, color=col, linewidth=1.0, alpha=0.9)
+        for length, col in ((20, SMA20_C), (50, SMA50_C)):
+            sma = df["Close"].rolling(length).mean().iloc[start:]
+            ax.plot(x, sma.values, color=col, linewidth=1.0, alpha=0.9)
 
-    # ceiling from first touch to right edge
-    first_t = max(cand["touches"][0] - off, 0)
-    ax.hlines(cand["level"], first_t, len(sub) - 1 + 3, color=CEIL_COLOR, linewidth=1.4)
-    for t in cand["touches"]:
-        if t >= off:
-            ax.plot(t - off, df["High"].iloc[t], marker="v", color=CEIL_COLOR, markersize=5)
-
-    # pattern-specific structure below the ceiling
-    if "support" in cand:  # ascending triangle: rising-lows trendline
-        slope, intercept = cand["support"]
-        a0 = cand["support_anchors"][0]
-        xs = np.arange(max(a0, off), n + 3)
-        ax.plot(xs - off, slope * xs + intercept, color=SUP_COLOR, linewidth=1.4)
-        for t in cand["support_touches"]:
+        # ceiling from first touch to right edge
+        first_t = max(cand["touches"][0] - off, 0)
+        ax.hlines(cand["level"], first_t, len(sub) - 1 + 3, color=CEIL_COLOR, linewidth=1.4)
+        for t in cand["touches"]:
             if t >= off:
-                ax.plot(t - off, df["Low"].iloc[t], marker="^", color=SUP_COLOR, markersize=5)
-    if "floor_level" in cand:  # rectangle: flat lower boundary
-        first_f = max(cand["floor_touches"][0] - off, 0)
-        ax.hlines(cand["floor_level"], first_f, len(sub) - 1 + 3, color=SUP_COLOR, linewidth=1.4)
-        for t in cand["floor_touches"]:
-            if t >= off:
-                ax.plot(t - off, df["Low"].iloc[t], marker="^", color=SUP_COLOR, markersize=5)
-    if "head_idx" in cand:  # H&S bottom: mark the head
-        h = cand["head_idx"]
-        if h >= off:
-            ax.plot(h - off, cand["head_low"], marker="^", color=TARGET_COLOR, markersize=7)
-            ax.annotate("H", (h - off, cand["head_low"]), xytext=(0, -14),
-                        textcoords="offset points", ha="center", color=TARGET_COLOR, fontsize=8)
+                ax.plot(t - off, df["High"].iloc[t], marker="v", color=CEIL_COLOR, markersize=5)
 
-    # trigger + measured target (far targets annotated, not drawn, so the
-    # candles aren't squished — NUTX-style log targets can be 2.5x price)
-    hi = float(sub["High"].max())
-    draw_target = cand["target"] <= hi * 1.35
-    xr = len(sub) + 3
-    if draw_target:
-        ax.axhline(cand["target"], color=TARGET_COLOR, linewidth=1.1, linestyle="--", alpha=0.9)
-        ax.text(xr, cand["target"], f" target {cand['target']:.2f} (+{cand['upside_pct']:.1f}%)",
-                color=TARGET_COLOR, fontsize=8, va="center")
-    else:
-        ax.text(0.995, 0.975, f"target {cand['target']:.2f} (+{cand['upside_pct']:.1f}%) ↑ off-scale",
-                transform=ax.transAxes, ha="right", va="top", color=TARGET_COLOR, fontsize=8)
-    ax.text(xr, cand["level"], f" trigger {cand['trigger']:.2f}\n confirm {cand['confirm']:.2f}",
-            color=CEIL_COLOR, fontsize=8, va="center")
+        # pattern-specific structure below the ceiling
+        if "support" in cand:  # ascending triangle: rising-lows trendline
+            slope, intercept = cand["support"]
+            a0 = cand["support_anchors"][0]
+            xs = np.arange(max(a0, off), n + 3)
+            ax.plot(xs - off, slope * xs + intercept, color=SUP_COLOR, linewidth=1.4)
+            for t in cand["support_touches"]:
+                if t >= off:
+                    ax.plot(t - off, df["Low"].iloc[t], marker="^", color=SUP_COLOR, markersize=5)
+        if "floor_level" in cand:  # rectangle: flat lower boundary
+            first_f = max(cand["floor_touches"][0] - off, 0)
+            ax.hlines(cand["floor_level"], first_f, len(sub) - 1 + 3, color=SUP_COLOR, linewidth=1.4)
+            for t in cand["floor_touches"]:
+                if t >= off:
+                    ax.plot(t - off, df["Low"].iloc[t], marker="^", color=SUP_COLOR, markersize=5)
+        if "head_idx" in cand:  # H&S bottom: mark the head
+            h = cand["head_idx"]
+            if h >= off:
+                ax.plot(h - off, cand["head_low"], marker="^", color=TARGET_COLOR, markersize=7)
+                ax.annotate("H", (h - off, cand["head_low"]), xytext=(0, -14),
+                            textcoords="offset points", ha="center", color=TARGET_COLOR, fontsize=8)
 
-    ax.set_xlim(-2, len(sub) + 16)
-    ymin = float(sub["Low"].min()) * 0.985
-    ymax = (max(hi, cand["target"]) if draw_target else hi) * 1.015
-    ax.set_ylim(ymin, ymax)
-    plt.setp(ax.get_xticklabels(), visible=False)
+        # trigger + measured target (far targets annotated, not drawn, so the
+        # candles aren't squished — NUTX-style log targets can be 2.5x price)
+        hi = float(sub["High"].max())
+        draw_target = cand["target"] <= hi * 1.35
+        xr = len(sub) + 3
+        if draw_target:
+            ax.axhline(cand["target"], color=TARGET_COLOR, linewidth=1.1, linestyle="--", alpha=0.9)
+            ax.annotate(f" target {cand['target']:.2f} (+{cand['upside_pct']:.1f}%)",
+                        (xr, cand["target"]), xytext=(2, 8), textcoords="offset points",
+                        color=TARGET_COLOR, fontsize=8, va="bottom")
+        else:
+            ax.text(0.995, 0.975, f"target {cand['target']:.2f} (+{cand['upside_pct']:.1f}%) ↑ off-scale",
+                    transform=ax.transAxes, ha="right", va="top", color=TARGET_COLOR, fontsize=8)
+        ax.axhline(cand["trigger"], color=CEIL_COLOR, linewidth=.8, linestyle=":", alpha=.65)
+        ax.annotate(f" trigger {cand['trigger']:.2f}\n confirm {cand['confirm']:.2f}",
+                    (xr, cand["trigger"]), xytext=(2, -8), textcoords="offset points",
+                    color=CEIL_COLOR, fontsize=8, va="top")
 
-    axv.bar(x, sub["Volume"].values, width=0.65,
-            color=np.where(up_mask, UP, DOWN), alpha=0.55)
-    axv.set_yticks([])
+        ax.set_xlim(-2, len(sub) + 16)
+        ymin = float(sub["Low"].min()) * 0.985
+        ymax = (max(hi, cand["target"]) if draw_target else hi) * 1.015
+        ax.set_ylim(ymin, ymax)
+        plt.setp(ax.get_xticklabels(), visible=False)
 
-    # month tick labels on bar index axis (no weekend gaps)
-    months = pd.Series(sub.index.strftime("%b %y"), index=x)
-    ticks = [i for i in x[1:] if months[i] != months[i - 1]]
-    if len(ticks) > 16:  # weekly charts span years — thin the labels
-        ticks = ticks[:: max(1, len(ticks) // 12)]
-    fmt = "%b %y" if cand.get("tf") == "W" else "%b"
-    axv.set_xticks(ticks)
-    axv.set_xticklabels([sub.index[i].strftime(fmt) for i in ticks], color=TEXT)
+        axv.bar(x, sub["Volume"].values, width=0.65,
+                color=np.where(up_mask, UP, DOWN), alpha=0.55)
+        axv.set_yticks([])
 
-    unit = "w" if cand.get("tf") == "W" else "d"
-    pname = PATTERN_NAMES.get(cand.get("pattern", "ascending_triangle"), cand.get("pattern"))
-    ax.set_title(
-        f"{cand['symbol']}  —  {pname} ({cand.get('tf', 'D')})   "
-        f"score {cand['score']}   base {cand['base_days']}{unit}   "
-        f"{cand['n_touches']} touches   ADV ${cand['adv_dollar'] / 1e6:,.0f}M",
-        color=TEXT, fontsize=10, loc="left",
-    )
+        # month tick labels on bar index axis (no weekend gaps)
+        months = pd.Series(sub.index.strftime("%b %y"), index=x)
+        ticks = [i for i in x[1:] if months[i] != months[i - 1]]
+        if len(ticks) > 16:  # weekly charts span years — thin the labels
+            ticks = ticks[:: max(1, len(ticks) // 12)]
+        fmt = "%b %y" if cand.get("tf") == "W" else "%b"
+        axv.set_xticks(ticks)
+        axv.set_xticklabels([sub.index[i].strftime(fmt) for i in ticks], color=TEXT)
 
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png", facecolor=DARK_BG, bbox_inches="tight")
-    plt.close(fig)
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+        unit = "w" if cand.get("tf") == "W" else "d"
+        pname = PATTERN_NAMES.get(cand.get("pattern", "ascending_triangle"), cand.get("pattern"))
+        ax.set_title(
+            f"{cand['symbol']}  —  {pname} ({cand.get('tf', 'D')})   "
+            f"score {cand['score']}   base {cand['base_days']}{unit}   "
+            f"{cand['n_touches']} touches   ADV ${cand['adv_dollar'] / 1e6:,.0f}M",
+            color=TEXT, fontsize=10, loc="left",
+        )
+
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", facecolor=DARK_BG, bbox_inches="tight")
+        return base64.b64encode(buf.getvalue()).decode("ascii")
+    finally:
+        plt.close(fig)
 
 
 # ---------------------------------------------------------------------------
@@ -916,6 +931,10 @@ def resample_weekly(df):
 
 
 def _universe_label(value):
+    if value.startswith("finviz:"):
+        value = value[len("finviz:"):]
+        if not value.startswith("http"):
+            return "finviz:" + value
     if value.startswith("http") and "finviz.com" in value:
         from urllib.parse import urlparse, parse_qs
         query = parse_qs(urlparse(value).query)
@@ -1008,8 +1027,13 @@ def main(argv=None):
     candidates = []
     gated = detection_errors = 0
     for symbol, daily in sorted(data.items()):
-        adv = float((daily["Close"] * daily["Volume"]).tail(20).mean()) if args.timeframe == "W" else None
-        frame = resample_weekly(daily) if args.timeframe == "W" else daily
+        try:
+            adv = float((daily["Close"] * daily["Volume"]).tail(20).mean()) if args.timeframe == "W" else None
+            frame = resample_weekly(daily) if args.timeframe == "W" else daily
+        except Exception as exc:
+            detection_errors += len(patterns)
+            log.warning("%s: preprocessing error: %s", symbol, type(exc).__name__)
+            continue
         for pattern in patterns:
             try:
                 candidate = DETECTORS[pattern](symbol, frame, spy_close, params, adv_dollar=adv)

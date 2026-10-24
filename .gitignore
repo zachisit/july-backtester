@@ -85,3 +85,7 @@ paper_state/stock_level/*
 !paper_state/stock_level/.gitkeep
 paper_state/target_books/*
 !paper_state/target_books/.gitkeep
+
+# Generated liquidity-screen cache; refresh with scripts/build_us_universe.py.
+/tickers_to_scan/us_liquid.json
+/tickers_to_scan/us_liquid.meta.json

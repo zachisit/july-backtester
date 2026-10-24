@@ -246,3 +246,104 @@ def test_pine_confirm_alert_tracks_the_displayed_input_level():
     source = Path(scan.__file__).with_name("pattern_levels.pine").read_text()
     assert "ta.crossover(close, confirm)" in source
     assert "ta.crossover(close, B * (1 + 3.0 / 100))" not in source
+
+
+@pytest.mark.parametrize("prefix", ["", "finviz:"])
+def test_all_accepted_finviz_url_forms_redact_artifacts(monkeypatch, tmp_path, prefix):
+    monkeypatch.setattr(scan, "load_universe", lambda _: ["AAA"])
+    monkeypatch.setattr(scan, "fetch_parquet", lambda *a, **k: {"AAA": frame(), "SPY": frame()})
+    html, artifact = tmp_path / "scan.html", tmp_path / "scan.json"
+    value = prefix + "https://elite.finviz.com/export.ashx?f=geo_usa&auth=FAKE_SECRET"
+    assert scan.main(["--universe", value, "--out", str(html), "--json-out", str(artifact)]) == 0
+    assert "FAKE_SECRET" not in html.read_text() + artifact.read_text()
+    assert json.loads(artifact.read_text())["meta"]["universe"] == "finviz:geo_usa"
+
+
+def test_weekly_preparation_error_is_isolated_even_for_custom_loader(monkeypatch):
+    captured = {}
+    _mock_main(monkeypatch, captured)
+    bad = frame(450)
+    bad["Volume"] = "BAD"
+    monkeypatch.setattr(scan, "load_universe", lambda _: ["AAA", "BAD"])
+    monkeypatch.setattr(scan, "fetch_parquet", lambda *a, **k: {
+        "AAA": frame(450), "BAD": bad, "SPY": frame(450)})
+    assert scan.main(["--timeframe", "W"]) == 0
+    assert captured["meta"]["counts"]["detection_errors"] == 3
+    assert captured["meta"]["counts"]["gated"] == 3
+
+
+def test_weekly_cli_keeps_healthy_symbols_when_one_price_file_is_malformed(tmp_path):
+    data = frame(450)
+    for symbol in ("AAA", "SPY"):
+        data.to_parquet(tmp_path / f"{symbol}.parquet")
+    bad = data.copy()
+    bad["Volume"] = "BAD"
+    bad.to_parquet(tmp_path / "BAD.parquet")
+    html, artifact = tmp_path / "scan.html", tmp_path / "scan.json"
+    result = subprocess.run(
+        [sys.executable, scan.__file__, "--universe", "AAA,BAD", "--timeframe", "W",
+         "--parquet-dir", str(tmp_path), "--out", str(html), "--json-out", str(artifact)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert html.exists()
+    counts = json.loads(artifact.read_text())["meta"]["counts"]
+    assert counts["loaded"] == 1 and counts["load_errors"] == 1
+
+
+def test_preferred_issues_excluded_and_common_share_classes_preserved(monkeypatch):
+    nasdaq = ("Symbol|Security Name|ETF|Test Issue\n"
+              "AAPL|Apple - Common Stock|N|N\n"
+              "BRKRP|Bruker - Preferred Stock|N|N\n"
+              "AGNCP|AGNC - Depositary Shares Preferred Stock|N|N\n"
+              "PFBC|Preferred Bank - Common Stock|N|N\n")
+    other = ("ACT Symbol|Security Name|ETF|Test Issue\n"
+             "BRK.B|Berkshire Hathaway Class B Common Stock|N|N\n"
+             "BF.B|Brown-Forman Class B Common Stock|N|N\n"
+             "PREF$A|Example Preferred Stock|N|N\n")
+    monkeypatch.setattr(universe.urllib.request, "urlopen", lambda url, **k: io.BytesIO(
+        (nasdaq if url == universe.NASDAQ_URL else other).encode()))
+    assert universe.fetch_listings() == ["AAPL", "BF.B", "BRK.B", "PFBC"]
+
+
+def test_yahoo_aliases_preserve_share_class_identity_in_both_tools(monkeypatch):
+    calls = []
+    raw = pd.concat({"BRK-B": frame(), "BF-B": frame()}, axis=1)
+    def download(tickers, **kwargs):
+        calls.append(tickers)
+        return raw
+    monkeypatch.setitem(sys.modules, "yfinance", SimpleNamespace(download=download))
+    assert set(scan.fetch_yahoo(["BRK.B", "BF.B"])) == {"BRK.B", "BF.B"}
+    assert set(universe.liquidity_filter(["BRK.B", "BF.B"], 2e6)) == {"BRK.B", "BF.B"}
+    assert calls == [["BRK-B", "BF-B"], ["BRK-B", "BF-B"]]
+
+
+def test_chart_keeps_the_entire_detected_base(monkeypatch, frozen):
+    from matplotlib.axes import Axes
+    _, data = frozen
+    candidate = scan.detect_hs_bottom("MDLZ", data["MDLZ"], data["SPY"]["Close"], dict(scan.DEFAULT_PARAMS))
+    lengths = []
+    original = Axes.vlines
+    def vlines(self, x, *a, **k):
+        lengths.append(len(x))
+        return original(self, x, *a, **k)
+    monkeypatch.setattr(Axes, "vlines", vlines)
+    assert scan.render_chart(candidate)
+    assert max(lengths) >= candidate["base_days"] + 20
+
+
+def test_missing_generated_universe_points_at_builder(tmp_path):
+    with pytest.raises(FileNotFoundError, match="build_us_universe.py"):
+        scan.load_universe(str(tmp_path / "us_liquid.json"))
+
+
+def test_chart_failure_releases_the_figure(monkeypatch, frozen):
+    import matplotlib.pyplot as plt
+    from matplotlib.figure import Figure
+    _, data = frozen
+    candidate = scan.detect_rectangle("DASH", data["DASH"], data["SPY"]["Close"], dict(scan.DEFAULT_PARAMS))
+    before = set(plt.get_fignums())
+    monkeypatch.setattr(Figure, "savefig", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("render failed")))
+    with pytest.raises(RuntimeError, match="render failed"):
+        scan.render_chart(candidate)
+    assert set(plt.get_fignums()) == before
