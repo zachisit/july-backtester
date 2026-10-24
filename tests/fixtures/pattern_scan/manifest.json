@@ -1,0 +1,98 @@
+{
+  "as_of": "2026-07-02",
+  "scanner_head": "1358f445",
+  "source": "local Parquet snapshot; rows truncated before selecting last 800 bars",
+  "symbols": {
+    "MDLZ": {
+      "source_rows_through_as_of": 6300,
+      "fixture_rows": 800,
+      "source_sha256": "0b1912d667fb89acd09582439033a9a31ef054800f9c3ec39c2ccacf63e9a874",
+      "csv_sha256": "fc3dd26a848008f1d9f0a3e714d8b62ae656c9aa2298b27cf925ec1eb617baa6",
+      "start": "2023-04-25 00:00:00+00:00",
+      "end": "2026-07-02 00:00:00+00:00"
+    },
+    "SPY": {
+      "source_rows_through_as_of": 8413,
+      "fixture_rows": 800,
+      "source_sha256": "8a2fb888ea170389f29db569876dabd8dcddfd0ce62f83270bf48960ed71bbc9",
+      "csv_sha256": "fbac826623a5c9acc6aa70b51daa66edd6d333e4bd0994137324c0a3f5e0f558",
+      "start": "2023-04-25 00:00:00+00:00",
+      "end": "2026-07-02 00:00:00+00:00"
+    },
+    "DASH": {
+      "source_rows_through_as_of": 1396,
+      "fixture_rows": 800,
+      "source_sha256": "d5fa563874392ebd4fba674b2efa09571f9af94c62f1bafdb5a07f783ca16873",
+      "csv_sha256": "df0536d9929d74304073da601fa991d290e603ae279c01097113d295962b231d",
+      "start": "2023-04-25 00:00:00+00:00",
+      "end": "2026-07-02 00:00:00+00:00"
+    },
+    "KHC": {
+      "source_rows_through_as_of": 2765,
+      "fixture_rows": 800,
+      "source_sha256": "651127938a2f1fb80cf0065eca5db03853f353dba55334fdf815cd2617e4081b",
+      "csv_sha256": "f62fe5a41e9ecf33aea3412fb63d2e992a72a0119093e6c3e526dfd63ac071a5",
+      "start": "2023-04-25 00:00:00+00:00",
+      "end": "2026-07-02 00:00:00+00:00"
+    },
+    "XEL": {
+      "source_rows_through_as_of": 9192,
+      "fixture_rows": 800,
+      "source_sha256": "a55cf8d76a4d8e5bbcd52436cacf143585610db59b477c96a4f28c7ff21a9f60",
+      "csv_sha256": "c323547cf8c1366417b4ee3344f97be294b67110ebf5226fc1fbf16afeefbc5a",
+      "start": "2023-04-25 00:00:00+00:00",
+      "end": "2026-07-02 00:00:00+00:00"
+    }
+  },
+  "detections": {
+    "MDLZ": {
+      "hs_bottom": {
+        "score": 39.8,
+        "level": 62.49326832580566,
+        "trigger": 63.29568862915039,
+        "target": 76.93671699210392,
+        "base_start": 582,
+        "base_days": 217,
+        "n_touches": 10
+      }
+    },
+    "DASH": {
+      "rectangle": {
+        "score": 45.9,
+        "level": 186.9788787841797,
+        "trigger": 191.1699981689453,
+        "target": 243.9713912550409,
+        "base_start": 707,
+        "base_days": 92,
+        "n_touches": 5
+      }
+    },
+    "KHC": {
+      "rectangle": {
+        "score": 52.5,
+        "level": 24.71397305806478,
+        "trigger": 25.1379451751709,
+        "target": 29.036390242232155,
+        "base_start": 626,
+        "base_days": 173,
+        "n_touches": 9
+      }
+    },
+    "XEL": {
+      "rectangle": {
+        "score": 47.7,
+        "level": 81.32538890838623,
+        "trigger": 81.86000061035156,
+        "target": 92.69761194687321,
+        "base_start": 617,
+        "base_days": 182,
+        "n_touches": 8
+      }
+    }
+  },
+  "review_tape_row_counts": {
+    "MDLZ": 6300,
+    "SPY": 8413,
+    "BIIB": 8754
+  }
+}

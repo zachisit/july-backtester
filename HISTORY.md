@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Add a standalone pattern scanner with frozen regression bars, historical replay, per-family controls, visible coverage/errors and tolerance provenance; fix the universe builder and Pine confirm-alert wiring (#348/#349).
+
 - Missing-bars demerits continue charging through 60% missing coverage, with a 30-point cap; the integer casts remain unchanged (#378/#382).
 
 - Position sizing reports per-run stop-input, proxy, cap, cash/margin, ADV, and heat conditions for every entry leg, including zero-trade runs. Tiny equity shorts now honor the same minimum size as longs (#387/#394).
