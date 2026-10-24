@@ -50,15 +50,23 @@ def _run_short(df, monkeypatch, **cfg):
 
 
 class TestEquityShortSlippage:
-    def test_short_entry_fills_below_raw_price_by_slippage(self, monkeypatch):
+    @pytest.mark.parametrize("requirement", [.5, 1.])
+    def test_short_entry_fills_below_raw_price_by_slippage(self, monkeypatch, requirement):
         df = _frame()
         res = _run_short(df, monkeypatch, slippage_pct=0.01,
-                         max_pct_adv=0.0, volume_impact_coeff=0.0)
+                         max_pct_adv=0.0, volume_impact_coeff=0.0,
+                         short_margin_requirement=requirement)
         row = pd.DataFrame(res["trade_log"]).iloc[0]
         # ep = 100 (bar1 close); sell fill = 100 * (1 - 0.01) = 99.0. Was 100.0.
         assert row["EntryPrice"] == pytest.approx(99.0)
-        # Share count sizes off the SLIPPED fill, not the raw price.
-        assert row["Shares"] == pytest.approx(100_000.0 / 99.0)
+        # Desired units use the slipped fill. A 100% collateral requirement
+        # binds after commission; the 50% default can fund the full target.
+        from helpers.portfolio_simulations import CONFIG as _C
+        _comm = _C.get("commission_per_share", 0.0) or 0.0
+        target = 100_000.0 / 99.0
+        affordable = 100_000.0 / (99.0 * requirement + _comm)
+        assert row["Shares"] == pytest.approx(min(target, affordable))
+        assert row["Shares"] * 99.0 * requirement + row["Shares"] * _comm <= 100_000.
 
     def test_zero_slippage_leaves_entry_at_raw_price(self, monkeypatch):
         df = _frame()

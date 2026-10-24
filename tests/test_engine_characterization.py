@@ -34,6 +34,66 @@ Regression map — scenario -> engine behaviour proven unchanged
   trailing_atr_equity  trailing_atr stop on an equity (CASH_FULL) symbol — anchors
                        stop/target/breakeven floor to slipped entry_price, not raw
                        (#240 fix); arm + trail + floor all exercise the equity path
+  risk_pct_capped_heat risk_pct_capped WITH the portfolio heat check live — pins
+                       that method's SECOND output, the stop fraction the heat
+                       check reads. Cap deliberately not binding here (#384)
+  risk_pct_capped_cap  risk_pct_capped where max_contracts_cap DOES bind: 40
+                       contracts wanted, 20 delivered. On MES since #385 gated
+                       the cap on margin_mode (#384, retargeted by #385)
+  risk_pct_capped_equity_uncapped
+                       the same method on an EQUITY, where #385 removed the cap
+                       and the integer floor and added a notional ceiling — the
+                       delivered-risk behaviour the fix exists to produce (#385)
+  risk_pct_capped_ceiling  the notional ceiling BINDING — the only scenario in
+                       which it does. Runs at heat 0.0075 because at heat 1.0
+                       the pre-existing cash clamp lands on the same number and
+                       the ceiling can be deleted without moving anything (#385)
+  risk_pct_capped_points_stop
+                       `points` stop + risk_pct_capped, which took ZERO trades
+                       long-only until #385 closed the shorter of the engine's
+                       two stop-distance ladders. Blessed at the POST state, not
+                       frozen pre-change — the pre-change result is no trades,
+                       which `_snapshot` cannot represent (#385)
+  fixed_contracts_futures  fixed_contracts on a MARGINED instrument — a unit
+                       count that must skip the point_value / margin conversion.
+                       Futures on purpose: on an equity that conversion is a
+                       no-op, so an equity scenario cannot fail on it (#384)
+
+  hold_state_stop      #401: a forward-filled 1 stopped out does NOT re-enter (edge)
+  hold_state_stop_level  ...and DOES under entry_trigger="level" (the twin)
+  hold_state_short     a held -2 is one short to the -1 cover, not a cover per bar
+
+Coverage note (#384): before the three sizing cases, this fixture pinned exactly TWO of
+the six position_sizing_method values — `fixed` via _BASE_CFG and `risk_parity`
+via one override. It was therefore structurally unable to fail a change to the
+other four, which makes "the golden master is byte-identical" a valid necessary
+condition and an invalid sufficient one.
+
+Two traps when adding a method here, both hit on the first draft of the three
+above and both of which produce a scenario that passes every mutant:
+
+  1. Put the CLAMPS at real values, not _BASE_CFG's disabled ones. Disabling
+     heat and the ADV cap is right for isolating core arithmetic, but it also
+     switches off the only consumer of risk_pct_capped's second output — with
+     max_portfolio_heat at 1.0 that output can be deleted outright and this
+     fixture will not move.
+  2. Use a FUTURES symbol for anything about the unit-count/dollar distinction.
+     The point_value / margin_required conversion is identity on a cash equity.
+
+Every scenario added for #384 was verified by mutation — each one moves for a
+specific defect and the others do not.
+
+A third trap, from #385 (which DID move numbers, deliberately):
+
+  3. A behavioural change can turn an existing scenario VACUOUS rather than
+     failing it, and the re-bless then freezes the vacuity. #385 sized
+     risk_pct_capped up to its real 1%-of-equity target on equities, which the
+     `risk_pct_capped_heat` scenario's 1% heat cap then REJECTED — the scenario
+     went to zero trades, which passes forever and asserts nothing. And
+     `risk_pct_capped_cap` stopped binding the cap it is named for, because the
+     cap no longer applies to its (equity) symbol. Before regenerating, check
+     that every scenario still exercises what its name claims; `_snapshot`
+     asserting `result is not None` catches only the extreme case.
 
 Regenerate the fixture (ONLY when an intended behaviour change is reviewed):
     REGEN_GOLDEN=1 .venv/bin/python -m pytest tests/test_engine_characterization.py -q
@@ -180,13 +240,404 @@ def _scenario(name):
                 {"type": "trailing_atr", "stop_mult": 1.0, "trail_mult": 1.0,
                  "t1_mult": 2.0, "floor": "breakeven"}, {})
 
+    if name == "risk_pct_capped_heat":
+        # #384: before this scenario existed, `grep -c 'risk_pct_capped\|
+        # fixed_contracts' <this file>` returned 0 -- the base config pins
+        # position_sizing_method="fixed" and the only override in the set is
+        # risk_parity, so neither method was ever selected and the fixture was
+        # byte-identical whether their implementation was right or wrong.
+        # "Any diff means it's wrong" held; "no diff means it's right" did not.
+        #
+        # Clamps are deliberately NOT at _BASE_CFG's disabled values here.
+        # risk_pct_capped's second output (sizing_kwargs["stop_distance_pct"])
+        # is read ONLY by the heat check, so a fixture with max_portfolio_heat
+        # at 1.0 cannot see it. price 5000 + point_cap 60 gives a real stop
+        # fraction of 1.2%, and heat 0.01 falls between that and the flat 2%
+        # target_risk_per_trade proxy the check silently reverts to if the
+        # output is dropped.  (@shardul0701 on #384.)
+        # Heat 0.015, not 0.01 (#385). This scenario was frozen while the
+        # 20-unit cap still applied to equities, so the position risked ~0.1%
+        # and fitted inside a 1% budget trivially. With the cap gated to
+        # margined instruments the position risks a genuine ~1.0%, a 1% heat
+        # cap rejects it, and the scenario freezes ZERO TRADES -- which passes
+        # forever and asserts nothing. Raised so it still exercises a real
+        # position while keeping the real-fraction/2%-proxy comparison live.
+        closes = [5000 + 10 * i for i in range(11)]
+        df = _df(closes, atr=[100.0] * len(closes))
+        sig = _sig(df, {2: 1, 8: -1})
+        return ({"III": df}, {"III": sig},
+                {"position_sizing_method": "risk_pct_capped",
+                 "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "risk_pct_capped_max_notional_pct": 1.0,
+                 "max_portfolio_heat": 0.015, "max_pct_adv": 0.05},
+                {"type": "trailing_atr", "stop_mult": 1.0, "trail_mult": 1.0,
+                 "t1_mult": 2.0, "point_cap": 60, "floor": "breakeven"}, {})
+
+    if name == "risk_pct_capped_cap":
+        # Binds max_contracts_cap: $1,000 budget / $5-per-contract stop = 200
+        # contracts wanted, 20 delivered.
+        #
+        # On MES, not on an equity (#385). The first version of this scenario
+        # used a cash equity, which was correct while the cap applied to
+        # everything -- but #385 gates the cap (and the integer floor) on
+        # margin_mode, because a contract count is not a share count. On an
+        # equity this now pins the UNCAPPED path and the mutant that deletes
+        # the clamp sails through it. Moving it to a margined instrument keeps
+        # it pinning what its name says.
+        #
+        # Price ~100, not ~1000: on MES a 5% stop at 1000 is 50 points, so the
+        # budget buys 1000/(50*5) = 3.9 -> 3 contracts and the cap never binds
+        # — the scenario would freeze the FLOOR while claiming to freeze the
+        # cap. At 100 the stop is 5 points, 40 contracts are wanted and 20
+        # delivered. Checked by running it, not by reading it.
+        df = _df([100 + i for i in range(10)])
+        sig = _sig(df, {1: 1, 6: -1})
+        return ({"MESM6": df}, {"MESM6": sig},
+                {"position_sizing_method": "risk_pct_capped",
+                 "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "max_portfolio_heat": 1.0, "max_pct_adv": 0.05,
+                 "instruments": {"default_asset_class": "equity",
+                                 "futures_initial_margin_pct": 0.10,
+                                 "futures_commission_per_contract": 2.50,
+                                 "futures_slippage_ticks": 1.0,
+                                 "overrides": {}}},
+                {"type": "percentage", "value": 0.05}, {})
+
+    if name == "equity_short_non_fixed_method":
+        # #386. Frozen BEFORE the change, deliberately, because as the fixture
+        # stood it could not detect that change at all: `short_borrow` is the
+        # only short scenario and it inherits `position_sizing_method: "fixed"`
+        # from _BASE_CFG — the one method whose long and short legs already
+        # agree to the tick. So routing the equity short leg through
+        # calculate_position_size moves nothing in the fixture, and a reviewer
+        # gets a clean diff for a change that alters every non-`fixed` short in
+        # production. (@shardul0701's audit on #386.)
+        #
+        # Mirror image of #384's problem: there the fixture could not detect a
+        # refactor that SHOULD NOT move numbers; here it cannot detect one that
+        # SHOULD.
+        #
+        # A real stop config so the sizing path is reachable, and vol_parity
+        # because its long/short divergence is the largest in the measured
+        # table (999.48 vs 100.05).
+        df = _df([100, 99, 98, 97, 96, 95, 96, 97, 98, 99],
+                 atr=[2.0] * 10)
+        sig = _sig(df, {1: -2, 6: -1})
+        return ({"NNN": df}, {"NNN": sig},
+                {"position_sizing_method": "vol_parity",
+                 "target_risk_per_trade": 0.02,
+                 "max_portfolio_heat": 1.0, "max_pct_adv": 0.0},
+                {"type": "percentage", "value": 0.05}, {})
+
+    if name == "futures_short_non_fixed_method":
+        # #386, second half. Frozen BEFORE the change, same as its equity
+        # sibling. The FUTURES short leg dispatched on a two-method list
+        # (`risk_pct_capped`, `fixed_contracts`) while the long leg calls
+        # calculate_position_size for all six, so vol_parity / risk_parity /
+        # kelly fell to fixed-fractional-over-margin there.
+        #
+        # The comment that guarded it — "Same two methods the long path
+        # dispatches" — was true when #384 wrote it and stopped being true in
+        # the same PR, because #384 is what made the long path unconditional.
+        #
+        # vol_parity because the short leg is INERT rather than merely
+        # different, and vol_parity's response to ATR is the clearest way to
+        # show that: swept over ATR the long leg tracks 197/198/100/50 while the
+        # short stays pinned at 19. (@shardul0701 on #392.)
+        df = _df([1000 - 5 * i for i in range(10)], atr=[20.0] * 10)
+        sig = _sig(df, {1: -2, 6: -1})
+        return ({"MESM6": df}, {"MESM6": sig},
+                {"position_sizing_method": "vol_parity",
+                 "target_risk_per_trade": 0.02,
+                 "max_portfolio_heat": 1.0, "max_pct_adv": 0.0,
+                 "instruments": {"default_asset_class": "equity",
+                                 "futures_initial_margin_pct": 0.10,
+                                 "futures_commission_per_contract": 2.50,
+                                 "futures_slippage_ticks": 1.0,
+                                 "overrides": {}}},
+                {"type": "percentage", "value": 0.05}, {})
+
+    if name == "size_mults_both_legs":
+        # #386. `size_mults` is a public parameter of run_portfolio_simulation
+        # that the long path honours and the short path drops. Nothing in-repo
+        # passes it (git grep finds only test_intrabar_wiring.py asserting it
+        # stays None), so it is latent through main.py and live for anything
+        # sizing off an ML probability band — and it had NO regression guard on
+        # either leg until #384 added one.
+        #
+        # Uses the 5th tuple slot, which is `{}` in every other scenario. One
+        # long symbol and one short, both at 0.5x, so the ratio is assertable on
+        # both legs from one frozen fixture.
+        #
+        # EQUITY on purpose: `round_units` floors a futures position to whole
+        # contracts, so 19 x 0.5 lands at 9 rather than 9.5 and an exact-ratio
+        # reading fails for a reason unrelated to size_mults. `fixed` sizing and
+        # heat off for the same reason — at the default 2% target, vol_parity
+        # sizes to ~100% of equity and the cash clamp bites at 1.0x but not at
+        # 0.5x, which also breaks the ratio. Both cost a round on #384's version
+        # of this test.
+        dfl = _df([100, 101, 102, 103, 104, 105, 106, 107])
+        dfs = _df([100, 99, 98, 97, 96, 95, 96, 97])
+        mults_l = pd.Series(0.5, index=dfl.index, dtype=float)
+        mults_s = pd.Series(0.5, index=dfs.index, dtype=float)
+        return ({"LONG": dfl, "SHRT": dfs},
+                {"LONG": _sig(dfl, {1: 1, 6: -1}),
+                 "SHRT": _sig(dfs, {1: -2, 6: -1})},
+                {"max_portfolio_heat": 1.0, "max_pct_adv": 0.0},
+                {"type": "none"},
+                {"size_mults": {"LONG": mults_l, "SHRT": mults_s}})
+
+    if name == "risk_pct_capped_points_stop":
+        # The futures-native pairing: `points` stop + risk_pct_capped, which
+        # long-only took ZERO trades for an entire backtest before #385 closed
+        # the shorter of the engine's two stop-distance ladders.
+        #
+        # This scenario is blessed at the POST state, not frozen pre-change like
+        # the #384 ones. It cannot be frozen pre-change: the pre-change result
+        # is no trades at all, and `_snapshot` asserts `result is not None`.
+        # That is the correct asymmetry — this is a NEW scenario for behaviour
+        # that did not exist, not a re-bless of an existing number. The
+        # pre-change value is recorded here instead: `{'shares': None}`, against
+        # the short leg's 20 contracts on identical inputs.
+        #
+        # floor(1000 budget / (5 points x $5/point)) = 40 -> capped at 20.
+        df = _df([1000 + 10 * i for i in range(10)])
+        sig = _sig(df, {1: 1, 6: -1})
+        return ({"MESM6": df}, {"MESM6": sig},
+                {"position_sizing_method": "risk_pct_capped",
+                 "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "max_portfolio_heat": 1.0, "max_pct_adv": 0.05,
+                 "instruments": {"default_asset_class": "equity",
+                                 "futures_initial_margin_pct": 0.10,
+                                 "futures_commission_per_contract": 2.50,
+                                 "futures_slippage_ticks": 1.0,
+                                 "overrides": {}}},
+                {"type": "points", "value": 5.0}, {})
+
+    if name == "risk_pct_capped_ceiling":
+        # The notional ceiling BINDING, which nothing else here does. Added
+        # because the mutation matrix caught the gap: deleting the ceiling
+        # outright passed all 14 other scenarios. Every one of them has a stop
+        # wide enough (>= risk_pct_per_trade) that the ceiling costs nothing —
+        # which is by design, but it means the fixture could not fail on the
+        # one control #385 adds.
+        #
+        # 0.5% stop against a 1% risk budget: 2,000 shares wanted at $100,
+        # $200k of notional on $100k of equity. Unreachable without leverage,
+        # so the ceiling clamps to 1,000 shares.
+        #
+        # max_portfolio_heat is 0.0075 for a specific reason, found by mutation
+        # rather than by design. With heat at 1.0 this scenario ALSO passed the
+        # ceiling-deleted mutant, because the pre-existing cash clamp
+        # (`capital_needed > cash` -> `shares = cash / entry_price`) truncates
+        # an unclamped 2,000 shares back to ~999 anyway. At a ceiling of 1.0 on
+        # a single-name book the two are very nearly the same number.
+        #
+        # What the ceiling adds is not a smaller number, it is an EARLIER one:
+        # it clamps BEFORE the heat check, so heat evaluates the position that
+        # will actually be held. The cash clamp runs after. Unclamped, this
+        # position presents 200k of notional to the heat check and reads as
+        # 1.00% risk; clamped, it presents 100k and reads as 0.50%. A 0.75%
+        # heat budget therefore ADMITS it with the ceiling and REJECTS it
+        # without — and the rejection is on a position size that would never
+        # have been held. (The ceiling is also equity-based rather than
+        # cash-based, which diverges once other positions are open, and is
+        # configurable below 1.0; neither is exercised here.)
+        df = _df([100, 101, 102, 103, 104, 105, 106, 107, 108, 109])
+        sig = _sig(df, {1: 1, 6: -1})
+        return ({"LLL": df}, {"LLL": sig},
+                {"position_sizing_method": "risk_pct_capped",
+                 "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "risk_pct_capped_max_notional_pct": 1.0,
+                 "max_portfolio_heat": 0.0075, "max_pct_adv": 0.05},
+                {"type": "percentage", "value": 0.005}, {})
+
+    if name == "risk_pct_capped_equity_uncapped":
+        # #385's actual subject: the same method on an EQUITY, where the cap
+        # and the floor no longer apply and the notional ceiling does. The
+        # budget is fully deliverable here (5% stop >> 1% risk), so this
+        # freezes the delivered-risk behaviour the fix exists to produce
+        # rather than the clamp that used to hide it.
+        df = _df([1000 + 10 * i for i in range(10)])
+        sig = _sig(df, {1: 1, 6: -1})
+        return ({"KKK": df}, {"KKK": sig},
+                {"position_sizing_method": "risk_pct_capped",
+                 "risk_pct_per_trade": 0.01, "max_contracts_cap": 20,
+                 "risk_pct_capped_max_notional_pct": 1.0,
+                 "max_portfolio_heat": 1.0, "max_pct_adv": 0.05},
+                {"type": "percentage", "value": 0.05}, {})
+
+    if name == "fixed_contracts_futures":
+        # The other method #384 hoists, on a MARGINED instrument -- which is
+        # where it matters. fixed_contracts answers in units, so it must skip
+        # the point_value / margin_required conversion the four dollar-answering
+        # methods get. On an EQUITY that conversion is a no-op (point_value 1.0,
+        # CASH_FULL), so an equity scenario cannot fail on it: measured, the
+        # first draft of this scenario used a cash equity and the mutant that
+        # deletes the gate passed it 12/12. On MES the same mutant doubles the
+        # position, 3 contracts -> 6.
+        df = _df([1000 + 10 * i for i in range(9)])
+        sig = _sig(df, {1: 1, 6: -1})
+        return ({"MESM6": df}, {"MESM6": sig},
+                {"position_sizing_method": "fixed_contracts",
+                 "fixed_contracts_per_trade": 3,
+                 "max_portfolio_heat": 0.10, "max_pct_adv": 0.05,
+                 "instruments": {"default_asset_class": "equity",
+                                 "futures_initial_margin_pct": 0.10,
+                                 "futures_commission_per_contract": 2.50,
+                                 "futures_slippage_ticks": 1.0,
+                                 "overrides": {}}},
+                {"type": "percentage", "value": 0.05}, {})
+
+    if name == "futures_margin_bound_commission":
+        # #386 QA round 3/4. A margin-bound futures entry with commission: the
+        # short SKIPPED it (clamp left no room for commission) and the long cut
+        # it further than needed (subtracted the OVERSIZED count's commission).
+        # Both now take floor(free / (margin + commission)). This moves LONG
+        # numbers, so it is frozen here -- the golden master had no scenario
+        # reaching that branch. Long then short, sequential: the long sees
+        # $100k free (1904 = floor(100000 / 52.5)), the short what the long's
+        # round-trip commission left (1723 = floor(90480 / 52.5)).
+        n = 10
+        df_l = _df([100.0] * n, atr=[0.2] * n)
+        df_s = _df([100.0] * n, atr=[0.2] * n)
+        return ({"MESM6": df_l, "MESZ6": df_s},
+                {"MESM6": _sig(df_l, {1: 1, 3: -1}),
+                 "MESZ6": _sig(df_s, {5: -2, 7: -1})},
+                {"position_sizing_method": "vol_parity",
+                 "target_risk_per_trade": 0.004, "max_portfolio_heat": 1.0,
+                 "max_pct_adv": 0.0,
+                 "instruments": {"default_asset_class": "equity",
+                                 "futures_initial_margin_pct": 0.10,
+                                 "futures_commission_per_contract": 2.50,
+                                 "futures_slippage_ticks": 0.0,
+                                 "overrides": {}}},
+                {"type": "none"}, {})
+
+    if name == "kelly_short_with_history":
+        # #386, kelly. Every other short scenario completes no trades before
+        # its short entry, and kelly needs >= 10 completed trades before it
+        # reads the record -- so the fixture could not see that the short legs
+        # never SUPPLIED win_rate/avg_win/avg_loss. HHH completes 12 round
+        # trips (7 wins of +3%, 5 losses of -2%), then SSS shorts. Before the
+        # fix SSS sized at the fixed fallback; after it, off the record.
+        # (Adversarial QA on #392: reverting the kelly commit left this file
+        # green.)
+        px, pairs = [], {}
+        for i in range(12):
+            up = (i % 5) not in (1, 3)
+            pairs[3 * i], pairs[3 * i + 1] = 1, -1
+            px += [100.0, 103.0 if up else 98.0, 100.0]
+        px += [100.0] * 4
+        hhh = _df(px)
+        sss = _df([100.0] * len(px))
+        return ({"HHH": hhh, "SSS": sss},
+                {"HHH": _sig(hhh, pairs), "SSS": _sig(sss, {37: -2, 39: -1})},
+                {"position_sizing_method": "kelly", "kelly_fraction": 0.25},
+                {"type": "none"}, {})
+
+
+    if name == "hold_state_stop":
+        # #401 / review of #373. Every OTHER scenario in this file builds its
+        # signal with _sig(df, {i: v}) -- an isolated pulse on a zero series --
+        # and 0 -> 1 is a transition under BOTH entry_trigger semantics. So the
+        # fixture was structurally blind to level-vs-edge: injecting
+        # entry_trigger into _BASE_CFG changed nothing, and a config key that is
+        # silently IGNORED produces the identical "10 passed".
+        #
+        # This is the missing coverage: same bars as long_pct_stop, same 5% stop,
+        # signal forward-filled instead of pulsed. Under "level" the stop closes
+        # the position and the still-held 1 re-enters; under "edge" it does not.
+        # entry_trigger is set EXPLICITLY (it was inherited from the local
+        # config.py, so a user running "level" locally failed the golden
+        # master), and hold_state_stop_level is the twin: the two together pin
+        # the semantics in both directions. The shipped default is pinned
+        # separately by test_entry_trigger.TestDefaultIsEdge.
+        df = _df([100, 101, 102, 101, 100, 94, 95, 96, 97, 98])
+        sig = pd.Series(0, index=df.index, dtype=int)
+        sig.iloc[1:] = 1                                  # enter and STAY 1
+        return ({"BBB": df}, {"BBB": sig}, {"entry_trigger": "edge"},
+                {"type": "percentage", "value": 0.05}, {})
+
+    if name == "hold_state_stop_level":
+        df = _df([100, 101, 102, 101, 100, 94, 95, 96, 97, 98])
+        sig = pd.Series(0, index=df.index, dtype=int)
+        sig.iloc[1:] = 1
+        return ({"BBB": df}, {"BBB": sig}, {"entry_trigger": "level"},
+                {"type": "percentage", "value": 0.05}, {})
+
+    if name == "hold_state_short":
+        # #405 QA: -2 held on every bar of a short. The cover test treated -2
+        # as a cover, so level churned a round trip per bar and edge went flat
+        # after one bar. Pins one short held to the -1 cover.
+        df = _df([100, 99, 98, 97, 96, 95, 96, 97, 98, 99])
+        sig = pd.Series(0, index=df.index, dtype=int)
+        sig.iloc[1:8] = -2
+        sig.iloc[8] = -1
+        return {"SSS": df}, {"SSS": sig}, {}, {"type": "none"}, {}
+
+    if name == "tiny_equity_short_entry":
+        control = _df([100.] * 8)
+        thin = _df([100.] * 8, volumes=[.02] * 8)
+        return ({"AAA": control, "BBB": thin},
+                {"AAA": _sig(control, {1: 1, 6: -1}),
+                 "BBB": _sig(thin, {1: -2, 6: -1})},
+                {"slippage_pct": 0., "commission_per_share": 0., "max_pct_adv": .05},
+                {"type": "none"}, {})
+
+    if name == "futures_short_liquidity":
+        df = _df([100.] * 30, opens=[100.] * 30,
+                 highs=[101.] * 30, lows=[99.] * 30)
+        return ({"MESM6": df, "MESZ6": df.copy()},
+                {"MESM6": _sig(df, {21: 1, 26: -1}),
+                 "MESZ6": _sig(df, {21: -2, 26: -1})},
+                {"max_portfolio_heat": 100., "max_pct_adv": .00005,
+                 "volume_impact_coeff": .5,
+                 "instruments": {"default_asset_class": "equity", "overrides": {},
+                                 "futures_initial_margin_pct": .1,
+                                 "futures_commission_per_contract": 0.,
+                                 "futures_slippage_ticks": 0.}},
+                {"type": "none"}, {})
+
+    if name == "futures_long_real_stop_heat":
+        # A $500 MES long risks 1% through a five-point stop. The $100
+        # follower risks 5%, so only the control fits a 4% aggregate heat cap.
+        control = _df([500.] * 8, opens=[500.] * 8,
+                      highs=[501.] * 8, lows=[499.] * 8)
+        follower = _df([100.] * 8, opens=[100.] * 8,
+                       highs=[101.] * 8, lows=[99.] * 8)
+        return ({"MESM6": control, "MESZ6": follower},
+                {"MESM6": _sig(control, {0: 1, 6: -1}),
+                 "MESZ6": _sig(follower, {1: 1, 6: -1})},
+                {"execution_time": "close", "position_sizing_method": "fixed",
+                 "max_portfolio_heat": .04, "max_pct_adv": 0.,
+                 "instruments": {"default_asset_class": "equity", "overrides": {},
+                                 "futures_initial_margin_pct": .1,
+                                 "futures_commission_per_contract": 0.,
+                                 "futures_slippage_ticks": 0.}},
+                {"type": "points", "value": 5.}, {})
+
     raise ValueError(name)
 
 
 SCENARIOS = [
+    "tiny_equity_short_entry",
+    "futures_short_liquidity",
+    "futures_long_real_stop_heat",
     "long_basic", "long_pct_stop", "long_atr_stop", "short_borrow",
     "vol_impact", "risk_parity_stop", "exclude_open", "multi_symbol",
-    "trailing_atr_equity",
+    "trailing_atr_equity", "hold_state_stop", "hold_state_stop_level",
+    "hold_state_short",
+    # #384 -- the two methods the fixture was structurally unable to fail on.
+    "risk_pct_capped_heat", "risk_pct_capped_cap", "fixed_contracts_futures",
+    # #385 -- the equity path, where the cap and floor no longer apply.
+    "risk_pct_capped_equity_uncapped", "risk_pct_capped_ceiling",
+    "risk_pct_capped_points_stop",
+    # #386 -- frozen BEFORE the equity-short change, which the fixture could not
+    # otherwise detect at all. See the audit note in the coverage section.
+    "equity_short_non_fixed_method", "futures_short_non_fixed_method",
+    "size_mults_both_legs", "kelly_short_with_history",
+    "futures_margin_bound_commission",
 ]
 
 

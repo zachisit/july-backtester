@@ -40,8 +40,11 @@ Integration status (so callers don't assume more than is live):
 from __future__ import annotations
 
 import json
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _norm(t):
@@ -73,7 +76,7 @@ def _yaml_change_intervals(start: str, end: str, yaml_dir: "Path",
     represented as separate intervals rather than swallowed.
     """
     import pandas as pd
-    from helpers.pit_universe import _load_sp500_yaml as _load_yaml  # generic YAML loader
+    from helpers.point_in_time import _load_year_yaml as _load_yaml
 
     yaml_dir = Path(yaml_dir)
     if not yaml_dir.is_dir():
@@ -85,6 +88,10 @@ def _yaml_change_intervals(start: str, end: str, yaml_dir: "Path",
     for year in range(seed_year, end_y + 1):
         path = yaml_dir / f"{file_prefix}-{year}.yaml"
         if not path.exists():
+            logger.warning(
+                "PIT membership history is incomplete: missing %s. "
+                "Re-sync the roster before trusting index removals.", path,
+            )
             continue
         data = _load_yaml(path)
         if not data:
@@ -203,17 +210,27 @@ def membership_intervals(value: str, config: dict | None = None) -> dict:
     end = config.get("end_date")
     if not start or not end:
         return {}
-    if kind == "sp500":
-        repo = config.get("sp500_pit_path") or os.environ.get("SP500_DATA_ROOT", "")
-        return _sp500_intervals(start, end, repo) if repo else {}
+    from helpers.point_in_time import PitRosterError, select_roster
 
-    # nq100: prefer the survivorship-free change-event YAML repo (config key or
-    # NQ100_DATA_ROOT env, symmetric with sp500). Fall back to the legacy
-    # daily-snapshot parquet only when the YAML repo yields nothing, so users
+    # Same roster, same completeness rule as build_membership_schedule (#422
+    # review): a partial mirror must not silently drive forced exits off a
+    # timeline with missing removals. Intervals replay from the 2004 seed, so
+    # the selection covers that span.
+    try:
+        yaml_dir, prefix = select_roster(kind, int(str(end)[:4]), config)
+    except PitRosterError as exc:
+        if exc.incomplete or exc.invalid:
+            raise
+        yaml_dir = None  # no YAML roster at all: keep the legacy fallbacks below
+
+    if kind == "sp500":
+        return _yaml_change_intervals(start, end, yaml_dir, prefix) if yaml_dir else {}
+
+    # nq100: prefer the survivorship-free change-event YAML roster. Fall back to
+    # the legacy daily-snapshot parquet only when no YAML roster exists, so users
     # without the data repo see unchanged behaviour.
-    repo = config.get("nq100_pit_path") or os.environ.get("NQ100_DATA_ROOT", "")
-    if repo:
-        yaml_intervals = _nq100_intervals_from_yaml(start, end, repo)
+    if yaml_dir is not None:
+        yaml_intervals = _yaml_change_intervals(start, end, yaml_dir, prefix)
         if yaml_intervals:
             return yaml_intervals
     parquet = config.get("nq100_pit_path") or os.path.join(

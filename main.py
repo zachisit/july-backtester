@@ -1,6 +1,7 @@
 # main_portfolio.py (Cleaned up and fully refactored)
 
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 import logging
 import os
 import sys
@@ -12,16 +13,19 @@ from services import get_data_service
 from helpers.indicators import calculate_sma, calculate_rsi, calculate_atr
 from helpers.registry import get_active_strategies
 from helpers.portfolio_simulations import run_portfolio_simulation
-from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary, generate_sensitivity_report
+from helpers.summary import generate_portfolio_summary_report, generate_per_portfolio_summary, generate_sensitivity_report, safe_path_component
 from helpers.llm_verdict import generate_llm_verdict
 from helpers.sensitivity import build_param_grid, is_sweep_enabled, label_for_params
 from helpers.correlation import run_correlation_analysis, DEFAULT_THRESHOLD
 from helpers.monte_carlo import run_monte_carlo_simulation, analyze_mc_results
+from helpers.mc_scoring import analyze_mc_results_v2
+from helpers.result_status import make_stub_result, split_results, STATUS_NO_TRADES, STATUS_ERROR
 from tqdm import tqdm
 from multiprocessing import Pool, cpu_count
 import orjson
 from helpers.caching import CACHE_DIR
 from helpers.noise import inject_price_noise
+from helpers.rng import derive_seed
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -79,7 +83,7 @@ intrabar_data_global = None
 # --------------------------------------------------------------------
 # --- WORKER INITIALIZER FOR MULTIPROCESSING ---
 # --------------------------------------------------------------------
-def init_worker(comparison_dfs_dict, benchmark_returns_dict, dependency_map_dict, portfolio_data_for_worker, delisting_dates_for_worker=None, pit_member_masks_dict=None, intrabar_data_for_worker=None):
+def init_worker(comparison_dfs_dict, benchmark_returns_dict, dependency_map_dict, portfolio_data_for_worker, delisting_dates_for_worker=None, pit_member_masks_dict=None, intrabar_data_for_worker=None, config_for_worker=None):
     """
     Initializer for the multiprocessing pool.
     Makes comparison ticker DataFrames, benchmark returns, dependency symbol map,
@@ -87,6 +91,13 @@ def init_worker(comparison_dfs_dict, benchmark_returns_dict, dependency_map_dict
     and optional intraday (sub-bar) data globally available to each worker process.
     """
     global comparison_dfs_global, benchmark_returns_global, dependency_map_global, portfolio_data_global, delisting_dates_global, pit_member_masks_global, intrabar_data_global
+    if config_for_worker is not None:
+        # Spawned workers import config.py afresh rather than inheriting CLI
+        # overrides. Update the shared dict in place so helpers see the same
+        # settings as main. Tasks still carry only small strategy metadata.
+        snapshot = dict(config_for_worker)
+        CONFIG.clear()
+        CONFIG.update(snapshot)
     comparison_dfs_global = comparison_dfs_dict
     benchmark_returns_global = benchmark_returns_dict
     dependency_map_global = dependency_map_dict
@@ -190,38 +201,160 @@ def _build_intrabar_data(portfolio_data, config):
 
 # --------------------------------------------------------------------
 
-def _build_strat_name(name, stop_config):
-    """Build the display name for a strategy given its stop-loss config.
+def _stop_label(stop_config):
+    """Return the stop suffix for a stop-loss config (``""`` for no stop).
 
-    Percentage and ATR stops get a descriptive suffix; every other stop
-    type (``none``, ``points``, ``signal_bar``, ``trailing_atr`` …) — and a
-    config with no ``type`` key at all — leaves the base name unchanged,
-    matching the engine, which resolves the type via ``.get("type", "none")``.
+    Every non-``none`` stop type gets its own descriptive suffix so two
+    different ``stop_loss_configs`` never share a strategy name (#434) -- the
+    name is the key for trade CSVs, correlation columns and display filters:
+
+    - ``percentage``   -> ``w/ 5% SL``
+    - ``atr``          -> ``w/ 3.0x ATR(14) SL``
+    - ``points``       -> ``w/ 10pt SL``
+    - ``signal_bar``   -> ``w/ SigBar(b0,buf0.0) SL``
+    - ``trailing_atr`` -> ``w/ TrailATR(1.0x,T0.0,tr1.0) SL``
+    - ``none`` / no ``type`` key / unknown type -> ``""`` (bare name), matching
+      the engine, which resolves the type via ``.get("type", "none")``.
 
     This helper must never raise on a config the *engine* would happily run,
     otherwise the label crashes the worker before the simulation starts and
     the whole run completes with zero results (issue #309). It therefore
     mirrors the engine's own defaults for every key it reads:
 
-    - ATR ``period`` defaults to 14 — the engine always uses the ``ATR_14``
+    - ATR ``period`` defaults to 14 -- the engine always uses the ``ATR_14``
       column; the documented shape ``{"type": "atr", "multiplier": 2.0}``
       carries no ``period`` (only the CLI shorthand ``atr:14:3.0`` injects
       one). Reading ``stop_config['period']`` unconditionally was the #309
-      crash.
-    - ATR ``multiplier`` defaults to 3.0 (``portfolio_simulations`` uses the
-      same default at its sizing/stop-level sites).
-    - percentage ``value`` defaults to 0.05 (ditto).
+      crash. ATR ``multiplier`` defaults to 3.0.
+    - percentage ``value`` defaults to 0.05; points ``value`` to 0.0.
+    - signal_bar ``bars_back`` 0, ``buffer`` 0.0.
+    - trailing_atr ``stop_mult`` 1.0, ``t1_mult`` 0.0, ``trail_mult`` 1.0.
+
+    Values are interpolated with plain ``{}`` so an unusual value type cannot
+    raise either.
     """
     stop_type = stop_config.get('type')
     if stop_type == 'percentage':
-        return f"{name} w/ {stop_config.get('value', 0.05):.0%} SL"
+        value = stop_config.get('value', 0.05)
+        try:
+            percent = format((Decimal(str(value)) * 100).normalize(), 'f')
+            return f"w/ {percent}% SL"
+        except (InvalidOperation, TypeError, ValueError):
+            return f"w/ {value} SL"
     if stop_type == 'atr':
         multiplier = stop_config.get('multiplier', 3.0)
         period = stop_config.get('period', 14)
-        return f"{name} w/ {multiplier}x ATR({period}) SL"
-    return name
+        cap = stop_config.get('point_cap')
+        extra = f" cap{cap}pt" if cap is not None else ""
+        return f"w/ {multiplier}x ATR({period}) SL{extra}"
+    if stop_type == 'points':
+        return f"w/ {stop_config.get('value', 0.0)}pt SL"
+    if stop_type == 'signal_bar':
+        return (f"w/ SigBar(b{stop_config.get('bars_back', 0)},"
+                f"buf{stop_config.get('buffer', 0.0)}) SL")
+    if stop_type == 'trailing_atr':
+        extra = "".join(f" {key}={stop_config[key]}" for key in ('point_cap', 'floor')
+                        if stop_config.get(key) is not None)
+        return (f"w/ TrailATR({stop_config.get('stop_mult', 1.0)}x,"
+                f"T{stop_config.get('t1_mult', 0.0)},"
+                f"tr{stop_config.get('trail_mult', 1.0)}) SL{extra}")
+    return ""
+
+
+def _build_strat_name(name, stop_config):
+    """Build the display name for a strategy given its stop-loss config:
+    ``name`` plus the :func:`_stop_label` suffix (bare name for ``none``).
+    Never raises -- see :func:`_stop_label`.
+    """
+    label = _stop_label(stop_config)
+    return f"{name} {label}" if label else name
+
+
+def _assign_unique_names(entries):
+    """Return unique final names for ``(portfolio_name, name)`` pairs (#434).
+
+    The first occurrence of a ``(portfolio, name)`` keeps its name; repeats get
+    ``" #2"``, ``" #3"`` ... appended, so identical stop configs (or distinct
+    configs whose labels coincide) can never merge or overwrite each other in
+    trade CSVs, correlation columns or display filters. Order is preserved.
+    """
+    counts = {}
+    used = set()
+    out = []
+    for portfolio, name in entries:
+        n = counts.get((portfolio, name), 0) + 1
+        final = name if n == 1 else f"{name} #{n}"
+        while (portfolio, final) in used:   # a literal "X #2" already exists
+            n += 1
+            final = f"{name} #{n}"
+        counts[(portfolio, name)] = n
+        used.add((portfolio, final))
+        out.append(final)
+    return out
+
+def _task_naming(name, stop_config, naming=None):
+    """Final name + structured metadata for one task (#434).
+
+    ``naming`` is the optional dict the parent puts at the end of the task
+    tuple (``strat_name`` / ``base_strategy`` / ``param_label`` /
+    ``stop_label``). A legacy 9-element tuple has none, so the same fields
+    are derived from ``name`` and ``stop_config``. Never raises.
+    """
+    if naming:
+        return dict(naming)
+    return {
+        "strat_name": _build_strat_name(name, stop_config),
+        "base_strategy": name,
+        "param_label": "(base)",
+        "stop_label": _stop_label(stop_config),
+    }
 
 # --------------------------------------------------------------------
+
+def _warmup_fetch_start(start_date, config):
+    """Fetch start for portfolio symbols: ``start_date - pit_warmup_days`` (#433).
+
+    Indicators need history before ``start_date``; the simulation, benchmarks and
+    WFA dates all stay anchored to ``start_date`` (see ``_trim_to_start``).
+    ``pit_warmup_days`` of 0/None disables warm-up (fetch from ``start_date``).
+    """
+    days = config.get("pit_warmup_days") or 0
+    if days <= 0:
+        return start_date
+    return (pd.Timestamp(start_date) - pd.Timedelta(days=int(days))).strftime("%Y-%m-%d")
+
+
+def _trim_to_start(obj, start_date):
+    """Return ``obj`` (DataFrame/Series, DatetimeIndex) restricted to >= start_date.
+
+    No-op (same object, no copy) when nothing precedes ``start_date``.
+    """
+    idx = obj.index
+    ts = pd.Timestamp(start_date)
+    if idx.tz is not None:
+        ts = ts.tz_localize(idx.tz)
+    if len(idx) == 0 or idx[0] >= ts:
+        return obj
+    return obj.loc[idx >= ts]
+
+
+def _classify_short_lived(window_idx, start_date, end_date, tol_days=7):
+    """Reasons a symbol's in-window bars look short-lived (#433).
+
+    Returns a list drawn from ``"ended_before_end_date"`` (likely delisted) and
+    ``"started_after_start_date"`` (late listing / IPO), using ``tol_days`` of slack.
+    """
+    reasons = []
+    tol = pd.Timedelta(days=tol_days)
+    first, last = window_idx[0], window_idx[-1]
+    if first.tzinfo is not None:
+        first, last = first.tz_localize(None), last.tz_localize(None)
+    if last < pd.Timestamp(end_date) - tol:
+        reasons.append("ended_before_end_date")
+    if first > pd.Timestamp(start_date) + tol:
+        reasons.append("started_after_start_date")
+    return reasons
+
 
 def run_single_simulation(args):
     """
@@ -233,7 +366,10 @@ def run_single_simulation(args):
 
     # 1. Unpack the arguments. `portfolio_data` has been REMOVED from the tuple.
     portfolio_name, name, logic_func, dependencies, stop_config, \
-    strategy_params, wfa_split_date, spy_actual_start, spy_actual_end = args
+    strategy_params, wfa_split_date, spy_actual_start, spy_actual_end = args[:9]
+    # Optional 10th element (#434): final unique name + base/param/stop metadata
+    # computed once in the parent. Absent in legacy 9-element tuples.
+    _naming = args[9] if len(args) > 9 else None
 
     # Assign the global data to a local variable for clarity
     portfolio_data = portfolio_data_global
@@ -244,7 +380,8 @@ def run_single_simulation(args):
     tnx_df_local = comparison_dfs_global.get(dependency_map_global.get("tnx"))
 
     try:
-        strat_name = _build_strat_name(name, stop_config)
+        _nm = _task_naming(name, stop_config, _naming)
+        strat_name = _nm.pop("strat_name")
 
         base_signals_with_dfs = {}
         for symbol, df in portfolio_data.items():
@@ -300,19 +437,32 @@ def run_single_simulation(args):
                 final_signals[symbol] = new_sig
         # --- END PIT SIGNAL GATING ---
 
+        # Preserve history for the first in-window open's prior signal, structural
+        # stop anchors and ADV. The engine restricts execution/timeline dates.
+
         # Call the simulation, passing the stop_config and using the global dataframes.
         result = run_portfolio_simulation(
             portfolio_data, final_signals, CONFIG["initial_capital"], CONFIG["allocation_per_trade"],
             spy_df_local, vix_df_local, tnx_df_local, stop_config,
             delisting_dates=delisting_dates_global,
             intrabar_data=intrabar_data_global,
+            start_date=CONFIG["start_date"],
         )
         
-        if result is None: return None
-        
-        if result and result.get('trade_pnl_list'):
+        # Zero trades: run_portfolio_simulation returns None. Return a stub so the
+        # strategy is still accounted for (#432) instead of silently vanishing.
+        if not result or not result.get('trade_pnl_list'):
+            return make_stub_result(
+                strat_name, portfolio_name, STATUS_NO_TRADES,
+                initial_capital=CONFIG["initial_capital"],
+                benchmark_returns=benchmark_returns_global,
+                meta=_nm,
+            )
+
+        if result:
             result['Strategy'] = strat_name
             result['Portfolio'] = portfolio_name
+            result.update(_nm)
             
             if result.get('Trades', 0) > 0:
                 if result['Trades'] >= CONFIG.get("min_trades_for_mc", 10):
@@ -330,16 +480,44 @@ def run_single_simulation(args):
                     _eff_sampling = _rms(CONFIG.get("mc_sampling", "iid"), _mc_profile)
                     result["mc_sampling_effective"] = _eff_sampling
                     _saved_sampling = CONFIG.get("mc_sampling", "iid")
+                    # Chronological ExitDate order: end-of-backtest / delisting closes
+                    # are appended after the loop, and block-bootstrap + the closed-
+                    # trade DD comparison both depend on true exit order (#429).
+                    _tl = result.get('trade_log') or []
+                    if _tl and len(_tl) == len(result['trade_pnl_list']):
+                        _order = sorted(range(len(_tl)), key=lambda i: pd.Timestamp(_tl[i]['ExitDate']))
+                        _mc_pnl = [_tl[i]['Profit'] for i in _order]
+                    else:
+                        _mc_pnl = list(result['trade_pnl_list'])
+                    # random_seed (#439): per-task seeds from the final unique strat_name +
+                    # portfolio, so draws are reproducible and independent of worker
+                    # assignment. monte_carlo.py (Do-Not-Touch) draws from the process-global
+                    # np.random, so seed that immediately before the call and restore the
+                    # prior state afterwards (no fixed state leaks into other code paths).
+                    # None = legacy unseeded behaviour, untouched.
+                    _rseed = CONFIG.get("random_seed")
+                    _boot_rng = None
+                    _np_state = None
+                    if _rseed is not None:
+                        _np_state = np.random.get_state()
+                        np.random.seed(derive_seed(_rseed, portfolio_name, strat_name, "mc"))
+                        _boot_rng = np.random.default_rng(derive_seed(_rseed, portfolio_name, strat_name, "boot"))
                     try:
                         CONFIG["mc_sampling"] = _eff_sampling
                         mc_sim_results = run_monte_carlo_simulation(
-                            result['trade_pnl_list'], initial_equity=result['initial_capital'],
+                            _mc_pnl, initial_equity=result['initial_capital'],
                             num_simulations=CONFIG["num_mc_simulations"]
                         )
                     finally:
                         CONFIG["mc_sampling"] = _saved_sampling
-                    mc_analysis = analyze_mc_results(result, mc_sim_results)
-                    result.update(mc_analysis)
+                        if _np_state is not None:
+                            np.random.set_state(_np_state)
+                    legacy = analyze_mc_results(result, mc_sim_results)
+                    result.update(analyze_mc_results_v2(
+                        result, mc_sim_results, _mc_pnl, rng=_boot_rng,
+                        sampling=_eff_sampling, block_size=CONFIG.get("mc_block_size")))
+                    result["mc_score_legacy"] = legacy["mc_score"]
+                    result["mc_verdict_legacy"] = legacy["mc_verdict"]
                 else:
                     result.update({"mc_verdict": "N/A (few trades)", "mc_score": -999})
             else:
@@ -353,7 +531,12 @@ def run_single_simulation(args):
             if wfa_split_date and result.get('trade_log'):
                 from helpers.wfa import split_trades as _split_trades, evaluate_wfa as _evaluate_wfa
                 _is, _oos = _split_trades(result['trade_log'], wfa_split_date)
-                result.update(_evaluate_wfa(_is, _oos, result['initial_capital']))
+                result.update(_evaluate_wfa(
+                    _is, _oos, result['initial_capital'],
+                    equity_curve=result.get('portfolio_timeline'),
+                    is_window=(spy_actual_start, wfa_split_date),
+                    oos_window=(wfa_split_date, pd.Timestamp(spy_actual_end) + pd.Timedelta(days=1)),
+                ))
             else:
                 result.update({'oos_pnl_pct': None, 'wfa_verdict': 'N/A'})
 
@@ -368,7 +551,9 @@ def run_single_simulation(args):
                 _min_fold = CONFIG.get("wfa_min_fold_trades", 5)
                 _fold_dates = _get_fold_dates(spy_actual_start, spy_actual_end, int(_wfa_folds))
                 result.update(_eval_rolling_wfa(
-                    result['trade_log'], _fold_dates, result['initial_capital'], _min_fold
+                    result['trade_log'], _fold_dates, result['initial_capital'], _min_fold,
+                    equity_curve=result.get('portfolio_timeline'),
+                    actual_start=spy_actual_start,
                 ))
             else:
                 result.update({'wfa_rolling_verdict': 'N/A'})
@@ -434,14 +619,57 @@ def run_single_simulation(args):
 
             return result
             
-    except Exception:
+    except Exception as exc:
         import traceback
         tqdm.write(f"\n--- FATAL ERROR IN WORKER ---\nStrategy: {name}\nPortfolio: {portfolio_name}\nTraceback:\n{traceback.format_exc()}\n---------------------------\n")
+        try:
+            _nm = _task_naming(name, stop_config, _naming)
+            _stub_name = _nm.pop("strat_name")
+        except Exception:
+            _stub_name = name
+            _nm = {"base_strategy": name, "param_label": "(base)", "stop_label": ""}
+        return make_stub_result(
+            _stub_name, portfolio_name, STATUS_ERROR,
+            initial_capital=CONFIG.get("initial_capital"),
+            benchmark_returns=benchmark_returns_global,
+            meta=_nm,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _pool_size(n_tasks: int, max_workers=None) -> int:
+    """Simulation pool size: ``min(cpu_count(), n_tasks, max_workers)``.
+
+    ``max_workers`` (config / ``--workers``) bounds memory, since every worker
+    receives its own copy of the portfolio's price data (#414). ``None`` or an
+    invalid value (non-int, < 1) leaves it unbounded, i.e. the old behaviour.
+    """
+    n = min(cpu_count(), n_tasks)
+    if isinstance(max_workers, int) and not isinstance(max_workers, bool) and max_workers >= 1:
+        n = min(n, max_workers)
+    return max(1, n)
+
+
+def _portfolio_data_mb(portfolio_data) -> float | None:
+    """Approximate in-memory size of the portfolio's DataFrames, in MB (shallow)."""
+    try:
+        total = sum(int(df.memory_usage(index=True, deep=False).sum())
+                    for df in portfolio_data.values() if hasattr(df, "memory_usage"))
+    except Exception:  # noqa: BLE001 - a size estimate must never break a run
         return None
+    return total / 1e6
+
+def _correlation_csv_path(run_folder_name, portfolio_name):
+    """Where a portfolio's strategy-correlation CSV is written (#403: the
+    portfolio name goes through the same sanitizer as the summary paths)."""
+    return os.path.join(
+        "output", "runs", run_folder_name,
+        f"{safe_path_component(portfolio_name)}_strategy_correlation.csv")
+
 
 def main():
     # --- ARGUMENT PARSING (full parser, applied before any CONFIG reads) ---
-    from helpers.cli_config import build_parser, apply_overrides, print_help_config
+    from helpers.cli_config import build_parser, apply_overrides, print_help_config, resolve_verbose
     parser = build_parser()
     args = parser.parse_args()
 
@@ -521,7 +749,7 @@ def main():
     # --- END S2 ---
 
     # --- FOLDER SETUP ---
-    CONFIG["verbose_output"] = args.verbose
+    CONFIG["verbose_output"] = resolve_verbose(args, CONFIG)
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     run_folder_name = f"{args.name}_{timestamp}" if args.name else timestamp
     start_time = time.monotonic()
@@ -647,11 +875,18 @@ def main():
         benchmark_dfs = {}
 
         # Fetch all comparison tickers (benchmarks + dependencies)
+        _dependency_symbols = set(comparison_config["dependencies"].values())
+        _comparison_windows = {}
         for symbol in comparison_config["all_symbols"]:
             normalized = normalize_ticker(symbol, CONFIG["data_provider"])
-            df = data_fetcher(normalized, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
+            fetch_start = (_warmup_fetch_start(CONFIG["start_date"], CONFIG)
+                           if symbol in _dependency_symbols else CONFIG["start_date"])
+            df = data_fetcher(normalized, fetch_start, CONFIG["end_date"], CONFIG)
             if df is not None and not df.empty:
                 comparison_dfs[symbol] = df
+                window = _trim_to_start(df, CONFIG["start_date"])
+                if not window.empty:
+                    _comparison_windows[symbol] = window
             else:
                 logger.warning(f"Failed to fetch data for comparison ticker '{symbol}' (normalized: '{normalized}')")
                 dep_warning = _dependency_warning_for_failed_fetch(symbol, comparison_config["dependencies"])
@@ -660,8 +895,8 @@ def main():
 
         # Derive actual data period from comparison ticker data if available,
         # otherwise fall back to config dates (valid when comparison_tickers = [])
-        if comparison_dfs:
-            spy_df = _pick_reference_df(comparison_dfs)
+        if _comparison_windows:
+            spy_df = _pick_reference_df(_comparison_windows)
             _spy_actual_start = spy_df.index.min().strftime("%Y-%m-%d")
             _spy_actual_end   = spy_df.index.max().strftime("%Y-%m-%d")
             logger.info("-" * 60)
@@ -679,8 +914,8 @@ def main():
         for bm in comparison_config["benchmarks"]:
             symbol = bm["symbol"]
             label = bm["label"]
-            if symbol in comparison_dfs:
-                df = comparison_dfs[symbol]
+            if symbol in _comparison_windows:
+                df = _comparison_windows[symbol]
                 bnh_return = (df['Close'].iloc[-1] - df['Close'].iloc[0]) / df['Close'].iloc[0]
                 benchmark_returns[label] = bnh_return
                 benchmark_dfs[label] = df
@@ -711,6 +946,8 @@ def main():
     all_portfolio_results = [] # To gather results from all portfolios
 
     logger.info("=" * 25 + " PROCESSING PORTFOLIOS " + "=" * 25)
+    _all_fetch_failures = []  # accumulated across portfolios for fetch_failures.csv (#437)
+    _skipped_rows = []  # short-lived symbols (skipped or kept) for skipped_symbols.csv (#433)
     noise_data_saved = False  # Save one noise sample CSV per run (first symbol with noise > 0)
     # Loop through each portfolio sequentially
     for portfolio_name, value in _portfolios.items():
@@ -796,11 +1033,25 @@ def main():
                 logger.error(f"  -> ERROR resolving rule universe '{value}': {e}")
                 continue
         elif isinstance(value, str) and value.startswith("pit:"):
-            from helpers.point_in_time import tickers_union_for_period as _pit_union, build_membership_schedule as _pit_schedule_build
+            from helpers.point_in_time import (
+                tickers_union_for_period as _pit_union,
+                build_membership_schedule as _pit_schedule_build,
+                PitResolutionError as _PitResolutionError,
+                PitRosterError as _PitRosterError,
+            )
             _pit_index_name = value.split(":", 1)[1]
             try:
                 symbols = _pit_union(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
                 _current_membership_schedule = _pit_schedule_build(_pit_index_name, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
+            except (_PitResolutionError, _PitRosterError):
+                # A missing roster year (#422) is the same failure: removals
+                # never applied, members never force-exited. Abort, too.
+                # #407: members that cannot be mapped to a single parquet
+                # security must ABORT, not skip the portfolio. `continue` here
+                # would be "drop the member" wearing a different hat — the run
+                # would go on and report survivorship-free numbers it has not
+                # earned. Let it propagate.
+                raise
             except Exception as e:
                 logger.error(f"  -> ERROR resolving PIT portfolio '{value}' for '{portfolio_name}': {e}")
                 continue
@@ -834,18 +1085,46 @@ def main():
                 )
 
         MIN_BARS = CONFIG.get("min_bars_required", 250)
+        # Survivorship-aware universes (pit:/rule: schedule, or include_delisted)
+        # KEEP short-lived names: early failures and late listings are exactly
+        # what the universe exists to include (#433). Plain lists keep the filter.
+        _keep_short_lived = (_current_membership_schedule is not None
+                             or bool(CONFIG.get("include_delisted", False)))
+        _fetch_start = _warmup_fetch_start(CONFIG["start_date"], CONFIG)
         skipped_symbols = []
+        _fetch_failures = []   # symbols whose fetch returned None (#437)
+        _kept_short_lived = []
         portfolio_data = {}
         for symbol in tqdm(symbols, desc="  -> Fetching & Preparing Data", unit=" symbols"):
-            df = data_fetcher(symbol, CONFIG["start_date"], CONFIG["end_date"], CONFIG)
+            df = data_fetcher(symbol, _fetch_start, CONFIG["end_date"], CONFIG)
+            if df is None:
+                _fetch_failures.append({"portfolio": portfolio_name, "symbol": symbol,
+                                        "reason": "fetch_returned_none"})
             if df is not None and not df.empty:
-                if len(df) < MIN_BARS:
-                    skipped_symbols.append((symbol, len(df)))
+                # Bars are counted inside the backtest window only: warm-up bars
+                # must not make a short-lived name look long-lived.
+                _window = _trim_to_start(df, CONFIG["start_date"])
+                if len(_window) == 0:
                     continue
+                if len(_window) < MIN_BARS:
+                    _reasons = _classify_short_lived(
+                        _window.index, CONFIG["start_date"],
+                        CONFIG.get("end_date") or datetime.now().strftime("%Y-%m-%d"))
+                    _row = {"portfolio": portfolio_name, "symbol": symbol, "bars": len(_window),
+                            "reason": ";".join(_reasons) or "fewer_than_min_bars",
+                            "action": "kept" if _keep_short_lived else "skipped"}
+                    _skipped_rows.append(_row)
+                    if not _keep_short_lived:
+                        skipped_symbols.append((symbol, len(_window), _row["reason"]))
+                        continue
+                    _kept_short_lived.append(symbol)
                 # --- NOISE INJECTION (stress test) ---
                 _noise_pct = CONFIG.get("noise_injection_pct", 0.0)
                 if _noise_pct > 0:
-                    df_noisy = inject_price_noise(df, _noise_pct)
+                    _nseed = CONFIG.get("random_seed")
+                    _noise_rng = (np.random.default_rng(derive_seed(_nseed, "noise", symbol))
+                                  if _nseed is not None else None)
+                    df_noisy = inject_price_noise(df, _noise_pct, rng=_noise_rng)
                     if not noise_data_saved:
                         _sample_clean = df[["Open", "High", "Low", "Close"]].tail(30).copy()
                         _sample_noisy = df_noisy[["Open", "High", "Low", "Close"]].tail(30).copy()
@@ -890,10 +1169,31 @@ def main():
                 portfolio_data[symbol] = df
 
         if skipped_symbols:
+            _n_end = sum("ended_before_end_date" in r for _, _, r in skipped_symbols)
+            _n_late = sum("started_after_start_date" in r for _, _, r in skipped_symbols)
             logger.warning(
-                f"  -> Skipped {len(skipped_symbols)} symbol(s) with fewer than {MIN_BARS} bars: "
-                + ", ".join(f"{s} ({n} bars)" for s, n in skipped_symbols)
+                f"  -> Skipped {len(skipped_symbols)} symbol(s) with fewer than {MIN_BARS} bars "
+                f"({_n_end} ended before end_date (likely delisted), {_n_late} started after "
+                f"start_date (late listing)): "
+                + ", ".join(f"{s} ({n} bars)" for s, n, _ in skipped_symbols)
             )
+        if _kept_short_lived:
+            logger.info(
+                f"  -> Kept {len(_kept_short_lived)} short-lived symbol(s) with fewer than "
+                f"{MIN_BARS} bars (survivorship-aware universe)."
+            )
+        if _fetch_failures:
+            logger.warning(
+                f"  -> {len(_fetch_failures)} symbol(s) returned no data (fetch error or no history) "
+                f"and are excluded from '{portfolio_name}': "
+                + ", ".join(r["symbol"] for r in _fetch_failures[:20])
+                + (" ..." if len(_fetch_failures) > 20 else "")
+                + " (full list: fetch_failures.csv)"
+            )
+            _all_fetch_failures.extend(_fetch_failures)
+            pd.DataFrame(_all_fetch_failures).to_csv(os.path.join(run_base_dir, "fetch_failures.csv"), index=False)
+        if _skipped_rows:
+            pd.DataFrame(_skipped_rows).to_csv(os.path.join(run_base_dir, "skipped_symbols.csv"), index=False)
 
         if not portfolio_data:
             logger.warning(f"Could not fetch data for any symbols in '{portfolio_name}'. Skipping.")
@@ -951,7 +1251,11 @@ def main():
         # The rule: case is what stops a liquidity universe being frozen at
         # start_date, which would bar every name that qualified later.
         if _current_membership_schedule is not None:
-            from helpers.point_in_time import pit_members_on as _pit_members_on
+            from helpers.point_in_time import (
+                pit_members_on as _pit_members_on,
+                SecuritySchedule as _PitSecuritySchedule,
+                security_intervals as _pit_security_intervals,
+            )
             from helpers.pit_enforcement import (
                 build_member_mask as _pit_build_member_mask,
                 build_forced_exit_mask as _pit_build_forced_exit_mask,
@@ -981,7 +1285,15 @@ def main():
             # _pit_force_exit → True on the LAST available member bar when no timely
             #                 next-bar exists after index removal (e.g. sudden delisting).
             #                 The simulator closes at that bar's Close rather than waiting.
-            _pit_intervals = _pit_membership_intervals(value, CONFIG)
+            # Parquet (#407): symbols are security IDs, and one roster
+            # ticker can map to different securities over time, so spells must
+            # come from the resolved schedule itself, keyed by security. Every
+            # other provider keeps the roster-ticker intervals.
+            _backtest_end_str = CONFIG.get("end_date") or str(pd.Timestamp.now().normalize().date())
+            if isinstance(_current_membership_schedule, _PitSecuritySchedule):
+                _pit_intervals = _pit_security_intervals(_current_membership_schedule, _backtest_end_str)
+            else:
+                _pit_intervals = _pit_membership_intervals(value, CONFIG)
             _exit_buffer = CONFIG.get("pit_exit_buffer_days", 10)
             _backtest_end = CONFIG.get("end_date") or str(pd.Timestamp.now().normalize().date())
             _n_forced = 0
@@ -1011,8 +1323,10 @@ def main():
 
             for variant_params in param_variants:
                 if len(param_variants) > 1:
-                    display_name = f"{strat_name} [{label_for_params(base_params, variant_params)}]"
+                    param_label = label_for_params(base_params, variant_params)
+                    display_name = f"{strat_name} [{param_label}]"
                 else:
+                    param_label = "(base)"
                     display_name = strat_name
 
                 for stop_config in CONFIG['stop_loss_configs']:
@@ -1023,8 +1337,18 @@ def main():
                         variant_params,
                         wfa_split_date,
                         _spy_actual_start, _spy_actual_end,
+                        # Final name is made unique below; small strings only.
+                        {"strat_name": _build_strat_name(display_name, stop_config),
+                         "base_strategy": strat_name,
+                         "param_label": param_label,
+                         "stop_label": _stop_label(stop_config)},
                     )
                     tasks_for_this_portfolio.append(task_args)
+
+        # Guarantee unique (portfolio, name) keys (#434): repeated names get " #2", " #3".
+        for _t, _final in zip(tasks_for_this_portfolio, _assign_unique_names(
+                (_t[0], _t[9]["strat_name"]) for _t in tasks_for_this_portfolio)):
+            _t[9]["strat_name"] = _final
 
         if not tasks_for_this_portfolio:
             logger.warning(f"No tasks generated for {portfolio_name}.")
@@ -1032,16 +1356,23 @@ def main():
 
         # --- Create a NEW Pool initialized with THIS portfolio's data ---
         logger.info("=" * 15 + f" RUNNING SIMULATIONS FOR '{portfolio_name}' " + "=" * 15)
-        _n_workers = min(cpu_count(), len(tasks_for_this_portfolio))
+        _n_workers = _pool_size(len(tasks_for_this_portfolio), CONFIG.get("max_workers"))
         logger.info(f"Found {len(tasks_for_this_portfolio)} tasks. Using up to {_n_workers} CPU cores.")
+        _data_mb = _portfolio_data_mb(portfolio_data)
+        if _data_mb is not None:
+            logger.info(
+                f"Price data ~{_data_mb:,.0f} MB; each worker holds a copy -> "
+                f"~{_data_mb * (_n_workers + 1):,.0f} MB peak for {_n_workers} worker(s) + parent "
+                f"(cap with --workers / max_workers)."
+            )
 
         # Sub-bar resolution: fetch intraday data per symbol only when enabled.
         _intrabar_data = (_build_intrabar_data(portfolio_data, CONFIG)
                           if CONFIG.get("intrabar_resolution", False) else None)
 
         # Pass comparison data, portfolio data, delisting dates, PIT masks, and
-        # optional intraday data during initialization
-        init_args = (comparison_dfs, benchmark_returns, comparison_config["dependencies"], portfolio_data, delisting_dates, _pit_member_masks, _intrabar_data)
+        # optional intraday data and the resolved runtime config at initialization.
+        init_args = (comparison_dfs, benchmark_returns, comparison_config["dependencies"], portfolio_data, delisting_dates, _pit_member_masks, _intrabar_data, dict(CONFIG))
 
         # _n_workers caps at the actual task count (not always cpu_count()): with
         # intrabar_resolution on, each worker gets its own pickled copy of the full
@@ -1079,6 +1410,14 @@ def main():
     if not all_portfolio_results:
         logger.warning("No simulation tasks were generated or completed successfully.")
         return
+
+    # Stubs (0-trade / errored runs, #432) are accounted for in the per-portfolio
+    # "Not shown" block and the sensitivity report; every other consumer sees
+    # only real results.
+    _real_results, _stub_results = split_results(all_portfolio_results)
+    if _stub_results:
+        logger.warning(f"{len(_stub_results)} of {len(all_portfolio_results)} simulations produced no result "
+                       f"(0 trades or errored); see the 'Not shown' block per portfolio.")
         
     results_by_portfolio = {}
     for res in all_portfolio_results:
@@ -1086,13 +1425,10 @@ def main():
         if p_name not in results_by_portfolio: results_by_portfolio[p_name] = []
         results_by_portfolio[p_name].append(res)
     
-    for p_name, p_results in results_by_portfolio.items():
+    for p_name, p_all_results in results_by_portfolio.items():
+        p_results, _ = split_results(p_all_results)
         # --- Strategy Correlation Analysis (run first so matrix is available for summary) ---
-        portfolio_name_safe = p_name.replace(" ", "_")
-        corr_csv_path = os.path.join(
-            "output", "runs", run_folder_name,
-            f"{portfolio_name_safe}_strategy_correlation.csv"
-        )
+        corr_csv_path = _correlation_csv_path(run_folder_name, p_name)
         corr_matrix = None
         try:
             corr_matrix, high_pairs = run_correlation_analysis(p_results, corr_csv_path)
@@ -1112,7 +1448,7 @@ def main():
         except Exception as _corr_err:
             logger.warning(f"  Correlation analysis skipped for '{p_name}': {_corr_err}")
 
-        generate_per_portfolio_summary(p_results, p_name, benchmark_returns, run_folder_name, corr_matrix=corr_matrix)
+        generate_per_portfolio_summary(p_all_results, p_name, benchmark_returns, run_folder_name, corr_matrix=corr_matrix)
 
         from helpers.regime import print_regime_heatmap as _print_heatmap
         for _r in p_results:
@@ -1120,18 +1456,18 @@ def main():
                 _print_heatmap(_r["regime_heatmap"], _r.get("Strategy", "Unknown"))
 
     duration_seconds = time.monotonic() - start_time
-    generate_portfolio_summary_report(all_portfolio_results, benchmark_returns, duration_seconds, run_folder_name)
+    generate_portfolio_summary_report(_real_results, benchmark_returns, duration_seconds, run_folder_name)
 
     from helpers.verdict_format import print_strategy_verdicts as _print_verdicts
-    _print_verdicts(all_portfolio_results, benchmark_returns)
+    _print_verdicts(_real_results, benchmark_returns)
 
-    generate_llm_verdict(all_portfolio_results, benchmark_returns, run_folder_name, benchmark_dfs=benchmark_dfs)
+    generate_llm_verdict(_real_results, benchmark_returns, run_folder_name, benchmark_dfs=benchmark_dfs)
     generate_sensitivity_report(all_portfolio_results, run_folder_name)
 
     if CONFIG.get("export_ml_features", False):
         from helpers.ml_export import export_trade_features as _ml_export
         _ml_path = os.path.join("output", "runs", run_folder_name, "ml_features.parquet")
-        _n_rows = _ml_export(all_portfolio_results, _ml_path)
+        _n_rows = _ml_export(_real_results, _ml_path)
         if _n_rows > 0:
             logger.info(f"  ML feature export: {_n_rows} trades -> {_ml_path}")
 

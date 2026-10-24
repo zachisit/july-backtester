@@ -106,6 +106,49 @@ class TestLoadStrategyVerdicts:
 
 
 class TestMatchStrategyVerdict:
+    @pytest.mark.parametrize("strategy,stem", [
+        ("EMA_PB-A3_ADX>20", "EMA_PB-A3_ADX>20"),
+        ("RSI 2.", "RSI_2."),
+        ("CON", "CON"),
+    ])
+    def test_saved_run_legacy_names_retain_verdict_in_all_mode(
+            self, strategy, stem, tmp_path, monkeypatch):
+        if sys.platform == "win32" and (">" in stem or stem == "CON"):
+            pytest.skip("historical POSIX filename cannot be created on Windows")
+        run_dir = tmp_path / "saved_run"
+        folder = run_dir / "analyzer_csvs/Nasdaq_100"
+        folder.mkdir(parents=True)
+        (folder / f"{stem}.csv").write_text("Profit\n101\n")
+        verdict = {"strategy": strategy, "portfolio": "Nasdaq 100"}
+        (run_dir / "llm_verdict.json").write_text(json.dumps({"strategies": [verdict]}))
+        rendered = []
+        monkeypatch.setattr(report_cli, "generate_trade_report",
+                            lambda *args: rendered.append(args[3]))
+        monkeypatch.setattr(sys, "argv", ["report.py", "--all", str(run_dir)])
+        report_cli.main()
+        assert len(rendered) == 1
+        assert rendered[0].get("STRATEGY_VERDICT") == verdict
+
+    @pytest.mark.parametrize("portfolio,folder", [
+        ("Nasdaq>20", "Nasdaq>20"), ("Nasdaq<20", "Nasdaq<20"),
+        ("Nasdaq>20", "Nasdaq_gt_20"), ("Nasdaq<20", "Nasdaq_lt_20"),
+    ])
+    def test_legacy_and_current_portfolios_keep_their_own_verdict(self, portfolio, folder):
+        verdicts = [{"strategy": "MACD", "portfolio": p}
+                    for p in ["Nasdaq>20", "Nasdaq<20"]]
+        match = report_cli._match_strategy_verdict(verdicts, "MACD", folder)
+        assert match["portfolio"] == portfolio
+
+    def test_strategy_only_fallback_rejects_ambiguous_portfolios(self):
+        verdicts = [{"strategy": "MACD", "portfolio": p} for p in ["A", "B"]]
+        assert report_cli._match_strategy_verdict(verdicts, "MACD", "unknown") is None
+
+    def test_distinct_dotted_and_plain_stems_keep_their_own_verdict(self):
+        verdicts = [{"strategy": s, "portfolio": "Nasdaq 100"}
+                    for s in ["RSI 2", "RSI 2."]]
+        assert report_cli._match_strategy_verdict(verdicts, "RSI_2", "Nasdaq_100") is verdicts[0]
+        assert report_cli._match_strategy_verdict(verdicts, "RSI_2.", "Nasdaq_100") is verdicts[1]
+
     def test_exact_match_on_strategy_and_portfolio(self):
         sanitized_strat = report_cli._sanitize_for_filename(SAMPLE_VERDICT["strategy"])
         sanitized_port = report_cli._sanitize_for_filename(SAMPLE_VERDICT["portfolio"])
@@ -260,3 +303,25 @@ class TestGenerateTearsheetPdfIncludesVerdict:
         # At least one captured page must be the Strategy Verdict page
         assert any("Strategy Verdict" in c for c in captured), \
             f"expected a Strategy Verdict page; captured titles: {captured}"
+
+
+class TestVerdictMatchesWhatTheWriterWrote:
+    """#403: report.py used to MIRROR the writer's sanitizer by hand. When the
+    writer learned ``>``/``<`` the mirror did not, so ``--all`` silently dropped
+    the verdict section for every renamed strategy. Round-trip through the real
+    writer instead of restating its rule."""
+
+    @pytest.mark.parametrize("strategy,portfolio", [
+        ("EMA_PB-A3_ADX>20", "Nasdaq: PIT"),
+        ("SMA Crossover (20/50)", "Nasdaq 100"),
+        ("EC-VIX-27: WR70", "S&P 500 PIT"),
+    ])
+    def test_round_trip(self, strategy, portfolio):
+        from helpers.summary import _safe_strategy_name, safe_path_component
+        stem, folder = _safe_strategy_name(strategy), safe_path_component(portfolio)
+        decoy = {"strategy": strategy, "portfolio": "Other", "verdict": "decoy"}
+        real = {"strategy": strategy, "portfolio": portfolio, "verdict": "real"}
+        # Decoy first: only an exact strategy+portfolio match picks `real`;
+        # the strategy-only fallback would return the decoy.
+        match = report_cli._match_strategy_verdict([decoy, real], stem, folder)
+        assert match is real, (stem, folder)

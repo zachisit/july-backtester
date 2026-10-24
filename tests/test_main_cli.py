@@ -192,3 +192,34 @@ class TestHelpFlag:
     def test_documents_name_flag(self):
         result = _run("--help", extra_env={"POLYGON_API_KEY": "test-key"})
         assert "--name" in result.stdout + result.stderr
+
+
+# ---------------------------------------------------------------------------
+# verbose_output: config key vs --verbose / --no-verbose (issue #440)
+# ---------------------------------------------------------------------------
+
+class TestVerboseResolution:
+    """CLI flag overrides config; with no flag the config value is honoured."""
+
+    @staticmethod
+    def _resolve(config_value, argv):
+        sys.path.insert(0, PROJECT_ROOT)
+        from helpers.cli_config import build_parser, resolve_verbose
+        args = build_parser().parse_args(argv)
+        return resolve_verbose(args, {"verbose_output": config_value})
+
+    def test_config_true_no_flag_is_true(self):
+        assert self._resolve(True, []) is True
+
+    def test_config_false_verbose_flag_is_true(self):
+        assert self._resolve(False, ["--verbose"]) is True
+
+    def test_config_false_no_flag_is_false(self):
+        assert self._resolve(False, []) is False
+
+    def test_config_true_no_verbose_flag_is_false(self):
+        assert self._resolve(True, ["--no-verbose"]) is False
+
+    def test_missing_config_key_defaults_false(self):
+        from helpers.cli_config import build_parser, resolve_verbose
+        assert resolve_verbose(build_parser().parse_args([]), {}) is False

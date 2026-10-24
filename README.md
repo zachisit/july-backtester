@@ -110,14 +110,40 @@ The engine runs every strategy in `custom_strategies/` against SPY, prints a res
 },
 ```
 
-Requires the ticker-history YAML data from these two public repos:
+The standard S3 data sync installs the ticker-history YAML beside the Parquet
+corpus and the backtester discovers it automatically:
+
+```bash
+parquet_data/scripts/sync_data.sh
+```
+
+This reads the independently refreshed private mirrors published under
+`s3://july-backtester-market-data/pit/{sp500,nq100}/`.
+
+The read-only AWS key used by the sync must include `s3:GetObject` and
+`s3:ListBucket` access for the `pit/` prefix as well as `parquet/`.
+
+The membership schedule, the fetched universe and daily forced-exit enforcement
+all read **one** roster, chosen by the same completeness rule: every yearly YAML
+from 2004 through the backtest's end year (the current year's file is optional,
+since it may not be published yet). A run starting in an unpublished year
+carries forward the latest available roster and its changes. An auto-discovered roster with a missing
+year or an empty/malformed annual file is skipped with a warning. If no valid,
+complete roster is left,
+the run **aborts** (`PitRosterError`) instead of replaying a timeline whose
+missing years never apply their removals. An explicitly configured
+`SP500_DATA_ROOT` / `NQ100_DATA_ROOT` / `*_pit_path` is used even if incomplete,
+with a warning, because you chose it. Malformed files in an explicit roster
+abort the run rather than replaying corrupt history.
+
+You can alternatively use the public source repos directly:
 
 - Nasdaq 100 — https://github.com/shardul0701/NQ100-Survivorship-bias-data-2004-2026
 - S&P 500 — https://github.com/shardul0701/SP500-Survivorship-bias-data-2004-2026
 
-Clone each repo locally, then point this project at them via **one** of:
+For a separate clone, point this project at it via **one** of:
 
-1. Env vars (recommended — copy `.env.example` to `.env` and fill in): `NQ100_DATA_ROOT` / `SP500_DATA_ROOT`, each pointing at the repo root (not the `src/` subfolder — the loader appends that path itself).
+1. Env vars: `NQ100_DATA_ROOT` / `SP500_DATA_ROOT`, each pointing at the repo root (not the `src/` subfolder — the loader appends that path itself).
 2. Config keys in `config.py`: `nq100_pit_path` / `sp500_pit_path`.
 3. Drop the YAML files directly under `tickers_to_scan/point_in_time/nq100/` or `tickers_to_scan/point_in_time/sp500/`.
 
@@ -167,58 +193,34 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full plugin reference including p
 
 ## Norgate Data
 
-If you have a Norgate license, you can either query Norgate live on every run **or** export the full database to local Parquet files once and share access with teammates who don't have a license.
+If you have a Norgate license you can query Norgate live on every run, or point the
+Parquet provider at a directory you exported yourself.
 
 | Setting | What it does | Requires |
 |---|---|---|
-| `data_provider: "norgate"` | Calls Norgate API live on every run | Norgate license + NDU running |
-| `data_provider: "parquet"` | Reads pre-exported local Parquet files | Submodule only — no license needed |
+| `data_provider: "norgate"` | Calls the Norgate API live on every run | Norgate license + NDU running |
+| `data_provider: "parquet"` | Reads local `{SYMBOL}.parquet` files from a directory you supply | Nothing — no license, no API key |
 
-### Pipeline
+### Parquet provider
 
-```mermaid
-%%{init: {'theme': 'neutral'}}%%
-graph LR
-    A[Norgate API\nNDU running] -->|norgate_to_parquet.py| B[(parquet_data/data/\n~36 000 .parquet files)]
-    B -->|data_provider: parquet| C[Backtester]
-    A -->|data_provider: norgate| C
-```
-
-### Exporting Norgate data to Parquet
-
-Run the three export commands once (full dump, ~36 000 symbols, ~2.5 GB):
+The Parquet provider is source-agnostic: it reads one file per symbol, named
+`{SYMBOL}.parquet`, with columns `Open, High, Low, Close, Volume` and a
+`DatetimeIndex`. It does not care how those files were produced — a Norgate export,
+a Polygon pull, or anything else that writes that shape.
 
 ```bash
-python scripts/norgate_to_parquet.py --database "US Equities"          --output-dir parquet_data/data --start-date 1990-01-01
-python scripts/norgate_to_parquet.py --database "US Equities Delisted" --output-dir parquet_data/data --start-date 1990-01-01 --skip-existing
-python scripts/norgate_to_parquet.py --database "US Indices"           --output-dir parquet_data/data --start-date 1990-01-01 --skip-existing
+python main.py --provider parquet --parquet-dir /path/to/your/parquet/files
 ```
 
-Validate that every Norgate symbol has a local file:
+Or set it in `config.py`:
 
-```bash
-python scripts/validate_norgate_export.py
+```python
+"data_provider": "parquet",
+"parquet_data_dir": "/path/to/your/parquet/files",
 ```
 
-See [scripts/NORGATE_EXPORT.md](scripts/NORGATE_EXPORT.md) for the full export and validation guide.
-
-### Accessing the exported data (interns / no-license teammates)
-
-The exported dataset lives in the `parquet_data/` git submodule (private repo: `july-backtester-norgate-data`). Clone it alongside the main repo:
-
-```bash
-git clone --recurse-submodules https://github.com/zachisit/july-backtester.git
-```
-
-Or, if you already cloned without `--recurse-submodules`:
-
-```bash
-git submodule update --init parquet_data
-```
-
-Then set `data_provider: "parquet"` in `config.py`. No Norgate license or NDU process required.
-
----
+> **This repository ships no market data and depends on no external dataset.**
+> Bring your own directory. Symbols with no matching file are simply skipped.
 
 ### The Backtesting Lifecycle
 
@@ -451,6 +453,7 @@ Pass any of these to override `config.py` for a single run:
 --rolling-sharpe <int>    Rolling Sharpe window in bars (0 = off)
 --export-ml / --no-export-ml
 --upload-s3 / --no-upload-s3
+--workers <int>           Cap the simulation pool (each worker copies the price data; 1 = serial)
 ```
 
 **Escape hatch — any config key not covered above**

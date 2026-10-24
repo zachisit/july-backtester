@@ -79,16 +79,17 @@ class TestAtrStopNaming:
         """Engine defaults a missing percentage value to 0.05; label mirrors it."""
         assert _build_strat_name("S", {"type": "percentage"}) == "S w/ 5% SL"
 
-    def test_percentage_rounding_is_half_even(self):
-        """`:.0%` uses Python round-half-to-even: 12.5% -> '12%'. Pin it."""
-        assert _build_strat_name("S", {"type": "percentage", "value": 0.125}) == "S w/ 12% SL"
+    def test_percentage_label_preserves_fractional_percent(self):
+        """Distinct percentage stops must not collapse into the same label."""
+        assert _build_strat_name("S", {"type": "percentage", "value": 0.125}) == "S w/ 12.5% SL"
 
     def test_none_config_returns_name_unchanged(self):
         assert _build_strat_name("S", {"type": "none"}) == "S"
 
     def test_unknown_stop_type_returns_name_unchanged(self):
-        # points / signal_bar / trailing_atr etc. are not specially labelled
-        assert _build_strat_name("S", {"type": "points", "value": 10}) == "S"
+        # points / signal_bar / trailing_atr now have their own suffix (#434);
+        # a genuinely unknown type is still left bare.
+        assert _build_strat_name("S", {"type": "mystery", "value": 10}) == "S"
 
     def test_missing_type_key_returns_name_unchanged(self):
         """A config with no 'type' is treated as 'none' (matches the engine's

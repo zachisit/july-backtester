@@ -6,6 +6,50 @@ from config import CONFIG
 import numpy as np
 from helpers.aws_utils import upload_file_to_s3
 from helpers.correlation import compute_avg_correlations, DEFAULT_THRESHOLD
+from helpers.result_status import split_results, format_not_shown, is_stub
+from helpers.filename_utils import sanitize_symbol_for_filename
+
+
+def _safe_strategy_name(strategy_name):
+    """Strategy name made safe for use in an output filename.
+
+    Applies the historical cosmetic transforms (spaces to underscores, remove
+    parentheses) so existing legal filenames are unchanged, then runs the result
+    through ``sanitize_symbol_for_filename`` so ANY Windows-illegal character is
+    handled — not just the ``/ ( ) : space`` this site used to strip by hand.
+
+    A strategy named ``EMA_PB-A3_ADX>20`` previously kept its ``>`` and produced
+    a filename Windows cannot write, which aborted ``git checkout`` for every
+    Windows contributor once the file was committed. The shared sanitizer maps
+    ``>``/``<`` to distinct ``_gt_``/``_lt_`` tokens, so comparison-sweep variants
+    stay distinct instead of colliding.
+
+    A Windows reserved device name gains a leading ``_`` (``CON`` -> ``_CON``).
+    Sanitize with the extension attached: a dot at the end of a strategy stem
+    is legal inside ``RSI_2..csv`` and must survive, or ``RSI 2.`` overwrites
+    ``RSI 2``. All callers append an extension or a suffix plus extension.
+    """
+    cosmetic = (
+        str(strategy_name)
+        .replace('/', '_').replace(' ', '_').replace('(', '').replace(')', '').replace(':', '')
+    )
+    if not cosmetic:
+        return sanitize_symbol_for_filename(cosmetic)
+    return sanitize_symbol_for_filename(cosmetic + ".csv").removesuffix(".csv")
+
+
+def safe_path_component(name):
+    """A portfolio or symbol name made safe for use in an output path.
+
+    Same idea as :func:`_safe_strategy_name` for the other two components of an
+    output path: keep the historical space-to-underscore transform so existing
+    legal folder names do not churn, then run the shared sanitizer. A portfolio
+    key like ``"Nasdaq: PIT"`` or an index asset like ``I:SPX`` otherwise lands
+    a ``:`` in the path, which Windows rejects the same way it rejects ``>``.
+    Reserved device names gain a leading underscore. Spaces become underscores
+    and trailing dots are stripped because these components can be directories.
+    """
+    return sanitize_symbol_for_filename(str(name).replace(" ", "_"))
 
 # Default drawdown filter shared by all four summary functions, so the value
 # cannot drift between copies again (issue #319 was one copy defaulting to
@@ -135,9 +179,9 @@ def save_trades_to_csv(result, local_folder, run_id):
         return
     
     # Sanitize names for filenames/paths
-    strategy_name_safe = result['Strategy'].replace('/', '_').replace(' ', '_').replace('(', '').replace(')', '').replace(':', '')
-    portfolio_name_safe = result.get('Portfolio', 'Portfolio').replace(" ", "_")
-    symbol = result.get('Asset', portfolio_name_safe)
+    strategy_name_safe = _safe_strategy_name(result['Strategy'])
+    portfolio_name_safe = safe_path_component(result.get('Portfolio', 'Portfolio'))
+    symbol = safe_path_component(result.get('Asset', portfolio_name_safe))
 
     filename = f"{symbol}_{strategy_name_safe}_trade_log.csv"
     local_filepath = os.path.join(local_folder, filename)
@@ -174,6 +218,7 @@ def generate_single_asset_summary_report(symbol_results, benchmark_returns, symb
         print(f"Benchmark ({label}) Buy & Hold Return: {ret:.2%}".center(80))
     print("=" * 80)
     
+    symbol_results, _ = split_results(symbol_results)
     if not symbol_results:
         print(f"\nNo successful strategy results to display for {symbol}.")
         return
@@ -315,6 +360,7 @@ def generate_final_summary(all_results, benchmark_returns):
     print("\n\n" + "=" * 80)
     print("Overall Top 5 Single-Asset Strategies".center(80))
     print("=" * 80)
+    all_results, _ = split_results(all_results)
     if not all_results:
         print("\nNo results to summarize.")
         return
@@ -449,6 +495,23 @@ def generate_final_summary(all_results, benchmark_returns):
 def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_returns, run_id, corr_matrix=None):
     """
     Prints the per-portfolio strategy summary and saves all trade logs.
+
+    ``portfolio_results`` may contain no-trades / error stubs (#432). They are
+    excluded from every table and CSV and listed in a closing
+    "Not shown: N with 0 trades, M errored" block instead.
+    """
+    real_results, stubs = split_results(portfolio_results)
+    try:
+        _generate_per_portfolio_summary(real_results, portfolio_name, benchmark_returns, run_id, corr_matrix=corr_matrix)
+    finally:
+        not_shown = format_not_shown(stubs)
+        if not_shown:
+            print("\n" + "\n".join(not_shown))
+
+
+def _generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_returns, run_id, corr_matrix=None):
+    """
+    Body of :func:`generate_per_portfolio_summary` (operates on real results only).
 
     Parameters
     ----------
@@ -622,7 +685,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_
             print("\n  Run with --verbose for extended metrics and robustness scores.")
 
     # --- Step 4a: Export analyzer-compatible CSVs ---
-    portfolio_name_safe = portfolio_name.replace(" ", "_")
+    portfolio_name_safe = safe_path_component(portfolio_name)
     analyzer_csv_folder = os.path.join("output", "runs", run_id, "analyzer_csvs", portfolio_name_safe)
 
     # Column mapping: backtester trade_log keys -> trade_analyzer expected columns
@@ -646,7 +709,7 @@ def generate_per_portfolio_summary(portfolio_results, portfolio_name, benchmark_
     for result in portfolio_results:
         if not result.get('trade_log') or len(result['trade_log']) == 0:
             continue
-        strategy_name_safe = result['Strategy'].replace('/', '_').replace(' ', '_').replace('(', '').replace(')', '').replace(':', '')
+        strategy_name_safe = _safe_strategy_name(result['Strategy'])
         raw_df = pd.DataFrame(result['trade_log'])
         mapped_df = raw_df.rename(columns=COLUMN_MAP)
         # Convert fractional values to percentages for the analyzer
@@ -737,6 +800,7 @@ def generate_portfolio_summary_report(all_results, benchmark_returns, duration_s
         print(f"Total Backtest Runtime: {format_duration(duration_seconds)}".center(80))
         print("=" * 80)
 
+    all_results, _ = split_results(all_results)
     if not all_results:
         print("\nNo portfolio results to summarize.")
         return
@@ -870,26 +934,44 @@ def generate_sensitivity_report(all_results: list[dict], run_id: str) -> None:
     from config import CONFIG
     if not CONFIG.get("sensitivity_sweep_enabled", False) or not all_results:
         return
+    def _meta(r):
+        # Structured metadata from main.py (#434); parse the display name only
+        # for legacy results that predate it.
+        if "base_strategy" in r and "param_label" in r:
+            return r["base_strategy"], r["param_label"], r.get("stop_label", "") or ""
+        name = r.get("Strategy", "")
+        label = name.split(" [")[-1].rstrip("]") if " [" in name else "(base)"
+        return name.split(" [")[0], label, ""
+
+    # One verdict per (portfolio, strategy, stop config), never pooled across them.
     groups = {}
     for r in all_results:
-        base = r.get("Strategy", "").split(" [")[0]
-        groups.setdefault(base, []).append(r)
+        base, _, stop = _meta(r)
+        groups.setdefault((r.get("Portfolio", ""), base, stop), []).append(r)
     swept = {k: v for k, v in groups.items() if len(v) > 1}
     if not swept:
         return
     print("\n" + "=" * 70)
     print("  PARAMETER SENSITIVITY REPORT")
     print("=" * 70)
-    for base_name, variants in swept.items():
-        profitable = [v for v in variants if v.get("pnl_percent", -1) > 0]
+    for (portfolio, base_name, stop), variants in swept.items():
+        # Zero-trade / errored variants (stubs, #432) stay in the denominator and
+        # are never profitable, so they count against robustness.
+        profitable = [v for v in variants
+                      if not is_stub(v) and (v.get("pnl_percent") or -1) > 0]
         pct = len(profitable) / len(variants) * 100
         flag = f"*** FRAGILE — profitable in only {pct:.0f}% of variants ***" if pct < 30 else \
                f"Robust — profitable in {pct:.0f}% of variants ({len(profitable)}/{len(variants)})"
-        print(f"\n  {base_name}\n  {flag}")
+        header = f"{base_name} | {portfolio}" + (f" | {stop}" if stop else "")
+        print(f"\n  {header}\n  {flag}")
         print(f"\n  {'Variant':<35} {'P&L':>8} {'Sharpe':>8} {'Max DD':>8} {'MC Score':>9}")
         print("  " + "-" * 70)
-        for r in sorted(variants, key=lambda x: (0 if "(base)" in x.get("Strategy", "") else 1, -x.get("pnl_percent", -999))):
-            label = r.get("Strategy", "").split(" [")[-1].rstrip("]") if " [" in r.get("Strategy", "") else "(base)"
+        for r in sorted(variants, key=lambda x: (0 if _meta(x)[1] == "(base)" else 1, -x.get("pnl_percent", -999))):
+            label = _meta(r)[1]
             mark = " <-- base" if label == "(base)" else ""
+            if r.get("status") == "no_trades":
+                mark += " [0 trades]"
+            elif r.get("status") == "error":
+                mark += " [ERROR]"
             print(f"  {label:<35} {r.get('pnl_percent', 0):>7.1%} {r.get('sharpe_ratio', 0) or 0:>8.2f} {r.get('max_drawdown', 0) or 0:>7.1%}  {r.get('mc_score', 0) or 0:>8}{mark}")
     print("=" * 70)

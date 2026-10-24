@@ -114,6 +114,8 @@ class TestEngineIntegration:
             "max_portfolio_heat": 1.0, "entry_priority": "alphabetical",
             "exclude_open_positions": False, "include_delisted": False,
             "intrabar_resolution": intrabar_on,
+            # Isolate the intrabar flag: pin the legacy stop-level coarse fill (#425).
+            "stop_gap_fill": "level",
             "instruments": {"default_asset_class": "equity", "overrides": {}},
         }
         with patch.dict("config.CONFIG", cfg, clear=False):

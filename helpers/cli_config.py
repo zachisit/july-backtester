@@ -105,8 +105,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Validate config and print summary without fetching data or running simulations.",
     )
     parser.add_argument(
-        "--verbose", action="store_true",
-        help="Show all columns in the summary table (default: compact view).",
+        "--verbose", dest="verbose", action="store_true", default=None,
+        help="Show all columns in the summary table (overrides config verbose_output).",
+    )
+    parser.add_argument(
+        "--no-verbose", dest="verbose", action="store_false", default=None,
+        help="Force the compact summary table (overrides config verbose_output=True).",
     )
     parser.add_argument("--init", action="store_true", help=argparse.SUPPRESS)
 
@@ -239,6 +243,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--mc-sampling", dest="mc_sampling", metavar="METHOD",
         help="MC resampling method: iid | block",
     )
+    parser.add_argument(
+        "--seed", dest="random_seed", type=int, metavar="INT",
+        help="Random seed for reproducible MC / noise injection. Omit = unseeded",
+    )
 
     # ---- WFA ----
     parser.add_argument(
@@ -280,6 +288,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Upload reports to the configured S3 bucket",
     )
 
+    parser.add_argument(
+        "--workers", dest="max_workers", type=int, metavar="N",
+        help="Cap the simulation pool at N workers (each holds a copy of the data). 1 = serial",
+    )
+
     # ---- ESCAPE HATCH ----
     parser.add_argument(
         "--set", dest="overrides", action="append", metavar="KEY=VALUE",
@@ -306,11 +319,18 @@ _DIRECT_KEYS = [
     "htb_rate_annual", "max_pct_adv", "volume_impact_coeff",
     "min_pandl_to_show_in_summary", "max_acceptable_drawdown",
     "mc_score_min_to_show_in_summary", "min_performance_vs_spy",
-    "num_mc_simulations", "min_trades_for_mc", "mc_sampling",
+    "num_mc_simulations", "min_trades_for_mc", "mc_sampling", "random_seed",
     "save_individual_trades", "save_only_filtered_trades",
     "noise_injection_pct", "rolling_sharpe_window",
-    "export_ml_features", "upload_to_s3",
+    "export_ml_features", "upload_to_s3", "max_workers",
 ]
+
+
+def resolve_verbose(args: argparse.Namespace, config_dict: dict) -> bool:
+    """CLI --verbose / --no-verbose wins; otherwise fall back to config verbose_output."""
+    if args.verbose is not None:
+        return bool(args.verbose)
+    return bool(config_dict.get("verbose_output", False))
 
 
 def apply_overrides(config_dict: dict, args: argparse.Namespace) -> dict:
@@ -438,9 +458,25 @@ _SECTIONS: list[tuple[str, str, list[dict]]] = [
         {
             "flag": "--min-bars <int>",
             "config_key": "min_bars_required",
-            "desc": "Skip any symbol with fewer bars than this.",
+            "desc": (
+                "Skip any symbol with fewer bars than this inside the backtest\n"
+                "      window (warm-up bars do not count). Survivorship-aware universes\n"
+                "      (pit:, rule:, include_delisted) KEEP short-lived names and only log\n"
+                "      them. Skipped/kept names are written to skipped_symbols.csv."
+            ),
             "options": None,
             "example": "python main.py --min-bars 500",
+        },
+        {
+            "flag": "--set pit_warmup_days=<int>",
+            "config_key": "pit_warmup_days",
+            "desc": (
+                "Calendar days of pre-start history fetched for symbols and dependencies so\n"
+                "      indicators are warm on start_date (default 400; 0 disables).\n"
+                "      No trade or equity point occurs before start_date."
+            ),
+            "options": None,
+            "example": "python main.py --set pit_warmup_days=600",
         },
     ]),
     ("strategies", "STRATEGIES", [
@@ -561,7 +597,7 @@ _SECTIONS: list[tuple[str, str, list[dict]]] = [
         {
             "flag": "--mc-sims <int>",
             "config_key": "num_mc_simulations",
-            "desc": "Number of Monte Carlo simulation runs.",
+            "desc": "Number of Monte Carlo simulation runs. MC Score (-4..5) = bootstrap edge test on mean trade P&L (p<0.05: +2, else -1 'No Significant Edge') + closed-trade DD realism (+1/-1 'DD Understated') + tail risk (+2/-1/-2).",
             "options": None,
             "example": "python main.py --mc-sims 2000",
         },
@@ -578,6 +614,13 @@ _SECTIONS: list[tuple[str, str, list[dict]]] = [
             "desc": "Resampling method. iid = independent. block = preserves streaks/regimes.",
             "options": "iid | block",
             "example": "python main.py --mc-sampling block",
+        },
+        {
+            "flag": "--seed <int>",
+            "config_key": "random_seed",
+            "desc": "Seed MC resampling, bootstrap p-value and noise injection for reproducible runs.",
+            "options": None,
+            "example": "python main.py --seed 42",
         },
     ]),
     ("wfa", "WALK-FORWARD ANALYSIS", [
@@ -597,6 +640,14 @@ _SECTIONS: list[tuple[str, str, list[dict]]] = [
         },
     ]),
     ("output", "OUTPUT & MISC", [
+        {
+            "flag": "--workers <int>",
+            "config_key": "max_workers",
+            "desc": "Cap the simulation pool. Each worker holds its own copy of the price data, "
+                    "so wide universes may need 1-2. None = min(cpu_count(), tasks).",
+            "options": None,
+            "example": "python main.py --workers 1",
+        },
         {
             "flag": "--save-trades / --no-save-trades",
             "config_key": "save_individual_trades",

@@ -67,6 +67,27 @@ logger = logging.getLogger(__name__)
 #: ``TICKER-YYYYMM`` marks a security that stopped trading in that month.
 _DELISTED_RE = re.compile(r"^(?P<ticker>.+)-(?P<yyyymm>\d{6})$")
 
+#: Where the parquet corpus lives when ``parquet_data_dir`` is not set, relative
+#: to the project root. The single default shared by every consumer of the key
+#: (the parquet price provider, ``resolve_universe`` and ``build_rule_schedule``)
+#: so they cannot disagree again (#413).
+DEFAULT_PARQUET_DATA_DIR = "parquet_data/data"
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def resolve_parquet_dir(config: dict | None) -> str:
+    """Absolute corpus directory for *config*.
+
+    ``parquet_data_dir`` if set (absolute, or relative to the project root),
+    else :data:`DEFAULT_PARQUET_DATA_DIR`. A missing key and an explicit
+    ``None`` both fall back to the default.
+    """
+    raw = (config or {}).get("parquet_data_dir") or DEFAULT_PARQUET_DATA_DIR
+    raw = str(raw)
+    return raw if os.path.isabs(raw) else os.path.join(_PROJECT_ROOT, raw)
+
+
 DEFAULTS = {
     "universe_min_price": 5.0,
     "universe_min_dollar_volume": 1_000_000.0,
@@ -273,6 +294,39 @@ def default_cache_path(data_dir: str) -> str:
     return os.path.join(os.path.dirname(abs_dir), f".span_index_{digest}.parquet")
 
 
+_FINGERPRINT_KEY = b"corpus_fingerprint"
+
+
+def corpus_fingerprint(data_dir: str) -> str:
+    """``"<files>:<total bytes>:<newest mtime ns>"`` over the corpus's parquet files.
+
+    Cheap (one ``scandir``, ~0.1s for 37k files) and changes whenever the corpus
+    does: a sync rewrites changed files with the source's modification time, a new
+    listing or a retired rename changes the count, and any rewrite changes size or
+    mtime.
+    """
+    n = size = newest = 0
+    with os.scandir(data_dir) as entries:
+        for e in entries:
+            if e.name.endswith(".parquet"):
+                st = e.stat()
+                n += 1
+                size += st.st_size
+                newest = max(newest, st.st_mtime_ns)
+    return f"{n}:{size}:{newest}"
+
+
+def _cached_fingerprint(cache_path: str) -> str | None:
+    import pyarrow.parquet as pq
+
+    try:
+        meta = pq.read_schema(cache_path).metadata or {}
+    except Exception:  # noqa: BLE001 - an unreadable cache is simply rebuilt
+        return None
+    raw = meta.get(_FINGERPRINT_KEY)
+    return raw.decode() if raw else None
+
+
 def build_span_index(data_dir: str, cache_path: str | None = None,
                      force: bool = False) -> pd.DataFrame:
     """Build (or load) the ``security -> [first_bar, last_bar, n_bars]`` index.
@@ -281,16 +335,28 @@ def build_span_index(data_dir: str, cache_path: str | None = None,
     Without this index, resolving a universe for a single date would re-open
     every file in the corpus.
 
+    The cache is reused only while the corpus is unchanged (see
+    :func:`corpus_fingerprint`). It used to be reused forever: the corpus now
+    refreshes daily from S3, so a cache built once kept every security's
+    ``last_bar`` frozen at that day and never saw files added later (new
+    listings, renamed or repaired securities) -- silently skewing both ``rule:``
+    universes and ``pit:`` security resolution.
+
     Returns a DataFrame indexed by security ID with columns
     ``ticker``, ``delisted``, ``first_bar``, ``last_bar``, ``n_bars``.
     """
+    fingerprint = corpus_fingerprint(data_dir) if data_dir and os.path.isdir(data_dir) else None
     if cache_path and os.path.exists(cache_path) and not force:
-        return pd.read_parquet(cache_path)
+        cached = _cached_fingerprint(cache_path)
+        if cached is not None and cached == fingerprint:
+            return pd.read_parquet(cache_path)
+        logger.info("Span index cache is stale (corpus changed); rebuilding %s", cache_path)
 
-    if not os.path.isdir(data_dir):
+    if not data_dir or not os.path.isdir(data_dir):
         raise FileNotFoundError(
-            f"Parquet corpus not found at '{data_dir}'. This is a git submodule — "
-            "run 'git submodule update --init parquet_data'."
+            f"Parquet corpus not found at '{data_dir}'. This repository ships no "
+            "dataset — point `parquet_data_dir` (or --parquet-dir) at your own "
+            "directory of {SYMBOL}.parquet files."
         )
 
     rows = []
@@ -314,8 +380,14 @@ def build_span_index(data_dir: str, cache_path: str | None = None,
     idx = pd.DataFrame(rows).set_index("security").sort_index()
 
     if cache_path:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
         os.makedirs(os.path.dirname(os.path.abspath(cache_path)), exist_ok=True)
-        idx.to_parquet(cache_path)
+        table = pa.Table.from_pandas(idx)
+        meta = dict(table.schema.metadata or {})
+        meta[_FINGERPRINT_KEY] = (fingerprint or "").encode()
+        pq.write_table(table.replace_schema_metadata(meta), cache_path)
     return idx
 
 
@@ -387,11 +459,7 @@ def resolve_universe(as_of, config: dict | None = None,
     top_n = config.get("universe_top_n", DEFAULTS["universe_top_n"])
     adv_window = _cfg("universe_adv_window")
 
-    data_dir = config.get("parquet_data_dir", "parquet_data/data")
-    if not os.path.isabs(data_dir):
-        data_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), data_dir
-        )
+    data_dir = resolve_parquet_dir(config)
 
     if span_index is None:
         span_index = build_span_index(data_dir, cache_path=default_cache_path(data_dir))
@@ -591,7 +659,7 @@ def build_rule_schedule(spec: str, start_date, end_date, config: dict | None = N
     # Build the span index once and reuse it: it is the expensive part, and
     # re-deriving it per re-base date would multiply the cost by len(dates).
     span_index = build_span_index(
-        merged.get("parquet_data_dir", DEFAULTS.get("parquet_data_dir")),
+        resolve_parquet_dir(merged),
         merged.get("universe_span_cache"),
     )
 

@@ -146,7 +146,11 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
                     if pd.notna(row.get("Ex. date")) and pd.notna(row.get("Profit"))
                 ]
                 is_trades, oos_trades = split_trades(wfa_trade_dicts, wfa_split_date)
-                wfa_result = evaluate_wfa(is_trades, oos_trades, initial_equity)
+                wfa_result = evaluate_wfa(
+                    is_trades, oos_trades, initial_equity,
+                    is_window=(actual_start, wfa_split_date),
+                    oos_window=(wfa_split_date, actual_end),
+                )
                 print(f"WFA: split_date={wfa_split_date}  IS={len(is_trades)} trades  OOS={len(oos_trades)} trades  verdict={wfa_result.get('wfa_verdict')}")
             except Exception as wfa_err:
                 print(f"WFA Warning: could not compute WFA metrics: {wfa_err}")

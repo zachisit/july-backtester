@@ -308,3 +308,57 @@ class TestGetPriceDataErrors:
 # tests/test_ticker_normalizer.py which provides comprehensive coverage
 # for all 4 data providers (yahoo, polygon, norgate, csv).
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Inclusive end_date (#441) — yfinance `end` is exclusive
+# ---------------------------------------------------------------------------
+
+def _df_from_index(idx):
+    n = len(idx)
+    df = pd.DataFrame(
+        {"Open": [1.0] * n, "High": [2.0] * n, "Low": [0.5] * n,
+         "Close": [1.5] * n, "Volume": [100.0] * n},
+        index=idx,
+    )
+    df.index.name = "Date"
+    return df
+
+
+class TestInclusiveEndDate:
+
+    def test_history_called_with_end_plus_one_day(self, mock_yf):
+        t = _configure_ticker(mock_yf, _make_yf_df())
+        from services import yahoo_service
+        yahoo_service.get_price_data("AAPL", "2023-01-01", "2024-12-31", _BASE_CONFIG)
+        assert t.history.call_args.kwargs["end"] == "2025-01-01"
+
+    def test_daily_end_bar_kept_and_next_dropped(self, mock_yf):
+        idx = pd.DatetimeIndex(
+            ["2024-12-30", "2024-12-31", "2025-01-01"], tz="America/New_York"
+        )
+        _configure_ticker(mock_yf, _df_from_index(idx))
+        from services import yahoo_service
+        res = yahoo_service.get_price_data("AAPL", "2024-12-01", "2024-12-31", _BASE_CONFIG)
+        assert res.index.max() == pd.Timestamp("2024-12-31", tz="UTC")
+        assert pd.Timestamp("2025-01-01", tz="UTC") not in res.index
+        assert len(res) == 2
+
+    def test_intraday_end_day_bars_kept_next_day_dropped(self, mock_yf):
+        idx = pd.DatetimeIndex(
+            ["2024-12-31 09:30", "2024-12-31 15:55", "2025-01-02 09:30"],
+            tz="America/New_York",
+        )
+        _configure_ticker(mock_yf, _df_from_index(idx))
+        cfg = {**_BASE_CONFIG, "timeframe": "MIN", "timeframe_multiplier": 5}
+        from services import yahoo_service
+        res = yahoo_service.get_price_data("AAPL", "2024-12-01", "2024-12-31", cfg)
+        assert len(res) == 2
+        assert res.index.max() < pd.Timestamp("2025-01-01", tz="UTC")
+
+    def test_end_date_none_passes_none_and_keeps_all_bars(self, mock_yf):
+        t = _configure_ticker(mock_yf, _make_yf_df(5))
+        from services import yahoo_service
+        res = yahoo_service.get_price_data("AAPL", "2023-01-01", None, _BASE_CONFIG)
+        assert t.history.call_args.kwargs["end"] is None
+        assert len(res) == 5
