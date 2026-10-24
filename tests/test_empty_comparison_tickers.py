@@ -428,7 +428,7 @@ class TestWrapperSource:
 
 
 class TestSubprocessCallSiteHygiene:
-    """Every `subprocess.run` in the four wrapper modules must pass
+    """Every `subprocess.run` in tests, including the shared harness, must pass
     `encoding`/`errors` and a `timeout` (#362, #366).
 
     Both invariants have already bitten, and both were fixed by hand across

@@ -146,7 +146,7 @@ def test_cli_spawn_workers_agree_on_a_known_corpus(tmp_path):
         result = subprocess.run(
             [sys.executable, str(Path(ROOT) / "scripts" / "data_quality_cast_census.py"),
              "--corpus", str(corpus_dir), "--workers", str(workers), "--json-out", str(artifact)],
-            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=60,
+            cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "Series scored        : 2   (1 unreadable)" in result.stdout
@@ -177,7 +177,7 @@ def test_module_initialization_failure_exits_without_worker_respawn_loop(tmp_pat
     result = subprocess.run(
         [sys.executable, str(Path(ROOT) / "scripts" / "data_quality_cast_census.py"),
          "--module", str(module), "--corpus", str(corpus_dir), "--workers", "2"],
-        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30,
+        cwd=ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     assert result.returncode == 2, result.stdout + result.stderr
     assert "cannot initialize scoring module" in result.stderr
