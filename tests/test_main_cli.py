@@ -20,6 +20,9 @@ import sys
 
 import pytest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import _wrapper_harness as _harness  # noqa: E402
+
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 MAIN = os.path.join(PROJECT_ROOT, "main.py")
 
@@ -50,49 +53,15 @@ def _run(*args, extra_env=None):
 
 
 def _run_with_config_patch(tmp_path, patches: dict, cli_args=("--dry-run",), extra_env=None):
+    """Delegates to tests/_wrapper_harness.py (#366).
+
+    This module previously hand-rolled the wrapper. Both invariants it
+    must hold -- the __main__ guard and encoding="utf-8" -- were violated
+    in production and fixed four times by hand; the second fix reached
+    six of seven call sites, and the seventh was in this file.
     """
-    Wrapper-script approach: mutates CONFIG keys then calls main.main().
-    Mirrors the identical helper in test_startup_validation.py.
-    """
-    lines = [
-        "import sys",
-        f"sys.path.insert(0, {repr(PROJECT_ROOT)})",
-        "import config",
-    ]
-    for k, v in patches.items():
-        lines.append(f"config.CONFIG[{repr(k)}] = {repr(v)}")
-    lines.append("import main")
-    # main.main() MUST sit under a __main__ guard (#362): main.py builds a
-    # multiprocessing Pool, and under the spawn start method every worker
-    # re-imports the parent __main__ — this wrapper — so an unguarded call
-    # re-enters main.main() during bootstrap and deadlocks the parent. Safe
-    # here only while every call site passes --dry-run and exits before the
-    # Pool; the first one that does not would hang the suite. The CONFIG
-    # patches stay at module scope so spawn children re-apply them.
-    lines.append('if __name__ == "__main__":')
-    lines.append(f"    sys.argv = {repr(['main.py'] + list(cli_args))}")
-    lines.append("    main.main()")
-
-    wrapper = tmp_path / "run_patched.py"
-    wrapper.write_text("\n".join(lines), encoding="utf-8")
-
-    env = os.environ.copy()
-    if extra_env:
-        env.update(extra_env)
-
-    return subprocess.run(
-        [sys.executable, str(wrapper)],
-        capture_output=True, text=True,
-        # main.py:27-28 reconfigures its streams to UTF-8; the locale default
-        # is cp1252 on Windows, which cannot decode the U+2501 in its banner.
-        # subprocess raises inside _readerthread, so stderr comes back None and
-        # every assertion becomes a TypeError. ASCII-only --dry-run output makes
-        # this benign here TODAY, which is incidental, not structural (#362).
-        encoding="utf-8",
-        errors="replace",
-        env=env, cwd=PROJECT_ROOT,
-        timeout=120,
-    )
+    return _harness.run_wrapper(tmp_path, patches, cli_args,
+                                env=extra_env)
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +129,11 @@ class TestMissingApiKey:
             extra_env={"POLYGON_API_KEY": ""},
         )
         combined = result.stdout + result.stderr
+        # The POSITIVE half. Without it the name's ordering claim -- S1 fires,
+        # AND the gate does not -- is satisfied by NEITHER happening: replacing
+        # main()'s whole body with `raise SystemExit(3)` left this green.
+        # @shardul0701 on #376.
+        assert "POLYGON_API_KEY is not set" in result.stdout
         assert "[DRY RUN]" not in combined
 
     def test_run_summary_not_printed(self, tmp_path):
@@ -170,6 +144,8 @@ class TestMissingApiKey:
             extra_env={"POLYGON_API_KEY": ""},
         )
         combined = result.stdout + result.stderr
+        # See test_dry_run_message_not_printed: absence alone is vacuous.
+        assert "POLYGON_API_KEY is not set" in result.stdout
         assert "RUN SUMMARY" not in combined
 
 

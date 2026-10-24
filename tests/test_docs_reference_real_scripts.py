@@ -34,7 +34,8 @@ SKIP_DIRS = {".git", ".venv", "node_modules", "output", "data_cache",
 
 def _tracked_files() -> set[str]:
     out = subprocess.run(["git", "ls-files"], cwd=ROOT,
-                         capture_output=True, text=True, check=True).stdout
+                         capture_output=True, text=True, encoding="utf-8", errors="replace",
+                         timeout=30, check=True).stdout
     return set(out.split())
 
 
