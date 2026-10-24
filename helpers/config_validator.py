@@ -31,9 +31,22 @@ logger = logging.getLogger(__name__)
 KNOWN_KEYS: set[str] = {
     # SECTION 1: Data Provider
     "data_provider",
+    "polygon_max_retries",
     "polygon_api_secret_name",  # PR #187: added — was triggering "unknown key" warning
     "csv_data_dir",
+    # --- Rule-based point-in-time universe (zachisit/july-backtester-private-strategies#70) ---
+    "universe_min_price",
+    "universe_min_dollar_volume",
+    "universe_min_bars",
+    "universe_top_n",
+    "universe_adv_window",
+    "universe_exclude_prefixes",
+    "universe_exclude_symbols",
+    "universe_exclude_etfs",
+    "universe_rebase",        # "annual" (default) | "quarterly" | "monthly" | "none"
+    "universe_span_cache",
     "parquet_data_dir",
+    "merged_data_root",
     # SECTION 2: Backtest Period & Capital
     "start_date",
     "end_date",
@@ -91,9 +104,11 @@ KNOWN_KEYS: set[str] = {
     "rolling_sharpe_window",
     # SECTION 17: Short Selling
     "htb_rate_annual",
+    "short_margin_requirement",
     # SECTION 18: MC Sampling
     "mc_sampling",
     "mc_block_size",
+    "random_seed",
     # SECTION 18b: Smoothness verdict profile
     "smoothness_profile",
     # SECTION 19: Volume Impact
@@ -120,7 +135,8 @@ KNOWN_KEYS: set[str] = {
     "fixed_contracts_per_trade",
     "risk_pct_per_trade",
     "max_contracts_cap",
-    # PIT screening
+    "risk_pct_capped_max_notional_pct",
+    # PIT and merged-data screening
     "pit_enforce_daily",
     "pit_warmup_days",
     "pit_exit_buffer_days",
@@ -130,6 +146,9 @@ KNOWN_KEYS: set[str] = {
     "instruments",
     # Sub-bar (intraday) resolution
     "intrabar_resolution",
+    "stop_gap_fill",
+    "stop_gap_fill_armed_trail",
+    "entry_bar_stop_check",
     "intrabar_timeframe",
     "intrabar_multiplier",
     "intrabar_parquet_source",
@@ -138,10 +157,17 @@ KNOWN_KEYS: set[str] = {
     # SECTION 30: Cross-sectional rotation (issue #294)
     "rotation",
     "max_position_pct",
+    # SECTION 31: Simulation workers (#414)
+    "max_workers",
     # SECTION 27: Deterministic Entry Queue
     "entry_priority",
     "entry_random_seed",
+    "entry_trigger",
     "nq100_pit_path",
+    # Merged Norgate+Polygon provider (merged_data_root registered in SECTION 1)
+    "merged_quality_filter_enabled",
+    "merged_exclude_statuses",
+    "merged_min_avg_dollar_volume",
     # S3
     "s3_reports_bucket",
     "upload_to_s3",
@@ -192,6 +218,126 @@ def validate_config(config: dict) -> list[str]:
                    f"(expected one of '{options}') -- will fall back to the equity profile")
             warnings.append(msg)
             logger.warning(msg)
+
+    # Value-level check for universe_rebase. Registering the key in KNOWN_KEYS
+    # without its DOMAIN left a gap: a plausible typo like "yearly" passes
+    # validation, then raises ValueError inside build_rule_schedule, which
+    # main.py's `except Exception: continue` turns into one ERROR line and a
+    # SILENTLY DROPPED PORTFOLIO. Catching it here fails at startup instead,
+    # where it is attributable. Same precedent as smoothness_profile above.
+    ur = config.get("universe_rebase")
+    if ur is not None:
+        from helpers.rule_based_universe import REBASE_FREQUENCIES
+        valid_ur = {"none", *REBASE_FREQUENCIES.keys()}
+        if str(ur).lower() not in valid_ur:
+            options = "', '".join(sorted(valid_ur))
+            msg = (f"WARNING: universe_rebase '{ur}' is not a known frequency "
+                   f"(expected one of '{options}') -- any rule: portfolio will "
+                   f"be DROPPED at run time with a single ERROR line")
+            warnings.append(msg)
+            logger.warning(msg)
+
+    # Value-level checks for the position-sizing numerics (#385). These four
+    # are read via CONFIG.get(key, default) deep inside the entry loop in
+    # helpers/position_sizing.py, so a bad value does not surface as a config
+    # error -- it surfaces as a TypeError thrown per-symbol mid-backtest, or
+    # worse, as a NEGATIVE share count that the engine then trades.
+    #
+    #   max_contracts_cap: None            -> TypeError in min(units, cap)
+    #   fixed_contracts_per_trade: None    -> TypeError in float(None)
+    #   fixed_contracts_per_trade: -3      -> a -3 contract position, silently
+    #
+    # Same precedent as the two enum checks above: catch it at startup where it
+    # is attributable to the key the user set.
+    # `None` is a legal "off" switch only where the sizer implements one. For
+    # the other three it is the input that raises. Spelled out per key rather
+    # than shared, because the original version of this loop asserted a single
+    # consequence ("a zero or NEGATIVE position size") for four keys with four
+    # different failure modes -- and was measurably wrong for one of them.
+    for _key, _none_means_off in (("risk_pct_per_trade", False),
+                                  ("max_contracts_cap", False),
+                                  ("risk_pct_capped_max_notional_pct", True),
+                                  ("fixed_contracts_per_trade", False)):
+        if _key not in config:
+            continue
+        _val = config[_key]
+        if _val is None:
+            if _none_means_off:
+                continue
+            msg = (f"WARNING: {_key} must be a positive number, got None "
+                   f"-- position sizing will raise mid-backtest")
+            warnings.append(msg)
+            logger.warning(msg)
+        elif isinstance(_val, bool) or not isinstance(_val, (int, float)):
+            msg = (f"WARNING: {_key} must be a positive number, got "
+                   f"{_val!r} -- position sizing will raise mid-backtest")
+            warnings.append(msg)
+            logger.warning(msg)
+        elif _val == 0 and _key == "risk_pct_capped_max_notional_pct":
+            # 0 is a ceiling of zero, so it takes no position at all. It used to
+            # mean the OPPOSITE -- the sizer's guard was a bare truthiness test,
+            # so 0.0 skipped the ceiling and produced the same size as 1.0 --
+            # and this warning used to claim it produced "a zero or NEGATIVE
+            # position size", which was wrong about a value that was also wrong
+            # in the code. Both now say the same thing. `None` disables it.
+            # (@shardul0701 on #390.)
+            msg = (f"WARNING: {_key} = 0 is a ceiling of zero and takes NO "
+                   f"position -- use None to disable the ceiling instead")
+            warnings.append(msg)
+            logger.warning(msg)
+        elif _val <= 0:
+            msg = (f"WARNING: {_key} must be a positive number, got {_val!r} "
+                   f"-- this produces a zero or NEGATIVE position size")
+            warnings.append(msg)
+            logger.warning(msg)
+
+    # The max_portfolio_heat == risk_pct_per_trade cliff (#385). The heat gate
+    # is shown notional(SLIPPED entry) x stop_fraction(RAW entry), so it
+    # evaluates (1 + slippage_pct) times the risk actually taken: a position
+    # risking exactly 1.000% of equity presents as 1.0005% and a 1% cap
+    # rejects it. Measured -- `risk_pct_per_trade: 0.02` with
+    # `max_portfolio_heat: 0.02` takes zero trades on both percentage and ATR
+    # stops, with no error. Pre-existing, but newly REACHABLE: gating the
+    # contract cap is what lets an equity position grow enough to reach the
+    # gate, and #385 is also what promoted both keys to documented dials, so
+    # setting them to the same round number is now a supported path into a
+    # silent zero-trade run. The drift itself is #381-D's.
+    _rp = config.get("risk_pct_per_trade")
+    _heat = config.get("max_portfolio_heat")
+    _slip = config.get("slippage_pct", 0.0)
+    if (config.get("position_sizing_method") == "risk_pct_capped"
+            and isinstance(_rp, (int, float)) and not isinstance(_rp, bool)
+            and isinstance(_heat, (int, float)) and not isinstance(_heat, bool)
+            and isinstance(_slip, (int, float)) and _rp > 0 and _heat > 0
+            and _heat <= _rp * (1.0 + _slip)):
+        msg = ("WARNING: max_portfolio_heat "
+               f"({_heat}) <= risk_pct_per_trade ({_rp}) x (1 + slippage_pct) "
+               f"-- risk_pct_capped will size every equity position to just "
+               f"over the heat cap and take ZERO trades, silently")
+        warnings.append(msg)
+        logger.warning(msg)
+
+    # Value-level check for entry_trigger. The engine runs "level" ONLY for an
+    # exact "level" and "edge" for everything else (#401), so a typo can no
+    # longer silently select the old behaviour -- but someone who meant "level"
+    # and typed "levle" still gets edge without being told. Same precedent as
+    # universe_rebase and smoothness_profile above.
+    mw = config.get("max_workers")
+    if mw is not None and (isinstance(mw, bool) or not isinstance(mw, int) or mw < 1):
+        msg = (f"WARNING: max_workers {mw!r} is not a positive integer or None "
+               f"-- the run will ignore it and use min(cpu_count(), tasks)")
+        warnings.append(msg)
+        logger.warning(msg)
+
+    # None means "unset" here as for every other key, and the engine runs an
+    # unset/None entry_trigger as the shipped default "edge" -- no warning due.
+    et = config.get("entry_trigger")
+    if et is not None and str(et).strip().lower() not in {"level", "edge"}:
+        msg = (f"WARNING: entry_trigger '{et}' is not a known mode "
+               f"(expected 'level' or 'edge') -- the run will fall back to "
+               f"'edge', i.e. entry only on the TRANSITION into the signal value")
+        warnings.append(msg)
+        logger.warning(msg)
 
     return warnings
 

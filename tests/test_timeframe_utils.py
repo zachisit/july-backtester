@@ -123,13 +123,12 @@ class TestGetBarsPerYear:
 class TestGetBarsPerDay:
     """Test get_bars_per_day() — bars in a single trading day, per timeframe.
 
-    Unlike get_bars_for_period, this correctly honours `multiplier` for the
-    H timeframe (get_bars_for_period("Nd", "H", mult) ignores `mult` for the
-    'd' unit branch -- a separate, pre-existing bug intentionally left alone
-    here to avoid changing behavior for any strategy already depending on
-    it; see PR #265 discussion). get_bars_per_day is used exclusively to
-    rescale a per-bar volume average into a true average-daily-volume figure
-    for the max_pct_adv / volume_impact_coeff liquidity/impact models.
+    Both this and get_bars_for_period now honour `multiplier` for the H
+    timeframe (get_bars_for_period's H/MIN multiplier bug was fixed in #318,
+    which also closed the H-branch half of #267). get_bars_per_day is used
+    exclusively to rescale a per-bar volume average into a true
+    average-daily-volume figure for the max_pct_adv / volume_impact_coeff
+    liquidity/impact models.
     """
 
     def test_daily_timeframe(self):
@@ -140,12 +139,8 @@ class TestGetBarsPerDay:
         assert get_bars_per_day({"timeframe": "H", "timeframe_multiplier": 1}) == 6
 
     def test_hourly_2h_honours_multiplier(self):
-        """2-hour bars: 6.5/2 = 3.25 -> 3 bars/day.
-
-        get_bars_for_period("20d", "H", 2) incorrectly ignores the multiplier
-        here (returns 130, i.e. as if multiplier were 1) -- get_bars_per_day
-        must not repeat that bug.
-        """
+        """2-hour bars: 6.5/2 = 3.25 -> 3 bars/day. get_bars_for_period("20d",
+        "H", 2) now also honours the multiplier (== 65 after #318)."""
         assert get_bars_per_day({"timeframe": "H", "timeframe_multiplier": 2}) == 3
 
     def test_hourly_4h_honours_multiplier(self):

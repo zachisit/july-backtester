@@ -662,3 +662,108 @@ class TestRunPortfolioSimulationSurvivorship:
         assert res.get("positions_delisted") in (None, 0)
         reasons = [t["ExitReason"] for t in res["trade_log"]]
         assert "Delisting" not in reasons
+
+
+# ---------------------------------------------------------------------------
+# Issue #431: delisting liquidation happens INSIDE the daily loop, so sizing
+# after a delisting uses real equity and the freed cash/slot is redeployable.
+# ---------------------------------------------------------------------------
+class TestDelistingInLoop431:
+    _helper = TestRunPortfolioSimulationSurvivorship()
+
+    def _run(self, cfg, data, sigs, delist, alloc=0.5, **kw):
+        import importlib
+        from unittest.mock import patch
+        import config
+        import helpers.portfolio_simulations as ps
+        try:
+            with patch.object(config, "CONFIG", cfg):
+                importlib.reload(ps)
+                return ps.run_portfolio_simulation(
+                    data, sigs, 100000.0, alloc, None, None, None, {"type": "none"},
+                    delisting_dates=delist, **kw)
+        finally:
+            importlib.reload(ps)
+
+    def _scenario(self, assumption, a_price=100.0, a_close_after=None):
+        """A (500 sh @100) is bought day 0 and delists day 5; B signals day 10."""
+        dates = pd.bdate_range("2024-01-01", periods=30)
+        a = pd.DataFrame({"Open": a_price, "High": a_price + 1, "Low": a_price - 1,
+                          "Close": a_price, "Volume": 1e6}, index=dates[:8])
+        b = pd.DataFrame({"Open": 100.0, "High": 101.0, "Low": 99.0,
+                          "Close": 100.0, "Volume": 1e6}, index=dates)
+        sa = pd.Series(0, index=a.index); sa.iloc[0] = 1
+        sb = pd.Series(0, index=dates); sb.iloc[10] = 1
+        cfg = self._helper._patched_cfg(delisting_price_assumption=assumption)
+        return self._run(cfg, {"A": a, "B": b}, {"A": sa, "B": sb},
+                         {"A": str(dates[5].date())})
+
+    def test_zero_sizes_later_entry_on_real_equity(self):
+        res = self._scenario("zero")
+        tl = {t["Symbol"]: t for t in res["trade_log"]}
+        assert tl["A"]["ExitReason"] == "Delisting"
+        assert tl["A"]["Shares"] == pytest.approx(500)
+        # Equity after the total loss is 50k -> 50% allocation = 250 sh, not 500.
+        assert tl["B"]["Shares"] == pytest.approx(250)
+
+    def test_curve_steps_down_on_delisting_bar(self):
+        res = self._scenario("zero")
+        tl = res["portfolio_timeline"]
+        assert tl.iloc[4] == pytest.approx(100000.0)
+        assert tl.iloc[5] == pytest.approx(50000.0)
+
+    def test_final_equity_reconciles_with_trade_pnl(self):
+        for assumption in ("zero", "last_close"):
+            res = self._scenario(assumption, a_price=100.0)
+            assert res["portfolio_timeline"].iloc[-1] == pytest.approx(
+                100000.0 + sum(t["Profit"] for t in res["trade_log"]))
+
+    def test_survivorship_stats_unchanged(self):
+        res = self._scenario("zero")
+        assert res["positions_delisted"] == 1
+        assert res["total_delisting_loss"] == pytest.approx(-50000.0)
+        assert res["delisting_loss_pct"] == pytest.approx(-0.5)
+
+    def test_last_close_frees_cash_for_blocked_entry(self):
+        """A takes 95% of cash; B's signal on day 10 is cash-blocked while A is
+        (wrongly) still held. After in-loop liquidation the cash is back."""
+        dates = pd.bdate_range("2024-01-01", periods=30)
+        a = pd.DataFrame({"Open": 100.0, "High": 101.0, "Low": 99.0,
+                          "Close": 100.0, "Volume": 1e6}, index=dates[:8])
+        b = pd.DataFrame({"Open": 100.0, "High": 101.0, "Low": 99.0,
+                          "Close": 100.0, "Volume": 1e6}, index=dates)
+        sa = pd.Series(0, index=a.index); sa.iloc[0] = 1
+        sb = pd.Series(0, index=dates); sb.iloc[10] = 1
+        cfg = self._helper._patched_cfg(delisting_price_assumption="last_close")
+        res = self._run(cfg, {"A": a, "B": b}, {"A": sa, "B": sb},
+                        {"A": str(dates[5].date())}, alloc=0.95)
+        b_trades = [t for t in res["trade_log"] if t["Symbol"] == "B"]
+        assert len(b_trades) == 1
+        assert b_trades[0]["Shares"] == pytest.approx(950)
+        assert res["portfolio_timeline"].iloc[-1] == pytest.approx(
+            100000.0 + sum(t["Profit"] for t in res["trade_log"]))
+
+    def test_delisting_after_last_loop_date_safety_net(self):
+        dates = pd.bdate_range("2024-01-01", periods=10)
+        a = pd.DataFrame({"Open": 100.0, "High": 101.0, "Low": 99.0,
+                          "Close": 100.0, "Volume": 1e6}, index=dates)
+        sa = pd.Series(0, index=dates); sa.iloc[0] = 1
+        cfg = self._helper._patched_cfg()
+        res = self._run(cfg, {"A": a}, {"A": sa}, {"A": "2024-06-03"}, alloc=0.5)
+        assert res["positions_delisted"] == 1
+        assert [t["ExitReason"] for t in res["trade_log"]] == ["Delisting"]
+        assert res["portfolio_timeline"].iloc[-1] == pytest.approx(
+            100000.0 + sum(t["Profit"] for t in res["trade_log"]))
+
+    def test_short_in_delisted_symbol_is_covered_and_collateral_released(self):
+        dates = pd.bdate_range("2024-01-01", periods=15)
+        a = pd.DataFrame({"Open": 100.0, "High": 101.0, "Low": 99.0,
+                          "Close": 100.0, "Volume": 1e6}, index=dates[:8])
+        sa = pd.Series(0, index=a.index); sa.iloc[0] = -2
+        cfg = self._helper._patched_cfg()
+        res = self._run(cfg, {"A": a}, {"A": sa}, {"A": str(dates[5].date())}, alloc=0.5)
+        t = res["trade_log"][0]
+        assert t["ExitReason"] == "Delisting" and t["Trade"].startswith("Short")
+        assert t["ExitDate"].startswith(str(dates[5].date()))
+        assert res["portfolio_timeline"].iloc[-1] == pytest.approx(
+            100000.0 + sum(x["Profit"] for x in res["trade_log"]))

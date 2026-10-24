@@ -443,6 +443,15 @@ class TestMainEndToEnd:
         bri.main()
         assert len(self._read_output(proj)) == 1
 
+    def test_runs_only_with_no_prefixes_errors_instead_of_scanning_everything(self, proj, monkeypatch):
+        """A bare --runs-only (no prefix args) must fail loudly, not silently
+        fall back to scanning every run."""
+        self._setup(proj)
+        monkeypatch.setattr(sys, "argv", ["build_research_index.py", "--runs-only"])
+        with pytest.raises(SystemExit) as exc_info:
+            bri.main()
+        assert exc_info.value.code != 0
+
     def test_creates_output_directory_when_absent(self, proj, monkeypatch):
         self._setup(proj)
         target = proj / "fresh" / "research_index.csv"

@@ -9,6 +9,7 @@ Research-specific presets (e.g. config_weekly_rsi.py) should NOT be committed
 to the repo. Keep experiment configs locally and copy values into this file
 temporarily when reproducing an experiment, then restore before committing.
 """
+import os
 
 CONFIG = {
     # ============================================================
@@ -18,8 +19,16 @@ CONFIG = {
     # polygon_api_secret_name: name of the env-var / .env key that holds the key.
     "data_provider": "polygon",
     "polygon_api_secret_name": "POLYGON_API_KEY",
+    # Retries (exponential backoff, honours Retry-After) on HTTP 429/5xx per request. 0 = off.
+    "polygon_max_retries": 5,
     # Only used when data_provider = "csv":
     "csv_data_dir": "csv_data",
+    # Only used when data_provider = "merged" — root of the built unified
+    # Norgate+Polygon store (see src/data/unified_market_data_provider.py).
+    # Empty string / unset falls back to data/market_data/merged/. Build the
+    # store with `python scripts/build_merged_dataset.py` before switching to
+    # "merged"; the provider raises at startup if this path doesn't exist.
+    "merged_data_root": os.environ.get("MERGED_DATA_ROOT", ""),
 
     # ============================================================
     # SECTION 2: BACKTEST PERIOD & CAPITAL
@@ -159,6 +168,12 @@ CONFIG = {
     # SECTION 17: SHORT SELLING BORROW COST
     # ============================================================
     "htb_rate_annual": 0.0,         # 0.0 = disabled (long-only default); set to e.g. 0.02 for short strategies
+    # Equity short buying power (#430): each open equity short reserves
+    # notional * this fraction of cash as collateral, released on cover. New
+    # entries (long or short) can only use cash minus the reserved collateral,
+    # so 0.5 with allocation_per_trade=0.10 caps the short book near 2x gross.
+    # 0.0 = legacy behaviour (shorts reserve nothing; unbounded gross leverage).
+    "short_margin_requirement": 0.5,
 
     # ============================================================
     # SECTION 18: MONTE CARLO SAMPLING
@@ -168,6 +183,10 @@ CONFIG = {
                                     # profile, else iid (calibrates the MC "DD-Understated"
                                     # verdict for single-instrument regime-dependent strategies)
     "mc_block_size": None,          # None = auto floor(sqrt(N))
+    "random_seed": None,            # None = unseeded (legacy: MC / bootstrap p-value / noise differ
+                                    # run to run). An int (e.g. 42) makes MC scores, the edge p-value
+                                    # and noise injection reproducible; seeds are derived per
+                                    # portfolio+strategy / symbol, independent of worker assignment (#439)
 
     # ============================================================
     # SECTION 18b: CURVE-SMOOTHNESS VERDICT PROFILE
@@ -200,10 +219,57 @@ CONFIG = {
     # Controls the order in which symbols are evaluated for entry when multiple
     # signals fire on the same bar and capital can only fill a subset.
     # "alphabetical" (default) — A→Z, reproducible and Alpaca-replicable
-    # "signal_date"            — earlier-signalling symbols get priority
-    # "random_seed"            — shuffle with a fixed seed (sensitivity testing)
+    # "signal_date"            — earlier-signalling symbols get priority. On
+    #                            daily bars every same-bar signal shares one
+    #                            signal_date, so ties fall through to the symbol:
+    #                            it is effectively ALPHABETICAL on same-bar ties.
+    # "random_seed"            — a different shuffle every bar, seeded from
+    #                            (entry_random_seed, date): reproducible for a
+    #                            given seed; run several seeds for a sensitivity
+    #                            distribution (#412)
     "entry_priority": "alphabetical",
     "entry_random_seed": 42,
+
+    # Whether a bar qualifies as an ENTRY at all.
+    # "edge" (default)  — enter only on the transition INTO the entry state,
+    #                     matching how the live scanner triggers
+    #                     (`last == 1 and prev != 1`).
+    # "level"           — enter on any bar whose signal reads the entry value.
+    #                     Strategies emitting a forward-filled state series make
+    #                     every hold bar entry-eligible under this mode.
+    #
+    # DEFAULT FLIPPED TO "edge" (#401). Under "level" a forward-filled state
+    # series re-enters on the SAME BAR a stop closed the position — measured
+    # 2 trades where the strategy emitted one decision — and WHICH bar gets
+    # taken becomes a function of book size. 29 of 50 functions in
+    # helpers/indicators.py forward-fill, so the default library is hold-state
+    # and was exposed by default. This key is read ONCE PER RUN, so opting
+    # individual strategies in was never expressible; the only two options were
+    # "everyone" or "nobody", and "nobody" meant stable-but-wrong numbers.
+    #
+    # TWO CONSEQUENCES OF "edge" BEYOND THE LATE-ENTRY FIX, both intended:
+    #   * A STOPPED-OUT POSITION DOES NOT RE-ENTER while the state signal is
+    #     still held. Level mode re-enters on the next bar (the series still
+    #     reads 1); edge mode waits for a transition that will not come until
+    #     the strategy actually re-signals. A live scanner triggering on
+    #     `last == 1 and prev != 1` behaves the same way, which is the point —
+    #     but on a stopped strategy this moves results more than the capacity
+    #     path this option was written for.
+    #   * ON A CONTESTED BOOK IT RE-PLANS, IT DOES NOT ONLY SUBTRACT. Skipping
+    #     a late entry frees the capital that entry would have consumed, and
+    #     that capital goes to whatever else is competing on the bar — so a
+    #     surviving trade can change SIZE, and a symbol can end up with MORE
+    #     trades than level mode gave it. On the docs/ENTRY_TRIGGER_DELTA.md
+    #     book (30 large caps, 2018-2026) that happened for 1 strategy of 130
+    #     (+1.7%); totals fell 21%. Net subtraction, but not strictly a filter.
+    #
+    # ONLY an exact "level" selects level (case/whitespace ignored); any other
+    # value runs as "edge" -- None silently (it means unset), a typo with a
+    # config_validator warning.
+    # A held -2 (hold-state SHORT) holds the short: -2 is not a cover signal.
+    # Asymmetry to know: -2 exits a long, but 1 does not cover a short, so a
+    # direct -2 -> 1 stays short; a flip needs a -1 bar in between.
+    "entry_trigger": "edge",
 
     # ============================================================
     # SECTION 21: VERBOSE SUMMARY TABLE
@@ -277,6 +343,51 @@ CONFIG = {
     # 1.0 = no limit (allow full portfolio risk)
     "max_portfolio_heat": 0.10,
 
+    # --- "risk_pct_capped" method (issue #385) ---------------------------
+    # These three existed only in config_validator.KNOWN_KEYS, so the
+    # CONFIG.get(..., default) in helpers/position_sizing.py always applied
+    # and a user had no documented dial. Listed here with their real defaults.
+
+    # Fraction of CURRENT equity to risk per trade, measured through the
+    # actual stop distance. Unlike target_risk_per_trade (used by vol_parity /
+    # risk_parity, which derive their own distance), this budget is subject to
+    # the ceiling and fill-price/stop-anchor drift described below.
+    "risk_pct_per_trade": 0.01,
+
+    # Hard ceiling on the CONTRACT count. Applies to MARGINED instruments
+    # (futures) only -- it is a contract count, and applying it to a fractional
+    # share count was a unit error that pinned equities at a flat 20 shares
+    # regardless of price, stop width or account size (#385). The integer
+    # floor() travels with it and is gated the same way.
+    "max_contracts_cap": 20,
+
+    # Notional ceiling for risk_pct_capped on UNMARGINED instruments
+    # (equities), as a fraction of equity. 1.0 = no leverage. None = disabled.
+    # 0.0 warns and takes no position; it does not abort the run. Use None to disable.
+    #
+    # This is deliberately NOT allocation_per_trade. Required notional is
+    # risk_pct_per_trade / stop_frac of equity, so an allocation ceiling of
+    # 0.10 would bind for any stop tighter than 10% -- nearly all of them --
+    # and deliver ~0.2-0.5% against a configured 1%, which is the same defect
+    # the cap gating removes, wearing a different number.
+    #
+    # At the 1.0 default this rarely changes the size HELD: on a long-only book
+    # cash <= equity, so the pre-existing cash clamp is at least as tight. What
+    # it changes is WHEN -- it clamps before the portfolio heat check, so heat
+    # sees the position that will actually be held. It binds on size below 1.0,
+    # or when unrealized short losses leave cash above equity.
+    "risk_pct_capped_max_notional_pct": 1.0,
+
+    # NOTE: setting max_portfolio_heat == risk_pct_per_trade takes ZERO trades
+    # on equities. The heat gate is shown notional(SLIPPED entry) x
+    # stop_fraction(RAW entry), so it evaluates (1 + slippage_pct) times the
+    # risk actually taken -- a position risking exactly 1.000% presents as
+    # 1.0005% and a 1% cap rejects it. The config validator warns; the
+    # underlying raw-vs-slipped drift is tracked on #381-D.
+
+    # Constant contract count for position_sizing_method="fixed_contracts".
+    "fixed_contracts_per_trade": 1,
+
     # ============================================================
     # SECTION 26: POINT-IN-TIME (PIT) MEMBERSHIP ENFORCEMENT
     # ============================================================
@@ -288,15 +399,14 @@ CONFIG = {
     # _pit_force_exit marks the last available member bar when no timely post-leave
     # bar exists, so the simulator can close at Close instead of waiting.
     "pit_enforce_daily": True,
-    "pit_warmup_days": 400,              # calendar days of pre-join data for indicators
+    "pit_warmup_days": 400,              # pre-start calendar days for symbols/dependency indicators
     "pit_exit_buffer_days": 10,          # grace-period bars after index removal
     "pit_coverage_tolerance_days": 7,
 
     # --- PIT Data Repo Paths (optional) ---
     # Absolute paths to local clones of the PIT ticker-history repos.
-    # Leave as "" to fall back to the NQ100_DATA_ROOT / SP500_DATA_ROOT
-    # environment variables (see .env.example), or drop the YAML files
-    # directly under tickers_to_scan/point_in_time/{nq100,sp500}/.
+    # Leave as "" to use NQ100_DATA_ROOT / SP500_DATA_ROOT, then S3-synced
+    # rosters beside parquet_data_dir, then bundled point_in_time folders.
     #   NQ100 -- https://github.com/shardul0701/NQ100-Survivorship-bias-data-2004-2026
     #   SP500 -- https://github.com/shardul0701/SP500-Survivorship-bias-data-2004-2026
     "nq100_pit_path": "",
@@ -360,6 +470,19 @@ CONFIG = {
     # sub-bar open instead of optimistically at the stop level). Opt-in; requires
     # 1-min data availability, so it is off by default.
     "intrabar_resolution": False,
+    # Coarse (non-intrabar) stop fills (issue #425). "open" = a bar that OPENS beyond
+    # the stop (gap-through) fills at the worse open: min(Open, stop) long,
+    # max(Open, stop) short. "level" = legacy, always fill at the stop level.
+    # Sub-bar data (intrabar_resolution) still overrides when present.
+    "stop_gap_fill": "open",
+    # Sleeve A parity: an ARMED trailing_atr trail fills at the exact trail level
+    # (gap or not). Set "open" to apply stop_gap_fill to armed trails too.
+    "stop_gap_fill_armed_trail": "level",
+    # Fill-bar stop check (issue #426). Under execution_time="open" the entry fills at
+    # the bar Open, so that bar's Low (High for shorts) is live against the initial
+    # stop: a breach closes the trade on the fill bar. False = legacy (first stop
+    # check on the NEXT bar). No effect under execution_time="close".
+    "entry_bar_stop_check": True,
     # Finer-resolution timeframe fetched per symbol when intrabar_resolution is on.
     "intrabar_timeframe": "MIN",     # "MIN" | "H"
     "intrabar_multiplier": 1,        # e.g. 5 for 5-minute sub-bars
@@ -372,6 +495,14 @@ CONFIG = {
     # 0.0 = disabled (default). Set below the instrument's initial_margin_pct, e.g.
     # 0.07 with a 0.10 initial. Equities (cash_full) are never margin-called.
     "maintenance_margin_pct": 0.0,
+    # Reserved — the data-quality screen (provider.filter_universe) is NOT yet
+    # wired into the backtest path; these merged_quality_filter_* keys are inert
+    # until a future PR. See helpers/pit_enforcement.py "Integration status".
+    "merged_quality_filter_enabled": True,
+    "merged_exclude_statuses": [
+        "insufficient_history", "review_no_patch", "identity_review", "flagged",
+    ],
+    "merged_min_avg_dollar_volume": 0.0,  # opt-in liquidity floor (0 = off)
 
     # ============================================================
     # SECTION 30: CROSS-SECTIONAL ROTATION (issue #294)
@@ -398,4 +529,15 @@ CONFIG = {
     # deliberately NO absolute-dollar cap default — a dollar cap is scale-dependent
     # and silently changes behaviour when initial_capital changes.
     "max_position_pct": 1.0,
+
+    # ============================================================
+    # SECTION 31: SIMULATION WORKERS (#414)
+    # ============================================================
+    # Upper bound on the simulation pool. Every worker receives its own copy of
+    # the portfolio's price data, so peak memory is roughly
+    # (workers + 1) x portfolio_data: on a wide universe (e.g. rule:us_liquid_500,
+    # 2004-2026) four workers can exhaust a 16 GB machine. None (default) keeps
+    # min(cpu_count(), number of tasks); 1 runs every task serially in one
+    # invocation, keeping the combined summary. CLI: --workers N.
+    "max_workers": None,
 }

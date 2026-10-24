@@ -138,27 +138,48 @@ def _load_strategy_verdicts(run_dir: Path) -> list[dict]:
 
 
 def _sanitize_for_filename(name: str) -> str:
-    """Mirror the engine's analyzer-csv name sanitization (spaces -> _, drop ( ) :)."""
-    return (name or "").replace(" ", "_").replace("(", "").replace(")", "").replace(":", "")
+    """The analyzer-csv file stem the engine writes for strategy *name*.
+
+    Delegates to the writer's own helper rather than mirroring it: the hand-kept
+    copy that lived here drifted from the writer twice (it never handled ``/``,
+    and #403 taught the writer ``>``/``<``), and each drift silently dropped the
+    verdict section in ``--all`` mode for the affected strategies.
+    """
+    from helpers.summary import _safe_strategy_name
+    return _safe_strategy_name(name) if name else ""
+
+
+def _portfolio_dir_for(name: str) -> str:
+    """The analyzer-csv folder name the engine writes for portfolio *name*."""
+    from helpers.summary import safe_path_component
+    return safe_path_component(name) if name else ""
 
 
 def _match_strategy_verdict(verdicts: list[dict], strategy_stem: str,
                             portfolio_dir: str) -> dict | None:
     """Find the llm_verdict entry matching a per-strategy CSV file.
 
-    ``strategy_stem`` is the CSV file stem (sanitized); ``portfolio_dir`` is the
-    parent folder name (sanitized portfolio name).
+    Accept current names and names written before #403. Only use the
+    strategy-only fallback when it identifies a single verdict; otherwise a
+    report can inherit another portfolio's performance assessment.
     """
+    strategy_matches, exact_matches = [], []
     for v in verdicts:
-        v_strat = _sanitize_for_filename(v.get("strategy", ""))
-        v_port = _sanitize_for_filename(v.get("portfolio", ""))
-        if v_strat == strategy_stem and v_port == portfolio_dir:
-            return v
-    # fallback: match on strategy only (handles trade-csv naming variants)
-    for v in verdicts:
-        if _sanitize_for_filename(v.get("strategy", "")) == strategy_stem:
-            return v
-    return None
+        strategy = v.get("strategy") or ""
+        portfolio = v.get("portfolio") or ""
+        # Historical writer rules are retained only for reading saved runs.
+        legacy_stem = (strategy.replace('/', '_').replace(' ', '_')
+                       .replace('(', '').replace(')', '').replace(':', ''))
+        stems = {_sanitize_for_filename(strategy), legacy_stem}
+        if strategy_stem not in stems:
+            continue
+        strategy_matches.append(v)
+        folders = {_portfolio_dir_for(portfolio), portfolio.replace(" ", "_")}
+        if portfolio_dir in folders:
+            exact_matches.append(v)
+    if exact_matches:
+        return exact_matches[0] if len(exact_matches) == 1 else None
+    return strategy_matches[0] if len(strategy_matches) == 1 else None
 
 
 def _load_wfa_split_ratio(run_dir: Path) -> float | None:

@@ -19,14 +19,8 @@ def get_bars_for_period(period_str: str, timeframe: str, multiplier: int = 1) ->
         ValueError: If units are incompatible or the timeframe is unsupported.
     """
     # Standard NYSE/NASDAQ trading day has 6.5 hours (9:30 AM - 4:00 PM ET).
-    HOURS_PER_DAY = 6.5 
+    HOURS_PER_DAY = 6.5
     MINUTES_PER_HOUR = 60
-
-    # Calculate the number of bars per day based on the multiplier
-    if timeframe == 'MIN' and multiplier > 0:
-        BARS_PER_DAY = int((HOURS_PER_DAY * MINUTES_PER_HOUR) / multiplier)
-    else:
-        BARS_PER_DAY = 1 # Default for Daily timeframe
 
     try:
         # Parse the period string (e.g., '200d' -> 200, 'd')
@@ -43,24 +37,32 @@ def get_bars_for_period(period_str: str, timeframe: str, multiplier: int = 1) ->
             raise ValueError(f"Cannot use period unit '{unit}' with Daily ('D') timeframe. Use 'd'.")
 
     elif timeframe == 'H':
+        # Each bar spans `multiplier` hours. The multiplier used to be ignored
+        # here (issues #318 / #267), over-counting bars by the multiplier — e.g.
+        # "20d" on 2h bars returned 130 instead of 20*6.5/2 = 65. Truncate (not
+        # round) so every multiplier=1 result is byte-for-byte unchanged
+        # (int(value*6.5) as before), and floor at 1 so a sub-bar period never
+        # returns 0 (which would make rolling(0) an all-NaN column).
         if unit == 'd':
-            # To get a 200-day equivalent MA on an hourly chart, we need 200 * 6.5 bars.
-            return int(value * HOURS_PER_DAY)
+            return max(1, int(value * HOURS_PER_DAY / multiplier))
         elif unit == 'h':
-            return value
+            return max(1, int(value / multiplier))
         else:
             raise ValueError(f"Cannot use period unit '{unit}' with Hourly ('H') timeframe. Use 'd' or 'h'.")
 
     elif timeframe == 'MIN':
+        # Each bar spans `multiplier` minutes. Compute bars-per-day as an EXACT
+        # float and truncate only at the end: the old code truncated BARS_PER_DAY
+        # first (int(390/60) = 6 for 60-min bars), losing up to 7.7% — "200d" on
+        # 60-min bars returned 1200 instead of 1300 (issue #318). multiplier=1
+        # results are unchanged; floor at 1 as above.
+        bars_per_day = (HOURS_PER_DAY * MINUTES_PER_HOUR) / multiplier
         if unit == 'd':
-            # --- CHANGE THIS LINE ---
-            return int(value * BARS_PER_DAY)
+            return max(1, int(value * bars_per_day))
         elif unit == 'h':
-            # --- CHANGE THIS LINE ---
-            return int(value * (MINUTES_PER_HOUR / multiplier))
+            return max(1, int(value * MINUTES_PER_HOUR / multiplier))
         elif unit == 'min':
-            # --- CHANGE THIS LINE ---
-            return int(value / multiplier)
+            return max(1, int(value / multiplier))
         else:
             raise ValueError(f"Cannot use period unit '{unit}' with Minute ('MIN') timeframe. Use 'd', 'h', or 'min'.")
             
@@ -278,11 +280,13 @@ def get_bars_per_day(config: dict) -> int:
     more than one bar makes up a trading day. Multiplying that per-bar mean
     by get_bars_per_day() converts it into a daily-equivalent figure.
 
-    Deliberately independent of get_bars_for_period(), which ignores
-    `timeframe_multiplier` in its H-timeframe 'd'-unit branch (a separate,
-    pre-existing bug left untouched to avoid changing behavior for any
-    strategy already depending on it -- tracked in #267). get_bars_per_day()
-    always honours the multiplier.
+    Independent of get_bars_for_period() by design (that one returns indicator
+    lookback lengths; this returns an ADV rescale factor), though both now
+    honour `timeframe_multiplier` on the H/MIN timeframes — get_bars_for_period's
+    multiplier bug was fixed in #318 (which also closed the H-branch half of
+    #267). Note: get_bars_for_period still hard-codes a 6.5h session while this
+    function honours config['trading_hours_per_day'], so the two diverge on a
+    non-6.5h (e.g. 23h futures) session — tracked as a follow-up.
 
     NOTE (issue #268): this returns a truncated bar COUNT and is therefore
     lossy whenever the multiplier does not divide the session evenly (4H ->

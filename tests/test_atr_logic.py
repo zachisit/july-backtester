@@ -421,3 +421,247 @@ class TestSimulationAtrColumnName:
             f"Expected a 'Stop Loss' exit but got: {exit_reasons}. "
             "This indicates the ATR column was not found (ATR vs ATR_14 mismatch)."
         )
+
+
+class TestAtrAnchorsToTheSignalBar:
+    """The ATR stop and ATR risk-sizing must read the SIGNAL bar's ATR.
+
+    #310 fixed entry-*feature* capture to read `signal_date`. Three branches in
+    the same loop kept hard-coding `prev_trading_dates[entry_exec_date]`:
+
+        :1444  the `atr` initial stop level
+        :1208  `atr` risk-based sizing
+        :1191  `trailing_atr` risk-based sizing
+
+    `entry_exec_date` is always the fill bar. Under `execution_time="open"` the
+    fill is the bar after the signal, so the bar before the fill IS the signal
+    bar and the two agree. Under `execution_time="close"` the fill IS the
+    signal bar, so the bar before it is one bar too EARLY — the stop gets
+    anchored to an ATR the signal never saw.
+
+    Found by @shardul0701 reviewing #324; the in-code comment ("the day BEFORE
+    entry (the signal day)") is only true for one of the two execution modes.
+    """
+
+    ATR_SIGNAL = 10.0     # ATR on the signal bar
+    ATR_EARLIER = 1.0     # ATR on every bar before it — 10x apart, unmissable
+    ENTRY_BAR = 6
+    MULT = 3.0
+    # rel=0.01 throughout: InitialRisk is entry_price - stop_level and the
+    # entry carries slippage (0.05 on a 100.0 price), so the exact figure is
+    # 30.05 rather than 30.0. 1% admits that and still excludes the 3.0 the
+    # wrong anchor produces by an order of magnitude.
+
+    def _data(self, n_dates=30):
+        dates = pd.bdate_range("2015-01-05", periods=n_dates)
+        closes = np.full(n_dates, 100.0)
+        atr = np.full(n_dates, self.ATR_EARLIER)
+        atr[self.ENTRY_BAR] = self.ATR_SIGNAL
+        df = pd.DataFrame({
+            "Open": closes, "High": closes + 0.5, "Low": closes - 0.5,
+            "Close": closes, "Volume": np.full(n_dates, 1_000_000.0),
+            "ATR_14": atr,
+            "RSI_14": np.full(n_dates, 50.0),
+            "ATR_14_pct": atr / 100.0,
+            "SMA200_dist_pct": np.full(n_dates, 0.05),
+            "Volume_Spike": np.full(n_dates, 1.0),
+        }, index=dates)
+        return {"SYM": df}
+
+    @staticmethod
+    def _signals(portfolio_data, entry_bar):
+        sig = pd.Series(0, index=portfolio_data["SYM"].index)
+        sig.iloc[entry_bar] = 1
+        return {"SYM": sig}
+
+    def _initial_risk(self, execution_time):
+        from unittest.mock import patch
+        import helpers.portfolio_simulations as ps
+        data = self._data()
+        # execution_time is read off the module-level CONFIG at call time.
+        with patch.dict(ps.CONFIG, {"execution_time": execution_time}):
+            result = ps.run_portfolio_simulation(
+                portfolio_data=data,
+                signals=self._signals(data, self.ENTRY_BAR),
+                initial_capital=100_000.0,
+                allocation_pct=0.10,
+                spy_df=None, vix_df=None, tnx_df=None,
+                stop_config={"type": "atr", "period": 14,
+                             "multiplier": self.MULT},
+            )
+        assert result is not None, f"no result for execution_time={execution_time}"
+        trades = result.get("trade_log", [])
+        assert trades, f"no trades for execution_time={execution_time}"
+        return float(trades[0]["InitialRisk"])
+
+    def test_close_execution_anchors_the_stop_to_the_signal_bar(self):
+        """Under close execution the fill bar IS the signal bar, so the stop
+        distance must be multiplier x the signal bar's ATR."""
+        risk = self._initial_risk("close")
+        assert risk == pytest.approx(self.MULT * self.ATR_SIGNAL, rel=0.01), (
+            f"InitialRisk {risk} — expected {self.MULT * self.ATR_SIGNAL} "
+            f"(3 x the signal bar's ATR of {self.ATR_SIGNAL}). Getting "
+            f"{self.MULT * self.ATR_EARLIER} means the stop was anchored to "
+            f"the bar BEFORE the signal bar.")
+
+    def test_open_execution_is_unchanged(self):
+        """The no-regression half. Under open execution the bar before the
+        fill already IS the signal bar, so this path must not move."""
+        risk = self._initial_risk("open")
+        assert risk == pytest.approx(self.MULT * self.ATR_SIGNAL, rel=0.01), risk
+
+    def test_both_execution_modes_agree_on_the_anchor(self):
+        """States the invariant rather than the two numbers: the anchor is the
+        signal bar, so the same signal must produce the same stop distance
+        under either execution mode."""
+        assert self._initial_risk("close") == pytest.approx(
+            self._initial_risk("open"), rel=0.01)
+
+
+# ---------------------------------------------------------------------------
+# The invariant, over the WHOLE anchored surface
+# ---------------------------------------------------------------------------
+
+class TestEveryAtrAnchorAgreesAcrossExecutionModes:
+    """The same invariant as above, parametrised over every ATR-anchored read
+    in the entry paths instead of pointed at one of them.
+
+    The first cut of this fix landed at 3 of 7 sites, and @shardul0701 found
+    the other 4 by running the single-site invariant against the rest of the
+    surface. That is the test doing its job and the author not pointing it
+    everywhere — so it is pointed everywhere now.
+
+    The seven anchors: long `atr` stop, long `trailing_atr` stop, short `atr`
+    stop, short `trailing_atr` stop, `risk_parity` stop-distance derivation,
+    and the two risk-sizing reads. The daily trailing updates
+    (portfolio_simulations.py:616 and :777) are deliberately NOT in scope —
+    those read the CURRENT bar's ATR, which is what trailing means.
+
+    Why an invariant and not expected values: the anchor is the signal bar, so
+    a signal must produce the same stop distance and the same size whichever
+    execution mode fills it. That property holds for every site without
+    knowing any site's arithmetic, which is exactly why it generalises where
+    the number-asserting tests do not.
+    """
+
+    ATR_SIGNAL = 10.0
+    ATR_EARLIER = 1.0
+    ENTRY_BAR = 6
+
+    def _data(self, n_dates=30):
+        dates = pd.bdate_range("2015-01-05", periods=n_dates)
+        closes = np.full(n_dates, 100.0)
+        atr = np.full(n_dates, self.ATR_EARLIER)
+        atr[self.ENTRY_BAR] = self.ATR_SIGNAL
+        return {"SYM": pd.DataFrame({
+            "Open": closes, "High": closes + 0.5, "Low": closes - 0.5,
+            "Close": closes, "Volume": np.full(n_dates, 1_000_000.0),
+            "ATR_14": atr,
+            "RSI_14": np.full(n_dates, 50.0),
+            "ATR_14_pct": atr / 100.0,
+            "SMA200_dist_pct": np.full(n_dates, 0.05),
+            "Volume_Spike": np.full(n_dates, 1.0),
+        }, index=dates)}
+
+    def _run(self, execution_time, stop_config, sizing_method, side):
+        from unittest.mock import patch
+        import helpers.portfolio_simulations as ps
+        data = self._data()
+        sig = pd.Series(0, index=data["SYM"].index)
+        sig.iloc[self.ENTRY_BAR] = -2 if side == "short" else 1
+        overrides = {"execution_time": execution_time,
+                     "position_sizing_method": sizing_method,
+                     # max_contracts_cap defaults to 20, which CLAMPS both modes
+                     # to 20 and hides the very divergence this test looks for:
+                     # floor(1000/30)=33 and floor(1000/3)=333 both become 20.
+                     # Raised so risk_pct_capped is actually pinned rather than
+                     # merely present in the grid.
+                     "max_contracts_cap": 10_000_000}
+        with patch.dict(ps.CONFIG, overrides):
+            result = ps.run_portfolio_simulation(
+                portfolio_data=data, signals={"SYM": sig},
+                initial_capital=100_000.0, allocation_pct=0.10,
+                spy_df=None, vix_df=None, tnx_df=None,
+                stop_config=stop_config,
+            )
+        if not result or not result.get("trade_log"):
+            return None
+        t = result["trade_log"][0]
+        return {"risk": t.get("InitialRisk"), "shares": t.get("Shares")}
+
+    @pytest.mark.parametrize("stop_type", ["atr", "trailing_atr"])
+    # risk_pct_capped and vol_parity are here because they were NOT: an
+    # adversarial pass showed reverting either risk_pct_capped anchor survived
+    # the entire 2630-test suite, and vol_parity carried a live 5x divergence
+    # nothing was looking at. The grid is the pin; a site outside it is unpinned
+    # no matter what the docstring claims.
+    @pytest.mark.parametrize("sizing_method",
+                             ["fixed", "risk_parity", "risk_pct_capped",
+                              "vol_parity"])
+    @pytest.mark.parametrize("side", ["long", "short"])
+    def test_anchor_is_execution_mode_independent(self, stop_type,
+                                                  sizing_method, side):
+        cfg = ({"type": "atr", "period": 14, "multiplier": 3.0}
+               if stop_type == "atr"
+               else {"type": "trailing_atr", "stop_mult": 3.0,
+                     "trail_mult": 2.0, "t1_mult": 6.0})
+        close = self._run("close", cfg, sizing_method, side)
+        opn = self._run("open", cfg, sizing_method, side)
+        if close is None or opn is None:
+            # fail, not skip: this test IS the audit trail for a fix that has
+            # regressed twice, and a silent skip is how it stops being one.
+            pytest.fail(f"no trade produced for {side}/{stop_type}/"
+                        f"{sizing_method} — the case asserts nothing")
+
+        for field in ("risk", "shares"):
+            c, o = close[field], opn[field]
+            if c is None or o is None or pd.isna(c) or pd.isna(o):
+                pytest.fail(f"{field} is None/NaN for {side}/{stop_type}/"
+                            f"{sizing_method} — the case asserts nothing")
+            assert float(c) == pytest.approx(float(o), rel=0.02), (
+                f"{field} differs by execution mode for {side}/{stop_type}/"
+                f"{sizing_method}: close={c} open={o}. The ATR anchor is the "
+                f"SIGNAL bar; if these differ, some read is still using the "
+                f"bar before the FILL bar.")
+
+    def test_risk_parity_sizes_off_the_same_stop_the_stop_uses(self):
+        """The regression the partial fix created, pinned directly.
+
+        With the stop level anchored to the signal bar and risk_parity's
+        stop-distance derivation still anchored to the bar before the fill,
+        the same trade held two beliefs about one stop — and sizing got the
+        10x-too-small one, so it sized UP. A 2%-of-book risk target became
+        20% of the book on a single position.
+        """
+        cfg = {"type": "atr", "period": 14, "multiplier": 3.0}
+        r = self._run("close", cfg, "risk_parity", "long")
+        if r is None or r["shares"] is None or r["risk"] is None:
+            pytest.skip("no risk_parity trade produced")
+        dollars_at_risk = float(r["risk"]) * float(r["shares"])
+        assert dollars_at_risk <= 0.05 * 100_000.0, (
+            f"risk_parity put ${dollars_at_risk:,.2f} of a $100,000 book at "
+            f"risk ({dollars_at_risk / 1000:.1f}%). Sizing and the stop level "
+            f"must anchor to the same bar.")
+
+    def test_risk_parity_respects_point_cap_like_the_stop_does(self):
+        """A capped ATR stop must size off the CAPPED distance.
+
+        The execution-mode invariant cannot see this one: both modes were
+        wrong identically, so they agreed. `atr_stop_level` takes `point_cap`
+        and `atr_stop_distance_pct` has no cap parameter, so sizing used the
+        uncapped 3 x 10 = 30 while the real risk was 5 — a 6x UNDER-size,
+        0.34% of book against a 2% target. Wrong in the safe direction, which
+        is why it could sit there unnoticed.
+        """
+        cfg = {"type": "atr", "period": 14, "multiplier": 3.0, "point_cap": 5.0}
+        r = self._run("close", cfg, "risk_parity", "long")
+        if r is None or r["shares"] is None or r["risk"] is None:
+            pytest.fail("no capped risk_parity trade produced")
+        risk_per_share = float(r["risk"])
+        assert risk_per_share == pytest.approx(5.0, rel=0.02), (
+            f"InitialRisk {risk_per_share} — the cap should bind at 5.0")
+        dollars_at_risk = risk_per_share * float(r["shares"])
+        target = 0.02 * 100_000.0
+        assert dollars_at_risk == pytest.approx(target, rel=0.25), (
+            f"${dollars_at_risk:,.2f} at risk against a ${target:,.0f} target. "
+            f"Sizing ignored the point_cap the stop applied.")

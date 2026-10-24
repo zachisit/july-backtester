@@ -6,6 +6,9 @@ import requests
 import pandas as pd
 import orjson
 import logging
+import re
+from requests.adapters import HTTPAdapter
+from urllib3.util import Retry
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from helpers.caching import get_cached_data, set_cached_data
@@ -16,6 +19,39 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 SESSION = requests.Session()
 
+_BASE_URL = "https://api.polygon.io"   # module-level so tests can point at a local server
+_RETRY_STATUSES = (429, 500, 502, 503, 504)
+_BACKOFF_FACTOR = 1.0                  # sleeps 0, 2, 4, 8... s between retries (tests set 0)
+_DEFAULT_MAX_RETRIES = 5
+_mounted_retries = None
+
+
+def _redact(err):
+    """str(err) with any apiKey query value masked (urllib3/requests embed the URL)."""
+    return re.sub(r"(apiKey=)[^&\s'\"]+", r"\1***", str(err))
+
+
+def _mount_retry_adapter(max_retries=_DEFAULT_MAX_RETRIES):
+    """Mount a retrying adapter on SESSION (429/5xx, honours Retry-After). Idempotent per value."""
+    global _mounted_retries
+    max_retries = int(max_retries)
+    if _mounted_retries == max_retries:
+        return
+    retry = Retry(
+        total=max_retries,
+        backoff_factor=_BACKOFF_FACTOR,
+        status_forcelist=_RETRY_STATUSES,
+        allowed_methods=frozenset({"GET"}),
+        respect_retry_after_header=True,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    SESSION.mount("https://", adapter)
+    SESSION.mount("http://", adapter)
+    _mounted_retries = max_retries
+
+
+_mount_retry_adapter()
+
 def get_previous_close_data(symbol, config):
     """
     Fetches only the single previous day's OHLC bar using Polygon's /prev endpoint.
@@ -24,12 +60,13 @@ def get_previous_close_data(symbol, config):
     api_key = os.environ.get("POLYGON_API_KEY")
     if not api_key:
         raise ValueError("POLYGON_API_KEY is not set. Add it to your .env file or environment.")
+    _mount_retry_adapter(config.get("polygon_max_retries", _DEFAULT_MAX_RETRIES))
 
     is_index = symbol.upper().startswith("I:")
     # Use "total_return" setting from config to determine 'adjusted' flag
     is_adjusted = "false" if is_index else ("true" if config.get("price_adjustment") == "total_return" else "false")
     
-    url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/prev"
+    url = f"{_BASE_URL}/v2/aggs/ticker/{symbol}/prev"
     params = {"apiKey": api_key, "adjusted": is_adjusted}
 
     try:
@@ -52,7 +89,7 @@ def get_previous_close_data(symbol, config):
         return None
         
     except requests.exceptions.RequestException as e:
-        logger.error(f"Polygon HTTP ERROR for previous close on '{symbol}': {e}")
+        logger.error(f"Polygon HTTP ERROR for previous close on '{symbol}': {_redact(e)}")
         return None
        
 def get_price_data(symbol, start_date, end_date, config):
@@ -72,6 +109,7 @@ def get_price_data(symbol, start_date, end_date, config):
     api_key = os.environ.get("POLYGON_API_KEY")
     if not api_key:
         raise ValueError("POLYGON_API_KEY is not set. Add it to your .env file or environment.")
+    _mount_retry_adapter(config.get("polygon_max_retries", _DEFAULT_MAX_RETRIES))
 
     # --- START: New Dynamic Timeframe Logic ---
     timeframe_code = config.get("timeframe", "D")
@@ -93,7 +131,7 @@ def get_price_data(symbol, start_date, end_date, config):
     is_adjusted = "false" if is_index else ("true" if config.get("price_adjustment") == "total_return" else "false")
 
     # The URL is now built dynamically using the timespan and multiplier.
-    next_url = f"https://api.polygon.io/v2/aggs/ticker/{polygon_symbol}/range/{multiplier}/{timespan}/{start_date}/{end_date}"
+    next_url = f"{_BASE_URL}/v2/aggs/ticker/{polygon_symbol}/range/{multiplier}/{timespan}/{start_date}/{end_date}"
     
     params = {
         "apiKey": api_key,
@@ -104,6 +142,7 @@ def get_price_data(symbol, start_date, end_date, config):
 
     all_results = []
     request_count = 0
+    complete = True   # False if pagination ended on an API ERROR page -> never cache
 
     while next_url:
         request_count += 1
@@ -117,6 +156,7 @@ def get_price_data(symbol, start_date, end_date, config):
             if data.get('status') == 'ERROR':
                 error_message = data.get('error', 'Unknown Polygon API error')
                 logger.warning(f"Polygon API ERROR ... for '{symbol}': {error_message}")
+                complete = False
                 break
 
             results = data.get('results', [])
@@ -126,7 +166,7 @@ def get_price_data(symbol, start_date, end_date, config):
             next_url = data.get('next_url')
             
         except requests.exceptions.RequestException as e:
-            logger.error(f"Polygon HTTP ERROR on page {request_count} for '{symbol}': {e}")
+            logger.error(f"Polygon HTTP ERROR on page {request_count} for '{symbol}': {_redact(e)}")
             return None
 
     if not all_results:
@@ -150,7 +190,9 @@ def get_price_data(symbol, start_date, end_date, config):
     if config.get("timeframe", "D").upper() == "D":
         df.index = df.index.normalize()
 
-    if not df.empty:
+    if not complete:
+        logger.warning(f"Incomplete Polygon data for '{symbol}' (pagination aborted); returning {len(df)} bars without caching.")
+    elif not df.empty:
         set_cached_data(df, polygon_symbol, start_date, end_date, timespan, multiplier)
 
     return df[available_cols]
@@ -163,6 +205,7 @@ def get_last_n_bars(symbol, n_bars, config):
     api_key = os.environ.get("POLYGON_API_KEY")
     if not api_key:
         raise ValueError("POLYGON_API_KEY is not set. Add it to your .env file or environment.")
+    _mount_retry_adapter(config.get("polygon_max_retries", _DEFAULT_MAX_RETRIES))
 
     # We query a recent range to ensure we capture the latest data
     end_date = datetime.utcnow().strftime('%Y-%m-%d')
@@ -171,7 +214,7 @@ def get_last_n_bars(symbol, n_bars, config):
     is_index = symbol.upper().startswith("I:")
     is_adjusted = "false" if is_index else ("true" if config.get("price_adjustment") == "total_return" else "false")
 
-    url = f"https://api.polygon.io/v2/aggs/ticker/{symbol}/range/1/day/{start_date}/{end_date}"
+    url = f"{_BASE_URL}/v2/aggs/ticker/{symbol}/range/1/day/{start_date}/{end_date}"
     params = {
         "apiKey": api_key,
         "adjusted": is_adjusted,
@@ -198,5 +241,5 @@ def get_last_n_bars(symbol, n_bars, config):
         logger.warning(f"No previous day data returned for '{symbol}'. Status: {data.get('status')}, Results Count: {data.get('resultsCount')}")
         return None
     except requests.exceptions.RequestException as e:
-        logger.error(f"Polygon HTTP ERROR for last N bars on '{symbol}': {e}")
+        logger.error(f"Polygon HTTP ERROR for last N bars on '{symbol}': {_redact(e)}")
         return None

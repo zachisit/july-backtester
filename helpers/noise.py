@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 
 
-def inject_price_noise(df: pd.DataFrame, noise_pct: float) -> pd.DataFrame:
+def inject_price_noise(df: pd.DataFrame, noise_pct: float, rng=None) -> pd.DataFrame:
     """Return a copy of *df* with uniform random noise applied to OHLC prices.
 
     For each bar and each price column (Open, High, Low, Close), an
@@ -36,6 +36,9 @@ def inject_price_noise(df: pd.DataFrame, noise_pct: float) -> pd.DataFrame:
         Half-width of the uniform noise range, expressed as a fraction of
         price.  ``0.01`` means ±1%.  Values <= 0 return the dataframe
         unchanged (no copy).
+    rng : numpy.random.Generator, optional
+        Source of randomness for reproducible noise (#439).  ``None`` (default)
+        draws from the global ``np.random`` exactly as before.
 
     Returns
     -------
@@ -50,7 +53,7 @@ def inject_price_noise(df: pd.DataFrame, noise_pct: float) -> pd.DataFrame:
     n = len(out)
 
     for col in ("Open", "High", "Low", "Close"):
-        multipliers = np.random.uniform(1.0 - noise_pct, 1.0 + noise_pct, size=n)
+        multipliers = (rng.uniform if rng is not None else np.random.uniform)(1.0 - noise_pct, 1.0 + noise_pct, size=n)
         out[col] = out[col] * multipliers
 
     # Reconstruct High/Low to prevent invalid candlesticks

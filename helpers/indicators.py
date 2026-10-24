@@ -807,11 +807,53 @@ def weekday_overnight_logic(df):
     """
     Weekday overnight hold strategy.
 
-    Generates a stateful signal to be long Monday through Thursday nights
-    and flat on Friday nights (avoiding weekend risk). Uses the day-of-week
-    index to determine signal.
+    Long Monday through Thursday nights, flat Friday night (avoiding weekend
+    risk). Uses the day-of-week index to determine the signal.
 
-    Signal convention: 1 on Mon/Tue/Wed/Thu (hold overnight), -1 on Fri.
+    The exit is derived from the actual CALENDAR GAPS in the index rather than
+    from a fixed Friday-is-day-4 assumption (issue #314). A "gap" is any interval
+    **> 2 calendar days** between consecutive bars.
+
+    That threshold means the strategy is flat across every WEEKEND, and across a
+    holiday only when the holiday *lengthens a weekend*. A lone midweek holiday
+    produces a gap of exactly 2 calendar days and is therefore HELD:
+
+    =========================  ==========  ====  ========
+    Case                       gap (days)  > 2   behaviour
+    =========================  ==========  ====  ========
+    normal weeknight Tue->Wed      1        no   HELD
+    normal weekend   Fri->Mon      3        yes  flat
+    Good Friday      Thu->Mon      4        yes  flat  (abuts the weekend)
+    Memorial/Labor   Fri->Tue      4        yes  flat  (Monday closure)
+    Thanksgiving     Wed->Fri      2        no   HELD
+    July 4th on Thu  Wed->Fri      2        no   HELD
+    =========================  ==========  ====  ========
+
+    This is a deliberate choice, not an oversight: a 2-day gap carries roughly a
+    weeknight's worth of extra exposure, and `tests/test_weekday_overnight.py`
+    pins the midweek-holiday hold explicitly.
+
+    Changing the threshold to ``>= 2`` would flip **only** the 2-day midweek
+    rows to flat — normal weeknights are a 1-day gap and ``1 >= 2`` is False, so
+    they stay held. That is a strategy decision about whether single-day holiday
+    closures are worth sitting out, and it has no side effect on ordinary
+    weeknights.
+
+    It is also EXECUTION-AWARE, because a signal on session S fills at a different
+    bar depending on ``execution_time``:
+
+    - ``close`` (fill same-day close): to be flat across the gap that follows the
+      last session before it, emit ``-1`` on that last pre-gap session (it exits
+      at its own close). Hold (``1``) otherwise.
+    - ``open`` (fill next session's open — the engine default): a signal fills one
+      session later, so the exit must be emitted one session earlier — ``-1`` on
+      the session whose *fill bar* is the last one before a gap, so the exit fills
+      at that pre-gap session's open and the position is flat across the gap.
+
+    Either way the position holds every weeknight overnight and is flat across
+    every gap longer than 2 calendar days (see the table above). The final bar(s)
+    with no future bar to hold into are flattened (you cannot manage a position
+    past the end of the data).
 
     Parameters
     ----------
@@ -823,9 +865,19 @@ def weekday_overnight_logic(df):
     pd.DataFrame
         Input DataFrame with 'Signal' column added (1 or -1).
     """
-    df['weekday'] = df.index.dayofweek
-    buy_days = [0, 1, 2, 3] # Mon, Tue, Wed, Thu
-    df['Signal'] = np.where(df['weekday'].isin(buy_days), 1, -1)
+    from config import CONFIG
+    _WEEKEND_GAP = 2  # > 2 calendar days between sessions = a weekend/holiday gap
+    # gap_after[i] = calendar days from bar i to bar i+1 (last bar -> NaN)
+    gap_after = df.index.to_series().diff().shift(-1).dt.days
+    if CONFIG.get("execution_time", "open").lower() == "open":
+        # Exit on bar i when its FILL bar (i+1) is the last before a gap, i.e.
+        # the gap AFTER the fill bar exceeds the threshold (or runs off the end).
+        gap_after_fill = gap_after.shift(-1)
+        is_exit = gap_after_fill.isna() | (gap_after_fill > _WEEKEND_GAP)
+    else:
+        # Close fills same-session: exit on the last session before the gap.
+        is_exit = gap_after.isna() | (gap_after > _WEEKEND_GAP)
+    df['Signal'] = np.where(is_exit.to_numpy(), -1, 1)
     return df
 
 def atr_trailing_stop_logic(df, atr_period=14, atr_multiplier=3.0):
@@ -951,12 +1003,18 @@ def chaikin_money_flow_with_stop_loss_logic(df, length=20, buy_threshold=0.05, s
     # 1. Get the original, stateless signals from the base strategy
     df_base = chaikin_money_flow_logic(df.copy(), length, buy_threshold, sell_threshold)
     
-    # 2. Extract just the entry and exit events (ignore the ffill part)
-    # A buy event is a change from not 1 to 1.
-    # A sell event is a change from not -1 to -1.
-    base_signal = df_base['Signal'].diff().fillna(0)
-    entry_event = base_signal == 1
-    exit_event = base_signal == -2 # A change from 1 to -1 is a diff of -2
+    # 2. Extract entry/exit events as STATE TRANSITIONS of the base signal.
+    # df_base['Signal'] is the base strategy's already-ffilled state (…1,1,-1,-1,
+    # 1,1…). The old code used base_signal.diff()==1, which only caught the first
+    # 0->1: every re-entry is a -1->1 transition (diff 2), so all but the first
+    # trade were silently dropped (issue #316). Detect transitions instead.
+    base_signal = df_base['Signal']
+    entry_event = (base_signal == 1) & (base_signal.shift(1) != 1)   # into long
+    exit_event = (base_signal == -1) & (base_signal.shift(1) != -1)  # into flat/short
+    # shift(1) is NaN at bar 0 (NaN != x is True), so guard bar 0 explicitly:
+    # correctness must not depend on the loop starting at i=1.
+    entry_event.iloc[0] = False
+    exit_event.iloc[0] = False
     
     # 3. Iteratively process signals to include the stop-loss
     events = pd.Series(0, index=df.index)
@@ -1146,6 +1204,13 @@ def rsi_scalping_logic(df, rsi_length=14, oversold_level=20, overbought_level=80
     - Exit (Long): RSI crosses up past the 50 midline.
     - Entry (Short): RSI crosses down from above the overbought level.
     - Exit (Short): RSI crosses down past the 50 midline.
+
+    Emits engine-convention EVENT signals (1 / -1 / -2 / 0), not a held/ffilled
+    state. Consequently, after an *engine* stop-out the strategy does NOT
+    re-enter on the same episode: the internal state machine still considers the
+    position open and only re-arms after its own midline-cross exit fires. This
+    is intentional for a single-shot scalp (unlike the ffilled RSI strategies,
+    which re-enter while their held signal stays 1).
     """
     # 1. Calculate RSI
     df = calculate_rsi(df, length=rsi_length)
@@ -1158,36 +1223,38 @@ def rsi_scalping_logic(df, rsi_length=14, oversold_level=20, overbought_level=80
     sell_entry = (df[rsi_col].shift(1) > overbought_level) & (df[rsi_col] <= overbought_level)
     sell_exit = (df[rsi_col].shift(1) > 50) & (df[rsi_col] <= 50)
 
-    # 3. Generate stateful signal (this requires careful state management)
-    signals = pd.Series(0, index=df.index)
-    in_long = False
-    in_short = False
+    # 3. Emit engine-convention EVENT signals directly from a single-position
+    # state machine (issue #311). A symbol can only be long OR short OR flat at
+    # once, so we track one state and emit an event only on a transition:
+    #   long entry -> 1 ; long exit / short cover -> -1 ; short entry -> -2 ; 0 otherwise
+    #
+    # The previous implementation built a held-state series and then took
+    # .diff()/.replace()/.ffill() to recover events. That round-trip broke on
+    # short round-trips: a cover (state -1 -> 0) has diff +1, which the engine
+    # reads as "enter long", and the ffill made that phantom long persist. Short
+    # entries were also encoded as -1 (engine cover) instead of -2 (engine short
+    # entry), so they were inert. Emitting events directly avoids both faults.
+    signals = pd.Series(0, index=df.index, dtype=int)
+    state = 0  # 0 = flat, 1 = long, -1 = short
 
     for i in range(1, len(df)):
-        # Handle Long Position
-        if not in_long and buy_entry.iloc[i]:
-            in_long = True
-        elif in_long and buy_exit.iloc[i]:
-            in_long = False
-        
-        # Handle Short Position
-        if not in_short and sell_entry.iloc[i]:
-            in_short = True
-        elif in_short and sell_exit.iloc[i]:
-            in_short = False
-            
-        if in_long:
-            signals.iloc[i] = 1
-        elif in_short:
-            signals.iloc[i] = -1 # Note: Your backtester may only support long trades
-        else:
-            signals.iloc[i] = 0
-            
-    # Convert events to state and then back to entry/exit signals for the backtester
-    final_signal = signals.diff().fillna(0)
-    df['Signal'] = final_signal.replace(-2, -1).replace(2, 1) # Handle short signals if needed
-    df['Signal'] = df['Signal'].replace(0, np.nan).ffill().fillna(0)
+        if state == 1:
+            if buy_exit.iloc[i]:
+                state = 0
+                signals.iloc[i] = -1        # exit long
+        elif state == -1:
+            if sell_exit.iloc[i]:
+                state = 0
+                signals.iloc[i] = -1        # cover short
+        else:  # flat
+            if buy_entry.iloc[i]:
+                state = 1
+                signals.iloc[i] = 1         # enter long
+            elif sell_entry.iloc[i]:
+                state = -1
+                signals.iloc[i] = -2        # enter short
 
+    df['Signal'] = signals
     return df
 
 def ema_scalping_logic(df, fast_ema_period=5, slow_ema_period=15, trend_ema_period=50):

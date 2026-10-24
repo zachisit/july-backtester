@@ -263,7 +263,8 @@ class TestEvaluateWfaPassVerdict:
         is_trades  = _year_range_trades(2010, 2014, 2_000.0)
         oos_trades = _year_range_trades(2015, 2019, 2_000.0)
         result = evaluate_wfa(is_trades, oos_trades, capital)
-        assert result["oos_pnl_pct"] == pytest.approx(5 * 2_000.0 / capital)
+        # OOS is measured on realised equity at OOS start (capital + IS profit)
+        assert result["oos_pnl_pct"] == pytest.approx(5 * 2_000.0 / (capital + 5 * 2_000.0))
 
     def test_mild_degradation_below_threshold_returns_pass(self):
         """OOS annualised return degrades by 50% (< 75% threshold) → Pass."""
@@ -340,10 +341,11 @@ class TestEvaluateWfaLikelyOverfitted:
         Verify the boundary condition is strictly greater-than.
         """
         capital = 100_000.0
-        # IS: $8000/yr × 10 trades (ann ≈ 8%)
+        # IS: $8000/yr × 10 trades (ann ≈ 6.8% over the 9-year exit span)
         is_trades = _year_range_trades(2000, 2009, 8_000.0)
-        # OOS: $2000/yr × 5 trades (ann ≈ 2%) — exactly 75% drop
-        oos_trades = _year_range_trades(2010, 2014, 2_000.0)
+        # OOS: measured on realised equity at OOS start ($180k), so $3000/yr
+        # gives ann ≈ 2.0% — ~70% drop, below the 75% threshold
+        oos_trades = _year_range_trades(2010, 2014, 3_000.0)
         result = evaluate_wfa(is_trades, oos_trades, capital)
         # 75% degradation is NOT > 0.75, so should be Pass
         assert result["wfa_verdict"] == "Pass"
@@ -494,3 +496,81 @@ class TestEndToEnd:
             assert "oos_pnl_pct" in result
             assert "wfa_verdict" in result
             assert result["wfa_verdict"] in {"Pass", "Likely Overfitted", "N/A"}
+
+
+# ---------------------------------------------------------------------------
+# TestCompoundingNormalisation (#427) — equal-basis IS/OOS measurement
+# ---------------------------------------------------------------------------
+
+import pandas as pd
+
+
+def _compounding_fixture(is_rate, oos_rate, start="2004-01-01", split="2020-01-01",
+                         end="2024-01-01", capital=100_000.0):
+    """Monthly trades + daily equity curve for a strategy compounding at
+    is_rate/yr before *split* and oos_rate/yr after.  Equity steps on each
+    month-end exit date, so the curve and the trade log agree exactly."""
+    months = pd.date_range(start, end, freq="MS")
+    split_ts = pd.Timestamp(split)
+    equity = capital
+    trades, points = [], [(pd.Timestamp(start) - pd.Timedelta(days=1), capital)]
+    for m in months[1:]:
+        rate = is_rate if m < split_ts else oos_rate
+        profit = equity * ((1 + rate) ** (1 / 12) - 1)
+        equity += profit
+        trades.append({"ExitDate": m.strftime("%Y-%m-%d"), "Profit": profit})
+        points.append((m, equity))
+    idx = pd.date_range(start, end, freq="D")
+    curve = pd.Series([v for _, v in points], index=[d for d, _ in points])
+    curve = curve.reindex(curve.index.union(idx)).ffill().dropna()
+    return trades, curve, capital, start, split, end
+
+
+class TestCompoundingNormalisation:
+    def _run(self, is_rate, oos_rate, use_curve):
+        trades, curve, cap, start, split, end = _compounding_fixture(is_rate, oos_rate)
+        is_t, oos_t = split_trades(trades, split)
+        return evaluate_wfa(
+            is_t, oos_t, cap,
+            equity_curve=curve if use_curve else None,
+            is_window=(start, split), oos_window=(split, end),
+        )
+
+    @pytest.mark.parametrize("use_curve", [True, False])
+    def test_constant_10pct_passes_with_oos_about_10pct(self, use_curve):
+        r = self._run(0.10, 0.10, use_curve)
+        assert r["wfa_verdict"] == "Pass"
+        # 4-year OOS window at 10%/yr compounded = 1.1**4 - 1
+        assert r["oos_pnl_pct"] == pytest.approx(1.1 ** 4 - 1, rel=0.05)
+
+    @pytest.mark.parametrize("use_curve", [True, False])
+    def test_10_to_2_pct_is_flagged(self, use_curve):
+        assert self._run(0.10, 0.02, use_curve)["wfa_verdict"] == "Likely Overfitted"
+
+    def test_5pct_oos_vs_10pct_is_not_degraded_75pct(self):
+        assert self._run(0.10, 0.05, True)["wfa_verdict"] == "Pass"
+
+    def test_old_initial_capital_basis_would_have_passed_collapse(self):
+        """Regression: dividing by initial capital inflates OOS ~4x."""
+        trades, _, cap, _, split, _ = _compounding_fixture(0.10, 0.02)
+        _, oos_t = split_trades(trades, split)
+        assert _total_pnl_pct(oos_t, cap) > 0.3  # inflated; true 4-year OOS return is ~0.08
+
+    def test_clustered_oos_trades_annualised_over_window(self):
+        # 6 OOS trades all inside two months; window is a full 4 years.
+        is_t = _make_trades([("2005-01-01", 0.0), ("2019-12-31", 100_000.0)])
+        oos_t = _make_trades([(f"2020-02-{d:02d}", 1_000.0) for d in range(1, 7)])
+        r_span = _annualised_return(oos_t, 100_000.0)  # legacy trade-span
+        r_win = _annualised_return(oos_t, 100_000.0, window=("2020-01-01", "2024-01-01"))
+        assert r_win == pytest.approx(1.06 ** (1 / (1461 / 365.25)) - 1)
+        assert r_span is not None and r_span > 10 * r_win
+
+    def test_legacy_three_arg_signature_works(self):
+        is_t = _year_range_trades(2005, 2015, 1000.0)
+        oos_t = _year_range_trades(2016, 2022, 1000.0)
+        r = evaluate_wfa(is_t, oos_t, 100_000.0)
+        assert set(r) == {"oos_pnl_pct", "wfa_verdict"}
+        assert r["wfa_verdict"] in ("Pass", "Likely Overfitted")
+
+    def test_oos_pnl_pct_none_when_no_oos_trades(self):
+        assert evaluate_wfa(_year_range_trades(2005, 2010, 1.0), [], 1e5)["oos_pnl_pct"] is None

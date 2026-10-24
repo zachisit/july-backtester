@@ -2,13 +2,15 @@
 
 > **RTK RULE — NON-NEGOTIABLE**: Every terminal command MUST be prefixed with `rtk`. No exceptions. This includes `rtk git`, `rtk grep`, `rtk pytest`, `rtk ls`, `rtk read`, etc. Bare `grep`, `git`, `pytest`, `find` etc. are FORBIDDEN in this project.
 
+> **GH POSTING RULE — NON-NEGOTIABLE**: Never pass comment/issue/review text as a shell argument. Use `python3 scripts/gh_post.py` for every GitHub comment, review, issue creation, and issue-body edit. `gh issue comment --body "..."` and `gh api -f body=@file` are FORBIDDEN — both have silently destroyed real comments in this project. See [Posting to GitHub](#posting-to-github).
+
 ## What This Is
 Python backtesting engine for US equities. Tests 20+ technical strategies across single symbols or large portfolios (Nasdaq, S&P 500, etc.) with Monte Carlo robustness scoring.
 
 ## Entry Points
 - `main.py` — runs all entries in `portfolios`; a single-ticker basket like `"My Symbols": ["AAPL"]` replaces the old single-asset mode
 - `main.py --name "run-name"` — optional prefix for report folder and S3 path
-- `main.py --verbose` — print two additional tables beneath the default Core Performance table: Extended Metrics (RS(avg/min/last), MaxRcvry, AvgRcvry, Calmar, PF, WinRate, Trades, Expct(R), SQN) and Robustness (OOS P&L, WFA Verdict, RollWFA, Corr, MC, MC Score). Default output shows Core Performance only.
+- `main.py --verbose` — print two additional tables beneath the default Core Performance table: Extended Metrics (RS(avg/min/last), MaxRcvry, AvgRcvry, Calmar, PF, WinRate, Trades, Expct(R), SQN) and Robustness (OOS P&L, WFA Verdict, RollWFA, Corr, MC, MC Score). Default output shows Core Performance only. `--verbose` / `--no-verbose` override the `verbose_output` config key at runtime; with neither flag the config value is used (`resolve_verbose` in `helpers/cli_config.py`).
 
 ## Versioning
 
@@ -25,7 +27,8 @@ helpers/indicators.py              # All strategy signal logic — do not touch
 helpers/registry.py                # Strategy registry: register_strategy decorator, load_strategies, get_active_strategies
 helpers/simulations.py             # Single-asset trade simulation engine
 helpers/portfolio_simulations.py   # Multi-asset portfolio simulation engine
-helpers/monte_carlo.py             # Monte Carlo robustness scoring
+helpers/monte_carlo.py             # Monte Carlo resampling (Do-Not-Touch); legacy scoring kept for mc_score_legacy
+helpers/mc_scoring.py              # MC scoring v2 (analyze_mc_results_v2): bootstrap edge test + closed-trade DD realism
 helpers/summary.py                 # Report generation, S3 upload; dynamic benchmark columns via _build_benchmark_columns(); _get_t1_cols()/_get_t2_cols()/_T3_COLS/_VERBOSE_SHORT_NAMES control tiered table layout; _print_table() handles all bordered terminal output
 helpers/wfa.py                     # Walk-Forward Analysis (get_split_date, split_trades, evaluate_wfa)
 helpers/wfa_rolling.py             # Rolling multi-fold WFA (get_fold_dates, evaluate_rolling_wfa)
@@ -33,6 +36,7 @@ helpers/ml_export.py               # ML trade feature export (export_trade_featu
 helpers/sensitivity.py             # Parameter sensitivity sweep (build_param_grid, label_for_params, is_sweep_enabled)
 helpers/regime.py                  # VIX regime heatmap (build_regime_heatmap, print_regime_heatmap, classify_vix_regime)
 helpers/point_in_time.py           # Point-in-time index universe resolver for portfolios like "pit:nq100" and "pit:sp500"
+helpers/rule_based_universe.py     # Survivorship-free universe from the delisted-inclusive Parquet corpus ("rule:top500") — needs no index membership
 helpers/init_wizard.py             # First-time setup wizard invoked via python main.py --init
 helpers/correlation.py             # Strategy correlation matrix (run_correlation_analysis, compute_avg_correlations)
 helpers/caching.py                 # Local Parquet cache (24h TTL)
@@ -49,7 +53,46 @@ tickers_to_scan/                   # JSON ticker lists (nasdaq_100.json, sp-500.
 scripts/                           # One-off diagnostic and utility scripts (NOT part of the pipeline)
 scripts/debug_data.py              # Compares Polygon vs Yahoo SPY data; run with: python scripts/debug_data.py
 scripts/build_research_index.py    # Consolidates all output/runs/ summaries + llm_verdict.json into output/research_index.csv
+scripts/gh_post.py                 # REQUIRED for all GitHub comments/reviews/issues — posts then verifies content landed intact (see "Posting to GitHub")
 ```
+
+## Posting to GitHub
+
+**Always:**
+
+```bash
+python3 scripts/gh_post.py comment   --repo O/R --number 302 --file reply.md
+python3 scripts/gh_post.py review    --repo O/R --number 302 --file r.md [--event APPROVE]
+python3 scripts/gh_post.py create    --repo O/R --title "..." --file body.md [--label backlog]
+python3 scripts/gh_post.py edit-body --repo O/R --number 109 --file body.md
+```
+
+> **Portability:** the script is **stdlib-only** and has **no `rtk` dependency** — it runs under any Python 3 with no venv and no pip install, so remote contributors are not blocked. Its only external requirement is the GitHub CLI (`gh`), and if that is missing or unauthenticated it says so with install/login instructions rather than a traceback. If you work on this machine, prefix `rtk` per the RTK rule above; everyone else runs it as written.
+
+Write the body to a file first (the scratchpad is fine), then pass `--file`.
+
+| Exit | Meaning | What to do |
+|---|---|---|
+| `0` | posted **and** verified byte-for-byte | nothing |
+| `1` | **nothing was posted** (bad usage, `gh` missing/unauthenticated, API rejected it) | fix and re-run |
+| `2` | **posted, but not confirmed intact** — content mismatched, *or* it landed and the read-back failed | open the printed URL and check. **Do not just re-run** — it posted |
+
+The `2` case covers "posted but unverifiable", not only "mangled". Re-running on a `2` is how you get a duplicate comment on top of the one already live.
+
+`--file` is required except for `review --event APPROVE`, where a bodyless approve is allowed (there is nothing to verify).
+
+**Never:**
+
+| Forbidden | Why |
+|---|---|
+| `gh issue comment --body "...\`path\`..."` | The shell runs command substitution **before `gh` sees it**. Backticks and `$(...)` are executed. This stripped file paths out of a real comment on #292 and created a stray file named `cash` |
+| `gh api -f body=@file` | `-f` sends the value **literally** — it posted `@C:/Users/.../gh_comment_106.md` as a comment body and the real reply was never sent |
+
+Both failures are **silent**: `gh` exits 0 and prints a URL. Nothing tells you the content was destroyed. That is why the tool verifies by reading the comment back rather than trusting the exit code.
+
+`--body-file` alone is *not* sufficient as a rule — the second failure above came from someone already trying to pass a file. Use the script; it removes the inline-body option entirely and checks the result.
+
+**Cross-repo refs:** a bare `#123` in a private-repo comment resolves against the *private* repo. When referring to a public issue from the private repo (or vice versa) always write it fully qualified: `zachisit/july-backtester#302`.
 
 ## Scripts Directory
 
@@ -60,6 +103,7 @@ scripts/build_research_index.py    # Consolidates all output/runs/ summaries + l
 "data_provider": "polygon"         # or "norgate", "yahoo", "csv"
 "csv_data_dir": "csv_data"         # only used when data_provider = "csv"
 "polygon_api_secret_name": "POLYGON_API_KEY"  # AWS secret name OR .env key
+"polygon_max_retries": 5           # retries on HTTP 429/5xx w/ backoff + Retry-After; 0 = off
 "start_date": "2004-01-01"
 "initial_capital": 100000.0
 "timeframe": "D"                   # D, H, MIN, W, M
@@ -76,12 +120,15 @@ scripts/build_research_index.py    # Consolidates all output/runs/ summaries + l
 "slippage_pct": 0.0005
 "commission_per_share": 0.002
 "min_trades_for_mc": 50
+"min_bars_required": 200        # min bars INSIDE start_date..end_date; plain lists drop shorter symbols, pit:/rule:/include_delisted keep them (#433)
+"pit_warmup_days": 400           # calendar days fetched before start_date so indicators are warm; 0 = off (#433)
 "num_mc_simulations": 1000
+"max_workers": None              # cap the simulation pool (--workers N); each worker copies portfolio_data, so wide universes may need 1-2 (#414)
 "wfa_split_ratio": 0.80          # 0.80 = 80% IS / 20% OOS; None or 0 = disabled
 "wfa_folds": None                # None = rolling WFA disabled; int >= 2 = number of folds
-"wfa_min_fold_trades": 5         # min OOS trades per fold to score it (rolling WFA only)
+"wfa_min_fold_trades": 5         # min IS and OOS trades per fold; N/A folds are never scored
 "export_ml_features": False      # True = write ml_features.parquet after the run (requires pyarrow)
-"verbose_output": False          # True = print Extended Metrics + Robustness tables; --verbose overrides at runtime
+"verbose_output": False          # True = print Extended Metrics + Robustness tables; --verbose / --no-verbose override at runtime
 "noise_injection_pct": 0.0       # 0.0 = disabled (default, stress testing is opt-in). Set to e.g. 0.01 for ±1% stress test.
 "risk_free_rate": 0.05           # annual, used in Sharpe calculation (default 5% — US T-bill proxy)
 "sensitivity_sweep_enabled": False  # opt-in parameter fragility sweep
@@ -89,11 +136,17 @@ scripts/build_research_index.py    # Consolidates all output/runs/ summaries + l
 "sensitivity_sweep_steps": 2     # 2 steps each side → 5 values per param
 "sensitivity_sweep_min_val": 2   # floor for generated values (prevents SMA period = 0)
 "rolling_sharpe_window": 126     # rolling Sharpe window in trading days; 0 or None = disable
+"entry_trigger": "edge"          # "edge" (default, #401) = enter only on the transition INTO the entry value; "level" = any bar reading it
 "htb_rate_annual": 0.02          # annual hard-to-borrow rate debited daily on short positions
+"short_margin_requirement": 0.5  # equity short collateral as fraction of notional, reserved from buying power (#430); 0.0 = legacy unbounded shorts
 "mc_sampling": "iid"             # "iid" = independent; "block" = block-bootstrap; "auto" = block for concentrated_futures profile else iid
 "mc_block_size": None            # block size for block-bootstrap; None = auto floor(sqrt(N))
+"random_seed": None              # None = unseeded (legacy); int (e.g. 42) = reproducible MC, bootstrap p-value and noise injection (#439); CLI: --seed
 "smoothness_profile": "auto"     # smoothness-verdict thresholds: "auto"|"equity"|"concentrated_futures"
 "volume_impact_coeff": 0.0       # square-root market impact coefficient; 0.0 = disabled
+"stop_gap_fill": "open"          # "open" = stop gapped through fills at the bar Open (min/max with stop); "level" = legacy fill at stop level (#425)
+"stop_gap_fill_armed_trail": "level"  # "open" also applies gap fills to an ARMED trailing_atr trail (default keeps Sleeve A exact-level parity)
+"entry_bar_stop_check": True  # execution_time="open": a fill-bar Low (High for shorts) breaching the initial stop closes the trade on the fill bar; False = legacy next-bar check (#426)
 ```
 
 ## Architecture Notes
@@ -111,6 +164,98 @@ scripts/build_research_index.py    # Consolidates all output/runs/ summaries + l
 **Dynamic benchmark columns:** `helpers/summary.py` uses `_build_benchmark_columns(benchmark_returns)` to generate column names, display names, format specs, and short names dynamically from the `benchmark_returns` dict passed to summary functions. This allows summary reports to display arbitrary benchmark tickers (not just hardcoded SPY/QQQ). All 4 summary functions (`generate_per_portfolio_summary`, `generate_single_asset_summary_report`, `generate_final_summary`, `generate_portfolio_summary_report`) accept a `benchmark_returns` dict parameter (e.g., `{"SPY": 0.12, "QQQ": 0.15, "XLF": 0.08}`) and dynamically build result keys like `vs_spy_benchmark`, `vs_qqq_benchmark`, `vs_xlf_benchmark`. The first benchmark appears in Table 1 (Core Performance), remaining benchmarks appear in Table 2 (Extended Metrics). Filtering logic supports backward compatibility: the first two benchmarks respect `min_performance_vs_spy` and `min_performance_vs_qqq` config keys; additional benchmarks default to `-9999.0` threshold (show all).
 
 **Datetime index normalization (Phase 4 of #55):** All data providers return `pd.DatetimeIndex` regardless of timeframe. Daily data (`timeframe="D"`) is normalized to midnight timestamps (00:00:00 UTC) via `.normalize()` to ensure consistent datetime handling across timeframes. Intraday data (`timeframe="H"` or `"MIN"`) preserves hour/minute precision. Trade logs store `EntryDate` and `ExitDate` as ISO 8601 strings (`.isoformat()`) supporting both date-only (`"2024-01-15"`) and datetime (`"2024-01-15T10:30:00"`) formats. WFA functions convert these strings to `pd.Timestamp` for chronological comparisons, ensuring robust datetime handling for mixed daily/intraday backtests.
+
+## Rule-Based Point-in-Time Universe (`"rule:..."`)
+
+A survivorship-free investable set derived from **observable liquidity**, requiring **no index-membership data**. Membership history is the vendor-locked part of PIT (`norgatedata.index_constituent_timeseries()` needs a Windows-only Norgate Data Updater); this sidesteps it.
+
+```python
+"portfolios": {"US Liquid 500": "rule:us_liquid_500"}   # or "rule:top250"
+```
+
+```
+universe(D) = { s : s has bars on D
+                and close(s, D)             >= universe_min_price
+                and dollar_volume_20d(s, D) >= universe_min_dollar_volume
+                and history(s, D)           >= universe_min_bars }
+```
+capped to `universe_top_n` by dollar volume.
+
+**Why it is survivorship-free:** the Parquet corpus carries **36,684 securities, 20,911 of them delisted**, named `TICKER-YYYYMM` — Bear Stearns is `BSC-200805`, Lehman `LEHMQ-201203`, Enron `ENRNQ-200411`. They are present with the dates they failed and drop out on their real last bar. Verified: `BSC-200805` **is** in the 2007-06-29 universe and **is not** in the 2008-12-31 one. The later-delisted share of a top-500 universe decays 45.0% (2004) → 32.8% (2008) → 20.2% (2015) → 1.0% (2024) — the correct signature.
+
+**Why there is no look-ahead:** every screen reads only bars `<= D`.
+
+**The universe is re-based periodically, not resolved once.** `universe(D)` is date-varying, but resolving it a single time at `start_date` and freezing it introduces a **start-date selection bias** of the same shape as the survivorship bug this feature removes, pointing the other way — the set can only shrink as names delist, so nothing can ever enter it. A 2004–2024 run frozen at 2004 never trades NVDA, TSLA, META or GOOGL, because none were top-500-liquidity names in 2004.
+
+`build_rule_schedule(spec, start, end, config)` therefore resolves at evenly-spaced dates and returns `(union, schedule)` — the **same pair shape** the `pit:` branch produces, so it reuses the existing per-bar membership masking (`pit_members_on`) with no engine change. The union is what gets fetched; the schedule is what keeps it causal, gating a name out of the tradeable set before it qualified.
+
+| `universe_rebase` | Resolutions over 20y | Note |
+|---|---|---|
+| `"annual"` **(default)** | 21 | tractable; closes most of the gap |
+| `"quarterly"` | 81 | finer, ~4× the cost |
+| `"monthly"` | 241 | rarely worth it |
+| `"none"` | 1 | **frozen at `start_date` — logs a warning; the biased behaviour, kept reachable for A/B** |
+
+Per-bar resolution is deliberately *not* offered: `resolve_universe` costs ~10s/date because it reopens real Parquet files, so ~5,000 trading days is ~14 hours just to build the schedule. `pit:`'s per-bar mask is cheap only because it reads pre-existing membership YAML rather than price data. The span index is built **once** and reused across re-base dates — rebuilding it per date multiplies the expensive part by `len(dates)`.
+
+**Config keys:** `universe_min_price` (5.0), `universe_min_dollar_volume` (1e6), `universe_min_bars` (252), `universe_top_n` (None), `universe_adv_window` (20), `universe_exclude_prefixes` (`("$", "#")`), `universe_exclude_symbols` (`()`), `universe_rebase` (`"annual"`).
+
+**Three traps this handles, each of which silently corrupts results:**
+1. **`Datetime` is not column 0** (order is `Open, High, Low, Close, Volume, Datetime` — it is the pandas index). Locating it by position reads float OHLC as nanosecond timestamps and yields **1970** dates. It is located by *name*.
+2. **`$` and `#` prefixes are not investable.** 1,160 index series (`$NYA`, `$DJITR`) and 455 breadth series (`#NYSEAD`) carry price and volume columns, so no liquidity screen rejects them — and they out-rank everything on notional dollar volume. Before this filter a top-100 universe came back as *almost entirely indices*. Excluded by default.
+3. **Ticker reuse.** `WB` is Wachovia (`WB-200812`) until 2008 and Weibo (`WB`) from 2014; `V` was Vivendi (`V-200608`) before Visa (`V`). Resolution is by **security ID**, never bare ticker — which also sidesteps `parquet_service`'s ambiguous `_multi_` bare-ticker fallback, since `WB-200812.parquet` matches exactly.
+
+**Performance:** a metadata-only span index over all 36,684 securities builds in **~8.5s**, cached to `<parquet_data_dir>/../.span_index.parquet`; universe resolution is then ~10s per date.
+
+**What it is NOT:** the S&P 500, Russell, or any index. If a thesis depends on index membership *itself* — reconstitution flow, inclusion effects, benchmark-relative mandates — this does not substitute. **Results produced on this universe must say so.**
+
+**ETFs are excluded by default** (`universe_exclude_etfs: True`). An unfiltered liquidity-ranked universe is materially ETFs — measured on the real corpus:
+
+| As of | top-100 | top-500 |
+|---|---|---|
+| 2004 | 4.0% | 2.6% |
+| 2010 | 24.0% | 13.6% |
+| 2020 | 26.0% | 19.0% |
+| 2024 | 21.0% | 16.6% |
+
+A stock-selection strategy holding SPY is partly holding the benchmark it's measured against, and no metric reveals it. Set `universe_exclude_etfs: False` to keep them.
+
+**Why a list and not a classifier.** The corpus carries no `securitytype` field. A statistical classifier was tried and **does not work** — recorded so it isn't re-attempted. R² of daily returns vs SPY, on 89 known ETFs vs 52 known stocks: threshold 0.80 catches 34.8% of ETFs at 0% false positives; threshold 0.50 catches 65.2% at **25%** false positives. It fails because commodity/currency/bond ETFs aren't equity baskets at all (GLD 0.018, SLV 0.0005, UUP 0.003, TLT 0.12). Counting idiosyncratic 5σ jumps separates better (ETF median 0, stock median 2 — no earnings) but still misclassifies ~25% of stocks. Neither is precise enough to silently drop names.
+
+**Why a list is nevertheless sufficient.** The screen is dollar-volume ranked, so the problem is self-limiting: not "how many ETFs exist" (hundreds) but "how many are liquid enough to hold a top-N slot" (~20 in a top-100). `ETF_TICKERS` (~230 names) spans broad/sector/style/bond/commodity/currency/country/leveraged/inverse/volatility/thematic and takes the measured contamination above to **0%**. Matching is on the bare ticker, so a closed ETF (`TVIX-202007`) is excluded too.
+
+It is curated, not exhaustive — a new or obscure ETF can pass. **`etf_report(universe)`** returns `{etfs, n_etfs, n_total, pct}` so that gap is visible rather than assumed away.
+
+**Tests:** `tests/test_rule_based_universe.py` — 31 tests on a synthetic corpus (no submodule dependency): security identity incl. share-class-vs-delisting (`BRK-A` vs `BRK-199001`), the 1970 trap, mixed tz-aware/naive files, each screen, ticker-reuse resolution, and survivorship present-then-absent.
+
+## `pit:` + parquet resolves to SECURITY IDs (#407)
+
+`pit:` membership is expressed in **bare tickers**. The Norgate parquet corpus keys delisted securities as `TICKER-YYYYMM`, so a bare ticker is **not an identifier there**. Before this fix the membership year was discarded before `services/parquet_service.py::_find_parquet(symbol, parquet_dir)` — which takes no date — was called, with two silent failure modes:
+
+| Mode | Count | What happened |
+|---|---|---|
+| **Masking** | ~84 names | An exact bare `CB.parquet` wins the resolver's first branch, so the delisted `CB-201601` (Chubb Corp, the actual 2004–2015 member) is never considered and the run gets ACE Ltd's history instead. Verified: 0 of 2,769 identical days, 0.71 return correlation, 2008 −13.0% vs −4.1%. |
+| **Collision** | 46 names | No bare file + several dated files → `_find_parquet` returns the `"_multi_"` sentinel → `get_price_data` logs an error and returns `None` → the member is dropped from the run. |
+
+Both drop or swap **dead companies** — precisely what a point-in-time universe exists to include — so a `pit:` + parquet run carried survivorship bias while claiming to be free of it. `rule:` universes were never affected because they already resolve to security IDs before the loader.
+
+**The fix is at the universe layer, not the loader.** `services/parquet_service.py` is correct as it stands (post-#396): it refuses to guess and warns when a live file masks delisted history. This change gives it something unambiguous to resolve. **Do not "fix" the loader.**
+
+- **Only when `config["data_provider"] == "parquet"`.** `CB-201601` is meaningless to Yahoo/Polygon/CSV; every other provider keeps bare tickers, byte-identical to before. (Five of the eight committed `pit:` runs used Yahoo.)
+- **Both entry points, same namespace.** `build_membership_schedule()` (the per-bar mask) and `tickers_union_for_period()` (the symbol list that gets fetched) must agree — the union is derived *from* the schedule so they agree by construction. A schedule of security IDs masked against a union of bare tickers would mask everything out on every bar and report zero trades with no error.
+- **Resolution order (revised after the #407 review against the real corpus).** Under parquet the schedule keeps the roster's **raw** ticker (only stripped/upper-cased — no alias, no dot→dash), and `resolve_security_id` tries, in order:
+  0. **`PIT_PARQUET_SECURITY_OVERRIDES`** — explicit, dated `roster ticker → security ID` windows (bankruptcy suffixes like `SHLD → SHLDQ-202210`, renames like `LB → BBWI`, and rosters that use a *current* ticker for an earlier period). Validated against the span index: an override whose target has no bars near the date **fails**, it never falls through to a guess.
+  1. **The raw roster ticker**, its own spelling first, then the other share-class punctuation (`BRK.B` ↔ `BRK-B`; the corpus files are `BRK.B.parquet`). Covering-span rule, then the **ticker-tenure tie-break**: `TICKER-YYYYMM` means "held this ticker until YYYYMM", so among several covering candidates the date's owner is the one with the **earliest tenure end at or after it** (live bare file = open-ended). Needed for CB: live `CB.parquet` carries ACE from 1993 and overlaps `CB-201601` (Chubb) for 23 years.
+  2. **`PIT_TICKER_NORMALISATION`'s alias only if (1) failed**, preferring the target's **live bare file** — Norgate back-fills a renamed security's history under today's ticker, so `SYMC` lives in `GEN.parquet`. Aliasing *first* (the original #407 order) sent it through the tenure rule to `GEN-201212`, GenOn — a silent wrong-company swap (7 such names found in review).
+  Every lookup also accepts a **single** candidate within `PIT_RESOLUTION_LAG_DAYS` (10) of its bars: index dates lag first/last trades by up to a week (HES, RTN, NBL, AMCR, KHC, CTRX). Overrides get 31 days.
+- **Wrong-company swaps don't abort, so they were audited, not assumed away.** On both rosters 2004→2026-09-28: every one of 1,109 resolutions has median dollar volume ≥ $3M/day over its membership (index-member scale), and 0 of 25 tenure tie-breaks pick a security trading < 10% of a covering alternative. The audit found 6 swaps the review had not (`LB`→a $0.4M/day stock instead of L Brands, `ES`→EnergySolutions, `SAF`, `IVGN`, `BBT`, `CECO`) — all now overrides. Re-run that audit after any corpus or roster change.
+- **YAML booleans.** Rosters are read with `load_roster_yaml()` (both `point_in_time` and `pit_universe`), never `yaml.safe_load`: an unquoted `- ON` in the NQ100 2023-25 files parsed as `True` → ticker `TRUE`, so ON Semiconductor resolved to TrueCar. This affected **every provider**, not just parquet.
+- **Unresolvable members ABORT the run** — `PitResolutionError`, raised **once** with **every** offender across the whole schedule (an operator fixing 46 collisions must not need 46 runs). The message names each bare ticker, its membership date, and the candidate security IDs with their spans, and points at the remedy: request the security ID directly. `main.py` re-raises it rather than `continue`-ing, because skipping the portfolio is "drop the member" wearing a different hat.
+- **There is no opt-out flag, by owner decision (2026-09-30).** It would be set once and forgotten, and this failure silently reintroduces survivorship bias. If `pit:` + parquet is unusable until the corpus gaps are closed, that is the honest state and the run should say so. Note this includes roster names absent from the corpus entirely: zero candidates is zero survivors, so the run aborts rather than quietly shrinking the universe.
+- **Forced-exit spells come from the resolved schedule under parquet.** `build_membership_schedule` returns a `SecuritySchedule` (a plain list subclass carrying `roster_tickers`), and `main.py` builds spells with `security_intervals(schedule, end)` — same semantics as `pit_enforcement.membership_intervals()`, keyed by **security**. Roster-ticker keys are wrong here: `IR` is Ingersoll-Rand plc (→ `TT`) until 2020 and the new Ingersoll Rand after, so roster-keyed spells would hand one company's membership to another. Other providers keep `membership_intervals()`.
+- **What still aborts (owner decision above):** three historical gaps remain — `ATGE` (S&P 2009-12), `LMCK` (NQ100 2004-14), and `DISCK` (NQ100 2004-05). J.C. Penney resolves to the corpus's full-history bankruptcy security, `CPPRQ-202102`. `pit:sp500` and `pit:nq100` resolve completely from **2015-01-02**; earlier starts abort when they encounter one of the remaining gaps.
+
+**Tests:** `tests/test_pit_407_review.py` — 19 tests pinning each review finding (dot-named share classes from either spelling, raw-before-alias, overrides win but are validated, lag window incl. two-candidate abort, unquoted `ON`, security-keyed spells). `tests/test_pit_security_resolution_158.py` — 35 tests on a synthetic corpus + YAML in `tmp_path`: the CB masking case (fails on `main`, which returns `{"CB"}`), the AGN collision case both sides of the hand-over, abort-naming-every-offender, all four non-parquet providers unchanged, schedule/union namespace agreement, share classes, and live-only tickers.
 
 ## Adding a Strategy (Plugin System)
 
@@ -206,6 +351,8 @@ output/
 The engine is instrument-aware: **`helpers/instruments.py`** resolves a per-symbol `Instrument` (`resolve_instrument(symbol, config)`) carrying `point_value` ($/point), `tick_size`, `margin_mode`, `commission_model`/value, `slippage_model`/value, `integer_units`, `borrow_applies`, `calendar`. **Equities are the default and reproduce the pre-#229 arithmetic byte-for-byte** (point_value=1, `cash_full` margin, per-share commission, %-slippage). Futures opt in via a contract-month ticker (e.g. `ESM6`) or `config["instruments"]["overrides"]`.
 
 - **Cost/accounting helpers** in `instruments.py` (`commission`, `apply_slippage`, `round_units`, `market_value`, `margin_required`, `unrealized_pnl`, `borrow_cost_per_bar`, `stop_level`, `atr_stop_level`, `atr_stop_distance_pct`) replace the formerly hard-coded sites in `portfolio_simulations.py`.
+- **Cash-bound equity entries:** after the commission-inclusive cash clamp, fractional long shares are rounded down by representable steps if floating-point recomputation puts cost above free buying power (cash net of short collateral). A fully affordable entry is retained without overdrawing the account.
+- **Futures long heat (#467):** known protective stops use `(entry_fill - stop_level) * point_value * contracts`, resolved by the same initializer that installs the position's stop. The existing pre-clamp gate remains; a final gate after impact/rounding/affordability checks and stores actual filled exposure. Missing or non-protective stops retain the existing proxy. Equity heat policy is unchanged.
 - **Futures execution:** margin accounting (entry reserves initial margin, not full notional; equity = cash + unrealized P&L; `reserved_margin` tracks buying power), integer contracts, `$/point` P&L, point-capped stop `{"type":"points","value":N}`, no borrow on futures shorts.
 - **Margin-based futures sizing (#238):** for margined instruments (`margin_mode == INITIAL_MARGIN`) contract count derives from `margin_required()`, not target-notional / `point_value` (which increasingly floored to 0 contracts as price appreciated, silently under-sizing/skipping late trades). The gate is `margin_mode`-first (checked before `point_value != 1.0`), so a futures instrument with `point_value == 1.0` still sizes on margin. Equity sizing (`CASH_FULL`) is unchanged. Applies to both long and short entry paths.
 - **Stop anchoring (#238):** `percentage`/`points` stop levels anchor to the **raw pre-slippage entry price for margined futures only** — `_stop_anchor = raw_entry_price if inst.margin_mode == INITIAL_MARGIN else entry_price`. Equities (`CASH_FULL`) keep the pre-PR slipped-fill anchor **byte-for-byte** (golden master unchanged). *Caveat:* the `trailing_atr` stop path anchors its initial stop/target/breakeven-floor to `raw_entry_price` **unconditionally** (not yet `margin_mode`-gated) — harmless today (trailing_atr is a futures-only mechanic with no equity consumer and no golden-master coverage), tracked as a follow-up. So "equities restore pre-PR behavior" holds for `percentage`/`points` stops, not `trailing_atr`.
@@ -215,7 +362,7 @@ The engine is instrument-aware: **`helpers/instruments.py`** resolves a per-symb
 - **Data path:** `services/futures_service.py` (Polygon dedicated `/futures/v1/aggs`), plus CSV/Parquet for pre-built continuous series; `services/__init__.py` dispatches futures tickers to the futures endpoint. `helpers/continuous_contract.py` builds back-adjusted continuous series (panama/ratio + volume-roll). `helpers/data_quality.py` missing-bar check is calendar-aware (skipped for `CME_ETH`).
 - **Config:** SECTION 27 `instruments` (asset-class defaults, per-root point-value/tick tables, per-symbol overrides), SECTION 28 `intrabar_resolution`/`intrabar_timeframe`/`intrabar_multiplier`, SECTION 29 `maintenance_margin_pct`.
 - **Exit configs (v1.11.0, issue #234):**
-  - `{"type":"trailing_atr","stop_mult":..,"trail_mult":..,"t1_mult":..,"point_cap":N,"floor":"breakeven"}` — Sleeve A mechanic: ATR **locked at the breakout bar** (the signal bar, `prev_trading_dates[entry_exec_date]` — assumes `execution_time="open"`); initial stop `entry - min(stop_mult*atr, point_cap)`; arms the trail when price reaches `entry + eff_stop_dist*(t1_mult/stop_mult)` (target is R:R off the *capped* stop); post-arm ratchets `running-max High - trail_mult*atr_locked` (trail leg uncapped), floored at literal entry. **Bidirectional** — `side="long"`/`"short"` mirror in `_update_trailing_atr_stop`; the short entry/cover loops wire the full stop/target/trail + margin-call + real InitialRisk/RMultiple, and open shorts are marked-to-market at end-of-backtest.
+  - `{"type":"trailing_atr","stop_mult":..,"trail_mult":..,"t1_mult":..,"point_cap":N,"floor":"breakeven"}` — Sleeve A mechanic: ATR **locked at the breakout bar** (the signal bar — resolved from `signal_date` on the long path and `sig_date` on the short, correct under both `execution_time` modes and in both directions; both previously anchored to the bar before the fill and were wrong under `"close"`); initial stop `entry - min(stop_mult*atr, point_cap)`; arms the trail when price reaches `entry + eff_stop_dist*(t1_mult/stop_mult)` (target is R:R off the *capped* stop); post-arm ratchets `running-max High - trail_mult*atr_locked` (trail leg uncapped), floored at literal entry. **Bidirectional** — `side="long"`/`"short"` mirror in `_update_trailing_atr_stop`; the short entry/cover loops wire the full stop/target/trail + margin-call + real InitialRisk/RMultiple, and open shorts are marked-to-market at end-of-backtest.
     - Known conservative assumptions (issue #234 review): on a bar hitting both init-stop and target, the engine resolves stop-first (pre-arm); maintenance-margin uses entry-price notional (calls marginally early).
   - `{"type":"atr","multiplier":..,"point_cap":N}` — ATR stop distance clipped at `N` points per trade (`instruments.atr_stop_level(point_cap=)`).
   - `maintenance_margin_pct` (SECTION 29): per-bar force-liquidation of a futures position when `margin + unrealized_pnl < notional*pct`, logged `ExitReason "Margin Call"`. `0.0` = disabled.
@@ -240,9 +387,19 @@ printed extreme. The level is **static — it does not trail**.
   start of the series yields `NaT` → no stop for that trade.
 - **Wiring**: both entry paths in `helpers/portfolio_simulations.py` resolve the signal bar
   from the loop's existing `signal_date` / `sig_date` variable — the bar *before* the fill under
-  `execution_time="open"`, the fill bar itself under `"close"`. This differs from the `atr`
-  branch, which hard-codes `prev_trading_dates[entry_exec_date]` and therefore assumes
-  `execution_time="open"`. No look-ahead either way: the level is known at entry.
+  `execution_time="open"`, the fill bar itself under `"close"`. **Every `atr` /
+  `trailing_atr` anchor on BOTH entry paths now does the same** — they previously
+  hard-coded the bar before the fill (`prev_trading_dates[entry_exec_date]` on the long
+  path, `prev_trading_dates[date]` on the short one), which is the signal bar only under
+  `execution_time="open"`; under `"close"` they read one bar too early (a measured 10x
+  difference in stop distance on identical inputs). Fixed at **seven** sites — long: the
+  `atr` stop level, `atr`/`trailing_atr`/`risk_parity` sizing, the `trailing_atr` locked
+  ATR; short: the `atr` stop level and the `trailing_atr` locked ATR. The first fix
+  covered only the long five, because the guard that was supposed to prove completeness
+  keyed on `entry_exec_date` — a name the short block does not use — and so was blind to
+  half the file. Provably a no-op under `"open"`, where the two expressions coincide by
+  construction; the golden master is unchanged. No look-ahead either way: the level is
+  known at entry.
 - **Next-Day Activation interaction (important for short holds):** a position is not
   stop-checked until the bar *after* entry. Under `execution_time="open"` a one-session trade
   (enter next open, exit the open after) is therefore unprotected for its entire holding
@@ -274,6 +431,7 @@ printed extreme. The level is **static — it does not trail**.
 - **New file**: `services/yahoo_service.py` — uses `yfinance` (lazy import inside `get_price_data` so the library is optional for non-Yahoo users)
 - **Dependency**: `yfinance` added to `requirements.txt`
 - **Interval building**: `_build_interval(config)` maps `timeframe`/`timeframe_multiplier` → yfinance interval string (`"1d"`, `"1h"`, `"5m"`, `"1wk"`, `"1mo"`). Multiplier >1 on D/W/M falls back to base interval with a warning.
+- **Inclusive `end_date` (#441)**: yfinance's `end` is exclusive, so `get_price_data` requests `end_date + 1 day` and then filters the index to `< end_date + 1 day` (daily bar dated `end_date` kept; next-day bars dropped; intraday bars on `end_date` kept). `end_date=None` ("run to today") passes `end=None` and skips the filter.
 - **No API key** needed — free data, but quality/availability varies.
 - **Mock pattern** in tests: yfinance is imported *inside* `get_price_data()` via `import yfinance as yf`, so patching `sys.modules["yfinance"]` in `patch.dict` intercepts the import on every call without needing to reload the module.
 
@@ -316,7 +474,20 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 
 **Plan history caps**: Polygon limits available history based on plan tier. A starter plan capped at ~2021; a paid plan extends that (confirmed: ~2016 on current plan). The `Actual Data Period` line in the run summary shows the true start Polygon returned — if it lags the configured `start_date`, the plan tier is the constraint. There is no pagination bug in `polygon_service.py` — the single page with 50,000-bar limit returns all available bars correctly.
 
-**Cache validation bug (issue #123)**: The local Parquet cache keys data by *requested* date range, not actual returned range. If Polygon returns plan-capped data (e.g. 2016–now) for a 2004 request, the cache stores that truncated result under a key named `SPY_2004-01-01_..._day_1.parquet`. After a plan upgrade, subsequent runs still serve the old capped data from cache — silently — until the cache entry is manually deleted or expires. **Fix**: add start-date validation in the `helpers/caching.py` read path; if `df.index.min()` lags the requested start by >30 days, treat as a cache miss and re-fetch. See issue #123 for the full implementation spec.
+**Cache request-lag: what it means, and why it is NOT invalidated (issues #123, #315)**: The local Parquet cache keys data by *requested* date range, not actual returned range. If Polygon returns plan-capped data (e.g. 2016–now) for a 2004 request, the cache stores that truncated result under a key named `SPY_2004-01-01_..._day_1.parquet`.
+
+A cached frame that **starts later than the requested start** has two indistinguishable causes, and the cache alone cannot tell them apart:
+
+1. the symbol **listed after** `start_date` — an IPO, where re-fetching returns the identical first bar; or
+2. provider **plan-capping**.
+
+The #123 fix invalidated on request-lag (`df.index.min()` lagging the request by >30 days → treat as a miss). That was **removed in #315**, because cause 1 is overwhelmingly the common one: the heuristic mis-fired on *every* late-listed symbol, forcing a full API re-fetch of it on **every run** — the cache never hit for any IPO in the universe.
+
+**Current behaviour** (`helpers/caching.py` read path): request-lag does **not** invalidate. A large lag is logged at `INFO` so plan-capping stays visible without thrashing the cache. A genuine plan upgrade is recovered by the **24h TTL**, or immediately by deleting `data_cache/`.
+
+**The residual**: within 24h of a plan upgrade, capped data is still served, and only an INFO line says so. That is the accepted trade against re-fetching every late-listed symbol on every run. If you have just upgraded a plan and want the new history now, clear the cache directory rather than waiting out the TTL.
+
+A separate integrity guard *does* invalidate: a cache file whose index is not a `DatetimeIndex` is discarded and re-fetched (this was an accident of the pre-#315 try/except; #315 made it explicit).
 
 **Index history cap is separate and tighter than the equities cap (issue #261)**: `I:VIX` and `I:TNX` (the two comparison-ticker dependencies most strategies rely on for regime gates) only return data from **2023-02-14 onward** on the current plan — confirmed for both symbols directly against the API, independent of the equities ~5yr rolling cap described above. Requesting an earlier `start_date` returns an empty result (HTTP 200, zero bars), not an error. Because `spy_df`/`vix_df` are injected as `None` when the fetch fails, and the None-guards added for issue-empty-comparison-tickers make `None` a *silent no-op* rather than a crash, any strategy whose regime/filter logic ANDs on `vix_df` (e.g. `MA Confluence (Full Stack) w/ Regime Filter`) will fail its gate closed for the whole requested window — **zero trades, no error, no warning** prior to this fix. `main.py`'s comparison-ticker fetch loop now logs an explicit warning when a failed fetch backs an active dependency (see the `dep_keys` check next to the `Failed to fetch data for comparison ticker` warning), but the underlying data-availability gap is a Polygon plan-tier limit, not a bug in this codebase — **use `data_provider = "yahoo"` (`^VIX`/`^TNX`, full history) for any backtest whose window starts before 2023-02-14 and depends on VIX/TNX-gated strategies.**
 
@@ -329,7 +500,7 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 - **`helpers/correlation.py`** — pure, stateless module. Public entry point: `run_correlation_analysis(strategy_results, output_path, threshold=0.85)`.
 - **Pipeline placement**: called in `main.py` inside the per-portfolio reporting loop, immediately after `generate_per_portfolio_summary`. Runs once per portfolio.
 - **Input**: list of simulation result dicts (each with `"Strategy"` and `"trade_log"` keys). Trades are grouped by `ExitDate` and profits summed to build a daily P&L series per strategy.
-- **Output CSV path**: `output/runs/<run_id>/<Portfolio_safe_name>_strategy_correlation.csv` — next to `overall_portfolio_summary.csv`, one file per portfolio.
+- **Output CSV path**: `output/runs/<run_id>/<Portfolio_safe_name>_strategy_correlation.csv` (`<Portfolio_safe_name>` = `helpers.summary.safe_path_component(portfolio)`, the same sanitizer the summary CSV paths use, #403) — next to `overall_portfolio_summary.csv`, one file per portfolio.
 - **Threshold**: default `0.85` (absolute Pearson). Pairs with `|r| > 0.85` are logged as `[WARNING]` lines via `logger.warning`.
 - **Skipped silently** when fewer than 2 strategies have non-empty trade logs (returns empty DataFrame + empty list, no CSV written).
 - **Tests**: `tests/test_correlation.py` — covers `_build_daily_pnl_series`, `build_daily_pnl_matrix`, `compute_correlation_matrix`, `find_high_correlation_pairs`, and `run_correlation_analysis` (with `tmp_path` file I/O). No network, no randomness.
@@ -340,8 +511,9 @@ The `TestU1SummaryContent::test_period_selected_label_is_exact` test enforces th
 - **`helpers/wfa.py`** — pure, stateless module: `get_split_date`, `split_trades`, `evaluate_wfa`.
 - **Split date source**: computed from `spy_df` actual start/end dates (not `config.start_date`) in `main.py` after the SPY fetch. Stored as a plain `str` and passed as the last element of each task tuple so Windows spawn workers receive it.
 - **Placement in pipeline**: `run_single_simulation` in `main.py` calls `evaluate_wfa` after Monte Carlo, before `return result`. Adds `oos_pnl_pct` and `wfa_verdict` to the result dict.
-- **"Likely Overfitted" triggers**: (1) IS P&L > 0 and OOS P&L < 0 (sign flip); (2) OOS annualised return degraded > 75% vs IS annualised return. Both require `_MIN_OOS_TRADES = 5` minimum OOS trades; fewer → "N/A".
+- **"Likely Overfitted" triggers**: (1) IS P&L > 0 and OOS P&L < 0 (sign flip); (2) OOS annualised return degraded > 75% vs IS annualised return. Both require `_MIN_OOS_TRADES = 5` minimum trades on **both** the OOS and IS side; fewer on either (including an empty IS) → "N/A" (a verdict needs an in-sample history to compare against).
 - **Annualised return now uses CAGR formula (compound), not simple division**: `(1 + total_pnl_frac) ** (1/years) - 1`. Guard: if `(1 + total_pnl_frac) <= 0` (bust), returns `None`.
+- **Equal-basis measurement (#427)**: `evaluate_wfa(is_trades, oos_trades, initial_capital, equity_curve=None, is_window=None, oos_window=None)`. Each bucket's return is the return on the equity the account held at the window start, not on `initial_capital` (position sizes compound, so dividing both by starting capital inflated OOS). With `equity_curve` (`result['portfolio_timeline']`) + window: `E(end)/E(start) - 1`, boundaries are the closes of the bar before each date (a start before the curve begins uses `initial_capital`). Without a curve (PDF analyzer from CSV): `sum(Profit) / realised equity at window start` (`initial_capital` for IS, `initial_capital + sum(IS Profit)` for OOS). With windows, annualisation uses the window length `(end - start).days / 365.25`; without (legacy 3-arg call) it falls back to the first-to-last ExitDate span. `oos_pnl_pct` is the OOS window equity return. `main.py` passes `(spy_actual_start, wfa_split_date)` / `(wfa_split_date, spy_actual_end)`.
 - **Summary columns**: `OOS P&L (%)` (formatted `{:+.2%}`) and `WFA Verdict` appear in all 4 summary functions in `helpers/summary.py`, placed before `MC Verdict`.
 - **Tests**: `tests/test_wfa.py` — 39 tests, 5 test classes. No I/O, no network. All deterministic.
 
@@ -453,10 +625,11 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
   | `sensitivity_sweep_min_val` | `2` | Floor prevents e.g. SMA period = 0 |
 
 - **Strategy naming convention**: when enabled, each variant is named `StrategyName [(base)]` for the base params and `StrategyName [fast=16]` for changed keys. Only changed keys appear in the label.
+- **Grouping (#435)**: `generate_sensitivity_report` computes one verdict per `(Portfolio, base_strategy, stop_label)` and prints portfolio and stop label in each group header, so variants are never pooled across portfolios or stop configs. Row labels and the base marker come from the result's structured `param_label` (`"(base)"` or `label_for_params` output), not from parsing `Strategy`; results lacking the `base_strategy`/`param_label` keys fall back to string parsing. Zero-trade/errored stubs stay in the denominator as not profitable.
 - **Fragility threshold**: `< 30%` of variants profitable → `*** FRAGILE ***` printed in the sensitivity report. ≥ 30% → `Robust`.
 - **Performance note**: 2 params × `steps=2` produces 25 grid points (5² cartesian). Keep disabled for normal runs; enable only for targeted fragility checks.
 - **No-regression guarantee**: when `sensitivity_sweep_enabled: False` (default), `param_variants = [base_params]` — identical to pre-sweep behaviour. The existing task-building loop runs exactly as before.
-- **Tests**: `tests/test_sensitivity.py` — covers `build_param_grid` (12 tests), `label_for_params`, and the no-regression default path.
+- **Tests**: `tests/test_sensitivity.py` — covers `build_param_grid` (12 tests), `label_for_params`, the no-regression default path, and report grouping.
 
 ## Rolling Sharpe (126-Day)
 
@@ -484,14 +657,15 @@ A short, wide banner figure (`figsize=(10, 3), dpi=150`) that shows the full dra
 | `1` | Enter long |
 | `0` | No change |
 | `-1` | Exit long **or** cover short |
-| `-2` | Enter short |
+| `-2` | Enter short (on a bar already short: hold — `-2` never covers). Also exits a long. `1` does NOT cover a short, so a short→long flip needs a `-1` bar first |
 
 - **Borrow cost**: `htb_rate_annual` (config, default `0.02`) converted to a daily compound rate `(1 + annual)^(1/252) - 1` and debited from cash each day a short is held. Set to `0.0` to disable.
-- **Three new blocks in the daily loop** (all additive — no long-path code changed):
+- **Short collateral / buying power (#430)**: each open equity short reserves `notional * short_margin_requirement` (default `0.5`) in `reserved_short_collateral`, stored as `spos['collateral']` and released on every cover path (strategy/stop/PIT cover loop and `_close_short_now`, which covers the intrabar-trailing and fill-bar stop paths). Any new equity entry, long or short, sees only `cash - reserved_short_collateral`; the configured sizing method and `size_mults` choose desired units, then the positive-requirement clamp uses `buying_power / (entry_price * requirement + commission_per_unit)`. At 0.5 the short book is capped near 2x gross. It is a constraint, not a cash debit: `total_equity` stays `cash + MTM`. Futures shorts keep using `reserved_margin`. `0.0` restores the legacy unbounded behaviour. Tests: `tests/test_short_collateral.py`.
+- **Short handling in the daily loop:**
   1. **Borrow cost debit**: iterates `short_positions`, subtracts `notional × htb_rate_daily` from cash and accumulates `spos['total_borrow_cost']`.
-  2. **Short cover**: on signal `< 0` for a held short, fills at Open/Close + slippage, deducts commission both sides, nets `total_borrow_cost` out of profit, logs to `trade_log`.
-  3. **Short entry**: on signal `== -2`, skips if `symbol in positions or symbol in short_positions`, allocates `min(total_equity × allocation_pct, cash)`, receives proceeds into cash.
-- **Short trades in `trade_log`**: `Trade: "Short N"`, `ExitReason: "Short Cover"`. `RMultiple` is `None` for shorts (initial risk undefined without a stop).
+  2. **Short cover**: on a negative signal other than `-2` for a held short, fills at Open/Close + slippage, deducts commission both sides, nets `total_borrow_cost` out of profit, logs to `trade_log`.
+  3. **Short entry**: on signal `== -2`, skips if `symbol in positions or symbol in short_positions`, sizes via `calculate_position_size` with the configured `position_sizing_method` and `size_mults` exactly as the long leg does (#386; subject to cash or margin limits), charges entry commission; short proceeds and the liability offset each other in cash accounting.
+- **Short trades in `trade_log`**: `Trade: "Short N"`, `ExitReason: "Short Cover"`. `RMultiple` uses the initial stop risk when available and is `None` otherwise.
 - **Equity MTM for shorts**: `current_market_value += (shares × entry_price) − (shares × current_close)` — profit when price falls.
 - **Backward compatibility**: all existing 1/0/−1 strategies skip all three new blocks entirely (`short_positions` is always empty for them).
 - **Tests**: `tests/test_short_selling.py` — 7 tests covering config defaults, daily-rate arithmetic, 30-day cost estimate, and no-regression empty-shorts loop.
@@ -544,16 +718,18 @@ Interactive four-step wizard for first-time setup. Writes `config_starter.py` to
 
 ## MC Block-Bootstrap
 
-Controlled by two config keys (SECTION 18):
+Controlled by config keys in SECTION 18:
 
 | Key | Default | Description |
 | --- | --- | --- |
+| `random_seed` | `None` | `None` = unseeded (legacy). An int makes MC scores, the `mc_edge_pvalue` bootstrap and noise injection reproducible (see "Reproducible randomness" below) |
 | `mc_sampling` | `"iid"` | `"iid"` = independent resampling (original behaviour); `"block"` = block-bootstrap; `"auto"` = block for a `concentrated_futures` smoothness profile, else iid |
 | `mc_block_size` | `None` | Trades per block. `None` = auto: `floor(sqrt(N))` (Politis-Romano rule of thumb) |
 
 - **`"iid"` (default)**: trades are resampled independently, each with equal probability. Fast and statistically clean for strategies with no autocorrelation.
 - **`"block"`**: consecutive blocks of `block_size` trades are sampled as a unit, preserving win/loss streaks and regime clustering. Use when the strategy shows known regime dependency (e.g., consistently loses only during bear markets / high-VIX periods identified by the Regime Heatmap).
 - **`"auto"` (issue #243)**: resolved per strategy in `main.py::run_single_simulation` via `helpers.smoothness_profiles.resolve_mc_sampling` — a `concentrated_futures` profile (single-instrument regime-dependent strategy, e.g. Sleeve A) gets `"block"`, everything else `"iid"`. This calibrates the MC **"DD-Understated"** verdict, which i.i.d. resampling structurally trips for that strategy class. Applied via a **scoped `CONFIG["mc_sampling"]` override** (restored in a `finally`) around the MC call — `helpers/monte_carlo.py` is Do-Not-Touch, so the effective method is chosen at the caller. The effective value is stored on the result as `mc_sampling_effective` and feeds `mc_sampling_caveat` (so the "consider block" note stays silent once block is actually used). Default stays `"iid"` → opt-in, no change to existing runs.
+- **Reproducible randomness (#439)**: with `random_seed` set, `run_single_simulation` seeds the process-global `np.random` right before `run_monte_carlo_simulation` (Do-Not-Touch module) with `helpers.rng.derive_seed(seed, portfolio, strat_name, "mc")` (crc32 over JSON-encoded label components, so embedded separators cannot merge components) and restores the prior global state afterwards; the `analyze_mc_results_v2` bootstrap gets `np.random.default_rng(derive_seed(seed, portfolio, strat_name, "boot"))`; `inject_price_noise(df, pct, rng=)` gets `default_rng(derive_seed(seed, "noise", symbol))`. Seeds depend only on labels, never on worker/fork state, so results are identical across runs and `max_workers`. `None` = legacy unseeded behaviour (forked workers may share RNG state). Recommended for reproducible runs: `42` / `--seed 42`.
 - **Auto block size**: `max(1, int(N ** 0.5))`. For 100 trades → blocks of 10; for 400 trades → blocks of 20.
 - **Circular wrap**: blocks that extend past the end of the trade list wrap around — no trades are omitted and edge blocks are not under-represented.
 - **No caller changes**: `run_monte_carlo_simulation` signature is unchanged. The refactor extracted a `_equity_and_drawdown` helper used by both branches.
@@ -625,13 +801,15 @@ Controlled by two config keys in SECTION 11 (opt-in — keep disabled for normal
 | Key | Default | Description |
 | --- | --- | --- |
 | `wfa_folds` | `None` | `None` or `0` = rolling WFA disabled; `int >= 2` = number of equal-width OOS folds |
-| `wfa_min_fold_trades` | `5` | Minimum OOS trades required to score a fold |
+| `wfa_min_fold_trades` | `5` | Minimum IS **and** OOS trades required to score a fold |
 
 - **Single-split WFA is unchanged**: `wfa_split_ratio` and the `oos_pnl_pct` / `wfa_verdict` result keys continue to work exactly as before. Rolling folds is purely additive.
-- **How it works**: the full period is divided into *k* equal-width OOS windows. For fold *i*, IS = all trades with `ExitDate < oos_start`. A fold is *scorable* when its OOS trade count ≥ `wfa_min_fold_trades`. Folds with fewer OOS trades are skipped.
-- **Verdict logic**: "Pass" when ≥ 60% of scorable folds pass `evaluate_wfa()` individually. "Fail" otherwise. "N/A" when fewer than 2 folds are scorable.
-- **`helpers/wfa_rolling.py`** — `get_fold_dates(actual_start, actual_end, k)` and `evaluate_rolling_wfa(trade_log, fold_dates, initial_capital, min_fold_trades=5)`.
+- **How it works**: the full period is divided into *k* equal-width OOS windows. For fold *i*, IS = all trades with `ExitDate < oos_start`. A fold is *scorable* when **both** its IS and OOS trade counts are ≥ `wfa_min_fold_trades`. Other folds are skipped — in particular fold 0 (IS = trades before `actual_start`, always empty) is never scored, and `evaluate_wfa` itself returns "N/A" for an empty/too-small IS rather than auto-passing.
+- **Verdict logic**: "Pass" when ≥ 60% of scorable folds pass `evaluate_wfa()` individually. "Fail" otherwise. "N/A" when fewer than 2 folds are scorable. A fold returning "N/A" is excluded even when `wfa_min_fold_trades` is below the evaluator's five-trade minimum. Internal fold ends are exclusive; the final fold includes all exits and equity changes on `actual_end`, including intraday bars. Anchored folds infer the IS start from the equity curve or earliest trade when `actual_start` is omitted.
+- **`helpers/wfa_rolling.py`** — `get_fold_dates(actual_start, actual_end, k, anchored=False)` (default tiles the whole period; opt-in `anchored=True` reserves the first `1/(k+1)` as initial IS so all *k* folds have IS history — not wired to a config key) and `evaluate_rolling_wfa(trade_log, fold_dates, initial_capital, min_fold_trades=5)`.
 - **`main.py` task tuple**: `spy_actual_start` and `spy_actual_end` are the last two elements of every task tuple (appended after `wfa_split_date`). They are passed at task-creation time from the `_spy_actual_start` / `_spy_actual_end` variables computed after the SPY fetch.
+- **Strategy naming and the task tuple (#434)**: the result `Strategy` is `<name> <stop suffix>` from `main._build_strat_name`/`_stop_label`: `none` -> bare name; `percentage` -> `w/ 5% SL`; `atr` -> `w/ 3.0x ATR(14) SL`; `points` -> `w/ 10pt SL`; `signal_bar` -> `w/ SigBar(b0,buf0.0) SL`; `trailing_atr` -> `w/ TrailATR(1.0x,T0.0,tr1.0) SL` (engine defaults for absent keys; never raises). At task-creation time `_assign_unique_names` guarantees `(portfolio, name)` uniqueness by appending ` #2`, ` #3` to repeats. The final name is computed in the parent and carried as an **optional 10th tuple element**, a small dict `{strat_name, base_strategy, param_label, stop_label}` (strings only, no DataFrames); `run_single_simulation` unpacks `args[:9]` and reads `args[9]` if present, else derives the same fields (legacy 9-element tuples still work). Every result, real or stub, carries `base_strategy`, `param_label` (`(base)` unless a sensitivity-sweep variant) and `stop_label` (`""` for none) for the sensitivity report grouping.
+- **Measurement (#427)**: each fold calls `evaluate_wfa` with `equity_curve=portfolio_timeline`, IS window `(actual_start, oos_start)` and OOS window `(oos_start, oos_end)` (`evaluate_rolling_wfa(..., equity_curve=None, actual_start=None)`); without a curve it uses the realised-equity base described under Walk-Forward Analysis.
 - **Result key**: `wfa_rolling_verdict` → summary column `Rolling WFA`, placed after `WFA Verdict` in all four summary functions.
 - **Tests**: `tests/test_wfa_rolling.py` — 11 tests across 3 classes: `TestConfigDefaults`, `TestGetFoldDates`, `TestEvaluateRollingWfa`.
 
@@ -652,6 +830,21 @@ The internal `Trade` counter column is always dropped.
 **`helpers/ml_export.py`** — `export_trade_features(all_results, output_path) -> int`. Returns the number of rows written (0 if no trades found).
 
 **Tests**: `tests/test_ml_export.py` — 8 tests: empty results (returns 0), row count, `is_win` presence, Strategy/Portfolio injection, readable Parquet, `Trade` column dropped, CSV fallback on ImportError, config default False.
+
+## Delisting Liquidation (include_delisted)
+
+With `include_delisted: True`, `run_portfolio_simulation` liquidates a held long **or short** in a delisted symbol **inside the daily loop** (`_liquidate_delisted` -> `_close_delisted`). On the first loop date on/after delisting, an already available price is settled before entries. Under open execution, a price taken from that same bar's Close is settled after open entries and before the end-of-bar equity snapshot; it cannot fund an earlier open. Exit price: `delisting_price_assumption` `"zero"` -> 0.0, `"last_close"` -> last non-NaN Close on/before the delisting date. Cash is credited (futures: P&L realised, margin released; shorts: covered at the assumption price, `reserved_short_collateral` released), so later sizing uses real equity and the slot/cash is redeployable (#431, subsumes #149). Trades log `ExitReason: "Delisting"`, `ExitDate` = the delisting date, and the actual `PosSizeMult`. The old post-loop equity-curve patch (`_delisting_corrections`) is gone; a post-loop safety net remains only for a position whose delisting date falls after the last loop date. A short in a delisted symbol under `"zero"` books the full short gain. `survivorship_stats` keys/semantics are unchanged. Tests: `tests/test_survivorship.py::TestDelistingInLoop431`.
+
+## Results Accounting (Zero-Trade and Errored Runs)
+
+Every strategy x stop x portfolio task yields a result; none silently vanish (#432).
+
+- `run_portfolio_simulation` still returns `None` for zero trades; `main.py::run_single_simulation` converts that into a **stub** via `helpers/result_status.make_stub_result`. A worker exception also returns a stub (`status: "error"`, `error: "<ExceptionType>: <message>"`) after the traceback is printed. The `Pool` / `init_worker` / task-tuple shape is unchanged.
+- Stubs carry the keys real results carry (`Strategy`, `Portfolio`, `Trades: 0`, `pnl_percent: 0.0`, empty `trade_log` / `trade_pnl_list`, neutral metrics, `mc_verdict` "N/A (no trades)" / "N/A (error)", `mc_score: -999`, `wfa_*: "N/A"`, `vs_<bench>_benchmark`) plus `status` = `"no_trades"` or `"error"`. Use `is_stub` / `split_results` to tell them apart.
+- Stubs are never ranked, never written to `overall_portfolio_summary.csv`, analyzer CSVs or trade CSVs, and are excluded from correlation, regime heatmaps, verdict blocks, `llm_verdict.json` and ML export.
+- `generate_per_portfolio_summary` ends with `Not shown: N with 0 trades, M errored`, listing the strategy names (errors with their message).
+- `generate_sensitivity_report` receives stubs and counts them as **not profitable**, so "profitable in X% of variants" includes zero-trade and crashed variants (labelled `[0 trades]` / `[ERROR]`).
+- Tests: `tests/test_main_results_accounting.py`.
 
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes
@@ -674,6 +867,8 @@ Fixed in two parts:
 **Which helper to use:** `get_bars_per_day_exact(config) -> float` for any *scaling factor*; `get_bars_per_day(config) -> int` (which now delegates to it) only where a genuine bar *count* is needed. Both honour `timeframe_multiplier`, unlike `get_bars_for_period()` — whose H-timeframe multiplier bug is separate and tracked in #267.
 
 **Direction of the old error:** understated ADV made the cap bind *earlier* and impact charge *more*, so affected runs looked worse than reality, never better.
+
+**ADV timing (#436):** under `execution_time="open"` `_daily_adv` returns the ADV as of the PRIOR bar (the fill bar's full-session volume is not known at the open); under `"close"` it is same-bar. A symbol's first bar (no prior bar) falls back to the same-bar value so the cap is never silently skipped.
 
 `trading_hours_per_day <= 0` now raises on intraday timeframes instead of silently producing a zero ADV that rejected every trade.
 
@@ -718,3 +913,46 @@ In `helpers/summary.py::generate_per_portfolio_summary()`, Step 4b's `save_only_
 **Fix**: after Step 2 produces the filtered `display_df`, capture `passed_display_filter = set(display_df['Strategy'].tolist())`. Step 4b now filters via `[r for r in portfolio_results if r['Strategy'] in passed_display_filter]` — no DataFrame rebuild needed.
 
 **Regression tests**: `tests/test_save_filtered_trades.py::TestSaveOnlyFilteredTrades` — three tests confirm `save_trades_to_csv` is called exactly once (the passing strategy) when `save_only_filtered_trades=True` and one result fails `min_pandl_to_show_in_summary`, and called twice when the flag is `False`.
+
+## MC Scoring v2 (#429)
+
+`helpers/mc_scoring.py::analyze_mc_results_v2` produces `mc_score` / `mc_verdict` (range -4..5, "Robust" = no flags). The legacy `analyze_mc_results` (helpers/monte_carlo.py, unchanged) still runs and is kept in `mc_score_legacy` / `mc_verdict_legacy` for one release.
+
+| Test | Pass | Fail | Flag |
+| --- | --- | --- | --- |
+| Edge: one-sided bootstrap p-value of mean trade P&L (resampling demeaned P&L) | p < 0.05: +2 | -1 | `No Significant Edge` |
+| DD realism: closed-trade historical DD >= MC median DD (both closed-trade, chronological ExitDate order) | +1 | -1 | `DD Understated` |
+| Tail risk (unchanged): MC 95th pct DD | <50%: +2 | <80%: -1; else -2 | `Moderate/High Tail Risk` |
+
+- The legacy "historical >= 5th percentile" test was near-tautological (passed ~100% of zero-edge strategies); the legacy DD test compared daily-MTM drawdown to a closed-trade distribution.
+- `main.py` sorts trades by `ExitDate` before MC and scoring (end-of-backtest/delisting closes are appended after the loop). Extra result keys: `mc_edge_pvalue`, `mc_closed_trade_dd`.
+- Functions accept an optional numpy `rng` (Generator) for deterministic seeding.
+- The edge bootstrap receives the effective MC sampling method and `mc_block_size`; block mode resamples circular blocks for the edge test too. IID sampling of serially dependent trades can otherwise report a false significant edge even when the risk simulation uses blocks. Block sums use bounded-memory prefix sums.
+- Tests: `tests/test_mc_scoring.py`.
+
+## Short-Lived Names & Warm-Up (#433)
+
+- **Warm-up**: portfolio symbols and strategy dependency tickers are fetched from `start_date - pit_warmup_days` (default 400, `0` disables) for **every** portfolio type. Features (`RSI_14`, `SMA200_dist_pct`, ...) and strategy signals are computed on the full frame. `run_portfolio_simulation(..., start_date=...)` limits execution and the equity timeline to `>= start_date`, while retaining earlier bars for the first open's signal, structural stop anchors, and prior-bar ADV. Dependency indicators such as SPY SMA200 also receive pre-start history. Benchmarks, `Actual Data Period` and WFA dates use comparison frames restricted to the selected window. The data cache is keyed by requested start, so warm-up fetches use a different cache key than pre-#433 entries.
+- **Bar filter**: `min_bars_required` counts bars inside the window only. Plain list/JSON/Norgate universes drop short symbols as before. `pit:`/`rule:` universes and `include_delisted=True` **keep** them (indicator-less bars yield no signals) and log an INFO count.
+- **`output/runs/<run_id>/skipped_symbols.csv`**: columns `portfolio, symbol, bars, reason, action`; `reason` is `ended_before_end_date` (likely delisted), `started_after_start_date` (late listing), both joined by `;`, or `fewer_than_min_bars`; `action` is `skipped` or `kept`.
+- Tests: `tests/test_short_lived_names.py`.
+
+### RC audit follow-ups (#460)
+
+- Delisting dates are aligned to each provider's index timezone. Both entry paths reject symbols on/after delisting. Delistings after the requested `end_date` do not affect historical results, and the post-loop safety net includes exit commission in its final equity correction.
+- Fill-bar stops use intraday refinement when available, including gaps between sub-bars. Short collateral sizing budgets entry commission alongside collateral.
+- Percentage stop labels retain fractional precision; ATR/trailing labels include point caps and trailing floors so sensitivity groups distinguish those configurations.
+- Cross-feature regressions: `tests/test_audit_460.py`.
+- `init_worker` accepts an optional runtime-config snapshot after intrabar data. The parent sends `dict(CONFIG)` once per worker; the initializer updates the shared dict in place so spawned workers and helper modules honor CLI overrides (including `--seed`, MC thresholds, execution settings and dates). Legacy calls without the snapshot still work; task tuples and the pool/global-DataFrame architecture are unchanged.
+
+### Kelly execution timing (#466)
+
+Opening Kelly entries use a completed-trade prefix captured before the fill bar's delistings, exits, and fill-bar stops. Same-open exits are conservatively excluded. Closing entries retain all outcomes already booked in the bar. Applies to equity/futures and both directions. Tests: `tests/test_kelly_execution_timing.py`.
+
+### Futures short liquidity (#468)
+
+Futures short entries apply the same contract ADV cap and prior-bar volume timing as futures longs. Market impact lowers the short-sale fill, contributes to round-trip `VolumeImpact_bps`, and increases risk to a raw-price-anchored stop. A final heat check precedes margin/cash mutation, and subsequent entries see the impacted stop exposure. Tests: `tests/test_futures_short_liquidity.py`.
+
+### Position sizing diagnostics (#387/#394)
+
+Each simulation accumulates actual sizing conditions and logs one report; successful results also include `sizing_diagnostics`. Counts describe conditions, so one entry attempt may contribute multiple reasons. Risk methods record their own missing-stop, ATR-proxy and cap outcomes. All entry legs record cash/margin, ADV and heat outcomes, including final-fill heat checks. Zero-trade runs log before returning `None`. Tests: `tests/test_sizing_diagnostics.py` and `tests/test_sizing_diagnostics_all_paths.py`.

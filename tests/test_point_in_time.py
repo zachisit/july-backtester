@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from helpers.point_in_time import (
+    normalise_pit_ticker,
     resolve_pit_portfolio,
     tickers_as_of,
     tickers_union_for_period,
@@ -289,3 +290,21 @@ changes:
     assert "AMZN" in pit_members_on(schedule, "2021-07-01")
     assert "TSLA" in pit_members_on(schedule, "2022-04-01")
     assert "TSLA" not in pit_members_on(schedule, "2022-02-01")
+
+
+def test_normalise_pit_ticker_107_rename_aliases():
+    # Added from the #107 roster look-ahead audit: without these aliases the
+    # roster ticker resolves to no price series and is silently dropped.
+    assert normalise_pit_ticker("SIVB") == "SIVBQ"   # SVB Financial (collapse "Q")
+    assert normalise_pit_ticker("CTRP") == "TCOM"    # Ctrip -> Trip.com (2019)
+    assert normalise_pit_ticker("RIMM") == "BB"      # Research In Motion -> BlackBerry (2013)
+
+
+def test_normalise_pit_ticker_passthrough_and_existing():
+    # Unmapped tickers pass through (upper-cased, dot->dash); existing aliases hold.
+    assert normalise_pit_ticker("aapl") == "AAPL"
+    assert normalise_pit_ticker("BRK.B") == "BRK-B"
+    assert normalise_pit_ticker("UTX") == "RTX"
+    # GOOG/GOOGL must NOT collapse (documented invariant).
+    assert normalise_pit_ticker("GOOG") == "GOOG"
+    assert normalise_pit_ticker("GOOGL") == "GOOGL"

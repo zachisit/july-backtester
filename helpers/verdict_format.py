@@ -89,7 +89,9 @@ def format_strategy_verdict_lines(result: Mapping,
     mc_s = result.get("mc_score")
     if mc_v is not None:
         score_part = f" (score: {mc_s})" if mc_s is not None else ""
-        lines.append(f"{indent}MC:         {mc_v}{score_part}")
+        pv = result.get("mc_edge_pvalue")
+        pv_part = f" [edge p={pv:.3f}]" if isinstance(pv, (int, float)) else ""
+        lines.append(f"{indent}MC:         {mc_v}{score_part}{pv_part}")
     mc_note = result.get("mc_sampling_note")
     if mc_note:
         lines.append(f"{indent}  note: {mc_note}")

@@ -14,7 +14,8 @@ Public API
 ----------
 get_split_date(actual_start, actual_end, ratio, df=None, config=None) -> str
 split_trades(trade_log, split_date)                   -> (is_trades, oos_trades)
-evaluate_wfa(is_trades, oos_trades, initial_capital)  -> dict
+evaluate_wfa(is_trades, oos_trades, initial_capital,
+             equity_curve=None, is_window=None, oos_window=None) -> dict
 """
 
 from __future__ import annotations
@@ -143,35 +144,96 @@ def split_trades(
 # Internal metric helpers
 # ---------------------------------------------------------------------------
 
-def _total_pnl_pct(trades: list[dict], initial_capital: float) -> Optional[float]:
-    """Sum of Profit / initial_capital (fractional, not percent)."""
-    if not trades:
+_EPS = pd.Timedelta(microseconds=1)
+
+
+def _naive_ts(value) -> pd.Timestamp:
+    ts = pd.Timestamp(value)
+    return ts.tz_localize(None) if ts.tzinfo is not None else ts
+
+
+def _naive_curve(equity_curve: pd.Series) -> pd.Series:
+    curve = equity_curve.dropna().sort_index()
+    if getattr(curve.index, "tz", None) is not None:
+        curve = curve.copy()
+        curve.index = curve.index.tz_localize(None)
+    return curve
+
+
+def _curve_value_before(curve: pd.Series, ts: pd.Timestamp) -> Optional[float]:
+    """Equity at the close of the last bar strictly before *ts* (None if none)."""
+    if curve.empty:
         return None
-    return sum(t["Profit"] for t in trades) / initial_capital
+    val = curve.asof(ts - _EPS)
+    return None if pd.isna(val) else float(val)
 
 
-def _annualised_return(trades: list[dict], initial_capital: float) -> Optional[float]:
-    """Compound annualised return (CAGR) over the calendar span of the trade bucket.
+def _window_years(window) -> Optional[float]:
+    days = (_naive_ts(window[1]) - _naive_ts(window[0])).days
+    return days / 365.25 if days >= 1 else None
 
-    Uses the earliest and latest ``ExitDate`` in the bucket as the window
-    boundaries.  Returns ``None`` when fewer than 2 distinct days exist or
-    when the strategy went bust (total equity <= 0).
 
-    Handles both date-only strings (``"2024-01-15"``) and datetime strings
-    (``"2024-01-15T10:30:00"``) by converting to pd.Timestamp.
+def _total_pnl_pct(
+    trades:          list[dict],
+    initial_capital: float,
+    base:            Optional[float] = None,
+    equity_curve:    Optional[pd.Series] = None,
+    window:          Optional[tuple] = None,
+) -> Optional[float]:
+    """Fractional return of one WFA bucket.
+
+    * ``equity_curve`` + ``window`` given: ``E(window_end) / E(window_start) - 1``
+      (boundaries are the closes of the bar before each date; the final window
+      ending at/after the last curve bar uses the last value; a start before the
+      curve begins uses *initial_capital*).
+    * otherwise: ``sum(Profit) / base`` where *base* defaults to
+      *initial_capital*; callers pass the realised equity at window start.
     """
     if not trades:
         return None
-    # Convert ExitDate strings to pd.Timestamp for datetime handling
-    exit_timestamps = sorted(pd.Timestamp(t["ExitDate"]) for t in trades)
-    start_ts = exit_timestamps[0]
-    end_ts = exit_timestamps[-1]
-    days = (end_ts - start_ts).days
-    if days < 1:
+    if equity_curve is not None and window is not None:
+        curve = _naive_curve(equity_curve)
+        if not curve.empty:
+            start_ts, end_ts = _naive_ts(window[0]), _naive_ts(window[1])
+            e0 = _curve_value_before(curve, start_ts)
+            if e0 is None:
+                e0 = initial_capital
+            e1 = (float(curve.iloc[-1]) if end_ts >= curve.index[-1]
+                  else _curve_value_before(curve, end_ts))
+            if e1 is not None and e0 > 0:
+                return e1 / e0 - 1
+    denom = initial_capital if base is None else base
+    if denom <= 0:
         return None
-    years          = days / 365.25
-    total_pnl_frac = sum(t["Profit"] for t in trades) / initial_capital
-    if (1 + total_pnl_frac) <= 0:
+    return sum(t["Profit"] for t in trades) / denom
+
+
+def _annualised_return(
+    trades:          list[dict],
+    initial_capital: float,
+    base:            Optional[float] = None,
+    equity_curve:    Optional[pd.Series] = None,
+    window:          Optional[tuple] = None,
+) -> Optional[float]:
+    """Compound annualised return (CAGR) of one WFA bucket.
+
+    The return comes from :func:`_total_pnl_pct`.  With a *window* the years are
+    the window length; without one (legacy callers) they are the calendar span
+    between the first and last ``ExitDate`` in the bucket.  Returns ``None``
+    when the period is under 1 day or the strategy went bust (CAGR undefined).
+    """
+    if not trades:
+        return None
+    if window is not None:
+        years = _window_years(window)
+    else:
+        ts = sorted(pd.Timestamp(t["ExitDate"]) for t in trades)
+        days = (ts[-1] - ts[0]).days
+        years = days / 365.25 if days >= 1 else None
+    if years is None:
+        return None
+    total_pnl_frac = _total_pnl_pct(trades, initial_capital, base, equity_curve, window)
+    if total_pnl_frac is None or (1 + total_pnl_frac) <= 0:
         return None  # strategy went bust — CAGR undefined
     return (1 + total_pnl_frac) ** (1 / years) - 1
 
@@ -184,39 +246,54 @@ def evaluate_wfa(
     is_trades:       list[dict],
     oos_trades:      list[dict],
     initial_capital: float,
+    equity_curve:    Optional[pd.Series] = None,
+    is_window:       Optional[tuple] = None,
+    oos_window:      Optional[tuple] = None,
 ) -> dict:
     """Evaluate IS vs OOS performance and return a WFA metrics dict.
+
+    Both buckets are measured on the same basis -- return on the equity the
+    account actually held at the start of each window -- so compounding growth
+    does not inflate OOS relative to IS:
+
+    * With ``equity_curve`` (the ``portfolio_timeline`` Series) and a window,
+      return = ``E(end) / E(start) - 1``.
+    * Without a curve (e.g. the PDF analyzer working from a CSV), each bucket's
+      profit is divided by the realised equity at its start:
+      ``initial_capital + sum(Profit of the IS trades)`` for OOS, and
+      ``initial_capital`` for IS.
+    * With ``is_window`` / ``oos_window`` (``(start, end)`` date-likes) the
+      annualisation period is the window length; without, it falls back to the
+      calendar span of the bucket's exit dates (legacy behaviour).
 
     Flagging rules
     --------------
     "Likely Overfitted" is returned when *either* condition is met:
 
-    1. **Sign flip**: IS total P&L is positive but OOS total P&L is negative.
+    1. **Sign flip**: IS return is positive but OOS return is negative.
     2. **Severe degradation**: OOS annualised return degrades by more than 75 %
        relative to IS annualised return (only checked when IS annualised > 0).
 
-    "N/A" is returned when OOS has fewer than ``_MIN_OOS_TRADES`` trades
-    (insufficient data to judge).
-
-    Parameters
-    ----------
-    is_trades        : list of trade dicts in the In-Sample window
-    oos_trades       : list of trade dicts in the Out-of-Sample window
-    initial_capital  : float  starting equity of the simulation
+    "N/A" is returned when either side has fewer than ``_MIN_OOS_TRADES``
+    trades: a verdict needs a real in-sample history to compare against (an
+    empty IS would otherwise skip both rules and auto-pass).
 
     Returns
     -------
     dict with keys:
-        ``oos_pnl_pct``  : float | None  (fractional, e.g. 0.05 = 5 %)
+        ``oos_pnl_pct``  : float | None  OOS window equity return (0.05 = 5 %)
         ``wfa_verdict``  : str           ("Pass" | "Likely Overfitted" | "N/A")
     """
-    oos_pnl_pct = _total_pnl_pct(oos_trades, initial_capital)
+    is_base  = initial_capital
+    oos_base = initial_capital + sum(t["Profit"] for t in is_trades)
 
-    # Not enough OOS trades to issue a meaningful verdict
-    if not oos_trades or len(oos_trades) < _MIN_OOS_TRADES:
+    oos_pnl_pct = _total_pnl_pct(oos_trades, initial_capital, oos_base, equity_curve, oos_window)
+
+    # Not enough OOS or IS trades to issue a meaningful verdict
+    if len(oos_trades) < _MIN_OOS_TRADES or len(is_trades) < _MIN_OOS_TRADES:
         return {"oos_pnl_pct": oos_pnl_pct, "wfa_verdict": "N/A"}
 
-    is_pnl_pct = _total_pnl_pct(is_trades, initial_capital)
+    is_pnl_pct = _total_pnl_pct(is_trades, initial_capital, is_base, equity_curve, is_window)
 
     # --- Condition 1: sign flip ---
     if is_pnl_pct is not None and oos_pnl_pct is not None:
@@ -224,8 +301,8 @@ def evaluate_wfa(
             return {"oos_pnl_pct": oos_pnl_pct, "wfa_verdict": "Likely Overfitted"}
 
     # --- Condition 2: severe annualised degradation ---
-    is_ann  = _annualised_return(is_trades,  initial_capital)
-    oos_ann = _annualised_return(oos_trades, initial_capital)
+    is_ann  = _annualised_return(is_trades,  initial_capital, is_base,  equity_curve, is_window)
+    oos_ann = _annualised_return(oos_trades, initial_capital, oos_base, equity_curve, oos_window)
     if is_ann is not None and oos_ann is not None and is_ann > 0:
         degradation = (is_ann - oos_ann) / abs(is_ann)
         if degradation > 0.75:
