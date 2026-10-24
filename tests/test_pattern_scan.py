@@ -347,3 +347,16 @@ def test_chart_failure_releases_the_figure(monkeypatch, frozen):
     with pytest.raises(RuntimeError, match="render failed"):
         scan.render_chart(candidate)
     assert set(plt.get_fignums()) == before
+
+
+def test_explicit_common_share_description_overrides_ambiguous_suffix(monkeypatch):
+    nasdaq = ("Symbol|Security Name|ETF|Test Issue\n"
+              "GOOGL|Alphabet Inc. - Class A Common Stock|N|N\n"
+              "GOOG|Alphabet Inc. - Class C Capital Stock|N|N\n"
+              "ABCDE|Example - Ordinary Shares|N|N\n"
+              "BRKRP|Bruker - Preferred Stock|N|N\n"
+              "UNITW|Example - Warrants to acquire Common Stock|N|N\n")
+    other = "ACT Symbol|Security Name|ETF|Test Issue\nIBM|IBM Common Stock|N|N\n"
+    monkeypatch.setattr(universe.urllib.request, "urlopen", lambda url, **k: io.BytesIO(
+        (nasdaq if url == universe.NASDAQ_URL else other).encode()))
+    assert universe.fetch_listings() == ["ABCDE", "GOOG", "GOOGL", "IBM"]

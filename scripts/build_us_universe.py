@@ -51,9 +51,12 @@ def fetch_listings():
             if re.search(r"\b((?:preferred|preference)\s+(?:stock|shares|securities)|warrants?|rights?|units?|notes?|bonds?|debentures?)\b",
                          description, re.IGNORECASE):
                 continue
-            # Nasdaq issue-type suffixes; other exchanges have distinct
-            # conventions. Source: Nasdaq's fifth-character specification.
-            if url == NASDAQ_URL and len(s) == 5 and s[-1] in "CGHILMNOPRTUVWXZ":
+            # Explicit common-share descriptions take precedence over legacy
+            # suffix guidance: GOOGL is a five-letter common-stock root.
+            common = re.search(r"\b(common|capital|ordinary)\s+(stock|shares?)\b",
+                               description, re.IGNORECASE)
+            if (url == NASDAQ_URL and len(s) == 5
+                    and s[-1] in "CGHILMNOPRTUVWXZ" and not common):
                 continue
             symbols.add(s.replace("-", "."))
     return sorted(symbols)
