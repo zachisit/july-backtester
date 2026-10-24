@@ -1,15 +1,8 @@
-"""Morning chart-pattern scanner — ascending-triangle continuation MVP (issue #348).
+"""Standalone scanner for triangle, rectangle, and inverse-H&S geometry.
 
-Scans a ticker universe for flat-ceiling / rising-lows geometry in an uptrend
-(ascending triangle acting as a continuation), ranks candidates by mechanical
-quality, and writes a self-contained HTML contact sheet with annotated
-candlestick charts (ceiling, rising-lows trendline, trigger, measured target).
-
-Standalone diagnostic tool — no engine/pipeline imports, no config.py coupling.
-
-Usage:
-    python scripts/pattern_scan.py --universe nasdaq_100.json --source yahoo
-    python scripts/pattern_scan.py --universe nasdaq_100.json --source parquet
+Produces an HTML contact sheet and optional JSON with parameter and boundary
+provenance. Historical replay selects bars before applying the lookback.
+See docs/PATTERN_SCANNER.md for controls and the frozen review tape.
 """
 
 import argparse
@@ -17,6 +10,10 @@ import base64
 import io
 import json
 import logging
+import math
+import re
+from html import escape
+from pathlib import Path
 import os
 import sys
 from datetime import datetime
@@ -34,19 +31,8 @@ log = logging.getLogger("pattern_scan")
 # Data loading
 # ---------------------------------------------------------------------------
 
-# Overridable so a GOLDEN SET can be captured from the pinned corpus and then
-# replayed from committed fixture bars -- which is what makes the set frozen
-# AND portable at the same time.
-#
-# `yahoo` cannot serve that purpose, for reasons that are not about data
-# quality: `period="3y"` (:889) anchors the window to TODAY, and
-# `auto_adjust=True` (:129) restates every historical bar on each ex-date. A
-# golden set wants FROZEN; "current" is the opposite property, and a suite
-# that goes red on its own schedule trains people to ignore it.
-#
-# `parquet` is frozen by construction (submodule SHA + .tail(800)); its only
-# defect is access. Committing the bars removes that, and also survives the
-# submodule advancing, which the pin alone does not. @shardul0701 on #349.
+# A standalone corpus override. Tests freeze the bars independently of provider
+# refreshes and adjustments; --as-of is applied before selecting the lookback.
 PARQUET_DIR = os.environ.get(
     "PATTERN_SCAN_PARQUET_DIR",
     os.path.join(PROJECT_ROOT, "parquet_data", "data"),
@@ -70,7 +56,7 @@ def _finviz_universe(spec):
         if not val:
             env_path = os.path.join(PROJECT_ROOT, ".env")
             if os.path.exists(env_path):
-                for line in open(env_path):
+                for line in open(env_path, encoding="utf-8"):
                     if line.strip().startswith(key + "="):
                         val = line.strip().split("=", 1)[1].strip().strip("\"'")
         return val
@@ -97,7 +83,12 @@ def _finviz_universe(spec):
     if cookie and not token:
         headers["Cookie"] = f".ASPXAUTH={cookie}"
     req = urllib.request.Request(url, headers=headers)
-    txt = urllib.request.urlopen(req, timeout=60).read().decode("utf-8", "replace")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as response:
+            txt = response.read().decode("utf-8", "replace")
+    except Exception:
+        # HTTP exceptions may retain an authenticated request URL.
+        raise SystemExit("Finviz export failed; check credentials and connectivity.") from None
     if txt.lstrip().startswith("<"):
         raise SystemExit("finviz export returned HTML, not CSV — auth token invalid/expired?")
     rows = list(csv.DictReader(io.StringIO(txt)))
@@ -119,58 +110,87 @@ def load_universe(universe_arg):
         return _finviz_universe(universe_arg)
     candidate = os.path.join(PROJECT_ROOT, "tickers_to_scan", universe_arg)
     if os.path.exists(candidate):
-        with open(candidate) as f:
+        with open(candidate, encoding="utf-8") as f:
             return json.load(f)
     if os.path.exists(universe_arg):
-        with open(universe_arg) as f:
+        with open(universe_arg, encoding="utf-8") as f:
             return json.load(f)
     return [t.strip().upper() for t in universe_arg.split(",") if t.strip()]
 
 
-def fetch_yahoo(tickers, period="2y", chunk=300):
-    """Batch-download daily bars from Yahoo in chunks (universe scans run
-    thousands of tickers — one giant request is fragile). Returns
-    {symbol: OHLCV df}."""
+def _cut_frame(df, as_of=None, lookback_bars=None):
+    """Select the historical window before tailing, preserving its time zone."""
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("price frame requires a DatetimeIndex")
+    df = df.sort_index()
+    if as_of is not None:
+        end = pd.Timestamp(as_of)
+        if df.index.tz is not None:
+            end = end.tz_localize(df.index.tz) if end.tzinfo is None else end.tz_convert(df.index.tz)
+        elif end.tzinfo is not None:
+            end = end.tz_localize(None)
+        df = df.loc[df.index <= end]
+    if lookback_bars is not None:
+        df = df.tail(lookback_bars)
+    return df[["Open", "High", "Low", "Close", "Volume"]].copy()
+
+
+def fetch_yahoo(tickers, period="2y", chunk=300, *, as_of=None, errors=None):
+    """Download daily bars; historical scans request a window ending at as_of."""
     import yfinance as yf
 
     out = {}
+    tickers = list(dict.fromkeys(tickers))
+    window = {"period": period}
+    if as_of is not None:
+        end = pd.Timestamp(as_of)
+        years = int(period[:-1]) if period.endswith("y") else 3
+        window = {"start": (end - pd.DateOffset(years=years)).strftime("%Y-%m-%d"),
+                  "end": (end + pd.Timedelta(days=1)).strftime("%Y-%m-%d")}
     for i in range(0, len(tickers), chunk):
-        batch = tickers[i : i + chunk]
+        batch = tickers[i:i + chunk]
         try:
-            raw = yf.download(
-                batch,
-                period=period,
-                interval="1d",
-                group_by="ticker",
-                auto_adjust=True,
-                threads=True,
-                progress=False,
-            )
-        except Exception as e:
-            log.warning("yahoo batch %d failed: %s", i, e)
+            raw = yf.download(batch, interval="1d", group_by="ticker", auto_adjust=True,
+                              threads=True, progress=False, **window)
+        except Exception as exc:
+            log.warning("Yahoo batch %d failed", i)
+            if errors is not None:
+                errors.update({symbol: type(exc).__name__ for symbol in batch})
             continue
-        for sym in batch:
+        if not isinstance(raw.columns, pd.MultiIndex) and len(batch) != 1:
+            if errors is not None:
+                errors.update({symbol: "ambiguous download columns" for symbol in batch})
+            continue
+        for symbol in batch:
             try:
-                df = raw[sym].dropna(subset=["Close"])
-            except (KeyError, IndexError):
-                continue
-            if len(df) >= 260:
-                out[sym] = df[["Open", "High", "Low", "Close", "Volume"]].copy()
-        if len(tickers) > chunk:
-            log.info("fetched %d/%d", min(i + chunk, len(tickers)), len(tickers))
+                frame = raw[symbol] if isinstance(raw.columns, pd.MultiIndex) else raw
+                frame = _cut_frame(frame.dropna(subset=["Close"]), as_of)
+                if not frame.empty:
+                    out[symbol] = frame
+            except (KeyError, ValueError, TypeError) as exc:
+                if errors is not None:
+                    errors[symbol] = type(exc).__name__
     return out
 
 
-def fetch_parquet(tickers, lookback_bars=500):
-    """Read symbols from the local parquet corpus. Returns {symbol: OHLCV df}."""
+def fetch_parquet(tickers, lookback_bars=500, *, as_of=None, parquet_dir=None, errors=None):
+    """Read an explicit corpus; a corrupt symbol does not erase other results."""
     out = {}
-    for sym in tickers:
-        path = os.path.join(PARQUET_DIR, f"{sym}.parquet")
-        if not os.path.exists(path):
+    directory = Path(parquet_dir or PARQUET_DIR).expanduser()
+    for symbol in dict.fromkeys(tickers):
+        if not re.fullmatch(r"[A-Za-z0-9^][A-Za-z0-9.^_-]*", symbol):
+            raise ValueError(f"invalid ticker: {symbol!r}")
+        path = directory / f"{symbol}.parquet"
+        if not path.is_file():
             continue
-        df = pd.read_parquet(path)
-        if len(df) >= 260:
-            out[sym] = df.tail(lookback_bars)[["Open", "High", "Low", "Close", "Volume"]].copy()
+        try:
+            frame = _cut_frame(pd.read_parquet(path), as_of, lookback_bars)
+            if not frame.empty:
+                out[symbol] = frame
+        except Exception as exc:
+            log.warning("Could not read %s: %s", symbol, type(exc).__name__)
+            if errors is not None:
+                errors[symbol] = type(exc).__name__
     return out
 
 
@@ -218,7 +238,7 @@ def find_pivots(df, k=4, atr=None, min_prominence_atr=0.3):
 
 def find_ceiling(df, piv_hi, atr, base_max=140, base_min=15, last_touch_within=30,
                  min_touches=2, tol_pct_floor=0.012, breakout_grace=1.007,
-                 live_price=None):
+                 live_price=None, *, tol_atr_mult=0.6, return_details=False):
     """Cluster recent pivot highs into a flat resistance level.
 
     Returns (level, touch_indices) for the best cluster, or (None, None).
@@ -238,7 +258,11 @@ def find_ceiling(df, piv_hi, atr, base_max=140, base_min=15, last_touch_within=3
     best = None
     for anchor in recent:
         lvl_anchor = df["High"].iloc[anchor]
-        tol = max(tol_pct_floor * lvl_anchor, 0.6 * (atr[anchor] if not np.isnan(atr[anchor]) else 0))
+        pct_tol = tol_pct_floor * lvl_anchor
+        atr_tol = tol_atr_mult * (atr[anchor] if np.isfinite(atr[anchor]) else 0.)
+        tol = max(pct_tol, atr_tol)
+        details = {"anchor": anchor, "tolerance": float(tol),
+                   "source": "percent" if pct_tol > atr_tol else "atr" if atr_tol > pct_tol else "both"}
         touches = [i for i in recent if abs(df["High"].iloc[i] - lvl_anchor) <= tol]
         if len(touches) < min_touches:
             continue
@@ -256,14 +280,14 @@ def find_ceiling(df, piv_hi, atr, base_max=140, base_min=15, last_touch_within=3
             continue
         key = (len(touches), span)
         if best is None or key > best[0]:
-            best = (key, level, sorted(touches))
+            best = (key, level, sorted(touches), details)
     if best is None:
-        return None, None
-    return best[1], best[2]
+        return (None, None, None) if return_details else (None, None)
+    return (best[1], best[2], best[3]) if return_details else (best[1], best[2])
 
 
 def find_floor(df, piv_lo, atr, window_start, min_touches=2, tol_pct_floor=0.012,
-               hold_grace=0.95):
+               hold_grace=0.95, *, tol_atr_mult=0.6, return_details=False):
     """Cluster pivot lows inside the base into a flat support level (rectangle
     bottom). Mirror of find_ceiling. Returns (level, touch_indices) or None.
     Closes may pierce the floor by up to (1 - hold_grace) — long rectangles
@@ -276,7 +300,11 @@ def find_floor(df, piv_lo, atr, window_start, min_touches=2, tol_pct_floor=0.012
     best = None
     for anchor in cand:
         lvl_anchor = df["Low"].iloc[anchor]
-        tol = max(tol_pct_floor * lvl_anchor, 0.6 * (atr[anchor] if not np.isnan(atr[anchor]) else 0))
+        pct_tol = tol_pct_floor * lvl_anchor
+        atr_tol = tol_atr_mult * (atr[anchor] if np.isfinite(atr[anchor]) else 0.)
+        tol = max(pct_tol, atr_tol)
+        details = {"anchor": anchor, "tolerance": float(tol),
+                   "source": "percent" if pct_tol > atr_tol else "atr" if atr_tol > pct_tol else "both"}
         touches = [i for i in cand if abs(df["Low"].iloc[i] - lvl_anchor) <= tol]
         if len(touches) < min_touches:
             continue
@@ -292,10 +320,10 @@ def find_floor(df, piv_lo, atr, window_start, min_touches=2, tol_pct_floor=0.012
             continue
         key = (len(touches), max(touches) - min(touches))
         if best is None or key > best[0]:
-            best = (key, level, sorted(touches))
+            best = (key, level, sorted(touches), details)
     if best is None:
         return None
-    return best[1], best[2]
+    return (best[1], best[2], best[3]) if return_details else (best[1], best[2])
 
 
 def find_rising_support(df, piv_lo, base_start, tol_atr, min_touches=2):
@@ -346,28 +374,18 @@ def detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=None):
     `adv_dollar` may be precomputed from daily bars (weekly resample path).
     Returns a candidate dict or None.
     """
-    n = len(df)
-    if n < params["min_bars"]:
+    C = _common_gates(df, params, adv_dollar)
+    if C is None:
         return None
-    atr = compute_atr(df).values
-    close = df["Close"]
-    last_close = float(close.iloc[-1])
-    last_atr = atr[-1]
-    if np.isnan(last_atr) or last_close <= 0:
-        return None
-
-    # liquidity floor (dollar ADV)
-    if adv_dollar is None:
-        adv_dollar = float((close * df["Volume"]).tail(20).mean())
-    if adv_dollar < params["min_adv"]:
-        return None
-
-    piv_hi, piv_lo = find_pivots(df, k=params["pivot_k"], atr=atr)
-    level, touches = find_ceiling(
+    n, atr, close = C["n"], C["atr"], C["close"]
+    last_close, last_atr = C["last_close"], C["atr"][-1]
+    adv_dollar, piv_hi, piv_lo = C["adv"], C["piv_hi"], C["piv_lo"]
+    level, touches, ceiling_details = find_ceiling(
         df, piv_hi, atr,
         base_max=params["base_max"], base_min=params["base_min"],
         last_touch_within=params["last_touch_within"],
         min_touches=params["min_touches"], live_price=last_close,
+        tol_pct_floor=params["tol_pct_floor"], tol_atr_mult=params["tol_atr_mult"], return_details=True,
     )
     if level is None:
         return None
@@ -423,7 +441,8 @@ def detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=None):
     if spy_close is not None:
         spy_aligned = spy_close.reindex(df.index).ffill()
         w = min(120, n - 1)
-        if not np.isnan(spy_aligned.iloc[-w]):
+        if (np.isfinite(spy_aligned.iloc[-w]) and spy_aligned.iloc[-w] > 0
+                and np.isfinite(spy_aligned.iloc[-1]) and spy_aligned.iloc[-1] > 0):
             sym_ret = last_close / close.iloc[-w] - 1.0
             spy_ret = spy_aligned.iloc[-1] / spy_aligned.iloc[-w] - 1.0
             rs_excess = float(sym_ret - spy_ret)
@@ -434,6 +453,8 @@ def detect_ascending_triangle(sym, df, spy_close, params, adv_dollar=None):
     return {
         "symbol": sym,
         "pattern": "ascending_triangle",
+        "ceiling_tolerance": ceiling_details["tolerance"],
+        "ceiling_tolerance_source": ceiling_details["source"],
         "tf": params.get("tf", "D"),
         "score": round(score, 1),
         "level": level,
@@ -464,14 +485,19 @@ def _common_gates(df, params, adv_dollar):
     n = len(df)
     if n < params["min_bars"]:
         return None
+    prices = df[["Open", "High", "Low", "Close"]].to_numpy(dtype=float)
+    if not np.isfinite(prices).all() or (prices <= 0).any():
+        return None
+    if not np.isfinite(df["Volume"]).all() or (df["Volume"] < 0).any():
+        return None
     atr = compute_atr(df).values
     close = df["Close"]
     last_close = float(close.iloc[-1])
-    if np.isnan(atr[-1]) or last_close <= 0:
+    if not np.isfinite(atr[-1]) or atr[-1] <= 0 or not np.isfinite(last_close) or last_close <= 0:
         return None
     if adv_dollar is None:
         adv_dollar = float((close * df["Volume"]).tail(20).mean())
-    if adv_dollar < params["min_adv"]:
+    if not np.isfinite(adv_dollar) or adv_dollar < params["min_adv"]:
         return None
     piv_hi, piv_lo = find_pivots(df, k=params["pivot_k"], atr=atr)
     return {"n": n, "atr": atr, "close": close, "last_close": last_close,
@@ -483,9 +509,8 @@ def _consolidation_common(sym, df, spy_close, params, C, level, touches, base_lo
     """Proximity gate, Roy-convention levels, and scoring shared by the
     rectangle and H&S-bottom rules. Returns the candidate dict or None.
 
-    Roy conventions (reverse-engineered from published calls, all six Aug-22
-    ideas + TechCharts FCX): confirm = boundary x 1.03; target = log-scale
-    measured move, boundary x (boundary / pattern low).
+    Consolidation convention: confirm = boundary x 1.03; target = boundary x
+    (boundary / pattern low). Family scoring/convention reconciliation is #383.
     """
     n, close, last_close = C["n"], C["close"], C["last_close"]
     base_start = touches[0]
@@ -512,7 +537,8 @@ def _consolidation_common(sym, df, spy_close, params, C, level, touches, base_lo
     if spy_close is not None:
         spy_aligned = spy_close.reindex(df.index).ffill()
         w = min(120, n - 1)
-        if not np.isnan(spy_aligned.iloc[-w]):
+        if (np.isfinite(spy_aligned.iloc[-w]) and spy_aligned.iloc[-w] > 0
+                and np.isfinite(spy_aligned.iloc[-1]) and spy_aligned.iloc[-1] > 0):
             rs_excess = float(last_close / close.iloc[-w] - spy_aligned.iloc[-1] / spy_aligned.iloc[-w])
             rs_score = 15.0 * float(np.clip(rs_excess / 0.20, 0, 1))
     prox_score = 20.0 * float(np.clip(1.0 - max(dist, 0) / max_dist, 0, 1))
@@ -551,25 +577,32 @@ def detect_rectangle(sym, df, spy_close, params, adv_dollar=None):
     C = _common_gates(df, params, adv_dollar)
     if C is None:
         return None
-    level, touches = find_ceiling(
+    level, touches, ceiling_details = find_ceiling(
         df, C["piv_hi"], C["atr"],
         base_max=params["base_max_long"], base_min=params["base_min_long"],
         last_touch_within=params["last_touch_within"],
-        min_touches=params["min_touches"], breakout_grace=1.03,
+        min_touches=params["min_touches_long"], breakout_grace=1.03,
+        tol_pct_floor=params["tol_pct_floor"], tol_atr_mult=params["tol_atr_mult"], return_details=True,
         live_price=C["last_close"],
     )
     if level is None:
         return None
-    floor = find_floor(df, C["piv_lo"], C["atr"], touches[0], min_touches=2)
+    floor = find_floor(
+        df, C["piv_lo"], C["atr"], touches[0], min_touches=params["floor_min_touches"],
+        tol_pct_floor=params["tol_pct_floor"], tol_atr_mult=params["tol_atr_mult"], return_details=True)
     if floor is None:
         return None
-    floor_level, floor_touches = floor
+    floor_level, floor_touches, floor_details = floor
     if floor_level >= level or (level - floor_level) / level < 0.07:
         return None
     base_low = float(df["Low"].iloc[touches[0]:].min())
     return _consolidation_common(
         sym, df, spy_close, params, C, level, touches, base_low,
-        "rectangle", {"floor_level": floor_level, "floor_touches": floor_touches},
+        "rectangle", {"floor_level": floor_level, "floor_touches": floor_touches,
+         "ceiling_tolerance": ceiling_details["tolerance"],
+         "ceiling_tolerance_source": ceiling_details["source"],
+         "floor_tolerance": floor_details["tolerance"],
+         "floor_tolerance_source": floor_details["source"]},
     )
 
 
@@ -581,11 +614,12 @@ def detect_hs_bottom(sym, df, spy_close, params, adv_dollar=None):
     C = _common_gates(df, params, adv_dollar)
     if C is None:
         return None
-    level, touches = find_ceiling(
+    level, touches, ceiling_details = find_ceiling(
         df, C["piv_hi"], C["atr"],
         base_max=params["base_max_long"], base_min=params["base_min_long"],
         last_touch_within=params["last_touch_within"],
-        min_touches=params["min_touches"], breakout_grace=1.03,
+        min_touches=params["min_touches_long"], breakout_grace=1.03,
+        tol_pct_floor=params["tol_pct_floor"], tol_atr_mult=params["tol_atr_mult"], return_details=True,
         live_price=C["last_close"],
     )
     if level is None:
@@ -610,7 +644,9 @@ def detect_hs_bottom(sym, df, spy_close, params, adv_dollar=None):
         return None  # head must be distinctly the lowest point
     return _consolidation_common(
         sym, df, spy_close, params, C, level, touches, head_low,
-        "hs_bottom", {"head_idx": head_idx, "head_low": head_low},
+        "hs_bottom", {"head_idx": head_idx, "head_low": head_low,
+                      "ceiling_tolerance": ceiling_details["tolerance"],
+                      "ceiling_tolerance_source": ceiling_details["source"]},
     )
 
 
@@ -765,14 +801,21 @@ def render_chart(cand, show_bars=170):
 def build_html(cands, meta, out_path):
     rows = []
     for rank, c in enumerate(cands, 1):
-        img = render_chart(c)
+        symbol = escape(str(c["symbol"]))
+        try:
+            img = render_chart(c)
+            chart = f'<img src="data:image/png;base64,{img}" alt="{symbol} chart"/>'
+        except Exception as exc:
+            log.warning("Chart unavailable for %s: %s", c["symbol"], type(exc).__name__)
+            meta["chart_errors"] = meta.get("chart_errors", 0) + 1
+            chart = "<p>Chart unavailable; the detected levels are listed above.</p>"
         rs = "n/a" if c["rs_excess_pct"] is None else f"{c['rs_excess_pct']:+.1f}%"
         rows.append(f"""
 <div class="card">
   <div class="head">
     <span class="rank">#{rank}</span>
-    <span class="sym">{c['symbol']}</span>
-    <span class="pat">{PATTERN_NAMES.get(c.get('pattern', ''), '')} ({c.get('tf', 'D')}){''.join(' +' + PATTERN_NAMES.get(p, p) for p in c.get('also_patterns', []))}</span>
+    <span class="sym">{symbol}</span>
+    <span class="pat">{escape(PATTERN_NAMES.get(c.get('pattern', ''), ''))} ({escape(str(c.get('tf', 'D')))}){escape(''.join(' +' + PATTERN_NAMES.get(p, p) for p in c.get('also_patterns', [])))}</span>
     <span class="score">score {c['score']}</span>
   </div>
   <table class="stats">
@@ -783,13 +826,14 @@ def build_html(cands, meta, out_path):
         <td>Vol 10d/base</td><td>{c['vol_ratio']:.2f}×</td>
         <td>Gain into base</td><td>{c['gain_into_base_pct']:+.1f}%</td></tr>
     <tr><td>RS vs SPY (120d)</td><td>{rs}</td>
-        <td>ADV</td><td>${c['adv_dollar'] / 1e6:,.0f}M</td><td></td><td></td></tr>
+        <td>ADV</td><td>${c['adv_dollar'] / 1e6:,.0f}M</td>
+        <td>Data through / tolerance</td><td>{escape(str(c.get('data_end', 'n/a')))} / {escape(str(c.get('ceiling_tolerance_source', 'n/a')))}</td></tr>
   </table>
-  <img src="data:image/png;base64,{img}" alt="{c['symbol']} chart"/>
+  {chart}
 </div>""")
 
     html = f"""<!doctype html><html><head><meta charset="utf-8">
-<title>Pattern Scan — {meta['pattern']} — {meta['date']}</title>
+<title>Pattern Scan — {escape(str(meta['pattern']))} — {escape(str(meta['date']))}</title>
 <style>
 body {{ background:{DARK_BG}; color:{TEXT}; font-family: 'Segoe UI', system-ui, sans-serif;
        max-width: 1240px; margin: 0 auto; padding: 18px; }}
@@ -807,17 +851,17 @@ h1 {{ font-size: 20px; margin-bottom: 2px; }}
 .stats td:nth-child(odd) {{ color:#8892a8; }}
 img {{ width:100%; border-radius:4px; }}
 </style></head><body>
-<h1>Chart Pattern Scan — {meta['pattern']}</h1>
-<div class="meta">{meta['date']} · universe: {meta['universe']} ({meta['n_universe']} symbols,
-{meta['n_loaded']} with data) · source: {meta['source']} · data through {meta['data_end']} ·
+<h1>Chart Pattern Scan — {escape(str(meta['pattern']))}</h1>
+<div class="meta">{escape(str(meta['date']))} · universe: {escape(str(meta['universe']))} ({meta['n_universe']} symbols,
+{meta['n_loaded']} with data) · source: {escape(str(meta['source']))} · data through {escape(str(meta['data_end']))} ·
 {len(cands)} candidates · min ADV ${meta['min_adv'] / 1e6:.0f}M ·
-funnel: {meta['funnel']} · <a href="https://github.com/zachisit/july-backtester/issues/348"
+funnel: {escape(str(meta['funnel']))} · <a href="https://github.com/zachisit/july-backtester/issues/348"
 style="color:{SUP_COLOR}">issue #348</a></div>
 {''.join(rows) if rows else '<p>No candidates passed all gates today.</p>'}
 </body></html>"""
 
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w", encoding="utf-8") as f:
+    Path(out_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+    with open(Path(out_path).expanduser(), "w", encoding="utf-8") as f:
         f.write(html)
 
 
@@ -833,6 +877,10 @@ DEFAULT_PARAMS = {
     "base_min": 15,
     "last_touch_within": 30,
     "min_touches": 2,
+    "min_touches_long": 2,
+    "floor_min_touches": 2,
+    "tol_pct_floor": .012,
+    "tol_atr_mult": .6,
     "uptrend_lookback": 60,
     "uptrend_min_gain": 0.12,
     "max_dist_to_trigger": None,  # None = adaptive: clip(0.5*height/trigger, 3%, cap)
@@ -867,146 +915,147 @@ def resample_weekly(df):
     )
 
 
-def main():
+def _universe_label(value):
+    if value.startswith("http") and "finviz.com" in value:
+        from urllib.parse import urlparse, parse_qs
+        query = parse_qs(urlparse(value).query)
+        return "finviz:" + query.get("f", [""])[0]
+    return value
+
+
+def _validated_symbols(value):
+    if not isinstance(value, list) or not value:
+        raise ValueError("universe must contain a nonempty list of tickers")
+    symbols = []
+    for item in value:
+        if not isinstance(item, str) or not re.fullmatch(r"[A-Za-z0-9^][A-Za-z0-9.^_-]*", item.strip()):
+            raise ValueError(f"invalid ticker: {item!r}")
+        symbols.append(item.strip().upper())
+    return list(dict.fromkeys(symbols))
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser(description="Chart pattern scanner (issue #348)")
     ap.add_argument("--universe", default="nasdaq_100.json")
     ap.add_argument("--source", choices=["yahoo", "parquet"], default="parquet")
-    ap.add_argument("--patterns", default="all",
-                    help="comma list of %s, or 'all'" % "/".join(DETECTORS))
-    ap.add_argument("--timeframe", choices=["D", "W"], default="D",
-                    help="W resamples daily bars to weekly before detection")
+    ap.add_argument("--parquet-dir", default=PARQUET_DIR,
+                    help="local corpus; defaults to PATTERN_SCAN_PARQUET_DIR or parquet_data/data")
+    ap.add_argument("--patterns", default="all")
+    ap.add_argument("--timeframe", choices=["D", "W"], default="D")
     ap.add_argument("--min-base", type=int, default=None,
-                    help="minimum base length in bars (e.g. 55 daily ~ 3 months)")
+                    help="floor for both pattern families; cannot loosen their defaults")
     ap.add_argument("--min-adv", type=float, default=DEFAULT_PARAMS["min_adv"])
-    ap.add_argument("--max-dist", type=float, default=None,
-                    help="fixed distance-to-trigger gate; default adapts to pattern height")
-    ap.add_argument("--min-gain", type=float, default=DEFAULT_PARAMS["uptrend_min_gain"])
+    ap.add_argument("--max-dist", type=float, default=None)
+    ap.add_argument("--min-gain", type=float, default=None)
+    for key in ("min_touches", "min_touches_long", "floor_min_touches"):
+        ap.add_argument("--" + key.replace("_", "-"), type=int, default=None)
+    for key in ("tol_pct_floor", "tol_atr_mult"):
+        ap.add_argument("--" + key.replace("_", "-"), type=float, default=None)
     ap.add_argument("--top", type=int, default=50)
     ap.add_argument("--out", default=None)
-    ap.add_argument("--as-of", default=None,
-                    help="drop bars after this date (YYYY-MM-DD) — replay a historical scan, "
-                         "e.g. to test the scanner against a known pro call")
-    args = ap.parse_args()
-
-    patterns = [p.strip() for p in args.patterns.split(",") if p.strip()]
-    if args.patterns == "all":
-        patterns = list(DETECTORS)
-    unknown = [p for p in patterns if p not in DETECTORS]
-    if unknown:
-        log.error("Unknown pattern(s) %s — available: %s", unknown, list(DETECTORS))
-        sys.exit(1)
-
-    params = dict(DEFAULT_PARAMS)
-    if args.timeframe == "W":
-        params.update(WEEKLY_PARAMS)
-    params["min_adv"] = args.min_adv
-    params["max_dist_to_trigger"] = args.max_dist
-    if args.min_gain != DEFAULT_PARAMS["uptrend_min_gain"]:
+    ap.add_argument("--json-out", default=None, help="optional candidate/parameter/provenance artifact")
+    ap.add_argument("--as-of", default=None, help="historical cutoff, YYYY-MM-DD")
+    args = ap.parse_args(argv)
+    patterns = list(DETECTORS) if args.patterns.strip() == "all" else list(dict.fromkeys(
+        p.strip() for p in args.patterns.split(",") if p.strip()))
+    if not patterns or any(p not in DETECTORS for p in patterns):
+        ap.error("--patterns must name known detectors or all")
+    if args.top < 1 or (args.min_base is not None and args.min_base < 1):
+        ap.error("--top and --min-base must be positive")
+    if not math.isfinite(args.min_adv) or args.min_adv < 0:
+        ap.error("--min-adv must be finite and nonnegative")
+    if args.max_dist is not None and (not math.isfinite(args.max_dist) or args.max_dist <= 0):
+        ap.error("--max-dist must be finite and positive")
+    if args.min_gain is not None and not math.isfinite(args.min_gain):
+        ap.error("--min-gain must be finite")
+    params = {**DEFAULT_PARAMS, **(WEEKLY_PARAMS if args.timeframe == "W" else {})}
+    params["min_adv"], params["max_dist_to_trigger"] = args.min_adv, args.max_dist
+    if args.min_gain is not None:
         params["uptrend_min_gain"] = args.min_gain
     if args.min_base is not None:
-        params["base_min"] = args.min_base
-
-    tickers = load_universe(args.universe)
-    log.info("Universe: %d symbols", len(tickers))
-
-    if args.source == "yahoo":
-        data = fetch_yahoo(tickers + ["SPY"], period="10y" if args.timeframe == "W" else "3y")
-    else:
-        data = fetch_parquet(tickers + ["SPY"], lookback_bars=2600 if args.timeframe == "W" else 800)
+        for key in ("base_min", "base_min_long"):
+            params[key] = max(params[key], args.min_base)
+    for key in ("min_touches", "min_touches_long", "floor_min_touches", "tol_pct_floor", "tol_atr_mult"):
+        value = getattr(args, key)
+        if value is not None:
+            if not math.isfinite(value) or value <= 0:
+                ap.error("--" + key.replace("_", "-") + " must be finite and positive")
+            params[key] = value
     if args.as_of:
-        def _truncate(df):
-            ts = pd.Timestamp(args.as_of)
-            if df.index.tz is not None:
-                ts = ts.tz_localize(df.index.tz)
-            return df[df.index <= ts]
-        data = {s: d for s, d in ((s, _truncate(d)) for s, d in data.items()) if len(d)}
-        log.info("Replaying as of %s", args.as_of)
-    spy_close = data.pop("SPY", pd.DataFrame()).get("Close")
-    log.info("Loaded data for %d symbols", len(data))
-
-    # A non-empty universe that loads NO data is never a legitimate outcome --
-    # but it produced `0 candidates`, exit 0, and a written HTML report, which
-    # reads as "no setups today" rather than "the data source is empty".
-    #
-    # The live cause is that `parquet_data` is a SUBMODULE and is uninitialised
-    # in a fresh clone / CI / new worktree. PARQUET_DIR (:37) then points at a
-    # missing directory, fetch_parquet returns {}, and nothing says so. The
-    # default `--source parquet` therefore fails silently everywhere the
-    # submodule has not been checked out.
-    #
-    # Fail loudly, name the source and the path, and name the fix -- a scanner
-    # whose entire output is a function of its input must not report a clean
-    # run on no input.
-    if tickers and not data:
-        log.error("Loaded data for 0 of %d symbols from source=%r.",
-                  len(tickers), args.source)
-        if args.source == "parquet":
-            log.error("  PARQUET_DIR = %s", PARQUET_DIR)
-            if not os.path.isdir(PARQUET_DIR):
-                log.error("  That directory does not exist. `parquet_data` is a "
-                          "submodule; initialise it with:")
-                log.error("    git submodule update --init parquet_data")
-            else:
-                log.error("  Directory exists but yielded no frames -- check it "
-                          "contains <SYMBOL>.parquet files.")
-            log.error("  Or re-run with `--source yahoo`, which needs no key "
-                      "and no submodule.")
+        try:
+            if datetime.strptime(args.as_of, "%Y-%m-%d").strftime("%Y-%m-%d") != args.as_of:
+                raise ValueError
+        except ValueError:
+            ap.error("--as-of must use YYYY-MM-DD")
+    try:
+        tickers = _validated_symbols(load_universe(args.universe))
+    except (ValueError, OSError, TypeError) as exc:
+        ap.error(str(exc))
+    load_errors = {}
+    requested = list(dict.fromkeys(tickers + ["SPY"]))
+    if args.source == "yahoo":
+        data = fetch_yahoo(requested, period="10y" if args.timeframe == "W" else "3y",
+                           as_of=args.as_of, errors=load_errors)
+    else:
+        data = fetch_parquet(requested, lookback_bars=2600 if args.timeframe == "W" else 800,
+                             as_of=args.as_of, parquet_dir=args.parquet_dir, errors=load_errors)
+    spy_close = data.get("SPY", pd.DataFrame()).get("Close")
+    data = {symbol: data[symbol] for symbol in tickers if symbol in data}
+    if not data:
+        log.error("Loaded no requested symbols from %s. Configure --parquet-dir / "
+                  "PATTERN_SCAN_PARQUET_DIR for a local corpus, or choose --source yahoo.", args.source)
         return 2
-
-    cands = []
-    for sym, df in sorted(data.items()):
-        adv = None
-        if args.timeframe == "W":
-            adv = float((df["Close"] * df["Volume"]).tail(20).mean())  # from daily bars
-            df = resample_weekly(df)
-        for pat in patterns:
+    candidates = []
+    gated = detection_errors = 0
+    for symbol, daily in sorted(data.items()):
+        adv = float((daily["Close"] * daily["Volume"]).tail(20).mean()) if args.timeframe == "W" else None
+        frame = resample_weekly(daily) if args.timeframe == "W" else daily
+        for pattern in patterns:
             try:
-                cand = DETECTORS[pat](sym, df, spy_close, params, adv_dollar=adv)
-            except Exception as e:  # one bad symbol must not kill the scan
-                log.warning("%s/%s: detection error: %s", sym, pat, e)
+                candidate = DETECTORS[pattern](symbol, frame, spy_close, params, adv_dollar=adv)
+            except Exception as exc:
+                detection_errors += 1
+                log.warning("%s/%s: detection error: %s", symbol, pattern, type(exc).__name__)
                 continue
-            if cand is not None:
-                cands.append(cand)
-                log.info("MATCH %-6s %-18s score %.1f  trigger %.2f  (%+.1f%% away)",
-                         sym, pat, cand["score"], cand["trigger"], cand["dist_to_trigger_pct"])
-
-    # collapse duplicate cards: the same boundary often satisfies 2-3 pattern
-    # rules — keep the best-scoring card per symbol, list the other labels
-    cands.sort(key=lambda c: c["score"], reverse=True)
+            if candidate is None:
+                gated += 1
+            else:
+                candidate["data_end"] = str(daily.index.max().date())
+                candidates.append(candidate)
+    raw_matches = len(candidates)
     merged = {}
-    for c in cands:
-        m = merged.get(c["symbol"])
-        if m is None:
-            merged[c["symbol"]] = c
-        elif abs(m["trigger"] - c["trigger"]) / m["trigger"] < 0.03:
-            m.setdefault("also_patterns", []).append(c["pattern"])
-    cands = sorted(merged.values(), key=lambda c: c["score"], reverse=True)[: args.top]
-
-    data_end = max((df.index.max() for df in data.values()), default=None)
+    for candidate in sorted(candidates, key=lambda c: c["score"], reverse=True):
+        existing = merged.get(candidate["symbol"])
+        if existing is None:
+            merged[candidate["symbol"]] = candidate
+        elif abs(existing["trigger"] - candidate["trigger"]) / existing["trigger"] < .03:
+            existing.setdefault("also_patterns", []).append(candidate["pattern"])
+    candidates = sorted(merged.values(), key=lambda c: c["score"], reverse=True)[:args.top]
+    ends = [str(frame.index.max().date()) for frame in data.values()]
+    counts = {"requested": len(tickers), "loaded": len(data), "missing": len(tickers) - len(data),
+              "load_errors": len(set(tickers) & set(load_errors)), "gated": gated,
+              "detection_errors": detection_errors, "raw_matches": raw_matches,
+              "qualified_symbols": len(merged), "shown": len(candidates)}
     run_date = datetime.now().strftime("%Y-%m-%d")
-    suffix = "" if args.timeframe == "D" else f"_{args.timeframe}"
     base_name = patterns[0] if len(patterns) == 1 else "scan"
-    out_path = args.out or os.path.join(
-        PROJECT_ROOT, "output", "scans", run_date, f"{base_name}{suffix}.html"
-    )
-    meta = {
-        "pattern": ", ".join(PATTERN_NAMES[p] for p in patterns),
-        "date": run_date if not args.as_of else f"{run_date} — REPLAY as of {args.as_of}",
-        "universe": args.universe,
-        "n_universe": len(tickers),
-        "n_loaded": len(data),
-        "source": args.source,
-        "data_end": "n/a" if data_end is None else str(data_end.date()),
-        "min_adv": params["min_adv"],
-        "funnel": f"{len(data)} scanned → {len(cands)} matched",
-    }
-    build_html(cands, meta, out_path)
-    log.info("%d candidates → %s", len(cands), out_path)
+    suffix = "" if args.timeframe == "D" else "_W"
+    out_path = args.out or str(Path(PROJECT_ROOT) / "output" / "scans" / run_date / f"{base_name}{suffix}.html")
+    meta = {"pattern": ", ".join(PATTERN_NAMES[p] for p in patterns),
+            "date": run_date if not args.as_of else f"{run_date} — REPLAY as of {args.as_of}",
+            "universe": _universe_label(args.universe), "n_universe": len(tickers), "n_loaded": len(data),
+            "source": args.source, "data_end": min(ends) if min(ends) == max(ends) else f"{min(ends)} to {max(ends)}",
+            "min_adv": params["min_adv"], "params": params, "counts": counts,
+            "funnel": ", ".join(f"{key}: {value}" for key, value in counts.items())}
+    build_html(candidates, meta, out_path)
+    if args.json_out:
+        artifact = Path(args.json_out).expanduser()
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text(json.dumps({"meta": meta,
+            "candidates": [{k: v for k, v in c.items() if k != "df"} for c in candidates]},
+            indent=2, allow_nan=False, default=lambda obj: obj.item() if isinstance(obj, np.generic) else str(obj)), encoding="utf-8")
     print(out_path)
+    return 2 if detection_errors == len(data) * len(patterns) else 0
 
 
 if __name__ == "__main__":
-    # main() returns a status code (2 on an empty load). Calling it bare
-    # discards that -- the guard printed its ERROR block and the process still
-    # exited 0, so anything checking the exit code saw a clean run.
     raise SystemExit(main())

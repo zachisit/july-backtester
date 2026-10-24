@@ -13,6 +13,10 @@ Usage:
 import argparse
 import io
 import json
+import math
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 import os
 import sys
 import urllib.request
@@ -31,20 +35,21 @@ def fetch_listings():
     for url, symcol in ((NASDAQ_URL, "Symbol"), (OTHER_URL, "ACT Symbol")):
         txt = urllib.request.urlopen(url, timeout=60).read().decode("utf-8", "replace")
         df = pd.read_csv(io.StringIO(txt), sep="|")
-        df = df[df.get("Test Issue", "N") == "N"]
+        if "Test Issue" in df.columns:
+            df = df[df["Test Issue"] == "N"]
         if "ETF" in df.columns:
             df = df[df["ETF"] == "N"]
         for s in df[symcol].dropna().astype(str):
             s = s.strip().upper()
-            if not s or any(c in s for c in "$.=^"):
+            if not re.fullmatch(r"[A-Z][A-Z0-9-]*", s):
                 continue  # preferred / when-issued / index notation
-            if len(s) == 5 and s[-1] in "WRU":
+            if url == NASDAQ_URL and len(s) == 5 and s[-1] in "WRU":
                 continue  # NASDAQ warrant / right / unit suffix convention
             symbols.add(s)
     return sorted(symbols)
 
 
-def liquidity_filter(tickers, min_adv, chunk=300):
+def liquidity_filter(tickers, min_adv, chunk=300, *, stats=None):
     import yfinance as yf
 
     keep = {}
@@ -58,29 +63,46 @@ def liquidity_filter(tickers, min_adv, chunk=300):
             continue
         for s in batch:
             try:
-                d = raw[s].dropna(subset=["Close"])
+                if not isinstance(raw.columns, pd.MultiIndex) and len(batch) != 1:
+                    continue
+                d = (raw[s] if isinstance(raw.columns, pd.MultiIndex) else raw).dropna(subset=["Close"])
             except (KeyError, IndexError):
                 continue
             if len(d) < 10:
                 continue
-            adv = float((d["Close"] * d["Volume"]).mean())
+            adv = float((d["Close"] * d["Volume"]).tail(20).mean())
+            if not math.isfinite(adv) or adv < 0:
+                continue
+            if stats is not None:
+                stats["scored"] = stats.get("scored", 0) + 1
             if adv >= min_adv:
                 keep[s] = adv
         print(f"{min(i + chunk, len(tickers))}/{len(tickers)} screened → {len(keep)} liquid")
     return keep
 
 
-def main():
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--min-adv", type=float, default=2e6)
     ap.add_argument("--out", default=os.path.join(PROJECT_ROOT, "tickers_to_scan", "us_liquid.json"))
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
+    if not math.isfinite(args.min_adv) or args.min_adv < 0:
+        ap.error("--min-adv must be finite and nonnegative")
 
     listings = fetch_listings()
     print(f"{len(listings)} US-listed common stocks in symbol directories")
-    liquid = liquidity_filter(listings, args.min_adv)
-    with open(args.out, "w") as f:
-        json.dump(sorted(liquid), f, indent=1)
+    stats = {}
+    liquid = liquidity_filter(listings, args.min_adv, stats=stats)
+    if not listings or not stats.get("scored"):
+        ap.error("no listing prices were scored; the existing universe was not overwritten")
+    destination = Path(args.out).expanduser()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(json.dumps(sorted(liquid), indent=1), encoding="utf-8")
+    destination.with_suffix(".meta.json").write_text(json.dumps({
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "min_dollar_adv": args.min_adv, "adv_sessions": 20,
+        "listed": len(listings), "scored": stats["scored"], "selected": len(liquid),
+    }, indent=2), encoding="utf-8")
     print(f"{len(liquid)} symbols with dollar ADV >= ${args.min_adv / 1e6:.1f}M → {args.out}")
 
 
