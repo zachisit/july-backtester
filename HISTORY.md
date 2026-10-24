@@ -2,68 +2,49 @@
 
 ## [Unreleased]
 
-- Add a standalone pattern scanner with frozen regression bars, historical replay, per-family controls, visible coverage/errors and tolerance provenance; fix the universe builder and Pine confirm-alert wiring (#348/#349).
+## [1.16.0] — 2026-10-24
 
-- Missing-bars demerits continue charging through 60% missing coverage, with a 30-point cap; the integer casts remain unchanged (#378/#382).
+Full release notes and merged change list: [v1.16.0](docs/releases/v1.16.0.md).
 
-- Position sizing reports per-run stop-input, proxy, cap, cash/margin, ADV, and heat conditions for every entry leg, including zero-trade runs. Tiny equity shorts now honor the same minimum size as longs (#387/#394).
+**Results change.** Re-run affected backtests before comparing with older results: entry triggering, fills, stop risk, costs, short buying power, equity timing, WFA and Monte Carlo verdicts have changed. Compatibility settings are documented in the release notes where available.
 
-- Futures short entries honor the ADV cap and adverse entry impact, report both impact legs, and recheck actual stop risk after impact; margin affordability uses the slipped/impacted fill (#468).
+### Execution and sizing
 
-- Opening Kelly orders use only trades completed before the fill bar; closing orders retain same-bar completed outcomes (#466).
+- Make `entry_trigger="edge"` the default; retain `"level"` as the former entry policy. Held short states wait for an actual cover signal.
+- Fill gap-through stops at the adverse open; check initial stops on the fill bar and use intraday refinement when available.
+- Record equity after bar fills/exits; use prior-bar ADV for opening orders and reserve equity-short collateral.
+- Consolidate sizing across all three entry paths, complete stop inputs, honor short sizing methods/multipliers, and distinguish fractional-share notional ceilings from futures contract caps.
+- Freeze opening Kelly history before the fill bar, measure futures heat from known stops, and recheck/register final fill risk. Futures shorts apply ADV caps, entry impact and actual-fill margin budgets.
+- Liquidate delisted positions inside the loop with time-zone, timing, fee and metadata corrections; block post-delisting entry.
+- Report actual stop/proxy/cap/cash/ADV/heat sizing conditions once per run, including zero trades. Decline tiny equity shorts consistently.
 
-- Futures long heat uses its actual known stop risk, including a final market-impact check, rather than a sizing proxy (#467).
+### Validation and reproducibility
 
-## [1.16.0] — Backtest-integrity epic (#424)
+- Correct window-equity WFA returns/annualization, final-day boundaries, rolling/anchored fold handling and N/A scoring.
+- Introduce MC Score v2: bootstrap edge significance and closed-trade drawdown realism, honoring block sampling. Retain legacy score/verdict fields for comparison.
+- Add `random_seed` / `--seed`, reproducible per-bar entry shuffling, and consistent runtime settings in spawned workers.
 
-> **Results change.** Most fixes in this release remove optimistic biases, so headline numbers for
-> existing configs will move (usually down). Each behaviour change has a config switch that restores
-> the old behaviour, listed in brackets.
+### Universes and data
 
-### Fixed — engine (fill realism)
-- **Gap-through stops fill at the open**, not at the unreachable stop level (#425) [`stop_gap_fill: "level"`].
-- **Stops are checked on the fill bar** under `execution_time="open"` (#426) [`entry_bar_stop_check: False`].
-- **Equity curve recorded at end of bar**, so exits at the open show on the bar they happen (#438).
-- **ADV cap / market impact use prior-bar volume** under open execution, with no same-bar look-ahead (#436).
-- **Equity shorts reserve collateral** (Reg-T 50% by default), so gross short leverage is bounded (#430) [`short_margin_requirement: 0.0`].
-- **Delisted positions are liquidated inside the daily loop**, so later sizing no longer uses phantom equity (#431; subsumes #149).
+- Resolve PIT members to dated Parquet security IDs; preserve ticker strings such as `ON`; fail unresolved/ambiguous mappings.
+- Honor corpus renames and retired overrides, rebuild changed span caches, reject distinct-security ticker collisions, and share the Parquet path default.
+- Discover sibling PIT roster mirrors; select one completeness/content-checked source for membership, fetched universe and forced exits. Carry prior membership into an unpublished year; normalize canonical change dates.
+- Wire 400-day pre-start warm-up for symbols/dependencies and preserve short-lived names in survivorship-aware universes, with symbol diagnostics.
+- Detect non-positive prices once per affected bar and raise the missing-bars demerit cap to 30; keep integer casts unchanged.
+- Retry Polygon transient failures without caching partial pages; include Yahoo's end-date bar.
 
-### Fixed — validation layer
-- **WFA measures IS/OOS on window equity** and annualises over the window length; compounding no longer inflates OOS (#427).
-- **Rolling WFA fold 0 / empty IS no longer auto-passes**; opt-in anchored fold layout (#428).
-- **MC Score v2**: a bootstrap mean-edge test replaces the near-tautological performance test, and DD realism compares closed-trade DD with closed-trade DD. The legacy score is kept as `mc_score_legacy` (#429).
+### CLI, reporting and tools
 
-### Fixed — results & data
-- **Zero-trade and errored strategies are accounted for** ("Not shown: N with 0 trades, M errored"), not silently dropped (#432).
-- **Unique strategy names for every stop config**, plus `base_strategy` / `param_label` / `stop_label` metadata (#434).
-- **Sensitivity report: one verdict per portfolio × strategy × stop config** (#435).
-- **Short-lived names are kept in survivorship-aware universes**, and `pit_warmup_days` is now wired, so indicators warm up before `start_date` (#433) [`pit_warmup_days: 0`].
-- **Polygon retries 429/5xx**, never caches partial pagination, and writes `fetch_failures.csv` (#437) [`polygon_max_retries`].
-- **Optional `random_seed` / `--seed`** for reproducible MC, bootstrap and noise (#439).
-- **`verbose_output` config is honoured**; new `--no-verbose` flag (#440).
-- **Yahoo includes the `end_date` bar** (#441).
+- Add worker limits, honor verbose config/flags, account for zero/errored runs, distinguish all strategy/stop variants and sensitivity verdicts, and sanitize output filenames.
+- Pin the installable `ft-pandas-ta` fork, SciPy and Seaborn.
+- Add the pattern scanner, replay/coverage/provenance artifacts, dated universe generator and Pine companion; freeze portable scanner regressions. Convention work remains under #383.
+- Add gap/dead-money/annual/leverage/volatility diagnostics and the data-quality cast census, plus source-restoring mutation audits and a shared subprocess harness.
+- Remove the private Parquet submodule and dataset-maintenance/export tooling; retain the data-source-agnostic provider and optional private strategies.
 
-### RC audit follow-ups (#460)
-- Keep seed-label component boundaries unambiguous, defer delisting prices from the current Close until after open entries, and preserve position-size metadata on delisting trades.
-- Integrate configurable short sizing with collateral/commission budgets, and apply floating-point affordability corrections against free buying power.
-- Fix UTC delisting liquidation, re-entry after delisting, future delistings leaking into earlier runs, and missing safety-net exit commissions.
-- Refine fill-bar stops with intraday data and include entry commissions in short collateral sizing.
-- Preserve warm-up signals, structural stop history and ADV through the first execution bar; warm strategy dependencies while keeping benchmark/WFA periods inside the selected window.
-- Include the final day's trades and intraday equity in WFA; exclude N/A folds and infer anchored IS history correctly.
-- Apply block sampling to the MC edge test when selected; distinguish fractional percentage stops, ATR caps and trailing floors in sensitivity labels.
-- Pass resolved runtime settings to spawned workers so CLI overrides, including `--seed`, apply consistently on macOS and Windows.
+### Verification
 
-### Fixed
-- **`pit:` rosters: an unquoted `ON` parsed as a boolean (all data providers).** PyYAML reads an
-  unquoted `- ON` as `True`, so in the NQ100 2023–2025 rosters ON Semiconductor became the ticker
-  `TRUE` and a `pit:nq100` run traded TrueCar in its place, whichever `data_provider` was set.
-  Rosters are now read with `load_roster_yaml()`, which keeps every entry a string. Shipped in #407.
-- **`pit:` + `data_provider = "parquet"`: delisted members were dropped or swapped for another
-  company.** Membership is now resolved to parquet security IDs (`TICKER-YYYYMM` for delisted
-  securities) before the loader, so a dead member is no longer masked by a live file that reuses
-  its ticker, or dropped when several dated files match. Runs abort, naming each member, if one
-  cannot be resolved. Other providers are unchanged. #407.
-- **Parquet span-index cache now rebuilds when the corpus changes** (#409).
+- Full suite including slow tests: **3,555 passed, 6 skipped, 11 expected failures**.
+- Fresh adversarial reviews, regression/mutation checks and required CI checks passed for the reviewed merge queue. Pine received source review without compilation.
 
 ## [1.3.0] — 2026-04-07
 
