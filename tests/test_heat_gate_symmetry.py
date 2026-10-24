@@ -23,6 +23,7 @@ to it, not in its arithmetic.
 """
 
 import ast
+from collections import Counter
 import os
 import re
 from datetime import date
@@ -77,7 +78,7 @@ class TestGateArithmeticIsDirectionBlind:
 
 
 class TestEveryEntryPathGatesAgainstTheMergedBook:
-    """Source-level pins. The gate is called from three entry paths; all three
+    """Source-level pins. Three entry paths and both final futures rechecks
     must pass the merged book. Asserted against the source because the defect
     was an argument at a call site, and a behavioural test would need a full
     mixed-book simulation per path to reach the same conclusion.
@@ -95,11 +96,18 @@ class TestEveryEntryPathGatesAgainstTheMergedBook:
                 calls.append(node)
         return src, calls
 
-    def test_there_are_three_gated_entry_paths(self):
-        """Long, equity short, futures short. If this count changes, a new entry
-        path was added and needs the same treatment."""
+    def test_entry_paths_and_final_futures_recheck_are_gated(self):
+        """Keep all three admission gates and both post-impact futures rechecks.
+
+        Counting calls alone treated #467's final-fill recheck as a fourth
+        entry path. Identify each risk input so an omitted gate cannot be
+        hidden by a duplicate call on another path.
+        """
         _, calls = self._heat_calls()
-        assert len(calls) == 3, f"expected 3 heat gates, found {len(calls)}"
+        assert Counter(ast.unparse(call.args[1]) for call in calls) == {
+            "new_position_risk": 1, "_s_new_risk": 1,
+            "_fs_risk(shares)": 1, "_final_risk": 1, "_fs_new_risk": 1,
+        }
 
     def test_every_call_passes_the_merged_book(self):
         """No call may pass `positions` or `short_positions` alone."""

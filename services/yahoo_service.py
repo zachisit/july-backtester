@@ -111,11 +111,18 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     # Normalise the ticker using provider-agnostic normalizer (e.g., "I:VIX" → "^VIX")
     yahoo_symbol = normalize_ticker(symbol, "yahoo")
 
+    # yfinance treats ``end`` as EXCLUSIVE; pass end_date + 1 day so the bar
+    # dated end_date is included (parity with Polygon/Norgate/CSV, #441).
+    # end_date=None means "run to today" and is passed through unchanged.
+    end_exclusive = None
+    if end_date is not None:
+        end_exclusive = (pd.Timestamp(end_date) + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
+
     try:
         ticker = yf.Ticker(yahoo_symbol)
         df = ticker.history(
             start=start_date,
-            end=end_date,
+            end=end_exclusive,
             interval=interval,
             auto_adjust=auto_adjust,
             actions=False,          # drop Dividends / Stock Splits columns
@@ -161,5 +168,13 @@ def get_price_data(symbol: str, start_date: str, end_date: str, config: dict):
     # This ensures consistent datetime handling across daily and intraday timeframes
     if config.get("timeframe", "D").upper() == "D":
         df.index = df.index.normalize()
+
+    # Enforce an inclusive end_date even if the API returns extra bars
+    # Daily bars are midnight-normalised, so "< end_date + 1 day" keeps the
+    # end_date bar and equals "<= end_date"; intraday bars on end_date are kept.
+    if end_exclusive is not None:
+        df = df[df.index < pd.Timestamp(end_exclusive, tz="UTC")]
+        if df.empty:
+            return None
 
     return df

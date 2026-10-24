@@ -203,7 +203,7 @@ class TestPointCap:
         rows = [(100, 100, 100, 100, 10.0),   # bar0
                 (100, 100, 100, 100, 10.0),   # bar1 enter @100 (initial capped stop 85)
                 (100, 120, 100, 120, 10.0),   # bar2 close 120 -> capped trail 105 (uncapped 70)
-                (100, 106, 104, 104, 10.0)]   # bar3 Low 104 <= 105 -> stop out @105
+                (106, 106, 104, 104, 10.0)]   # bar3 opens above 105, Low 104 <= 105 -> stop out @105 (no gap, #425)
         df = _df(rows)
         res = _run({"AAA": df}, {"AAA": _sig(df, {1: 1})},
                    {"type": "atr", "multiplier": 5.0, "point_cap": 15.0})

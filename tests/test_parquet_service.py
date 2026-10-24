@@ -12,6 +12,9 @@ Test matrix:
                                   non-DatetimeIndex, index name
         TestGetPriceData       — happy path, date filtering, None guards,
                                   NaN row dropping, missing dir
+        TestMultiTickerCollision — issue #395: bare-ticker collision between
+                                  distinct securities is refused (not merged),
+                                  live-file-masks-delisted warning
 
     Integration (real Norgate fixture in tests/fixtures/parquet_data/):
         TestGetPriceDataRealFixture — AAPL row count, date filter, ABNB IPO date,
@@ -303,6 +306,99 @@ class TestGetPriceData:
         assert len(result) == 3  # 2 NaN rows dropped, 3 clean rows remain
         assert result["Close"].notna().all()
         assert result["Open"].notna().all()
+
+
+# ---------------------------------------------------------------------------
+# TestMultiTickerCollision  (regression — issue #395)
+#
+# Two distinct securities that reused the same bare ticker at different
+# times must never be silently merged into one series. The old behaviour
+# concatenated all TICKER-YYYYMM files and deduped with an unstable sort,
+# producing 1000%+ fabricated single-day moves. The fix refuses to merge
+# and returns None with a loud, named warning instead.
+# ---------------------------------------------------------------------------
+
+class TestMultiTickerCollision:
+
+    def _write(self, tmp_path, name: str, df: pd.DataFrame) -> None:
+        df.to_parquet(tmp_path / f"{name}.parquet")
+
+    def test_overlapping_spans_returns_none_not_merged(self, tmp_path, caplog):
+        """KMG-style case: two companies' spans overlap in time."""
+        old_co = _make_ohlcv_df(10, start="1997-01-06")   # ~overlap era
+        new_co = _make_ohlcv_df(10, start="1997-01-06")
+        new_co["Close"] = new_co["Close"] * 0.1            # visibly different series
+        self._write(tmp_path, "KMG-200608", old_co)
+        self._write(tmp_path, "KMG-201811", new_co)
+
+        with caplog.at_level(logging.ERROR, logger="services.parquet_service"):
+            result = get_price_data("KMG", "1990-01-01", "2026-01-01", _config_for(tmp_path))
+
+        assert result is None
+        assert "KMG-200608" in caplog.text
+        assert "KMG-201811" in caplog.text
+
+    def test_non_overlapping_splice_also_returns_none(self, tmp_path, caplog):
+        """AAN-style case: end-to-end splice with no overlap is still two
+        unrelated companies and must not be silently concatenated either."""
+        early = _make_ohlcv_df(5, start="1992-11-06")
+        later = _make_ohlcv_df(5, start="2020-11-25")
+        self._write(tmp_path, "AAN-201012", early)
+        self._write(tmp_path, "AAN-202410", later)
+
+        with caplog.at_level(logging.ERROR, logger="services.parquet_service"):
+            result = get_price_data("AAN", "1990-01-01", "2026-01-01", _config_for(tmp_path))
+
+        assert result is None
+        assert "AAN-201012" in caplog.text
+        assert "AAN-202410" in caplog.text
+
+    def test_multi_find_parquet_returns_sentinel(self, tmp_path):
+        """_find_parquet itself still signals ambiguity via the sentinel —
+        it's get_price_data's job to refuse it, not _find_parquet's."""
+        self._write(tmp_path, "AGN-201503", _make_ohlcv_df(5, start="1990-01-02"))
+        self._write(tmp_path, "AGN-202005", _make_ohlcv_df(5, start="1993-02-17"))
+        result = _find_parquet("AGN", str(tmp_path))
+        assert result is not None
+        assert result.startswith("_multi_|")
+
+    def test_security_id_lookup_unaffected(self, tmp_path):
+        """Requesting the exact security ID directly must still work fine —
+        the fix only blocks the ambiguous bare-ticker path."""
+        self._write(tmp_path, "KMG-201811", _make_ohlcv_df(10, start="2010-01-04"))
+        result = get_price_data("KMG-201811", "2010-01-01", "2026-01-01", _config_for(tmp_path))
+        assert result is not None
+        assert not result.empty
+
+    def test_single_dated_file_still_resolves_normally(self, tmp_path):
+        """A single delisted date-suffixed file (no collision) is unaffected —
+        only >=2 candidates trigger the refusal."""
+        self._write(tmp_path, "ALTR-201512", _make_ohlcv_df(10, start="2010-01-04"))
+        result = get_price_data("ALTR", "2010-01-01", "2026-01-01", _config_for(tmp_path))
+        assert result is not None
+        assert not result.empty
+
+    def test_live_file_masks_delisted_history_with_warning(self, tmp_path, caplog):
+        """ABI-style case: an exact live bare file wins (existing behaviour
+        preserved) but a warning must now name what's being dropped."""
+        self._write(tmp_path, "ABI", _make_ohlcv_df(5, start="2025-06-26"))
+        self._write(tmp_path, "ABI-199908", _make_ohlcv_df(5, start="1999-08-02"))
+        self._write(tmp_path, "ABI-200811", _make_ohlcv_df(5, start="2008-11-03"))
+
+        with caplog.at_level(logging.WARNING, logger="services.parquet_service"):
+            result = get_price_data("ABI", "1990-01-01", "2026-01-01", _config_for(tmp_path))
+
+        assert result is not None  # live file still wins, behaviour unchanged
+        assert "ABI-199908" in caplog.text
+        assert "ABI-200811" in caplog.text
+
+    def test_live_file_no_dated_siblings_no_warning(self, tmp_path, caplog):
+        """No masking warning when there's genuinely nothing being hidden."""
+        self._write(tmp_path, "AAPL", _make_ohlcv_df(10))
+        with caplog.at_level(logging.WARNING, logger="services.parquet_service"):
+            result = get_price_data("AAPL", "2023-01-01", "2023-12-31", _config_for(tmp_path))
+        assert result is not None
+        assert "masked" not in caplog.text
 
 
 # ---------------------------------------------------------------------------

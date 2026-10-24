@@ -245,17 +245,21 @@ class TestBarDensity:
             f"scored {score} — a recycled ticker passing the gate is the "
             f"failure this check exists to prevent")
 
-    def test_density_actually_costs_score(self):
-        """Without this, setting the demerits to 0 survives mutation — the
-        flag would be cosmetic."""
+    def test_density_actually_costs_score(self, monkeypatch):
+        """Compare the same frame so missing-bars charges cannot mask density."""
+        from helpers import data_quality
         idx = pd.to_datetime(
             [f"{y}-01-{d:02d}" for y in range(2015, 2025) for d in range(1, 11)])
         df = pd.DataFrame(
             {"Open": 10.0, "High": 10.1, "Low": 9.9, "Close": 10.0,
              "Volume": 1_000_000},
             index=idx)
-        score, _ = validate_ohlcv(df, "FER", "D")
-        assert score <= 75.0, score
+        score, issues = validate_ohlcv(df, "FER", "D")
+        monkeypatch.setattr(data_quality, "_DENSITY_DEMERITS", 0)
+        without_density, same_issues = validate_ohlcv(df, "FER", "D")
+        assert same_issues == issues
+        assert any("Sparse history" in issue for issue in issues)
+        assert without_density - score == 25.0
 
     def test_density_is_skipped_for_non_daily_timeframes(self):
         """A weekly series is ~52 bars/yr by construction. Without this,
@@ -538,7 +542,7 @@ class TestColumnNameCaseInsensitivity:
              "volume": [1_000_000.0] * n},
             index=_IDX[:n])
         _, issues = validate_ohlcv(df, "NEG", "D")
-        assert any("Negative" in i for i in issues), issues
+        assert any("Non-positive" in i for i in issues), issues
 
     def test_uppercase_columns_also_work(self):
         n = 300

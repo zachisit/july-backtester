@@ -166,7 +166,8 @@ class TestMarginAccounting:
 # ---------------------------------------------------------------------------
 class TestPointStop:
     def test_points_stop_exit(self):
-        # Enter ~5000, point stop 50 -> stop ~4950; drop below it triggers.
+        # Enter ~5000, point stop 50 -> stop ~4950; bar3 OPENS at 4930, i.e. gaps
+        # through the stop, so (#425) it fills at the open, not the 4950 level.
         df = _df([5000, 5000, 4990, 4930, 4900, 4890])
         res = _run({"MESM6": df}, {"MESM6": _sig(df, {1: 1})},
                    stop_config={"type": "points", "value": 50.0})
@@ -178,8 +179,9 @@ class TestPointStop:
         # also shift where the stop sits (see portfolio_simulations.py raw_entry_price
         # anchoring for 'percentage'/'points' stop types).
         raw_entry = t["EntryPrice"] - 0.25  # back out the 1-tick buy slippage
-        # stop = raw_entry - 50 points; the fill then takes 1 tick (0.25) of sell slippage.
-        assert t["ExitPrice"] == pytest.approx(raw_entry - 50.0 - 0.25, abs=1e-6)
+        assert raw_entry - 50.0 == pytest.approx(4950.0, abs=1e-6)   # stop level
+        # gap-through: fill at the 4930 open less 1 tick (0.25) of sell slippage.
+        assert t["ExitPrice"] == pytest.approx(4930.0 - 0.25, abs=1e-6)
 
 
 # ---------------------------------------------------------------------------

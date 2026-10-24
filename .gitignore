@@ -40,7 +40,6 @@ Thumbs.db
 # Project outputs
 data_cache/
 output/
-# parquet_data/ is now a git submodule (july-backtester-norgate-data)
 
 tools/watchlists
 
@@ -73,7 +72,7 @@ custom_strategies/private/**/*.py
 # Local 1-min FX cache built by scripts/fetch_fx_minute.py (multi-GB)
 fx_minute_cache/
 
-# Binary data files — belong in private data submodule (july-backtester-norgate-data)
+# Binary data files — keep market data out of this repo; supply it externally
 data/nq100_membership.parquet
 data/*.parquet
 

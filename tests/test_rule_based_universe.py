@@ -10,6 +10,7 @@ survivorship (dead names present until they die, gone after), and security-level
 identity (ticker reuse must never collapse two companies into one).
 """
 
+import os
 import numpy as np
 import pandas as pd
 import pytest
@@ -130,9 +131,44 @@ class TestSpanIndex:
         b = build_span_index(str(corpus), cache_path=str(cache))
         pd.testing.assert_frame_equal(a, b)
 
+    def test_cache_rebuilds_when_a_file_is_added(self, corpus, tmp_path):
+        """A new listing synced in after the cache was built must appear."""
+        cache = tmp_path / "cache" / "span.parquet"
+        build_span_index(str(corpus), cache_path=str(cache))
+        _write(corpus, "NEWCO", "2026-06-01", "2026-09-30")
+        idx = build_span_index(str(corpus), cache_path=str(cache))
+        assert "NEWCO" in idx.index
+
+    def test_cache_rebuilds_when_a_file_grows(self, corpus, tmp_path):
+        """The daily refresh appends bars; a frozen last_bar is the bug this guards."""
+        cache = tmp_path / "cache" / "span.parquet"
+        before = build_span_index(str(corpus), cache_path=str(cache)).loc["AAA", "last_bar"]
+        _write(corpus, "AAA", "2000-01-03", "2025-06-30", price=100, volume=5_000_000)
+        after = build_span_index(str(corpus), cache_path=str(cache)).loc["AAA", "last_bar"]
+        assert after > before and after.year == 2025
+
+    def test_legacy_cache_without_fingerprint_is_rebuilt(self, corpus, tmp_path):
+        cache = tmp_path / "cache" / "span.parquet"
+        cache.parent.mkdir()
+        stale = build_span_index(str(corpus)).iloc[:2]   # wrong content, no fingerprint
+        stale.to_parquet(cache)
+        assert len(build_span_index(str(corpus), cache_path=str(cache))) == 11
+
     def test_missing_corpus_raises_actionable_error(self, tmp_path):
-        with pytest.raises(FileNotFoundError, match="submodule"):
-            build_span_index(str(tmp_path / "nope"))
+        """The message must tell the operator what to DO, not just what failed.
+
+        It used to say "run 'git submodule update --init parquet_data'". That
+        instruction died with the submodule, so the assertion moved to what the
+        message must now carry: the offending path, and the fact that a directory
+        has to be supplied. Asserting on the path as well means a message that
+        degrades to a bare "not found" fails here.
+        """
+        missing = str(tmp_path / "nope")
+        with pytest.raises(FileNotFoundError, match="parquet") as exc:
+            build_span_index(missing)
+        msg = str(exc.value)
+        assert missing in msg
+        assert "parquet_data_dir" in msg or "--parquet-dir" in msg
 
 
 class TestResolveUniverse:
@@ -530,3 +566,55 @@ class TestUniverseRebaseValueHandling:
             assert not any("universe_rebase" in m
                            for m in validate_config({"universe_rebase": value}))
             rebase_dates("2020-01-01", "2021-01-01", value)   # must not raise
+
+
+# ---------------------------------------------------------------------------
+# #413 — one default for parquet_data_dir across every consumer
+# ---------------------------------------------------------------------------
+
+class TestParquetDataDirDefault:
+    """``build_rule_schedule`` used to fall back to ``DEFAULTS.get("parquet_data_dir")``,
+    a key DEFAULTS never had, so a ``rule:`` run without --parquet-dir died with
+    ``os.path.isdir(None)`` while the price provider found the corpus fine."""
+
+    @staticmethod
+    def _project_with_corpus(tmp_path, monkeypatch):
+        import helpers.rule_based_universe as rbu
+        data = tmp_path / "parquet_data" / "data"
+        data.mkdir(parents=True)
+        _write(data, "AAA", "2000-01-03", "2024-12-31", price=100, volume=5_000_000)
+        _write(data, "BBB", "2000-01-03", "2024-12-31", price=80, volume=3_000_000)
+        monkeypatch.setattr(rbu, "_PROJECT_ROOT", str(tmp_path))
+        return data
+
+    def test_rule_schedule_resolves_with_the_key_absent(self, tmp_path, monkeypatch):
+        self._project_with_corpus(tmp_path, monkeypatch)
+        union, schedule = build_rule_schedule(
+            "rule:top10", "2010-01-04", "2012-01-03", {"universe_min_bars": 100},
+            frequency="none")
+        assert union == ["AAA", "BBB"]
+        assert schedule[0][1] == frozenset({"AAA", "BBB"})
+
+    def test_explicit_none_falls_back_to_the_default(self, tmp_path, monkeypatch):
+        import helpers.rule_based_universe as rbu
+        data = self._project_with_corpus(tmp_path, monkeypatch)
+        for cfg in ({"parquet_data_dir": None}, {}, None):
+            assert os.path.normpath(rbu.resolve_parquet_dir(cfg)) == os.path.normpath(str(data))
+
+    def test_price_provider_and_rule_universe_agree(self):
+        from helpers.rule_based_universe import resolve_parquet_dir
+        from services.parquet_service import _resolve_dir
+        for cfg in ({}, {"parquet_data_dir": None}, {"parquet_data_dir": "some/rel"},
+                    {"parquet_data_dir": os.path.abspath("abs_corpus")}):
+            assert _resolve_dir(cfg) == resolve_parquet_dir(cfg)
+
+    def test_no_usable_directory_names_the_setting(self, tmp_path, monkeypatch):
+        import helpers.rule_based_universe as rbu
+        monkeypatch.setattr(rbu, "_PROJECT_ROOT", str(tmp_path))   # no corpus here
+        with pytest.raises(FileNotFoundError, match="parquet_data_dir"):
+            build_rule_schedule("rule:top10", "2010-01-04", "2012-01-03", {},
+                                frequency="none")
+
+    def test_build_span_index_none_gets_the_helpful_error(self):
+        with pytest.raises(FileNotFoundError, match="--parquet-dir"):
+            build_span_index(None)

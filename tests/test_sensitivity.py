@@ -228,3 +228,67 @@ class TestNoRegressionDefaultPath:
             )
         assert len(param_variants) == 1
         assert param_variants[0] is base_params
+
+
+# ---------------------------------------------------------------------------
+# generate_sensitivity_report grouping (#435)
+# ---------------------------------------------------------------------------
+
+def _sens_result(portfolio, stop, label, pnl, stop_suffix=None):
+    """Result dict shaped like main.py's (#434): metadata + display name."""
+    name = f"Strat [{label}]" + (f" w/ {stop_suffix}" if stop_suffix else "")
+    return {"Strategy": name, "Portfolio": portfolio, "base_strategy": "Strat",
+            "param_label": label, "stop_label": stop, "pnl_percent": pnl,
+            "sharpe_ratio": 1.0, "max_drawdown": 0.1, "mc_score": 50}
+
+
+def _run_report(results):
+    import io
+    from contextlib import redirect_stdout
+    from helpers import summary
+    buf = io.StringIO()
+    with patch.dict(CONFIG, {"sensitivity_sweep_enabled": True}), redirect_stdout(buf):
+        summary.generate_sensitivity_report(results, "run1")
+    return buf.getvalue()
+
+
+class TestSensitivityReportGrouping:
+    LABELS = ["(base)", "fast=8", "fast=9", "fast=11", "fast=12"]
+
+    def _grid(self):
+        res = []
+        for port in ("Port A", "Port B"):
+            for stop, suffix in (("", None), ("5% SL", "5% SL")):
+                for i, lab in enumerate(self.LABELS):
+                    # Port A profitable everywhere; Port B never profitable.
+                    pnl = 0.1 + i / 100 if port == "Port A" else -0.1
+                    res.append(_sens_result(port, stop, lab, pnl, suffix))
+        return res
+
+    def test_four_groups_of_five_with_labels_and_base_marker(self):
+        out = _run_report(self._grid())
+        assert out.count("Strat | Port") == 4
+        assert "Strat | Port A\n" in out and "Strat | Port A | 5% SL" in out
+        assert "Strat | Port B | 5% SL" in out
+        assert out.count(" <-- base") == 4
+        assert out.count("fast=8 ") == 4
+        assert "w/ 5% SL" not in out and "fast=8]" not in out  # no mis-parsed labels
+        assert out.count("(5/5)") == 2          # Port A groups only
+        assert out.count("FRAGILE") == 2        # Port B groups, not diluted by Port A
+
+    def test_zero_trade_variants_count_as_not_profitable(self):
+        from helpers.result_status import make_stub_result
+        meta = lambda lab: {"base_strategy": "Strat", "param_label": lab, "stop_label": ""}
+        res = [_sens_result("P", "", "(base)", 0.3)] + [
+            make_stub_result(f"Strat [{lab}]", "P", "no_trades", meta=meta(lab))
+            for lab in ("fast=8", "fast=9", "fast=11")]
+        out = _run_report(res)
+        assert "FRAGILE" in out and "25%" in out
+        assert out.count("[0 trades]") == 3
+
+    def test_legacy_results_without_metadata_still_render(self):
+        res = [{"Strategy": n, "Portfolio": "P", "pnl_percent": p}
+               for n, p in (("S [(base)]", 0.2), ("S [fast=8]", 0.1), ("S [fast=9]", -0.1))]
+        out = _run_report(res)
+        assert "S | P" in out and "(2/3)" in out
+        assert out.count(" <-- base") == 1 and "fast=8" in out

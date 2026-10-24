@@ -126,11 +126,10 @@ class TestEvaluateRollingWfa:
         When the majority of scorable folds fail (IS+, OOS-), the verdict must be 'Fail'.
 
         k=3 folds over 2000-2018:
-          fold 0 OOS (2000-2006): trades here appear as fold 0 OOS and as IS for folds 1+.
-                                  IS is empty → evaluate_wfa returns 'Pass'.
+          fold 0 OOS (2000-2006): IS is empty → not scorable (#428), skipped.
           fold 1 OOS (2006-2012): IS (profitable 2000-2005), OOS (losing) → 'Likely Overfitted'.
           fold 2 OOS (2012-2018): IS (profitable net), OOS (losing) → 'Likely Overfitted'.
-        1 / 3 pass < 60 % → overall 'Fail'.
+        0 / 2 scorable folds pass → overall 'Fail (0/2)'.
         """
         # 20 profitable trades in 2001-2005 → these are fold 0 OOS and IS for folds 1+
         good_2001_2005 = _make_trades("2001-01-01", "2005-12-31", n=20, profit=1000.0)
@@ -144,8 +143,7 @@ class TestEvaluateRollingWfa:
 
         result = evaluate_rolling_wfa(all_trades, fold_dates, 100_000, min_fold_trades=5)
         verdict = result["wfa_rolling_verdict"]
-        assert verdict.startswith("Fail"), f"Expected 'Fail (K/N)', got: {verdict}"
-        assert "/" in verdict, f"Expected K/N fraction in verdict, got: {verdict}"
+        assert verdict == "Fail (0/2)", f"Expected 'Fail (0/2)', got: {verdict}"
 
     def test_insufficient_scorable_folds_returns_na(self):
         """
@@ -168,3 +166,87 @@ class TestEvaluateRollingWfa:
         trades = _make_trades("2010-01-01", "2020-01-01", n=50)
         result = evaluate_rolling_wfa(trades, [], 100_000, min_fold_trades=5)
         assert result["wfa_rolling_verdict"] == "N/A"
+
+
+# ---------------------------------------------------------------------------
+# #427 — rolling folds measure window equity returns, not initial-capital pnl
+# ---------------------------------------------------------------------------
+
+from tests.test_wfa import _compounding_fixture
+
+
+class TestRollingCompoundingNormalisation:
+    def _verdict(self, is_rate, oos_rate, split="2012-01-01", **kw):
+        trades, curve, cap, start, _, end = _compounding_fixture(
+            is_rate, oos_rate, split=split)
+        folds = get_fold_dates(start, end, 5)
+        return evaluate_rolling_wfa(trades, folds, cap, 5, equity_curve=curve,
+                                    actual_start=start, **kw)["wfa_rolling_verdict"]
+
+    def test_constant_rate_passes(self):
+        assert self._verdict(0.10, 0.10).startswith("Pass")
+
+    def test_collapsed_edge_fails(self):
+        assert self._verdict(0.10, 0.0).startswith("Fail")
+
+    def test_legacy_call_without_curve_still_works(self):
+        trades, _, cap, start, _, end = _compounding_fixture(0.10, 0.10)
+        folds = get_fold_dates(start, end, 5)
+        assert evaluate_rolling_wfa(trades, folds, cap, 5)["wfa_rolling_verdict"].startswith("Pass")
+
+
+# ---------------------------------------------------------------------------
+# #428 — folds without in-sample history are never scored
+# ---------------------------------------------------------------------------
+
+from helpers.wfa import evaluate_wfa
+
+
+class TestFoldZeroNotScored:
+    def test_evaluate_wfa_empty_is_returns_na(self):
+        oos = _make_trades("2010-01-01", "2012-01-01", n=10)
+        assert evaluate_wfa([], oos, 100_000)["wfa_verdict"] == "N/A"
+
+    def test_evaluate_wfa_too_few_is_returns_na(self):
+        is_t = _make_trades("2005-01-01", "2006-01-01", n=4)
+        oos = _make_trades("2010-01-01", "2012-01-01", n=10)
+        assert evaluate_wfa(is_t, oos, 100_000)["wfa_verdict"] == "N/A"
+
+    def test_fold_zero_not_scored(self):
+        # Trades only inside fold 0's OOS window: all later folds lack OOS
+        # trades and fold 0 lacks IS, so nothing is scorable.
+        trades = _make_trades("2000-02-01", "2003-12-31", n=40)
+        folds = get_fold_dates("2000-01-01", "2020-01-01", k=5)
+        assert evaluate_rolling_wfa(trades, folds, 100_000)["wfa_rolling_verdict"] == "N/A"
+
+    def test_fail_when_every_fold_with_is_history_fails(self):
+        # Profitable 2001-2005 (fold 0 OOS, no IS) then losers in every later fold.
+        good = _make_trades("2001-01-01", "2005-12-31", n=20, profit=1000.0)
+        bad = _make_trades("2006-06-01", "2017-06-01", n=40, profit=-100.0)
+        folds = get_fold_dates("2000-01-01", "2018-01-01", k=3)
+        v = evaluate_rolling_wfa(good + bad, folds, 100_000)["wfa_rolling_verdict"]
+        assert v == "Fail (0/2)"
+
+    def test_is_below_min_fold_trades_not_scorable(self):
+        is_t = _make_trades("2000-06-01", "2001-06-01", n=3)
+        oos = _make_trades("2010-01-01", "2019-01-01", n=40)
+        folds = get_fold_dates("2000-01-01", "2020-01-01", k=2)
+        assert evaluate_rolling_wfa(is_t + oos, folds, 100_000)["wfa_rolling_verdict"] == "N/A"
+
+
+class TestAnchoredFoldDates:
+    def test_default_unchanged(self):
+        assert get_fold_dates("2000-01-01", "2020-01-01", 4)[0][0] == "2000-01-01"
+
+    def test_anchored_reserves_initial_is_window(self):
+        folds = get_fold_dates("2000-01-01", "2020-01-01", 4, anchored=True)
+        assert len(folds) == 4
+        assert folds[0][0] > "2000-01-01"
+        assert folds[-1][1] == "2020-01-01"
+        assert all(folds[i][1] == folds[i + 1][0] for i in range(3))
+
+    def test_anchored_all_folds_scorable(self):
+        trades = _make_trades("2000-01-01", "2020-01-01", n=200)
+        folds = get_fold_dates("2000-01-01", "2020-01-01", 4, anchored=True)
+        v = evaluate_rolling_wfa(trades, folds, 100_000)["wfa_rolling_verdict"]
+        assert v.endswith("/4)")
