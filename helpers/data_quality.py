@@ -461,7 +461,11 @@ def validate_ohlcv(df: pd.DataFrame, symbol: str, timeframe: str = "D",
             missing = expected_bars - total_bars
             pct = (missing / expected_bars) * 100
             issues.append(f"Missing bars: {missing} gaps ({pct:.1f}% of expected)")
-            demerits += min(20, int(pct / 2))  # 1 point per 2% missing
+            # Continue charging through 60% missing coverage. A cap of 20
+            # saturated at the default 80-point quality gate once 40% was
+            # missing. Integer truncation still leaves [40%, 42%) at a
+            # 20-point charge; changing that cast is tracked separately (#389).
+            demerits += min(30, int(pct / 2))  # 1 point per 2% missing
 
     # --- CHECK 7: floor-tick prices (issue #350) ---
     # Bars printing EXACTLY 1e-06, the bottom of the provider's tick grid. See

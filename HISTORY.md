@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Missing-bars demerits continue charging through 60% missing coverage, with a 30-point cap; the integer casts remain unchanged (#378/#382).
+
 - Position sizing reports per-run stop-input, proxy, cap, cash/margin, ADV, and heat conditions for every entry leg, including zero-trade runs. Tiny equity shorts now honor the same minimum size as longs (#387/#394).
 
 - Futures short entries honor the ADV cap and adverse entry impact, report both impact legs, and recheck actual stop risk after impact; margin affordability uses the slipped/impacted fill (#468).

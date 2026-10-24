@@ -336,6 +336,45 @@ class TestIntegrationWithConfig:
         assert issues == []
 
 
+class TestMissingBarsCapDoesNotSaturateAtTheGate:
+    """Isolate the missing-bars charge and assert its band and saturation."""
+
+    @staticmethod
+    def _sparse(missing_pct):
+        full = pd.bdate_range("2020-01-01", periods=1000)
+        n = max(2, int(round(len(full) * (1.0 - missing_pct))))
+        # An integer stride collapses different requested fractions to the
+        # same frame; evenly spaced positions preserve the requested count.
+        pos = np.unique(np.linspace(0, len(full) - 1, n).round().astype(int))
+        idx = full[pos]
+        price = np.linspace(50.0, 60.0, len(idx))
+        return pd.DataFrame({"Open": price, "High": price * 1.01,
+                             "Low": price * 0.99, "Close": price,
+                             "Volume": 1_000_000.0}, index=idx)
+
+    def _score_with_density(self, missing_pct):
+        score, issues = validate_ohlcv(self._sparse(missing_pct), "MISS", "D")
+        assert sorted(i.split(":")[0] for i in issues) == ["Missing bars", "Sparse history"], (
+            "the density charge must fire at both compared points, with no "
+            f"other demerits; otherwise the difference is confounded: {issues}")
+        return score
+
+    def test_the_40_percent_case_still_lands_exactly_on_the_gate(self):
+        # The remaining [40%,42%) plateau comes from int(), not the cap.
+        score, issues = validate_ohlcv(self._sparse(0.40), "MISS40", "D")
+        assert score == pytest.approx(80.0), (score, issues)
+        assert len(issues) == 1 and issues[0].startswith("Missing bars:"), issues
+
+    def test_the_charge_keeps_accumulating_in_the_40_to_60_band(self):
+        s50 = self._score_with_density(0.50)
+        s60 = self._score_with_density(0.60)
+        assert s60 < s50, "the missing-bars charge saturated inside its 40–60% band"
+
+    def test_a_cap_still_exists(self):
+        # Beyond 60%, removing the cap would keep charging; density is equal.
+        assert self._score_with_density(0.95) == self._score_with_density(0.98)
+
+
 # ---------------------------------------------------------------------------
 # CHECK 2 — non-positive prices (#369)
 # ---------------------------------------------------------------------------
