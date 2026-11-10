@@ -618,3 +618,46 @@ class TestParquetDataDirDefault:
     def test_build_span_index_none_gets_the_helpful_error(self):
         with pytest.raises(FileNotFoundError, match="--parquet-dir"):
             build_span_index(None)
+
+
+class TestAdjustedPriceScreen474:
+    """#474: the corpus stores only retrospectively ADJUSTED prices, so a
+    nominal-price screen on them is look-ahead (AAPL's 2005 adjusted close is
+    $0.95 because of splits it had not yet made). The screen is off by
+    default; an explicit threshold still applies but warns."""
+
+    @pytest.fixture(autouse=True)
+    def _reset_warning(self, monkeypatch):
+        import helpers.rule_based_universe as rbu
+        monkeypatch.setattr(rbu, "_ADJUSTED_PRICE_WARNED", False)
+
+    def test_price_screen_off_by_default(self):
+        assert DEFAULTS["universe_min_price"] == 0.0
+
+    def test_low_adjusted_price_liquid_name_included_by_default(self, corpus):
+        """A liquid name whose ADJUSTED close is $1.50 (the shape of a future
+        split winner seen through today's adjustment) must not be screened out."""
+        assert "PENNY" in resolve_universe("2015-06-30", _cfg(corpus))
+
+    def test_explicit_threshold_still_applies(self, corpus):
+        assert "PENNY" not in resolve_universe(
+            "2015-06-30", _cfg(corpus, universe_min_price=5.0))
+
+    def test_explicit_threshold_warns_once(self, corpus, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING, logger="helpers.rule_based_universe"):
+            resolve_universe("2015-06-30", _cfg(corpus, universe_min_price=5.0))
+            resolve_universe("2016-06-30", _cfg(corpus, universe_min_price=5.0))
+        hits = [r for r in caplog.records if "ADJUSTED closes" in r.getMessage()]
+        assert len(hits) == 1, "warn once per process, not once per re-base date"
+        assert "#474" in hits[0].getMessage()
+
+    def test_default_does_not_warn(self, corpus, caplog):
+        import logging
+        with caplog.at_level(logging.WARNING, logger="helpers.rule_based_universe"):
+            resolve_universe("2015-06-30", _cfg(corpus))
+        assert not [r for r in caplog.records if "ADJUSTED closes" in r.getMessage()]
+
+    def test_dollar_volume_screen_unaffected(self, corpus):
+        """The liquidity screen that replaces the price screen still removes THIN."""
+        assert "THIN" not in resolve_universe("2015-06-30", _cfg(corpus))
