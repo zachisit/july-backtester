@@ -16,9 +16,12 @@ investable set*. An index roster is one way to get one. A **rule** is another,
 and it needs no membership data at all::
 
     universe(D) = { s : s has bars on D
-                    and close(s, D)             >= min_price
+                    and close(s, D)             >= min_price   (default 0 = off, #474)
                     and dollar_volume_20d(s, D) >= min_dollar_volume
                     and history(s, D)           >= min_bars }
+
+(``close`` is the corpus's ADJUSTED close, so a non-zero ``min_price`` is
+look-ahead: it depends on splits/dividends after D. Off by default — #474.)
 
 optionally capped to the top N by dollar volume for a fixed-size universe
 comparable across dates (a liquidity-ranked stand-in for an index's size
@@ -89,7 +92,14 @@ def resolve_parquet_dir(config: dict | None) -> str:
 
 
 DEFAULTS = {
-    "universe_min_price": 5.0,
+    # Default OFF (#474). The corpus stores only retrospectively ADJUSTED
+    # prices (Norgate total-return, then Polygon split-adjusted), so a stock's
+    # "close" on date D depends on splits/dividends that happen after D. A
+    # nominal-price screen on it is look-ahead: at $5 it removed AAPL ($0.95
+    # adjusted), NVDA and AMZN from the 2005 top-500 — mostly future winners.
+    # The dollar-volume screen (split-invariant: price/k * volume*k) already
+    # removes illiquid microcaps. Setting this > 0 still works but warns.
+    "universe_min_price": 0.0,
     "universe_min_dollar_volume": 1_000_000.0,
     "universe_min_bars": 252,
     "universe_top_n": None,
@@ -422,6 +432,26 @@ def _liquidity_at(path: str, as_of: pd.Timestamp, adv_window: int):
     return float(df["Close"].iloc[-1]), dollar_volume, len(df)
 
 
+_ADJUSTED_PRICE_WARNED = False
+
+
+def _warn_adjusted_price_screen(min_price: float) -> None:
+    """Warn (once per process) that a nominal-price screen on adjusted closes
+    is look-ahead-biased (#474). Once, because a re-based schedule calls
+    ``resolve_universe`` ~20+ times per run."""
+    global _ADJUSTED_PRICE_WARNED
+    if _ADJUSTED_PRICE_WARNED:
+        return
+    _ADJUSTED_PRICE_WARNED = True
+    logger.warning(
+        "rule universe: universe_min_price=%s is applied to retrospectively "
+        "ADJUSTED closes, so eligibility on date D depends on splits/dividends "
+        "after D (look-ahead; it excludes the early history of future split "
+        "winners such as AAPL/NVDA/AMZN). The corpus has no as-traded price. "
+        "Set universe_min_price=0.0 (the default) unless you accept this bias. "
+        "See issue #474.", min_price)
+
+
 def resolve_universe(as_of, config: dict | None = None,
                      span_index: pd.DataFrame | None = None) -> list[str]:
     """Return the security IDs investable as of *as_of*.
@@ -454,6 +484,8 @@ def resolve_universe(as_of, config: dict | None = None,
         return DEFAULTS[key] if val is None and key != "universe_top_n" else val
 
     min_price = _cfg("universe_min_price")
+    if min_price and min_price > 0:
+        _warn_adjusted_price_screen(min_price)
     min_dollar_volume = _cfg("universe_min_dollar_volume")
     min_bars = _cfg("universe_min_bars")
     top_n = config.get("universe_top_n", DEFAULTS["universe_top_n"])
