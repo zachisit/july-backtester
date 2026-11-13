@@ -529,13 +529,12 @@ def run_single_simulation(args):
 
             # --- WFA ---
             if wfa_split_date and result.get('trade_log'):
-                from helpers.wfa import split_trades as _split_trades, evaluate_wfa as _evaluate_wfa
-                _is, _oos = _split_trades(result['trade_log'], wfa_split_date)
-                result.update(_evaluate_wfa(
-                    _is, _oos, result['initial_capital'],
+                # Shared with trade_analyzer/analyzer.py so the PDF matches (#477).
+                from helpers.wfa import evaluate_run_wfa as _evaluate_run_wfa
+                result.update(_evaluate_run_wfa(
+                    result['trade_log'], result['initial_capital'],
+                    wfa_split_date, spy_actual_start, spy_actual_end,
                     equity_curve=result.get('portfolio_timeline'),
-                    is_window=(spy_actual_start, wfa_split_date),
-                    oos_window=(wfa_split_date, pd.Timestamp(spy_actual_end) + pd.Timedelta(days=1)),
                 ))
             else:
                 result.update({'oos_pnl_pct': None, 'wfa_verdict': 'N/A'})
@@ -937,6 +936,13 @@ def main():
             f"  WFA split date   : {wfa_split_date}  "
             f"(IS: {_spy_actual_start} -> {wfa_split_date} | OOS: {wfa_split_date} -> {_spy_actual_end})"
         )
+        # Persist the exact inputs so report.py reproduces this split (#477).
+        from helpers.wfa import save_wfa_inputs as _save_wfa_inputs
+        if _save_wfa_inputs(run_base_dir, wfa_split_date, _spy_actual_start,
+                            _spy_actual_end, float(_wfa_ratio),
+                            initial_capital=CONFIG.get("initial_capital")) is None:
+            logger.warning("Could not write wfa_inputs.json; report.py will fall back "
+                           "to a closed-trade WFA approximation.")
     else:
         logger.info("  WFA              : disabled (wfa_split_ratio not set)")
     # --- END WFA SPLIT DATE ---

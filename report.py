@@ -51,7 +51,22 @@ def _load_equity_file(path: Path) -> "pd.Series | None":
         df = pd.read_csv(path, index_col=0, parse_dates=True)
         if df.empty:
             return None
-        return df.iloc[:, 0].rename("Equity")
+        series = df.iloc[:, 0].rename("Equity")
+        if not isinstance(series.index, pd.DatetimeIndex):
+            # Offsets that change mid-file (e.g. a DST transition, -05:00 then
+            # -04:00) leave a text index. Parse each stamp and keep its wall
+            # time -- what helpers.wfa does to the in-memory curve main.py
+            # used (tz_localize(None)) -- so the WFA boundaries line up (#477).
+            parsed = pd.DatetimeIndex([
+                (lambda ts: ts.tz_localize(None) if ts.tzinfo is not None else ts)(
+                    pd.Timestamp(v)) if pd.notna(v) else pd.NaT
+                for v in series.index
+            ])
+            series.index = parsed
+            series = series[series.index.notna()]
+            if series.empty:
+                return None
+        return series
     except Exception:
         return None
 
@@ -202,6 +217,22 @@ def _load_wfa_split_ratio(run_dir: Path) -> float | None:
     return None
 
 
+def _load_wfa_inputs(run_dir: Path) -> dict | None:
+    """Read the WFA inputs main.py used (``wfa_inputs.json``) from a run directory.
+
+    Returns ``{wfa_split_ratio, wfa_split_date, actual_start, actual_end}``, or
+    None for runs written before #477 (the analyzer then falls back to a
+    labelled closed-trade approximation).
+    """
+    from helpers.wfa import load_wfa_inputs
+    inputs = load_wfa_inputs(run_dir)
+    if inputs is not None and inputs.get("initial_capital") is None:
+        # The run's own capital, never --equity or the analyzer default: the
+        # analyzer only claims parity with main.py when this is set.
+        inputs["initial_capital"] = _load_initial_capital(run_dir)
+    return inputs
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate a detailed PDF/Markdown trade analysis report from a CSV file."
@@ -231,7 +262,9 @@ def main():
         default=None,
         help=f"Initial equity for the analysis. If omitted, auto-loaded from "
              f"config_snapshot.json's initial_capital when available, else "
-             f"falls back to {INITIAL_EQUITY}.",
+             f"falls back to {INITIAL_EQUITY}. The walk-forward (WFA) section "
+             f"ignores this when the run has wfa_inputs.json: it always uses the "
+             f"run's own initial capital so it matches main.py.",
     )
     parser.add_argument(
         "--report-name",
@@ -299,6 +332,10 @@ def main():
         wfa_ratio = _load_wfa_split_ratio(run_dir)
         if wfa_ratio is not None:
             print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
+        wfa_inputs = _load_wfa_inputs(run_dir)
+        if wfa_inputs is not None:
+            print(f"WFA inputs loaded from wfa_inputs.json: split {wfa_inputs['wfa_split_date']} "
+                  f"({wfa_inputs['actual_start']} -> {wfa_inputs['actual_end']})")
 
         # Load risk-free rate from this run's config_snapshot.json (if present)
         risk_free_rate = _load_risk_free_rate(run_dir)
@@ -319,6 +356,7 @@ def main():
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
             'WFA_SPLIT_RATIO': wfa_ratio,
+            'WFA_INPUTS': wfa_inputs,
             'NOISE_CSV_PATH': str(_noise_csv) if _noise_csv.is_file() else None,
         }
         if bars_per_year is not None:
@@ -373,6 +411,7 @@ def main():
         # Load timeframe-aware annualization factor, WFA split ratio, and risk-free rate
         # from config_snapshot.json if the CSV is inside a run dir
         wfa_ratio = None
+        wfa_inputs = None
         bars_per_year = None
         risk_free_rate = None
         initial_capital = None
@@ -386,6 +425,10 @@ def main():
             wfa_ratio = _load_wfa_split_ratio(_run_dir)
             if wfa_ratio is not None:
                 print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
+            wfa_inputs = _load_wfa_inputs(_run_dir)
+            if wfa_inputs is not None:
+                print(f"WFA inputs loaded from wfa_inputs.json: split {wfa_inputs['wfa_split_date']} "
+                      f"({wfa_inputs['actual_start']} -> {wfa_inputs['actual_end']})")
             risk_free_rate = _load_risk_free_rate(_run_dir)
             if risk_free_rate is not None:
                 print(f"Risk-free rate loaded from config_snapshot.json: {risk_free_rate}")
@@ -410,11 +453,16 @@ def main():
             _candidate = Path(*csv_parts_check[:idx_check]) / "noise_sample_data.csv"
             if _candidate.is_file():
                 _noise_csv_single = str(_candidate)
-        portfolio_timeline = _load_equity_file(Path(csv_path).parent / f"{report_name}_equity.csv")
+        # Pair the curve with the trades CSV it was written beside, never with
+        # --report-name: that would score this CSV's trades on another
+        # strategy's curve (#477).
+        portfolio_timeline = _load_equity_file(
+            Path(csv_path).parent / f"{Path(csv_path).stem}_equity.csv")
         config_params = {
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
             'WFA_SPLIT_RATIO': wfa_ratio,
+            'WFA_INPUTS': wfa_inputs,
             'NOISE_CSV_PATH': _noise_csv_single,
         }
         if portfolio_timeline is not None:
