@@ -209,8 +209,15 @@ def _run_layout(csv_path) -> "tuple[Path | None, Path]":
                       None)
         return candidates, marked
 
-    lexical = Path(os.path.abspath(str(csv_path))).parts
+    lexical_path = os.path.abspath(str(csv_path))
+    lexical = Path(lexical_path).parts
     lex_candidates, idx = _search(lexical)
+    # Normalising collapses ``link/..`` by name; trust the as-given match only
+    # if it still names the file actually read, else pair trades with the
+    # wrong run's config.
+    if idx is not None and not (os.path.exists(lexical_path)
+                                and os.path.samefile(lexical_path, csv_path)):
+        idx = None
     parts = lexical
     if idx is None:
         resolved = Path(os.path.realpath(str(csv_path))).parts

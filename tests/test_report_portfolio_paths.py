@@ -279,6 +279,27 @@ class TestAmbiguousRunFolders:
         self._assert_matches_all(monkeypatch, run_dir, [(csv, "Portfolio_A")])
 
     @pytest.mark.skipif(not hasattr(os, "symlink"), reason="no symlink support")
+    def test_symlink_dotdot_with_decoy_run_at_lexical_location(self, tmp_path, monkeypatch):
+        """``entry/link/../run`` reads ``real/run`` when ``link -> real/deep``,
+        even when another run (different capital) exists at ``entry/run``."""
+        real_run = _two_portfolio_run(tmp_path / "real")       # real/run
+        (tmp_path / "real" / "deep").mkdir()
+        _snapshot_run(real_run, capital=12_345.0)
+        decoy = _two_portfolio_run(tmp_path / "entry")        # entry/run
+        _snapshot_run(decoy, capital=99_999.0)
+        try:
+            os.symlink(tmp_path / "real" / "deep", tmp_path / "entry" / "link",
+                       target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"cannot create symlinks here: {exc}")
+
+        csv = (tmp_path / "entry" / "link" / ".." / "run" / "analyzer_csvs"
+               / "Portfolio_A" / f"{STRATEGY_STEM}.csv")
+        assert os.path.samefile(csv, real_run / "analyzer_csvs" / "Portfolio_A"
+                                / f"{STRATEGY_STEM}.csv")
+        self._assert_matches_all(monkeypatch, real_run, [(csv, "Portfolio_A")])
+
+    @pytest.mark.skipif(not hasattr(os, "symlink"), reason="no symlink support")
     def test_symlinked_analyzer_csvs_folder(self, tmp_path, monkeypatch):
         """``run/analyzer_csvs -> archive/trades``: realpath drops the
         ``analyzer_csvs`` name, so the run must be found from the path as given."""
