@@ -226,6 +226,13 @@ def _snapshot_run(run_dir, capital=12_345.0):
                                "2020-12-31", 0.8, initial_capital=capital)
 
 
+#: These two tests assert POSIX semantics: ``link/..`` goes through the link.
+#: Windows collapses ``..`` by name before opening, so the file read is a
+#: different one; ``test_link_then_dotdot_uses_the_run_actually_read`` covers
+#: both behaviours (#481).
+_POSIX_DOTDOT = "Windows resolves link/.. by name, not through the link"
+
+
 class TestAmbiguousRunFolders:
     """Codex review #2 of #480: same-named folders and symlinks."""
 
@@ -261,6 +268,7 @@ class TestAmbiguousRunFolders:
         ])
 
     @pytest.mark.skipif(not hasattr(os, "symlink"), reason="no symlink support")
+    @pytest.mark.skipif(os.name == "nt", reason=_POSIX_DOTDOT)
     def test_symlink_then_dotdot_follows_the_filesystem(self, tmp_path, monkeypatch):
         """``entry/link/../run`` is ``storage/run`` when ``link -> storage/nested``."""
         storage = tmp_path / "storage"
@@ -279,6 +287,7 @@ class TestAmbiguousRunFolders:
         self._assert_matches_all(monkeypatch, run_dir, [(csv, "Portfolio_A")])
 
     @pytest.mark.skipif(not hasattr(os, "symlink"), reason="no symlink support")
+    @pytest.mark.skipif(os.name == "nt", reason=_POSIX_DOTDOT)
     def test_symlink_dotdot_with_decoy_run_at_lexical_location(self, tmp_path, monkeypatch):
         """``entry/link/../run`` reads ``real/run`` when ``link -> real/deep``,
         even when another run (different capital) exists at ``entry/run``."""
@@ -340,3 +349,115 @@ class TestAllIgnoresOutputDir:
         run_dir = _two_portfolio_run(tmp_path)
         _capture(monkeypatch, ["--all", str(run_dir)])
         assert "--output-dir is ignored" not in capsys.readouterr().out
+
+
+def _link(kind, target, link):
+    """Create a directory symlink or (Windows only) junction; skip if impossible."""
+    try:
+        if kind == "junction":
+            if os.name != "nt":
+                pytest.skip("junctions exist only on Windows")
+            import _winapi
+            _winapi.CreateJunction(str(target), str(link))
+        else:
+            os.symlink(target, link, target_is_directory=True)
+    except (OSError, NotImplementedError, AttributeError) as exc:
+        pytest.skip(f"cannot create a {kind} here: {exc}")
+
+
+class TestRunLayoutPortability:
+    """#481: case-insensitive ``analyzer_csvs`` on Windows only, and links /
+    junctions, covered on every OS."""
+
+    @pytest.mark.parametrize("fold, expected", [
+        (True, ("run", "P")),
+        (False, (None, "")),
+    ])
+    def test_mixed_case_folder_matches_only_when_folding(
+            self, fold, expected, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(report, "_FOLD_CASE", fold)
+        run, sub = expected
+        want = (None if run is None else Path(os.path.realpath(tmp_path)) / run, Path(sub))
+        assert report._run_layout(Path("run/Analyzer_CSVs/P/S.csv")) == want
+
+    def test_fold_case_follows_os_name(self):
+        assert report._FOLD_CASE is (os.name == "nt")
+
+    def test_folded_portfolio_named_analyzer_csvs_keeps_marked_run(
+            self, tmp_path, monkeypatch):
+        """With folding on, ``run/ANALYZER_CSVS/analyzer_csvs/S.csv`` still picks
+        the folder whose parent holds the run file, not the portfolio."""
+        monkeypatch.setattr(report, "_FOLD_CASE", True)
+        csv_dir = tmp_path / "run" / "ANALYZER_CSVS" / "analyzer_csvs"
+        csv_dir.mkdir(parents=True)
+        (tmp_path / "run" / "config_snapshot.json").write_text("{}")
+        csv = csv_dir / "S.csv"
+        csv.write_text("x")
+        assert report._run_layout(csv) == (tmp_path / "run", Path("analyzer_csvs"))
+
+    def test_link_into_portfolio_falls_back_to_realpath(self, tmp_path, monkeypatch):
+        """``shortcut -> run/analyzer_csvs/Portfolio_A``: the path as given has no
+        ``analyzer_csvs``, so the run is found from the resolved path."""
+        run_dir = _two_portfolio_run(tmp_path)
+        _snapshot_run(run_dir)
+        _link("symlink", run_dir / "analyzer_csvs" / "Portfolio_A", tmp_path / "shortcut")
+        csv = tmp_path / "shortcut" / f"{STRATEGY_STEM}.csv"
+        (out, _, cfg), = _capture(monkeypatch, [str(csv)])
+        assert out == str(Path(os.path.realpath(run_dir)) / "detailed_reports" / "Portfolio_A")
+        assert cfg["INITIAL_EQUITY"] == 12_345.0
+
+    @pytest.mark.parametrize("kind", ["symlink", "junction"])
+    def test_linked_analyzer_csvs_folder(self, kind, tmp_path, monkeypatch):
+        """``run/analyzer_csvs`` is a link to ``archive/trades``."""
+        archive = _two_portfolio_run(tmp_path / "archive") / "analyzer_csvs"
+        trades = tmp_path / "archive" / "trades"
+        archive.rename(trades)
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        _snapshot_run(run_dir)
+        _link(kind, trades, run_dir / "analyzer_csvs")
+        TestAmbiguousRunFolders()._assert_matches_all(monkeypatch, run_dir, [
+            (run_dir / "analyzer_csvs" / p / f"{STRATEGY_STEM}.csv", p)
+            for p in ("Portfolio_A", "Portfolio_B")
+        ])
+
+    @pytest.mark.parametrize("kind", ["symlink", "junction"])
+    def test_link_then_dotdot_uses_the_run_actually_read(self, kind, tmp_path, monkeypatch):
+        """``entry/link/../run`` with ``link -> real/deep`` and a run at both
+        ``entry/run`` and ``real/run``. POSIX resolves the ``..`` through the
+        link (``real/run``); Windows collapses it by name (``entry/run``).
+        Either way the config must come from the run whose CSV is read."""
+        real_run = _two_portfolio_run(tmp_path / "real")
+        (tmp_path / "real" / "deep").mkdir()
+        _snapshot_run(real_run, capital=12_345.0)
+        entry_run = _two_portfolio_run(tmp_path / "entry")
+        _snapshot_run(entry_run, capital=99_999.0)
+        _link(kind, tmp_path / "real" / "deep", tmp_path / "entry" / "link")
+
+        tail = Path("analyzer_csvs") / "Portfolio_A" / f"{STRATEGY_STEM}.csv"
+        csv = tmp_path / "entry" / "link" / ".." / "run" / tail
+        read_run, capital = next((r, c) for r, c in ((real_run, 12_345.0),
+                                                     (entry_run, 99_999.0))
+                                 if os.path.samefile(csv, r / tail))
+        (out, _, cfg), = _capture(monkeypatch, [str(csv)])
+        assert os.path.realpath(out) == os.path.realpath(
+            read_run / "detailed_reports" / "Portfolio_A")
+        assert cfg["INITIAL_EQUITY"] == capital
+
+    @pytest.mark.parametrize("kind", ["symlink", "junction"])
+    def test_linked_analyzer_csvs_of_another_run_uses_the_given_run(
+            self, kind, tmp_path, monkeypatch):
+        """``run/analyzer_csvs -> other/analyzer_csvs`` where ``other`` is a run
+        too: the path as given names ``run``, and that is the run --all uses."""
+        other = _two_portfolio_run(tmp_path)
+        other = other.rename(tmp_path / "other")
+        _snapshot_run(other, capital=99_999.0)
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        _snapshot_run(run_dir)
+        _link(kind, other / "analyzer_csvs", run_dir / "analyzer_csvs")
+        TestAmbiguousRunFolders()._assert_matches_all(monkeypatch, run_dir, [
+            (run_dir / "analyzer_csvs" / p / f"{STRATEGY_STEM}.csv", p)
+            for p in ("Portfolio_A", "Portfolio_B")
+        ])
