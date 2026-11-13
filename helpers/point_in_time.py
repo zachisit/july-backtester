@@ -738,7 +738,13 @@ def _format_pit_failures(failures) -> str:
         else:
             lines.append("      no security with this bare ticker exists in the "
                          "parquet corpus at all.")
+    last_failure = max(str(date) for _, date, _ in failures)
     lines += [
+        "",
+        f"Within this run's dates, every unresolvable member above falls on or "
+        f"before {last_failure}: a later --start avoids them, but an earlier or "
+        f"longer window may hit others. Known corpus gaps are listed in CLAUDE.md "
+        f"under 'What still aborts'.",
         "",
         "A security ID can be requested directly (e.g. 'CB-201601' instead of "
         "'CB') — the same remedy the parquet loader's own masking warning "
