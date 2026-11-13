@@ -202,6 +202,17 @@ def _load_wfa_split_ratio(run_dir: Path) -> float | None:
     return None
 
 
+def _load_wfa_inputs(run_dir: Path) -> dict | None:
+    """Read the WFA inputs main.py used (``wfa_inputs.json``) from a run directory.
+
+    Returns ``{wfa_split_ratio, wfa_split_date, actual_start, actual_end}``, or
+    None for runs written before #477 (the analyzer then falls back to a
+    labelled closed-trade approximation).
+    """
+    from helpers.wfa import load_wfa_inputs
+    return load_wfa_inputs(run_dir)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate a detailed PDF/Markdown trade analysis report from a CSV file."
@@ -299,6 +310,10 @@ def main():
         wfa_ratio = _load_wfa_split_ratio(run_dir)
         if wfa_ratio is not None:
             print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
+        wfa_inputs = _load_wfa_inputs(run_dir)
+        if wfa_inputs is not None:
+            print(f"WFA inputs loaded from wfa_inputs.json: split {wfa_inputs['wfa_split_date']} "
+                  f"({wfa_inputs['actual_start']} -> {wfa_inputs['actual_end']})")
 
         # Load risk-free rate from this run's config_snapshot.json (if present)
         risk_free_rate = _load_risk_free_rate(run_dir)
@@ -319,6 +334,7 @@ def main():
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
             'WFA_SPLIT_RATIO': wfa_ratio,
+            'WFA_INPUTS': wfa_inputs,
             'NOISE_CSV_PATH': str(_noise_csv) if _noise_csv.is_file() else None,
         }
         if bars_per_year is not None:
@@ -373,6 +389,7 @@ def main():
         # Load timeframe-aware annualization factor, WFA split ratio, and risk-free rate
         # from config_snapshot.json if the CSV is inside a run dir
         wfa_ratio = None
+        wfa_inputs = None
         bars_per_year = None
         risk_free_rate = None
         initial_capital = None
@@ -386,6 +403,10 @@ def main():
             wfa_ratio = _load_wfa_split_ratio(_run_dir)
             if wfa_ratio is not None:
                 print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
+            wfa_inputs = _load_wfa_inputs(_run_dir)
+            if wfa_inputs is not None:
+                print(f"WFA inputs loaded from wfa_inputs.json: split {wfa_inputs['wfa_split_date']} "
+                      f"({wfa_inputs['actual_start']} -> {wfa_inputs['actual_end']})")
             risk_free_rate = _load_risk_free_rate(_run_dir)
             if risk_free_rate is not None:
                 print(f"Risk-free rate loaded from config_snapshot.json: {risk_free_rate}")
@@ -415,6 +436,7 @@ def main():
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
             'WFA_SPLIT_RATIO': wfa_ratio,
+            'WFA_INPUTS': wfa_inputs,
             'NOISE_CSV_PATH': _noise_csv_single,
         }
         if portfolio_timeline is not None:

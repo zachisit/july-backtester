@@ -16,10 +16,16 @@ get_split_date(actual_start, actual_end, ratio, df=None, config=None) -> str
 split_trades(trade_log, split_date)                   -> (is_trades, oos_trades)
 evaluate_wfa(is_trades, oos_trades, initial_capital,
              equity_curve=None, is_window=None, oos_window=None) -> dict
+evaluate_run_wfa(trade_log, initial_capital, split_date,
+                 actual_start, actual_end, equity_curve=None) -> dict
+save_wfa_inputs(run_dir, split_date, actual_start, actual_end, ratio)
+load_wfa_inputs(run_dir)                              -> dict | None
 """
 
 from __future__ import annotations
 
+import json
+import os
 from datetime import date, timedelta
 from typing import Optional
 import pandas as pd
@@ -309,3 +315,99 @@ def evaluate_wfa(
             return {"oos_pnl_pct": oos_pnl_pct, "wfa_verdict": "Likely Overfitted"}
 
     return {"oos_pnl_pct": oos_pnl_pct, "wfa_verdict": "Pass"}
+
+
+# ---------------------------------------------------------------------------
+# Run-level WFA (shared by main.py and the PDF analyzer -- issue #477)
+# ---------------------------------------------------------------------------
+
+#: File written into each run folder holding the inputs main.py used for WFA,
+#: so ``report.py`` reproduces the same split instead of re-deriving it.
+WFA_INPUTS_FILENAME = "wfa_inputs.json"
+
+
+def run_wfa_windows(split_date: str, actual_start: str, actual_end: str) -> tuple[tuple, tuple]:
+    """``(is_window, oos_window)`` for a run whose data spans *actual_start*..*actual_end*.
+
+    The OOS window ends one day after the last bar so the final bar's equity is
+    included (curve lookups use the close of the bar *before* each boundary).
+    """
+    is_window = (actual_start, split_date)
+    oos_window = (split_date, pd.Timestamp(actual_end) + pd.Timedelta(days=1))
+    return is_window, oos_window
+
+
+def evaluate_run_wfa(
+    trade_log:       list[dict],
+    initial_capital: float,
+    split_date:      str,
+    actual_start:    str,
+    actual_end:      str,
+    equity_curve:    Optional[pd.Series] = None,
+) -> dict:
+    """Run-level WFA exactly as ``main.py`` computes it for each strategy.
+
+    Splits *trade_log* at *split_date* and evaluates both buckets against the
+    run's actual data window, mark-to-market on *equity_curve* when given.
+    ``main.py`` and ``trade_analyzer/analyzer.py`` both call this, so the
+    terminal and the tearsheet cannot drift apart for the same inputs.
+    """
+    is_trades, oos_trades = split_trades(trade_log, split_date)
+    is_window, oos_window = run_wfa_windows(split_date, actual_start, actual_end)
+    return evaluate_wfa(
+        is_trades, oos_trades, initial_capital,
+        equity_curve=equity_curve,
+        is_window=is_window,
+        oos_window=oos_window,
+    )
+
+
+def save_wfa_inputs(
+    run_dir:      str,
+    split_date:   str,
+    actual_start: str,
+    actual_end:   str,
+    ratio:        float,
+) -> Optional[str]:
+    """Write the run's WFA inputs to ``<run_dir>/wfa_inputs.json``.
+
+    Returns the path written, or None if the write failed. Never raises: a
+    missing file only means ``report.py`` falls back to its labelled
+    closed-trade approximation.
+    """
+    path = os.path.join(str(run_dir), WFA_INPUTS_FILENAME)
+    payload = {
+        "wfa_split_ratio": float(ratio),
+        "wfa_split_date":  str(split_date),
+        "actual_start":    str(actual_start),
+        "actual_end":      str(actual_end),
+    }
+    try:
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+        return path
+    except OSError:
+        return None
+
+
+def load_wfa_inputs(run_dir) -> Optional[dict]:
+    """Read ``<run_dir>/wfa_inputs.json``; None if missing, unreadable or invalid."""
+    path = os.path.join(str(run_dir), WFA_INPUTS_FILENAME)
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        out = {
+            "wfa_split_ratio": float(data["wfa_split_ratio"]),
+            "wfa_split_date":  str(data["wfa_split_date"]),
+            "actual_start":    str(data["actual_start"]),
+            "actual_end":      str(data["actual_end"]),
+        }
+        if not 0 < out["wfa_split_ratio"] < 1:
+            return None
+        for key in ("wfa_split_date", "actual_start", "actual_end"):
+            pd.Timestamp(out[key])  # a corrupt file must not crash the report
+        return out
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
