@@ -461,3 +461,26 @@ class TestRunLayoutPortability:
             (run_dir / "analyzer_csvs" / p / f"{STRATEGY_STEM}.csv", p)
             for p in ("Portfolio_A", "Portfolio_B")
         ])
+
+    @pytest.mark.skipif(not hasattr(os, "symlink"), reason="no symlink support")
+    def test_linked_analyzer_csvs_without_run_files_uses_the_given_run(
+            self, tmp_path, monkeypatch):
+        """``local/run/analyzer_csvs -> archive/run/analyzer_csvs`` with no run
+        file in either run: single-file mode picks ``local/run``, the folder
+        --all on ``local/run`` uses, not the link target's ``archive/run``."""
+        archive_run = _two_portfolio_run(tmp_path / "archive")
+        local_run = tmp_path / "local" / "run"
+        local_run.mkdir(parents=True)
+        for run in (archive_run, local_run):
+            (run / "noise_sample_data.csv").write_text("Date,Close\n")
+        _link("symlink", archive_run / "analyzer_csvs", local_run / "analyzer_csvs")
+
+        batch = {out: cfg for out, _, cfg in _capture(monkeypatch, ["--all", str(local_run)])}
+        assert len(batch) == 2
+        for p in ("Portfolio_A", "Portfolio_B"):
+            csv = local_run / "analyzer_csvs" / p / f"{STRATEGY_STEM}.csv"
+            (out, _, cfg), = _capture(monkeypatch, [str(csv)])
+            assert out == str(local_run / "detailed_reports" / p)
+            assert out in batch
+            assert cfg["NOISE_CSV_PATH"] == batch[out]["NOISE_CSV_PATH"] == str(
+                local_run / "noise_sample_data.csv")
