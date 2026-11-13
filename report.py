@@ -5,6 +5,10 @@ Usage:
     python report.py path/to/strategy.csv
     python report.py output/runs/2026-03-02_14-00-00/analyzer_csvs/Nasdaq_100/EMA_Regime.csv
     python report.py --all output/runs/2026-03-02_14-00-00
+
+Reports for CSVs under a run's analyzer_csvs/<Portfolio>/ are written to
+detailed_reports/<Portfolio>/<Strategy>/, mirroring analyzer_csvs/, so a
+strategy name shared by two portfolios keeps both reports (#479).
 """
 import argparse
 import json
@@ -170,6 +174,22 @@ def _portfolio_dir_for(name: str) -> str:
     return safe_path_component(name) if name else ""
 
 
+def _portfolio_subdir(csv_path: Path) -> Path:
+    """The folder(s) between ``analyzer_csvs/`` and *csv_path* (#479).
+
+    ``analyzer_csvs/Nasdaq_100/Strat.csv`` -> ``Path("Nasdaq_100")``. Reports
+    are written to ``detailed_reports/<that>/<strategy>/`` so the same strategy
+    name in two portfolios of one run gets two reports instead of the second
+    overwriting the first. A CSV directly under ``analyzer_csvs/`` (or outside
+    any run) gives ``Path()``, which leaves the report directory unchanged.
+    """
+    parts = Path(csv_path).parts
+    if "analyzer_csvs" not in parts:
+        return Path()
+    idx = parts.index("analyzer_csvs")
+    return Path(*parts[idx + 1:-1])
+
+
 def _match_strategy_verdict(verdicts: list[dict], strategy_stem: str,
                             portfolio_dir: str) -> dict | None:
     """Find the llm_verdict entry matching a per-strategy CSV file.
@@ -248,13 +268,16 @@ def main():
         "--all",
         type=str,
         metavar="RUN_DIR",
-        help="Path to a run directory (e.g. output/runs/2026-03-02_15-12-32). Generates reports for all CSVs found under analyzer_csvs/.",
+        help="Path to a run directory (e.g. output/runs/2026-03-02_15-12-32). Generates reports for all CSVs found under analyzer_csvs/, "
+             "written to detailed_reports/<Portfolio>/<Strategy>/ (mirroring analyzer_csvs/<Portfolio>/).",
     )
 
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Root directory for report output. Auto-detected from the CSV path when inside output/runs/<run_id>/analyzer_csvs/.",
+        help="Root directory for report output. Auto-detected from the CSV path when inside "
+             "output/runs/<run_id>/analyzer_csvs/<Portfolio>/ (-> <run_id>/detailed_reports/<Portfolio>/). "
+             "When given, the report goes to <output-dir>/<report-name>/ exactly.",
     )
     parser.add_argument(
         "--equity",
@@ -382,7 +405,11 @@ def main():
                                                     csv_file.parent.name)
             if _verdict_match is not None:
                 this_config['STRATEGY_VERDICT'] = _verdict_match
-            generate_trade_report(trades_df, output_dir, report_name, this_config)
+            # Mirror analyzer_csvs/<Portfolio>/ so a strategy name shared by two
+            # portfolios does not overwrite the other's report (#479).
+            report_dir = str(Path(output_dir) / csv_file.parent.relative_to(analyzer_csvs_dir))
+            this_config['BASE_OUTPUT_DIRECTORY'] = report_dir
+            generate_trade_report(trades_df, report_dir, report_name, this_config)
             count += 1
 
         print(f"Generated {count} reports in {output_dir}")
@@ -395,8 +422,10 @@ def main():
             sys.exit(1)
 
         # Dynamically determine output directory based on the CSV path.
-        # If the CSV lives inside a run's analyzer_csvs/ folder, route the report
-        # to detailed_reports/ inside the same run directory.
+        # If the CSV lives inside a run's analyzer_csvs/<Portfolio>/ folder,
+        # route the report to detailed_reports/<Portfolio>/ inside the same run
+        # directory -- the same place --all writes it (#479). An explicit
+        # --output-dir is used exactly as given.
         if args.output_dir is not None:
             output_dir = args.output_dir
         else:
@@ -404,7 +433,8 @@ def main():
             if "analyzer_csvs" in csv_parts:
                 idx = csv_parts.index("analyzer_csvs")
                 base_run_dir = Path(*csv_parts[:idx])
-                output_dir = str(base_run_dir / "detailed_reports")
+                output_dir = str(base_run_dir / "detailed_reports"
+                                 / _portfolio_subdir(Path(csv_path)))
             else:
                 output_dir = "detailed_reports"
 
