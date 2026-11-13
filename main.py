@@ -939,7 +939,8 @@ def main():
         # Persist the exact inputs so report.py reproduces this split (#477).
         from helpers.wfa import save_wfa_inputs as _save_wfa_inputs
         if _save_wfa_inputs(run_base_dir, wfa_split_date, _spy_actual_start,
-                            _spy_actual_end, float(_wfa_ratio)) is None:
+                            _spy_actual_end, float(_wfa_ratio),
+                            initial_capital=CONFIG.get("initial_capital")) is None:
             logger.warning("Could not write wfa_inputs.json; report.py will fall back "
                            "to a closed-trade WFA approximation.")
     else:

@@ -107,25 +107,28 @@ def _main_reference(trade_log, timeline):
     return split, res
 
 
-def _write_run_dir(tmp_path, trade_log, timeline, with_inputs=True):
+def _write_run_dir(tmp_path, trade_log, timeline, with_inputs=True,
+                   with_snapshot=True, inputs_capital=None, stem_name="Long Hold"):
     """Lay out a run folder the way main.py / helpers.summary write it."""
     from helpers.summary import _safe_strategy_name
 
     run_dir = tmp_path / "run"
     csv_dir = run_dir / "analyzer_csvs" / "Port"
-    csv_dir.mkdir(parents=True)
-    (run_dir / "config_snapshot.json").write_text(json.dumps({
-        "wfa_split_ratio": RATIO,
-        "initial_capital": INITIAL_CAPITAL,
-    }))
+    csv_dir.mkdir(parents=True, exist_ok=True)
+    if with_snapshot:
+        (run_dir / "config_snapshot.json").write_text(json.dumps({
+            "wfa_split_ratio": RATIO,
+            "initial_capital": INITIAL_CAPITAL,
+        }))
     if with_inputs:
         split = wfa.get_split_date(SPY_START, SPY_END, RATIO)
-        assert wfa.save_wfa_inputs(str(run_dir), split, SPY_START, SPY_END, RATIO)
+        assert wfa.save_wfa_inputs(str(run_dir), split, SPY_START, SPY_END, RATIO,
+                                   initial_capital=inputs_capital)
 
     # Same mapping + writers as helpers/summary.py Step 4a.
     column_map = {"EntryDate": "Date", "ExitDate": "Ex. date", "EntryPrice": "Price",
                   "ExitPrice": "Ex. Price", "ProfitPct": "% Profit", "HoldDuration": "# bars"}
-    stem = _safe_strategy_name("Long Hold")
+    stem = _safe_strategy_name(stem_name)
     mapped = pd.DataFrame(trade_log).rename(columns=column_map)
     mapped["% Profit"] = mapped["% Profit"] * 100.0
     mapped.to_csv(csv_dir / f"{stem}.csv", index=False)
@@ -305,6 +308,132 @@ class TestFallbackIsLabelled:
         assert ("closed-trade approximation" in split_line) is approx
 
 
+def _report_config_single(csv_path, monkeypatch, extra_args=()):
+    """Run report.py in single-file mode with the analyzer stubbed."""
+    import report as report_cli
+
+    captured = []
+    monkeypatch.setattr(report_cli, "generate_trade_report",
+                        lambda df, out, name, cfg: captured.append((df, cfg)))
+    monkeypatch.setattr(sys, "argv", ["report.py", str(csv_path), *extra_args])
+    report_cli.main()
+    assert len(captured) == 1
+    return captured[0]
+
+
+class TestQaFollowups:
+    """Codex QA findings on PR #478."""
+
+    def test_dst_crossing_equity_curve_still_matches_main(self, tmp_path, monkeypatch):
+        """Offsets changing mid-file (-05:00 -> -04:00) used to load as a text
+        index, make ``curve.asof`` raise and drop the WFA section silently."""
+        trade_log, timeline = _synthetic_run()
+        ny = timeline.copy()
+        ny.index = ny.index.tz_convert(None).tz_localize("America/New_York")
+        ref_split, ref = _main_reference(trade_log, ny)
+        run_dir, csv_path = _write_run_dir(tmp_path, trade_log, ny)
+        raw = (csv_path.parent / f"{csv_path.stem}_equity.csv").read_text()
+        assert "-05:00" in raw and "-04:00" in raw  # the fixture really crosses DST
+
+        df, cfg = _report_config(run_dir, monkeypatch)
+        assert isinstance(cfg["PORTFOLIO_TIMELINE"].index, pd.DatetimeIndex)
+        split, res = _analyzer_wfa(df, cfg)
+        assert split == ref_split
+        assert res["wfa_basis"] == "run"
+        assert res["wfa_verdict"] == ref["wfa_verdict"]
+        assert res["oos_pnl_pct"] == pytest.approx(ref["oos_pnl_pct"], abs=1e-12)
+
+    def test_unusable_curve_falls_back_labelled_not_dropped(self, tmp_path, monkeypatch):
+        from trade_analyzer.analyzer import WFA_APPROX_LABEL
+
+        trade_log, timeline = _synthetic_run()
+        run_dir, _ = _write_run_dir(tmp_path, trade_log, timeline)
+        df, cfg = _report_config(run_dir, monkeypatch)
+        bad = pd.Series(timeline.values, index=[str(i) for i in timeline.index])
+        split, res = _analyzer_wfa(df, {**cfg, "PORTFOLIO_TIMELINE": bad})
+        assert split == wfa.get_split_date(SPY_START, SPY_END, RATIO)
+        assert res["wfa_verdict"] in ("Pass", "Likely Overfitted", "N/A")
+        assert res["wfa_basis"] == "approximation"
+        assert WFA_APPROX_LABEL in res["wfa_basis_note"]
+
+    def test_curve_that_raises_falls_back_labelled(self, tmp_path, monkeypatch):
+        from trade_analyzer import analyzer
+
+        trade_log, timeline = _synthetic_run()
+        run_dir, _ = _write_run_dir(tmp_path, trade_log, timeline)
+        df, cfg = _report_config(run_dir, monkeypatch)
+        real = wfa.evaluate_run_wfa
+
+        def _boom(*a, equity_curve=None, **k):
+            if equity_curve is not None:
+                raise TypeError("cannot compare")
+            return real(*a, **k)
+
+        monkeypatch.setattr(wfa, "evaluate_run_wfa", _boom)
+        split, res = _analyzer_wfa(df, cfg)
+        assert split is not None and res
+        assert res["wfa_basis"] == "approximation"
+        assert analyzer.WFA_APPROX_LABEL in res["wfa_basis_note"]
+
+    def test_single_file_report_name_does_not_pick_other_curve(self, tmp_path, monkeypatch):
+        """``report.py A.csv --report-name B`` must not score A on B_equity.csv."""
+        trade_log, timeline = _synthetic_run()
+        run_dir, a_csv = _write_run_dir(tmp_path, trade_log, timeline, stem_name="A")
+        (a_csv.parent / "A_equity.csv").rename(a_csv.parent / "B_equity.csv")
+
+        df, cfg = _report_config_single(a_csv, monkeypatch, ["--report-name", "B"])
+        assert cfg.get("PORTFOLIO_TIMELINE") is None
+        _, res = _analyzer_wfa(df, cfg)
+        assert res["wfa_basis"] == "approximation"
+
+    def test_single_file_pairs_curve_by_trades_csv_stem(self, tmp_path, monkeypatch):
+        trade_log, timeline = _synthetic_run()
+        ref_split, ref = _main_reference(trade_log, timeline)
+        run_dir, a_csv = _write_run_dir(tmp_path, trade_log, timeline, stem_name="A")
+
+        df, cfg = _report_config_single(a_csv, monkeypatch, ["--report-name", "B"])
+        assert cfg.get("PORTFOLIO_TIMELINE") is not None
+        split, res = _analyzer_wfa(df, cfg)
+        assert split == ref_split
+        assert res["wfa_basis"] == "run"
+        assert res["oos_pnl_pct"] == pytest.approx(ref["oos_pnl_pct"], abs=1e-12)
+
+    def test_missing_run_capital_is_labelled(self, tmp_path, monkeypatch):
+        """wfa_inputs.json without capital and no config_snapshot.json: the
+        analyzer default capital is not the run's, so no parity claim."""
+        trade_log, timeline = _synthetic_run()
+        run_dir, _ = _write_run_dir(tmp_path, trade_log, timeline, with_snapshot=False)
+        df, cfg = _report_config(run_dir, monkeypatch)
+        assert cfg["WFA_INPUTS"]["initial_capital"] is None
+        _, res = _analyzer_wfa(df, cfg)
+        assert res["wfa_basis"] == "approximation"
+        assert "initial capital" in res["wfa_basis_note"]
+
+    def test_capital_in_inputs_is_used_even_without_snapshot(self, tmp_path, monkeypatch):
+        trade_log, timeline = _synthetic_run()
+        ref_split, ref = _main_reference(trade_log, timeline)
+        run_dir, _ = _write_run_dir(tmp_path, trade_log, timeline, with_snapshot=False,
+                                    inputs_capital=INITIAL_CAPITAL)
+        df, cfg = _report_config(run_dir, monkeypatch)
+        assert cfg["INITIAL_EQUITY"] != INITIAL_CAPITAL  # analyzer default, not the run's
+        split, res = _analyzer_wfa(df, cfg)
+        assert res["wfa_basis"] == "run"
+        assert res["wfa_verdict"] == ref["wfa_verdict"]
+        assert res["oos_pnl_pct"] == pytest.approx(ref["oos_pnl_pct"], abs=1e-12)
+
+    def test_invalid_inputs_file_uses_labelled_fallback(self, tmp_path, monkeypatch):
+        trade_log, timeline = _synthetic_run()
+        run_dir, _ = _write_run_dir(tmp_path, trade_log, timeline)
+        (run_dir / wfa.WFA_INPUTS_FILENAME).write_text(json.dumps({
+            "wfa_split_ratio": RATIO, "wfa_split_date": "NaT",
+            "actual_start": SPY_START, "actual_end": SPY_END}))
+        df, cfg = _report_config(run_dir, monkeypatch)
+        assert cfg["WFA_INPUTS"] is None
+        split, res = _analyzer_wfa(df, cfg)
+        assert split is not None
+        assert res["wfa_basis"] == "approximation"
+
+
 @pytest.mark.slow
 class TestEndToEndMainThenReport:
     """A real ``main.py`` run (CSV provider, synthetic prices), then report.py.
@@ -349,6 +478,7 @@ class TestEndToEndMainThenReport:
         try:
             inputs = wfa.load_wfa_inputs(run_dir)
             assert inputs is not None, "main.py did not write wfa_inputs.json"
+            assert inputs["initial_capital"] is not None
             summary = pd.read_csv(os.path.join(run_dir, "overall_portfolio_summary.csv"),
                                   keep_default_na=False)
             row = summary.iloc[0]
@@ -371,7 +501,13 @@ class TestWfaInputsFile:
         assert wfa.load_wfa_inputs(tmp_path) == {
             "wfa_split_ratio": RATIO, "wfa_split_date": "2023-01-01",
             "actual_start": SPY_START, "actual_end": SPY_END,
+            "initial_capital": None,
         }
+
+    def test_round_trip_with_capital(self, tmp_path):
+        wfa.save_wfa_inputs(str(tmp_path), "2023-01-01", SPY_START, SPY_END, RATIO,
+                            initial_capital=250_000)
+        assert wfa.load_wfa_inputs(tmp_path)["initial_capital"] == 250_000.0
 
     def test_missing_returns_none(self, tmp_path):
         assert wfa.load_wfa_inputs(tmp_path) is None
@@ -383,6 +519,19 @@ class TestWfaInputsFile:
         json.dumps({"wfa_split_ratio": 1.5, "wfa_split_date": "2023-01-01",
                     "actual_start": SPY_START, "actual_end": SPY_END}),
         json.dumps({"wfa_split_ratio": 0.8, "wfa_split_date": "garbage",
+                    "actual_start": SPY_START, "actual_end": SPY_END}),
+        # NaT parses without raising; it must still be rejected.
+        json.dumps({"wfa_split_ratio": 0.8, "wfa_split_date": "NaT",
+                    "actual_start": SPY_START, "actual_end": SPY_END}),
+        json.dumps({"wfa_split_ratio": 0.8, "wfa_split_date": "2023-01-01",
+                    "actual_start": "NaT", "actual_end": SPY_END}),
+        # Window ends before it starts.
+        json.dumps({"wfa_split_ratio": 0.8, "wfa_split_date": "2023-01-01",
+                    "actual_start": SPY_END, "actual_end": SPY_START}),
+        # Split outside the window.
+        json.dumps({"wfa_split_ratio": 0.8, "wfa_split_date": "2030-01-01",
+                    "actual_start": SPY_START, "actual_end": SPY_END}),
+        json.dumps({"wfa_split_ratio": 0.8, "wfa_split_date": SPY_START,
                     "actual_start": SPY_START, "actual_end": SPY_END}),
     ])
     def test_invalid_returns_none(self, tmp_path, content):

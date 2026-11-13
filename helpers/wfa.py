@@ -368,6 +368,7 @@ def save_wfa_inputs(
     actual_start: str,
     actual_end:   str,
     ratio:        float,
+    initial_capital: Optional[float] = None,
 ) -> Optional[str]:
     """Write the run's WFA inputs to ``<run_dir>/wfa_inputs.json``.
 
@@ -382,6 +383,8 @@ def save_wfa_inputs(
         "actual_start":    str(actual_start),
         "actual_end":      str(actual_end),
     }
+    if initial_capital is not None:
+        payload["initial_capital"] = float(initial_capital)
     try:
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2)
@@ -391,7 +394,15 @@ def save_wfa_inputs(
 
 
 def load_wfa_inputs(run_dir) -> Optional[dict]:
-    """Read ``<run_dir>/wfa_inputs.json``; None if missing, unreadable or invalid."""
+    """Read ``<run_dir>/wfa_inputs.json``; None if missing, unreadable or invalid.
+
+    Invalid means: ratio outside (0, 1), any date unparseable or ``NaT``, or
+    not ``actual_start < wfa_split_date < actual_end``. A None return makes the
+    report fall back to its labelled closed-trade approximation, never a
+    silently wrong "matches main.py" result.
+
+    ``initial_capital`` is optional (None when absent or not a positive number).
+    """
     path = os.path.join(str(run_dir), WFA_INPUTS_FILENAME)
     if not os.path.isfile(path):
         return None
@@ -406,8 +417,18 @@ def load_wfa_inputs(run_dir) -> Optional[dict]:
         }
         if not 0 < out["wfa_split_ratio"] < 1:
             return None
-        for key in ("wfa_split_date", "actual_start", "actual_end"):
-            pd.Timestamp(out[key])  # a corrupt file must not crash the report
+        stamps = [_naive_ts(out[k]) for k in ("actual_start", "wfa_split_date", "actual_end")]
+        if any(pd.isna(ts) for ts in stamps):
+            return None
+        start_ts, split_ts, end_ts = stamps
+        if not start_ts < split_ts < end_ts:
+            return None
+        capital = data.get("initial_capital")
+        try:
+            capital = float(capital) if capital is not None else None
+        except (TypeError, ValueError):
+            capital = None
+        out["initial_capital"] = capital if (capital is not None and capital > 0) else None
         return out
     except (OSError, ValueError, TypeError, KeyError, AttributeError):
         return None

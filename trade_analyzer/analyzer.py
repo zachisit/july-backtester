@@ -84,6 +84,94 @@ def _raw_wfa_trades(trades_df_raw: pd.DataFrame) -> list:
             for d, p in zip(raw[exit_col], profits) if pd.notna(p)]
 
 
+def _usable_curve(curve):
+    """*curve* if it can be fed to helpers.wfa (dated, numeric, non-empty), else None."""
+    if curve is None or not isinstance(curve, pd.Series) or curve.empty:
+        return None
+    if not isinstance(curve.index, pd.DatetimeIndex):
+        return None
+    if not pd.api.types.is_numeric_dtype(curve):
+        return None
+    if curve.dropna().empty:
+        return None
+    return curve
+
+
+def _run_wfa_from_inputs(wfa, raw_trades, initial_equity, wfa_inputs, portfolio_timeline):
+    """main.py's run-level WFA from ``wfa_inputs.json``.
+
+    The result is labelled ``"run"`` only when every input really is the run's:
+    its split/window, its initial capital and a usable equity curve. Anything
+    short of that is computed as far as possible and labelled an approximation.
+    """
+    split_date = wfa_inputs['wfa_split_date']
+    # The same trade log main.py evaluated: raw exit dates and profits.
+    trade_dicts = list(raw_trades or [])
+    reasons = []
+
+    capital = wfa_inputs.get('initial_capital')
+    if capital is None:
+        capital = initial_equity
+        reasons.append(f"the run's initial capital was not found (using {capital:,.0f})")
+
+    curve = _usable_curve(portfolio_timeline)
+    if curve is None:
+        reasons.append("no usable equity curve was found, so OOS P&L uses "
+                       "closed-trade profits only")
+    result = None
+    if curve is not None:
+        try:
+            result = wfa.evaluate_run_wfa(
+                trade_dicts, capital, split_date,
+                wfa_inputs['actual_start'], wfa_inputs['actual_end'],
+                equity_curve=curve,
+            )
+        except Exception as curve_err:
+            reasons.append(f"the equity curve could not be used ({curve_err}), so "
+                           f"OOS P&L uses closed-trade profits only")
+    if result is None:
+        result = wfa.evaluate_run_wfa(
+            trade_dicts, capital, split_date,
+            wfa_inputs['actual_start'], wfa_inputs['actual_end'],
+        )
+
+    if reasons:
+        result.update(wfa_basis="approximation", wfa_basis_note=(
+            f"{WFA_APPROX_LABEL}: run split used, but " + "; ".join(reasons)))
+    else:
+        result.update(wfa_basis="run", wfa_basis_note=None)
+    n_is, n_oos = (len(x) for x in wfa.split_trades(trade_dicts, split_date))
+    return split_date, result, n_is, n_oos
+
+
+def _legacy_wfa(wfa, trades_df, start_dt, end_dt, initial_equity, wfa_split_ratio,
+                inputs_ratio=None, inputs_found=False):
+    """Pre-#477 trade-span split on closed-trade profits, always labelled."""
+    ratio = inputs_ratio or wfa_split_ratio
+    if not (ratio and 0 < float(ratio) < 1 and pd.notna(start_dt) and pd.notna(end_dt)):
+        return None
+    actual_start = start_dt.strftime("%Y-%m-%d")
+    actual_end = end_dt.strftime("%Y-%m-%d")
+    split_date = wfa.get_split_date(actual_start, actual_end, float(ratio))
+    trade_dicts = [
+        {"ExitDate": row["Ex. date"].strftime("%Y-%m-%d"), "Profit": row["Profit"]}
+        for _, row in trades_df.iterrows()
+        if pd.notna(row.get("Ex. date")) and pd.notna(row.get("Profit"))
+    ]
+    is_trades, oos_trades = wfa.split_trades(trade_dicts, split_date)
+    result = wfa.evaluate_wfa(
+        is_trades, oos_trades, initial_equity,
+        is_window=(actual_start, split_date),
+        oos_window=(split_date, actual_end),
+    )
+    why = ("could not be used" if inputs_found else "not found")
+    result.update(wfa_basis="approximation", wfa_basis_note=(
+        f"{WFA_APPROX_LABEL}: run WFA inputs ({wfa.WFA_INPUTS_FILENAME}) {why}, "
+        f"so the split is taken over the trade span (first entry to last exit) "
+        f"and OOS P&L uses closed-trade profits only; may differ from main.py"))
+    return split_date, result, len(is_trades), len(oos_trades)
+
+
 def _compute_wfa(raw_trades, trades_df, start_dt, end_dt, initial_equity,
                  wfa_split_ratio, wfa_inputs=None, portfolio_timeline=None):
     """Return ``(wfa_split_date, wfa_result)`` for the tearsheet.
@@ -100,49 +188,23 @@ def _compute_wfa(raw_trades, trades_df, start_dt, end_dt, initial_equity,
     """
     try:
         wfa = _import_wfa()
-        curve = portfolio_timeline if (portfolio_timeline is not None
-                                       and not portfolio_timeline.empty) else None
-
+        outcome = None
         if wfa_inputs:
-            split_date = wfa_inputs['wfa_split_date']
-            # The same trade log main.py evaluated: raw exit dates and profits.
-            trade_dicts = list(raw_trades or [])
-            result = wfa.evaluate_run_wfa(
-                trade_dicts, initial_equity, split_date,
-                wfa_inputs['actual_start'], wfa_inputs['actual_end'],
-                equity_curve=curve,
-            )
-            if curve is not None:
-                result.update(wfa_basis="run", wfa_basis_note=None)
-            else:
-                result.update(wfa_basis="approximation", wfa_basis_note=(
-                    f"{WFA_APPROX_LABEL}: run split used, but no equity curve "
-                    f"was found, so OOS P&L uses closed-trade profits only"))
-            n_is, n_oos = (len(x) for x in wfa.split_trades(trade_dicts, split_date))
-        else:
-            if not (wfa_split_ratio and 0 < float(wfa_split_ratio) < 1
-                    and pd.notna(start_dt) and pd.notna(end_dt)):
+            try:
+                outcome = _run_wfa_from_inputs(wfa, raw_trades, initial_equity,
+                                               wfa_inputs, portfolio_timeline)
+            except Exception as run_err:
+                print(f"WFA Warning: run WFA inputs could not be used ({run_err}); "
+                      f"falling back to the {WFA_APPROX_LABEL}.")
+                outcome = None
+        if outcome is None:
+            outcome = _legacy_wfa(wfa, trades_df, start_dt, end_dt, initial_equity,
+                                  wfa_split_ratio,
+                                  wfa_inputs.get('wfa_split_ratio') if wfa_inputs else None,
+                                  inputs_found=bool(wfa_inputs))
+            if outcome is None:
                 return None, {}
-            actual_start = start_dt.strftime("%Y-%m-%d")
-            actual_end = end_dt.strftime("%Y-%m-%d")
-            split_date = wfa.get_split_date(actual_start, actual_end, float(wfa_split_ratio))
-            trade_dicts = [
-                {"ExitDate": row["Ex. date"].strftime("%Y-%m-%d"), "Profit": row["Profit"]}
-                for _, row in trades_df.iterrows()
-                if pd.notna(row.get("Ex. date")) and pd.notna(row.get("Profit"))
-            ]
-            is_trades, oos_trades = wfa.split_trades(trade_dicts, split_date)
-            result = wfa.evaluate_wfa(
-                is_trades, oos_trades, initial_equity,
-                is_window=(actual_start, split_date),
-                oos_window=(split_date, actual_end),
-            )
-            result.update(wfa_basis="approximation", wfa_basis_note=(
-                f"{WFA_APPROX_LABEL}: run WFA inputs ({wfa.WFA_INPUTS_FILENAME}) not "
-                f"found, so the split is taken over the trade span (first entry to "
-                f"last exit) and OOS P&L uses closed-trade profits only; may differ "
-                f"from main.py"))
-            n_is, n_oos = len(is_trades), len(oos_trades)
+        split_date, result, n_is, n_oos = outcome
 
         print(f"WFA: split_date={split_date}  IS={n_is} trades  OOS={n_oos} trades  "
               f"verdict={result.get('wfa_verdict')}")

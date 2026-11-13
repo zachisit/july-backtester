@@ -51,7 +51,22 @@ def _load_equity_file(path: Path) -> "pd.Series | None":
         df = pd.read_csv(path, index_col=0, parse_dates=True)
         if df.empty:
             return None
-        return df.iloc[:, 0].rename("Equity")
+        series = df.iloc[:, 0].rename("Equity")
+        if not isinstance(series.index, pd.DatetimeIndex):
+            # Offsets that change mid-file (e.g. a DST transition, -05:00 then
+            # -04:00) leave a text index. Parse each stamp and keep its wall
+            # time -- what helpers.wfa does to the in-memory curve main.py
+            # used (tz_localize(None)) -- so the WFA boundaries line up (#477).
+            parsed = pd.DatetimeIndex([
+                (lambda ts: ts.tz_localize(None) if ts.tzinfo is not None else ts)(
+                    pd.Timestamp(v)) if pd.notna(v) else pd.NaT
+                for v in series.index
+            ])
+            series.index = parsed
+            series = series[series.index.notna()]
+            if series.empty:
+                return None
+        return series
     except Exception:
         return None
 
@@ -210,7 +225,12 @@ def _load_wfa_inputs(run_dir: Path) -> dict | None:
     labelled closed-trade approximation).
     """
     from helpers.wfa import load_wfa_inputs
-    return load_wfa_inputs(run_dir)
+    inputs = load_wfa_inputs(run_dir)
+    if inputs is not None and inputs.get("initial_capital") is None:
+        # The run's own capital, never --equity or the analyzer default: the
+        # analyzer only claims parity with main.py when this is set.
+        inputs["initial_capital"] = _load_initial_capital(run_dir)
+    return inputs
 
 
 def main():
@@ -431,7 +451,11 @@ def main():
             _candidate = Path(*csv_parts_check[:idx_check]) / "noise_sample_data.csv"
             if _candidate.is_file():
                 _noise_csv_single = str(_candidate)
-        portfolio_timeline = _load_equity_file(Path(csv_path).parent / f"{report_name}_equity.csv")
+        # Pair the curve with the trades CSV it was written beside, never with
+        # --report-name: that would score this CSV's trades on another
+        # strategy's curve (#477).
+        portfolio_timeline = _load_equity_file(
+            Path(csv_path).parent / f"{Path(csv_path).stem}_equity.csv")
         config_params = {
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
