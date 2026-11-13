@@ -5,6 +5,7 @@
 ### Fixes
 
 - `report.py` writes tearsheets to `detailed_reports/<Portfolio>/<Strategy>/`, mirroring `analyzer_csvs/<Portfolio>/`, in both `--all` and single-file mode. A strategy name shared by two portfolios of one run no longer overwrites the first portfolio's PDF/Markdown (#479). Explicit `--output-dir` (single-file mode only; `--all` now warns that it ignores it) and CSVs outside `analyzer_csvs/<Portfolio>/` are unchanged; old run folders are not moved. Existing run folders are not migrated: their old flat `detailed_reports/<Strategy>/` folders stay in place, and regenerating writes the per-portfolio folders alongside them without deleting anything.
+- `report.py` single-file mode recognises a run's `analyzer_csvs/` folder case-insensitively on Windows (e.g. `Analyzer_CSVs`); POSIX stays case-sensitive. Run-folder detection is simplified to one search over the path as given and its `realpath`, finding the same run as before in every tested case, and Windows junctions are covered by tests and a Windows CI job (#481).
 
 ## [1.16.0] — 2026-10-24
 
