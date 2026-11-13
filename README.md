@@ -110,6 +110,14 @@ The engine runs every strategy in `custom_strategies/` against SPY, prints a res
 },
 ```
 
+> **Start date with the Parquet corpus:** `pit:sp500` and `pit:nq100` resolve
+> completely from **2015-01-02**. Earlier start dates, including the default
+> `start_date` of `2004-01-01`, stop with `PitResolutionError` because a few
+> historical members (`ATGE`, S&P 2009-12; `LMCK` and `DISCK`, NQ100) have no
+> price file yet. Run with `--start 2015-01-02` or later until those gaps are
+> filled. The abort is deliberate: dropping the members would reintroduce
+> survivorship bias.
+
 The standard S3 data sync installs the ticker-history YAML beside the Parquet
 corpus and the backtester discovers it automatically:
 
