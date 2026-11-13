@@ -9,6 +9,7 @@ No network: the benchmark download is stubbed.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -171,16 +172,19 @@ class TestRunLayoutDetection:
     """Codex review of #480: normalised paths, last ``analyzer_csvs`` wins."""
 
     @pytest.mark.parametrize("path, expected", [
-        ("run/analyzer_csvs/../analyzer_csvs/P/S.csv", (Path("run"), Path("P"))),
-        ("a/analyzer_csvs/run/analyzer_csvs/P/S.csv",
-         (Path("a/analyzer_csvs/run"), Path("P"))),
-        ("run/analyzer_csvs/P/./S.csv", (Path("run"), Path("P"))),
-        ("run/analyzer_csvs/S.csv", (Path("run"), Path())),
-        ("elsewhere/analyzer_csvs", (None, Path())),
-        ("elsewhere/S.csv", (None, Path())),
+        ("run/analyzer_csvs/../analyzer_csvs/P/S.csv", ("run", "P")),
+        ("a/analyzer_csvs/run/analyzer_csvs/P/S.csv", ("a/analyzer_csvs/run", "P")),
+        ("run/analyzer_csvs/P/./S.csv", ("run", "P")),
+        ("run/analyzer_csvs/S.csv", ("run", "")),
+        ("elsewhere/analyzer_csvs", (None, "")),
+        ("elsewhere/S.csv", (None, "")),
     ])
-    def test_run_layout(self, path, expected):
-        assert report._run_layout(Path(path)) == expected
+    def test_run_layout(self, path, expected, tmp_path, monkeypatch):
+        """Relative paths resolve against the cwd (no run files on disk here)."""
+        monkeypatch.chdir(tmp_path)
+        run, sub = expected
+        want = (None if run is None else Path(os.path.realpath(tmp_path)) / run, Path(sub))
+        assert report._run_layout(Path(path)) == want
 
     def test_dotdot_path_writes_to_portfolio_folder(self, tmp_path, monkeypatch):
         run_dir = _two_portfolio_run(tmp_path)
@@ -212,6 +216,69 @@ class TestRunLayoutDetection:
         assert cfg["WFA_INPUTS"] == batch_cfg["WFA_INPUTS"]
 
 
+def _snapshot_run(run_dir, capital=12_345.0):
+    """Write the run-level files main.py leaves at the top of a run folder."""
+    from helpers import wfa
+
+    (run_dir / "config_snapshot.json").write_text(
+        json.dumps({"initial_capital": capital, "wfa_split_ratio": 0.8}))
+    assert wfa.save_wfa_inputs(str(run_dir), "2020-08-01", "2020-01-02",
+                               "2020-12-31", 0.8, initial_capital=capital)
+
+
+class TestAmbiguousRunFolders:
+    """Codex review #2 of #480: same-named folders and symlinks."""
+
+    def _assert_matches_all(self, monkeypatch, run_dir, csvs):
+        batch = {o: cfg for o, _, cfg in _capture(monkeypatch, ["--all", str(run_dir)])}
+        assert len(batch) == 2
+        for csv, portfolio in csvs:
+            (out, _, cfg), = _capture(monkeypatch, [str(csv)])
+            expected = str(run_dir / "detailed_reports" / portfolio)
+            assert out == expected
+            assert expected in batch
+            assert cfg["INITIAL_EQUITY"] == batch[expected]["INITIAL_EQUITY"] == 12_345.0
+            assert cfg["WFA_INPUTS"] is not None
+            assert cfg["WFA_INPUTS"] == batch[expected]["WFA_INPUTS"]
+
+    def test_portfolio_named_analyzer_csvs_under_parent_named_analyzer_csvs(
+            self, tmp_path, monkeypatch):
+        """A portfolio called ``analyzer_csvs`` inside a run that itself sits
+        under a parent folder called ``analyzer_csvs``: single-file mode must
+        find the run (and its config) that --all uses, for every portfolio."""
+        run_dir = tmp_path / "analyzer_csvs" / "run"
+        for portfolio, symbol in (("analyzer_csvs", "AAA"), ("Portfolio_B", "BBB")):
+            csv_dir = run_dir / "analyzer_csvs" / portfolio
+            csv_dir.mkdir(parents=True)
+            _trades(symbol, 1).to_csv(csv_dir / f"{STRATEGY_STEM}.csv", index=False)
+        _snapshot_run(run_dir)
+
+        self._assert_matches_all(monkeypatch, run_dir, [
+            (run_dir / "analyzer_csvs" / "analyzer_csvs" / f"{STRATEGY_STEM}.csv",
+             "analyzer_csvs"),
+            (run_dir / "analyzer_csvs" / "Portfolio_B" / f"{STRATEGY_STEM}.csv",
+             "Portfolio_B"),
+        ])
+
+    @pytest.mark.skipif(not hasattr(os, "symlink"), reason="no symlink support")
+    def test_symlink_then_dotdot_follows_the_filesystem(self, tmp_path, monkeypatch):
+        """``entry/link/../run`` is ``storage/run`` when ``link -> storage/nested``."""
+        storage = tmp_path / "storage"
+        (storage / "nested").mkdir(parents=True)
+        run_dir = _two_portfolio_run(storage)        # storage/run
+        _snapshot_run(run_dir)
+        (tmp_path / "entry").mkdir()
+        try:
+            os.symlink(storage / "nested", tmp_path / "entry" / "link")
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"cannot create symlinks here: {exc}")
+
+        csv = (tmp_path / "entry" / "link" / ".." / "run" / "analyzer_csvs"
+               / "Portfolio_A" / f"{STRATEGY_STEM}.csv")
+        assert csv.is_file()
+        self._assert_matches_all(monkeypatch, run_dir, [(csv, "Portfolio_A")])
+
+
 class TestAllIgnoresOutputDir:
     def test_all_warns_and_ignores_output_dir(self, tmp_path, monkeypatch, capsys):
         run_dir = _two_portfolio_run(tmp_path)
@@ -220,7 +287,13 @@ class TestAllIgnoresOutputDir:
 
         out = capsys.readouterr().out
         assert "WARNING: --output-dir is ignored with --all" in out
-        assert all(o.startswith(str(run_dir / "detailed_reports")) for o, _, _ in calls)
+        assert len(calls) == 2
+        assert sorted(o for o, _, _ in calls) == [
+            str(run_dir / "detailed_reports" / "Portfolio_A"),
+            str(run_dir / "detailed_reports" / "Portfolio_B"),
+        ]
+        assert all(cfg["BASE_OUTPUT_DIRECTORY"] == o for o, _, cfg in calls)
+        assert not custom.exists()
 
     def test_no_warning_without_output_dir(self, tmp_path, monkeypatch, capsys):
         run_dir = _two_portfolio_run(tmp_path)

@@ -174,26 +174,39 @@ def _portfolio_dir_for(name: str) -> str:
     return safe_path_component(name) if name else ""
 
 
+#: Files main.py writes at the top of a run folder; used to tell the run's
+#: ``analyzer_csvs/`` from a portfolio or parent folder with the same name.
+_RUN_MARKERS = ("config_snapshot.json", "wfa_inputs.json", "llm_verdict.json",
+                "overall_portfolio_summary.csv")
+
+
 def _run_layout(csv_path) -> "tuple[Path | None, Path]":
     """``(run_dir, portfolio_subdir)`` for a CSV inside a run's ``analyzer_csvs/``.
 
-    ``run/analyzer_csvs/Nasdaq_100/Strat.csv`` -> ``(Path("run"),
+    ``run/analyzer_csvs/Nasdaq_100/Strat.csv`` -> ``(<abs>/run,
     Path("Nasdaq_100"))``. Reports are written to
     ``run/detailed_reports/<portfolio_subdir>/<strategy>/`` so the same strategy
     name in two portfolios of one run gets two reports instead of the second
     overwriting the first (#479). A CSV directly under ``analyzer_csvs/`` gives
     ``Path()`` for the subdir; a CSV outside any run gives ``(None, Path())``.
 
-    The path is normalised first, so ``..`` segments cannot make a folder look
-    like a portfolio, and the *last* ``analyzer_csvs`` folder is the run's, so a
-    parent folder that happens to share the name is ignored. That keeps
-    single-file mode pointing at the same run and folder as ``--all``.
+    The path is resolved with ``os.path.realpath`` first, so ``..`` segments
+    and symlinks land where the filesystem says they do (``normpath`` alone
+    collapses ``link/..`` lexically and can pick the wrong run). When several
+    folders are named ``analyzer_csvs`` -- a parent folder, or a portfolio that
+    happens to have that name -- the run's is the innermost one whose parent
+    holds a run file (``config_snapshot.json``, ``wfa_inputs.json``, ...);
+    with no run file anywhere, the innermost one. That keeps single-file mode
+    pointing at the same run, folder and config as ``--all``.
     """
-    parts = Path(os.path.normpath(str(csv_path))).parts
+    parts = Path(os.path.realpath(str(csv_path))).parts
     folders = parts[:-1]
-    if "analyzer_csvs" not in folders:
+    candidates = [i for i, name in enumerate(folders) if name == "analyzer_csvs"]
+    if not candidates:
         return None, Path()
-    idx = len(folders) - 1 - folders[::-1].index("analyzer_csvs")
+    idx = next((i for i in reversed(candidates)
+                if any((Path(*parts[:i]) / m).is_file() for m in _RUN_MARKERS)),
+               candidates[-1])
     return Path(*parts[:idx]), Path(*parts[idx + 1:-1])
 
 
