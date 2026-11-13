@@ -23,7 +23,11 @@ def generate_trade_report(trades_df: pd.DataFrame, output_dir: str, report_name:
     Args:
         trades_df: DataFrame with columns matching the analyzer's expected format
                    (Date, Ex. date, Profit, % Profit, Price, Ex. Price, etc.)
-        output_dir: Root directory where the report folder will be created.
+        output_dir: Directory where the report folder will be created. The
+                    report goes to ``<output_dir>/<report_name>/``, so the
+                    caller must make *output_dir* unique per portfolio when
+                    strategy names can repeat (report.py passes
+                    ``detailed_reports/<Portfolio>/``; see #479).
         report_name: Name for the report subfolder and output files.
         config_params: Optional dict of overrides for default_config values.
                        Keys should match the uppercase attribute names in default_config.
