@@ -190,23 +190,38 @@ def _run_layout(csv_path) -> "tuple[Path | None, Path]":
     overwriting the first (#479). A CSV directly under ``analyzer_csvs/`` gives
     ``Path()`` for the subdir; a CSV outside any run gives ``(None, Path())``.
 
-    The path is resolved with ``os.path.realpath`` first, so ``..`` segments
-    and symlinks land where the filesystem says they do (``normpath`` alone
-    collapses ``link/..`` lexically and can pick the wrong run). When several
-    folders are named ``analyzer_csvs`` -- a parent folder, or a portfolio that
-    happens to have that name -- the run's is the innermost one whose parent
-    holds a run file (``config_snapshot.json``, ``wfa_inputs.json``, ...);
-    with no run file anywhere, the innermost one. That keeps single-file mode
-    pointing at the same run, folder and config as ``--all``.
+    When several folders are named ``analyzer_csvs`` -- a parent folder, or a
+    portfolio that happens to have that name -- the run's is the innermost one
+    whose parent holds a run file (``config_snapshot.json``,
+    ``wfa_inputs.json``, ...). The path is searched as given first
+    (``abspath``, no symlink resolution), so a symlinked ``analyzer_csvs/``
+    folder still counts. Only if that finds no run file is it searched again
+    with ``os.path.realpath``, so ``link/..`` follows the filesystem instead of
+    collapsing lexically onto the wrong run. With no run file anywhere, the
+    innermost ``analyzer_csvs`` wins (resolved path first, then as given).
+    That keeps single-file mode pointing at the same run, folder and config as
+    ``--all``.
     """
-    parts = Path(os.path.realpath(str(csv_path))).parts
-    folders = parts[:-1]
-    candidates = [i for i, name in enumerate(folders) if name == "analyzer_csvs"]
-    if not candidates:
-        return None, Path()
-    idx = next((i for i in reversed(candidates)
-                if any((Path(*parts[:i]) / m).is_file() for m in _RUN_MARKERS)),
-               candidates[-1])
+    def _search(parts):
+        candidates = [i for i, name in enumerate(parts[:-1]) if name == "analyzer_csvs"]
+        marked = next((i for i in reversed(candidates)
+                       if any((Path(*parts[:i]) / m).is_file() for m in _RUN_MARKERS)),
+                      None)
+        return candidates, marked
+
+    lexical = Path(os.path.abspath(str(csv_path))).parts
+    lex_candidates, idx = _search(lexical)
+    parts = lexical
+    if idx is None:
+        resolved = Path(os.path.realpath(str(csv_path))).parts
+        real_candidates, idx = _search(resolved)
+        if idx is not None or real_candidates:
+            parts = resolved
+            idx = idx if idx is not None else real_candidates[-1]
+        elif lex_candidates:
+            idx = lex_candidates[-1]
+        else:
+            return None, Path()
     return Path(*parts[:idx]), Path(*parts[idx + 1:-1])
 
 

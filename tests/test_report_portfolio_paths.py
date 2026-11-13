@@ -278,6 +278,26 @@ class TestAmbiguousRunFolders:
         assert csv.is_file()
         self._assert_matches_all(monkeypatch, run_dir, [(csv, "Portfolio_A")])
 
+    @pytest.mark.skipif(not hasattr(os, "symlink"), reason="no symlink support")
+    def test_symlinked_analyzer_csvs_folder(self, tmp_path, monkeypatch):
+        """``run/analyzer_csvs -> archive/trades``: realpath drops the
+        ``analyzer_csvs`` name, so the run must be found from the path as given."""
+        archive = _two_portfolio_run(tmp_path / "archive") / "analyzer_csvs"
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        _snapshot_run(run_dir)
+        trades = tmp_path / "archive" / "trades"
+        archive.rename(trades)
+        try:
+            os.symlink(trades, run_dir / "analyzer_csvs", target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"cannot create symlinks here: {exc}")
+
+        self._assert_matches_all(monkeypatch, run_dir, [
+            (run_dir / "analyzer_csvs" / p / f"{STRATEGY_STEM}.csv", p)
+            for p in ("Portfolio_A", "Portfolio_B")
+        ])
+
 
 class TestAllIgnoresOutputDir:
     def test_all_warns_and_ignores_output_dir(self, tmp_path, monkeypatch, capsys):
