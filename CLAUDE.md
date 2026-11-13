@@ -323,8 +323,8 @@ output/
 ```
 
 - `output/` is git-ignored.
-- `report.py` auto-detects the run's `detailed_reports/` directory when given a path inside `analyzer_csvs/`. Pass `--output-dir` to override.
-- Reports mirror `analyzer_csvs/`: a CSV at `analyzer_csvs/<Portfolio>/<Strategy>.csv` is written to `detailed_reports/<Portfolio>/<Strategy>/<Strategy>.pdf` (and `.md`), in both `--all` and single-file mode, so a strategy name shared by two portfolios keeps both reports (#479). A CSV directly under `analyzer_csvs/` still goes to `detailed_reports/<Strategy>/`; an explicit `--output-dir` is used exactly as given (`<output-dir>/<Strategy>/`). Run folders written before #479 keep their flat `detailed_reports/<Strategy>/` folders; regenerating writes the new per-portfolio folders alongside and deletes nothing.
+- `report.py` auto-detects the run's `detailed_reports/` directory when given a path inside `analyzer_csvs/` (the path is normalised and the *last* `analyzer_csvs` folder is taken as the run's). Pass `--output-dir` to override in single-file mode; `--all` ignores `--output-dir` and prints a warning.
+- Reports mirror `analyzer_csvs/`: a CSV at `analyzer_csvs/<Portfolio>/<Strategy>.csv` is written to `detailed_reports/<Portfolio>/<Strategy>/<Strategy>.pdf` (and `.md`), in both `--all` and single-file mode, so a strategy name shared by two portfolios keeps both reports (#479). A CSV directly under `analyzer_csvs/` still goes to `detailed_reports/<Strategy>/`; in single-file mode an explicit `--output-dir` is used exactly as given (`<output-dir>/<Strategy>/`); `--all` always writes under the run's `detailed_reports/` and warns if `--output-dir` is passed. Run folders written before #479 keep their flat `detailed_reports/<Strategy>/` folders; regenerating writes the new per-portfolio folders alongside and deletes nothing.
 - S3 uploads (if configured) use the same `<run_id>/` prefix as the key root.
 
 ## PDF Tearsheet Layouts (`report.py --layout`)

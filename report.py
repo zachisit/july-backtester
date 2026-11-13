@@ -174,20 +174,32 @@ def _portfolio_dir_for(name: str) -> str:
     return safe_path_component(name) if name else ""
 
 
-def _portfolio_subdir(csv_path: Path) -> Path:
-    """The folder(s) between ``analyzer_csvs/`` and *csv_path* (#479).
+def _run_layout(csv_path) -> "tuple[Path | None, Path]":
+    """``(run_dir, portfolio_subdir)`` for a CSV inside a run's ``analyzer_csvs/``.
 
-    ``analyzer_csvs/Nasdaq_100/Strat.csv`` -> ``Path("Nasdaq_100")``. Reports
-    are written to ``detailed_reports/<that>/<strategy>/`` so the same strategy
+    ``run/analyzer_csvs/Nasdaq_100/Strat.csv`` -> ``(Path("run"),
+    Path("Nasdaq_100"))``. Reports are written to
+    ``run/detailed_reports/<portfolio_subdir>/<strategy>/`` so the same strategy
     name in two portfolios of one run gets two reports instead of the second
-    overwriting the first. A CSV directly under ``analyzer_csvs/`` (or outside
-    any run) gives ``Path()``, which leaves the report directory unchanged.
+    overwriting the first (#479). A CSV directly under ``analyzer_csvs/`` gives
+    ``Path()`` for the subdir; a CSV outside any run gives ``(None, Path())``.
+
+    The path is normalised first, so ``..`` segments cannot make a folder look
+    like a portfolio, and the *last* ``analyzer_csvs`` folder is the run's, so a
+    parent folder that happens to share the name is ignored. That keeps
+    single-file mode pointing at the same run and folder as ``--all``.
     """
-    parts = Path(csv_path).parts
-    if "analyzer_csvs" not in parts:
-        return Path()
-    idx = parts.index("analyzer_csvs")
-    return Path(*parts[idx + 1:-1])
+    parts = Path(os.path.normpath(str(csv_path))).parts
+    folders = parts[:-1]
+    if "analyzer_csvs" not in folders:
+        return None, Path()
+    idx = len(folders) - 1 - folders[::-1].index("analyzer_csvs")
+    return Path(*parts[:idx]), Path(*parts[idx + 1:-1])
+
+
+def _portfolio_subdir(csv_path) -> Path:
+    """The folder(s) between the run's ``analyzer_csvs/`` and *csv_path* (#479)."""
+    return _run_layout(csv_path)[1]
 
 
 def _match_strategy_verdict(verdicts: list[dict], strategy_stem: str,
@@ -277,7 +289,8 @@ def main():
         default=None,
         help="Root directory for report output. Auto-detected from the CSV path when inside "
              "output/runs/<run_id>/analyzer_csvs/<Portfolio>/ (-> <run_id>/detailed_reports/<Portfolio>/). "
-             "When given, the report goes to <output-dir>/<report-name>/ exactly.",
+             "When given, the report goes to <output-dir>/<report-name>/ exactly. "
+             "Single-file mode only: ignored (with a warning) with --all.",
     )
     parser.add_argument(
         "--equity",
@@ -334,6 +347,10 @@ def main():
     if args.all:
         # --- Batch mode ---
         run_dir = Path(args.all)
+        if args.output_dir is not None:
+            print(f"WARNING: --output-dir is ignored with --all; reports are written to "
+                  f"{run_dir / 'detailed_reports'}/<Portfolio>/<Strategy>/. "
+                  f"--output-dir applies to single-file mode only.")
         analyzer_csvs_dir = run_dir / "analyzer_csvs"
         if not analyzer_csvs_dir.is_dir():
             print(f"ERROR: analyzer_csvs/ not found under: {args.all}")
@@ -426,17 +443,13 @@ def main():
         # route the report to detailed_reports/<Portfolio>/ inside the same run
         # directory -- the same place --all writes it (#479). An explicit
         # --output-dir is used exactly as given.
+        _run_dir, _portfolio = _run_layout(csv_path)
         if args.output_dir is not None:
             output_dir = args.output_dir
+        elif _run_dir is not None:
+            output_dir = str(_run_dir / "detailed_reports" / _portfolio)
         else:
-            csv_parts = Path(csv_path).parts
-            if "analyzer_csvs" in csv_parts:
-                idx = csv_parts.index("analyzer_csvs")
-                base_run_dir = Path(*csv_parts[:idx])
-                output_dir = str(base_run_dir / "detailed_reports"
-                                 / _portfolio_subdir(Path(csv_path)))
-            else:
-                output_dir = "detailed_reports"
+            output_dir = "detailed_reports"
 
         # Load timeframe-aware annualization factor, WFA split ratio, and risk-free rate
         # from config_snapshot.json if the CSV is inside a run dir
@@ -445,10 +458,7 @@ def main():
         bars_per_year = None
         risk_free_rate = None
         initial_capital = None
-        csv_parts = Path(csv_path).parts
-        if "analyzer_csvs" in csv_parts:
-            idx = csv_parts.index("analyzer_csvs")
-            _run_dir = Path(*csv_parts[:idx])
+        if _run_dir is not None:
             bars_per_year = _load_bars_per_year(_run_dir)
             if bars_per_year is not None:
                 print(f"Bars per year loaded from config_snapshot.json: {bars_per_year}")
@@ -477,10 +487,8 @@ def main():
         print(f"Loaded {len(trades_df)} trades.")
 
         _noise_csv_single = None
-        csv_parts_check = Path(csv_path).parts
-        if "analyzer_csvs" in csv_parts_check:
-            idx_check = csv_parts_check.index("analyzer_csvs")
-            _candidate = Path(*csv_parts_check[:idx_check]) / "noise_sample_data.csv"
+        if _run_dir is not None:
+            _candidate = _run_dir / "noise_sample_data.csv"
             if _candidate.is_file():
                 _noise_csv_single = str(_candidate)
         # Pair the curve with the trades CSV it was written beside, never with

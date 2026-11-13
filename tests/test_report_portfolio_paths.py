@@ -8,6 +8,7 @@ second portfolio's PDF and Markdown replaced the first. Reports now mirror
 No network: the benchmark download is stubbed.
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -164,3 +165,64 @@ class TestPortfolioSubdir:
     ])
     def test_portfolio_subdir(self, path, expected):
         assert report._portfolio_subdir(Path(path)) == expected
+
+
+class TestRunLayoutDetection:
+    """Codex review of #480: normalised paths, last ``analyzer_csvs`` wins."""
+
+    @pytest.mark.parametrize("path, expected", [
+        ("run/analyzer_csvs/../analyzer_csvs/P/S.csv", (Path("run"), Path("P"))),
+        ("a/analyzer_csvs/run/analyzer_csvs/P/S.csv",
+         (Path("a/analyzer_csvs/run"), Path("P"))),
+        ("run/analyzer_csvs/P/./S.csv", (Path("run"), Path("P"))),
+        ("run/analyzer_csvs/S.csv", (Path("run"), Path())),
+        ("elsewhere/analyzer_csvs", (None, Path())),
+        ("elsewhere/S.csv", (None, Path())),
+    ])
+    def test_run_layout(self, path, expected):
+        assert report._run_layout(Path(path)) == expected
+
+    def test_dotdot_path_writes_to_portfolio_folder(self, tmp_path, monkeypatch):
+        run_dir = _two_portfolio_run(tmp_path)
+        csv = (run_dir / "analyzer_csvs" / ".." / "analyzer_csvs" / "Portfolio_A"
+               / f"{STRATEGY_STEM}.csv")
+        (out, _, _), = _capture(monkeypatch, [str(csv)])
+        assert out == str(run_dir / "detailed_reports" / "Portfolio_A")
+
+    def test_parent_folder_named_analyzer_csvs(self, tmp_path, monkeypatch):
+        """Single-file mode finds the same run, folder and inputs as --all."""
+        from helpers import wfa
+
+        outer = tmp_path / "analyzer_csvs"
+        run_dir = _two_portfolio_run(outer)
+        (run_dir / "config_snapshot.json").write_text(
+            json.dumps({"initial_capital": 12_345.0, "wfa_split_ratio": 0.8}))
+        assert wfa.save_wfa_inputs(str(run_dir), "2020-08-01", "2020-01-02",
+                                   "2020-12-31", 0.8, initial_capital=12_345.0)
+
+        batch = {Path(out).name: (out, cfg) for out, _, cfg in
+                 _capture(monkeypatch, ["--all", str(run_dir)])}
+        csv = run_dir / "analyzer_csvs" / "Portfolio_A" / f"{STRATEGY_STEM}.csv"
+        (out, _, cfg), = _capture(monkeypatch, [str(csv)])
+
+        batch_out, batch_cfg = batch["Portfolio_A"]
+        assert out == batch_out == str(run_dir / "detailed_reports" / "Portfolio_A")
+        assert cfg["INITIAL_EQUITY"] == batch_cfg["INITIAL_EQUITY"] == 12_345.0
+        assert cfg["WFA_INPUTS"] is not None
+        assert cfg["WFA_INPUTS"] == batch_cfg["WFA_INPUTS"]
+
+
+class TestAllIgnoresOutputDir:
+    def test_all_warns_and_ignores_output_dir(self, tmp_path, monkeypatch, capsys):
+        run_dir = _two_portfolio_run(tmp_path)
+        custom = tmp_path / "my_reports"
+        calls = _capture(monkeypatch, ["--all", str(run_dir), "--output-dir", str(custom)])
+
+        out = capsys.readouterr().out
+        assert "WARNING: --output-dir is ignored with --all" in out
+        assert all(o.startswith(str(run_dir / "detailed_reports")) for o, _, _ in calls)
+
+    def test_no_warning_without_output_dir(self, tmp_path, monkeypatch, capsys):
+        run_dir = _two_portfolio_run(tmp_path)
+        _capture(monkeypatch, ["--all", str(run_dir)])
+        assert "--output-dir is ignored" not in capsys.readouterr().out
