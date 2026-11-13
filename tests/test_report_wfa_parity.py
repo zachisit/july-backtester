@@ -410,16 +410,80 @@ class TestQaFollowups:
         assert "initial capital" in res["wfa_basis_note"]
 
     def test_capital_in_inputs_is_used_even_without_snapshot(self, tmp_path, monkeypatch):
-        trade_log, timeline = _synthetic_run()
+        """The capital must observably change the answer.
+
+        The curve starts a year after ``actual_start``, so the IS window's
+        starting equity is the initial capital (helpers.wfa uses it when the
+        curve has no bar before the window). It slides 100k -> 80k by the split
+        and on to 75k: on the run's 100k, IS is -20% and the verdict is Pass;
+        on the analyzer's 50k default, IS reads +60%, OOS is negative, and the
+        sign flip makes it "Likely Overfitted".
+        """
+        trade_log, _ = _synthetic_run()
+        split = pd.Timestamp(wfa.get_split_date(SPY_START, SPY_END, RATIO))
+        days = pd.bdate_range("2016-01-04", SPY_END)
+        vals = [
+            100_000 - 20_000 * (d - days[0]).days / (split - days[0]).days if d < split
+            else 80_000 - 5_000 * (d - split).days / (days[-1] - split).days
+            for d in days
+        ]
+        timeline = pd.Series(vals, index=days.tz_localize("UTC"), name="Equity")
+
         ref_split, ref = _main_reference(trade_log, timeline)
+        assert ref["wfa_verdict"] == "Pass"
+        default_capital = wfa.evaluate_run_wfa(trade_log, 50_000.0, ref_split, SPY_START,
+                                               SPY_END, equity_curve=timeline)
+        assert default_capital["wfa_verdict"] == "Likely Overfitted"  # fixture guard
+
         run_dir, _ = _write_run_dir(tmp_path, trade_log, timeline, with_snapshot=False,
                                     inputs_capital=INITIAL_CAPITAL)
         df, cfg = _report_config(run_dir, monkeypatch)
-        assert cfg["INITIAL_EQUITY"] != INITIAL_CAPITAL  # analyzer default, not the run's
-        split, res = _analyzer_wfa(df, cfg)
+        assert cfg["INITIAL_EQUITY"] == 50_000  # analyzer default, not the run's
+        split_date, res = _analyzer_wfa(df, cfg)
+        assert split_date == ref_split
         assert res["wfa_basis"] == "run"
-        assert res["wfa_verdict"] == ref["wfa_verdict"]
+        assert res["wfa_verdict"] == "Pass"
         assert res["oos_pnl_pct"] == pytest.approx(ref["oos_pnl_pct"], abs=1e-12)
+
+    def test_intraday_split_on_last_session_round_trips_and_matches(self, tmp_path, monkeypatch):
+        """Minute bars, five sessions 2024-01-08..12, ratio 0.8: the bar-count
+        split lands on the last date (split == actual_end). main.py handles it
+        (OOS runs to end + 1 day), so the inputs file must accept it."""
+        sessions = pd.bdate_range("2024-01-08", "2024-01-12")
+        bars = pd.DatetimeIndex([
+            d + pd.Timedelta(hours=9, minutes=30) + pd.Timedelta(minutes=m)
+            for d in sessions for m in range(390)
+        ])
+        df_bars = pd.DataFrame({"Close": 1.0}, index=bars)
+        start, end = "2024-01-08", "2024-01-12"
+        split = wfa.get_split_date(start, end, RATIO, df=df_bars, config={"timeframe": "MIN"})
+        assert split == end
+
+        assert wfa.save_wfa_inputs(str(tmp_path), split, start, end, RATIO,
+                                   initial_capital=INITIAL_CAPITAL)
+        inputs = wfa.load_wfa_inputs(tmp_path)
+        assert inputs is not None
+        assert inputs["wfa_split_date"] == split
+
+        # Six trades per side; minute-stamped exits.
+        trade_log = []
+        for i, d in enumerate(list(sessions[:4]) * 2 + [sessions[4]] * 6):
+            exit_ts = d + pd.Timedelta(hours=10, minutes=5 * i)
+            trade_log.append({"EntryDate": (exit_ts - pd.Timedelta(minutes=3)).isoformat(),
+                              "ExitDate": exit_ts.isoformat(), "Profit": 50.0 - 9 * (d == sessions[4])})
+        equity = INITIAL_CAPITAL + pd.Series(range(len(bars)), index=bars, dtype=float)
+
+        ref = wfa.evaluate_wfa(*wfa.split_trades(trade_log, split), INITIAL_CAPITAL,
+                               equity_curve=equity, is_window=(start, split),
+                               oos_window=(split, pd.Timestamp(end) + pd.Timedelta(days=1)))
+
+        from trade_analyzer import analyzer
+        got_split, got = analyzer._compute_wfa(
+            trade_log, None, pd.NaT, pd.NaT, 50_000.0, RATIO, inputs, equity)
+        assert got_split == split
+        assert got["wfa_basis"] == "run"
+        assert got["wfa_verdict"] == ref["wfa_verdict"]
+        assert got["oos_pnl_pct"] == pytest.approx(ref["oos_pnl_pct"], abs=1e-12)
 
     def test_invalid_inputs_file_uses_labelled_fallback(self, tmp_path, monkeypatch):
         trade_log, timeline = _synthetic_run()

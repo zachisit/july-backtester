@@ -262,7 +262,9 @@ def main():
         default=None,
         help=f"Initial equity for the analysis. If omitted, auto-loaded from "
              f"config_snapshot.json's initial_capital when available, else "
-             f"falls back to {INITIAL_EQUITY}.",
+             f"falls back to {INITIAL_EQUITY}. The walk-forward (WFA) section "
+             f"ignores this when the run has wfa_inputs.json: it always uses the "
+             f"run's own initial capital so it matches main.py.",
     )
     parser.add_argument(
         "--report-name",

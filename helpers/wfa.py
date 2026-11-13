@@ -397,7 +397,7 @@ def load_wfa_inputs(run_dir) -> Optional[dict]:
     """Read ``<run_dir>/wfa_inputs.json``; None if missing, unreadable or invalid.
 
     Invalid means: ratio outside (0, 1), any date unparseable or ``NaT``, or
-    not ``actual_start < wfa_split_date < actual_end``. A None return makes the
+    not ``actual_start < wfa_split_date <= actual_end``. A None return makes the
     report fall back to its labelled closed-trade approximation, never a
     silently wrong "matches main.py" result.
 
@@ -421,7 +421,9 @@ def load_wfa_inputs(run_dir) -> Optional[dict]:
         if any(pd.isna(ts) for ts in stamps):
             return None
         start_ts, split_ts, end_ts = stamps
-        if not start_ts < split_ts < end_ts:
+        # split == end is legitimate: an intraday bar-count split can land on
+        # the last session's date, and main.py's OOS window runs to end + 1 day.
+        if not start_ts < split_ts <= end_ts:
             return None
         capital = data.get("initial_capital")
         try:
