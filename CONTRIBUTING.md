@@ -142,6 +142,7 @@ Before opening a pull request, confirm each of the following:
 - [ ] **Strategy naming** — if you added a strategy, the `name` in `@register_strategy` matches the format used by other strategies (e.g., `"SMA Crossover (20d/50d)"`)
 - [ ] **Docstrings** — new functions have a one-paragraph docstring explaining what they do, their signal convention, and parameters
 - [ ] **Dry run** — `python main.py --dry-run` completes without errors
+- [ ] **Same-bar re-entry** — if the change lets a harness enter more than once per symbol, it ships the guard and a mutation-checked test (see [Same-Bar Re-Entry Invariant](#same-bar-re-entry-invariant))
 
 ## Code Style
 
@@ -157,6 +158,28 @@ Before opening a pull request, confirm each of the following:
 - If a test needs to override `config.py` values (e.g., `wfa_folds`), use `monkeypatch` to patch `CONFIG` — don't modify `config.py` directly in tests.
 - Tests that need file I/O should use `tmp_path` fixtures (see `tests/test_csv_service.py` for examples).
 - Run the full suite with `pytest -v` before submitting.
+
+## Same-Bar Re-Entry Invariant
+
+**No harness may book an entry on a bar that already closed a trade on the same symbol, unless both fills sit at the same point in that bar and the entry is a new decision.** Bar data has no intrabar path. An exit and a re-entry inside one bar need the price to travel out through the exit and back to the entry trigger, and the bar cannot show whether that happened. Booking both inflates trade count and every per-trade statistic with it (private-strategies#135, #401).
+
+The portfolio engine (`helpers/portfolio_simulations.py`) enforces this in two layers:
+
+- **`entry_trigger="edge"` (default, #401).** An entry needs a *transition* into `1` / `-2`. A forward-filled hold-state signal that still reads `1` on its stop-out bar does not re-buy. This is why the forward-fill pattern above is safe.
+- **`open_exec_same_bar_reentry_guard` (default `True`).** Under `execution_time="open"`, entries fill at the bar's open, which comes before any intrabar exit. A symbol closed on a bar by a stop, margin call or last-close PIT exit therefore cannot be entered, on either side, at that bar's open.
+  - Exits that fill at the open (strategy exit or short cover) do not block. A `-2` reversal at one open still flips.
+  - Under `execution_time="close"`, a stop mid-session followed by a buy at the close is a real, executable sequence, so a fresh transition on the stop bar may still enter.
+
+Do not turn off either default to raise trade counts. Results produced with either one off must say so.
+
+### New or modified harnesses
+
+This covers any harness that can enter more than once per symbol: an intraday script, a custom engine like `scripts/orb_engine.py`, or a re-entry path in an existing harness.
+
+- **The guard ships in the same PR as the re-entry capability.** Record the bar each exit happened on and refuse entry for that symbol on that bar. `scripts/orb_engine.py` (#133) is the reference.
+- **A test pins the behaviour.** Include a scenario where the exit bar would also satisfy the entry trigger, and assert that it produces one trade, not two.
+- **The test is mutation-checked.** Remove or disable the guard and show that the test fails. Then add a positive control that shows the scenario really reaches the guard (see `TestOpenExecSameBarGuard::test_legacy_flag_books_the_inverted_fill` in `tests/test_entry_trigger.py`). A test that also passes with the guard deleted proves nothing.
+- **Use hold-state signals in the test, not only isolated pulses.** Pulses (`0 → 1`) cannot tell "the signal is 1" apart from "the signal became 1". This is why the golden master missed #401 until `hold_state_stop` was added.
 
 ## Do Not Touch
 
