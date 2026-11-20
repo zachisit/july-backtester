@@ -174,9 +174,9 @@ Do not turn off either default to raise trade counts. Results produced with eith
 
 ### New or modified harnesses
 
-This covers any harness that can enter more than once per symbol: an intraday script, a custom engine like `scripts/orb_engine.py`, or a re-entry path in an existing harness.
+This covers any harness that can enter more than once per symbol: an intraday script, a custom engine, or a re-entry path in an existing harness.
 
-- **The guard ships in the same PR as the re-entry capability.** Record the bar each exit happened on and refuse entry for that symbol on that bar. `scripts/orb_engine.py` (#133) is the reference.
+- **The guard ships in the same PR as the re-entry capability.** Record the bar each exit happened on and refuse entry for that symbol on that bar. That is the shape of `_open_entry_blocked` in the portfolio engine, and of the ORB harness fix in private-strategies PR #133.
 - **A test pins the behaviour.** Include a scenario where the exit bar would also satisfy the entry trigger, and assert that it produces one trade, not two.
 - **The test is mutation-checked.** Remove or disable the guard and show that the test fails. Then add a positive control that shows the scenario really reaches the guard (see `TestOpenExecSameBarGuard::test_legacy_flag_books_the_inverted_fill` in `tests/test_entry_trigger.py`). A test that also passes with the guard deleted proves nothing.
 - **Use hold-state signals in the test, not only isolated pulses.** Pulses (`0 → 1`) cannot tell "the signal is 1" apart from "the signal became 1". This is why the golden master missed #401 until `hold_state_stop` was added.
