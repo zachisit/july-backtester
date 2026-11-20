@@ -147,6 +147,7 @@ Both failures are **silent**: `gh` exits 0 and prints a URL. Nothing tells you t
 "stop_gap_fill": "open"          # "open" = stop gapped through fills at the bar Open (min/max with stop); "level" = legacy fill at stop level (#425)
 "stop_gap_fill_armed_trail": "level"  # "open" also applies gap fills to an ARMED trailing_atr trail (default keeps Sleeve A exact-level parity)
 "entry_bar_stop_check": True  # execution_time="open": a fill-bar Low (High for shorts) breaching the initial stop closes the trade on the fill bar; False = legacy next-bar check (#426)
+"open_exec_same_bar_reentry_guard": True  # execution_time="open": a symbol closed this bar by a stop / margin call / last-close PIT exit cannot be re-entered (either side) at this bar's open; at-open exits don't block; False = legacy (#401 follow-up)
 ```
 
 ## Architecture Notes
