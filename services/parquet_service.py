@@ -23,6 +23,7 @@ Configuration key:
 
 import logging
 import os
+import re
 
 import pandas as pd
 
@@ -48,7 +49,54 @@ def _resolve_dir(config: dict) -> str:
     return resolve_parquet_dir(config)
 
 
+# A dashed share-class spelling: a base ticker, ONE hyphen, then a purely
+# alphabetic class suffix of 1-3 letters (BRK-B, BF-B, MOG-A, APTV-WI).
+# Letters only on purpose: the corpus already uses "-" for Norgate's delisted
+# date stamp (BRKB-199602, CB-201601), and a digit suffix must never be read as
+# a share class.
+_DASHED_SHARE_CLASS_RE = re.compile(r"^([A-Za-z0-9]+)-([A-Za-z]{1,3})$")
+
+
+def _dotted_share_class(symbol: str) -> str | None:
+    """``"BRK-B" -> "BRK.B"``; ``None`` when *symbol* is not a dashed share class.
+
+    Issue #485: the PIT roster normaliser (and Yahoo) spell share classes with a
+    hyphen, but the parquet corpus stores them dotted (``BRK.B.parquet``), so a
+    hyphenated request found no file and the symbol silently dropped out.
+    """
+    m = _DASHED_SHARE_CLASS_RE.match(str(symbol).strip())
+    if m is None:
+        return None
+    return f"{m.group(1)}.{m.group(2)}"
+
+
 def _find_parquet(symbol: str, parquet_dir: str) -> str | None:
+    """
+    Find the Parquet file for *symbol*, trying its dotted share-class spelling
+    when the given spelling matches nothing at all.
+
+    The given spelling is resolved first, completely: exact file, then
+    case-insensitive, then Norgate date-suffixed files (see
+    :func:`_find_parquet_exact`). Only when ALL of that finds nothing, and
+    *symbol* looks like a dashed share class (``BRK-B``), is the dotted spelling
+    (``BRK.B``) tried, through the same full lookup. Ordering this way means a
+    dashed file that really exists (preferred shares such as ``ALL-B.parquet``)
+    always wins over the dotted share class, and nothing that resolved before
+    resolves differently now (issue #485).
+    """
+    found = _find_parquet_exact(symbol, parquet_dir)
+    if found is not None:
+        return found
+    dotted = _dotted_share_class(symbol)
+    if dotted is None or not os.path.isdir(parquet_dir):
+        return None
+    found = _find_parquet_exact(dotted, parquet_dir)
+    if found is not None:
+        logger.debug(f"'{symbol}' resolved via share-class spelling '{dotted}'")
+    return found
+
+
+def _find_parquet_exact(symbol: str, parquet_dir: str) -> str | None:
     """
     Find the Parquet file for *symbol* with case-insensitive lookup.
     Returns the full file path, or None if not found.
