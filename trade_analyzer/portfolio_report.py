@@ -8,7 +8,7 @@ their per-fill "profit" would misstate the strategy. Every return, drawdown
 and ratio here is computed from the **portfolio NAV ledger** of the whole
 basket (risk products + cash sleeve + unsettled receivables).
 
-Output: ``<output_dir>/<report_name>/<report_name>.pdf`` (3 A4-landscape
+Output: ``<output_dir>/<report_name>/<report_name>.pdf`` (4 A4-landscape
 pages, house navy/gold identity) and ``.md`` with PNG charts in ``images/``.
 """
 from __future__ import annotations
@@ -82,6 +82,31 @@ def _num(v, d=2):
 
 def _money(v):
     return "N/A" if v is None else f"${v:,.0f}"
+
+
+def _band_pp(band) -> str:
+    """Band in percentage points, without rounding 2.5 pp to "2%"."""
+    return f"{float(band) * 100:g} pp"
+
+
+def _is_immediate(summary: dict) -> bool:
+    return summary.get("settlement") == "immediate"
+
+
+NON_DEPLOYABLE = ("NON-DEPLOYABLE BENCHMARK: this run reuses sale proceeds at the same open "
+                  "(portfolio_settlement=immediate); it is not a cash-account result.")
+#: Page-1 flag; short enough to sit beside the NAV-basis line without overlapping it.
+NON_DEPLOYABLE_SHORT = "NON-DEPLOYABLE BENCHMARK RUN (immediate proceeds reuse): not a cash-account result"
+
+
+def _traded_sessions(summary: dict, fills: pd.DataFrame | None) -> int:
+    """Sessions that executed at least one rebalance fill (not merely where the rule fired)."""
+    act = summary["activity"]
+    if "rebalance_sessions_traded" in act:
+        return int(act["rebalance_sessions_traded"])
+    if fills is None or fills.empty:  # run written before the key existed
+        return 0
+    return int(fills.loc[fills["Reason"] == "rebalance", "Date"].nunique())
 
 
 def _series_order(daily: pd.DataFrame) -> list:
@@ -178,7 +203,7 @@ def plot_holdings(ledger: pd.DataFrame, symbols: list, cash_symbol: str, ax=None
     return fig or ax.figure
 
 
-def plot_exposure(ledger: pd.DataFrame, band: float, ax=None):
+def plot_exposure(ledger: pd.DataFrame, band: float, ax=None, signed: bool = True):
     fig = None
     if ax is None:
         fig, ax = plt.subplots(figsize=(10, 3), dpi=130)
@@ -190,11 +215,12 @@ def plot_exposure(ledger: pd.DataFrame, band: float, ax=None):
     unfilled = ledger.index[ledger["target_unfilled_at_open"].astype(bool)]
     if len(unfilled):
         ax.scatter(unfilled, ledger.loc[unfilled, "target"] * 100, s=6, color=T["negative"], zorder=3,
-                   label=f"Target not reached at open (> {band:.0%} band; settling cash)")
+                   label=f"Target not reached at open (> {_band_pp(band)} band; settling cash)")
     ax.axhline(0, color="#9e9e9e", lw=0.6)
-    ax.set_ylabel("Signed exposure (%)", fontsize=8)
+    ax.set_ylabel("Signed exposure (%)" if signed else "Risk weight (%)", fontsize=8)
     ax.legend(fontsize=7, loc="lower right", bbox_to_anchor=(1.0, 1.0), frameon=False, ncol=3)
-    _style_axis(ax, "Signed underlying exposure: target vs executed")
+    _style_axis(ax, "Signed underlying exposure: target vs executed" if signed
+                else "Total risk weight: target vs executed")
     return fig or ax.figure
 
 
@@ -236,13 +262,19 @@ def plot_signals(signals: pd.DataFrame, sessions: pd.DatetimeIndex, symbols: lis
 
 def period_table(summary: dict) -> pd.DataFrame:
     rows = []
+    cash = summary["cash_symbol"]
+    own = f"{cash} (cash sleeve)"
     for period, by_series in summary["periods"].items():
         for name, m in by_series.items():
+            # The cash sleeve measured against itself differs only by its one-off
+            # entry fee, so a ratio of that to ~zero excess volatility is not a
+            # performance figure. metrics.json keeps the raw value.
+            sharpe = "—" if name == own else _num(m.get("sharpe_cash_reference"), 3)
             rows.append({"Period": period, "Series": name,
                          "Start": m.get("start"), "End": m.get("end"),
                          "Total return": _pct(m.get("total_return")), "CAGR": _pct(m.get("cagr")),
                          "Max DD": _pct(m.get("max_drawdown")), "Volatility": _pct(m.get("volatility")),
-                         f"Sharpe vs {summary['cash_symbol']}": _num(m.get("sharpe_cash_reference"), 3),
+                         f"Sharpe vs {cash}": sharpe,
                          "Sharpe rf=2%": _num(m.get("sharpe_rf2"), 3)})
     return pd.DataFrame(rows)
 
@@ -278,23 +310,49 @@ def recent_fills(fills: pd.DataFrame, n: int = 12) -> pd.DataFrame:
                          "Settles": f["SettlementDate"].dt.strftime("%Y-%m-%d")})
 
 
+def activity_lines(summary: dict, fills: pd.DataFrame | None = None) -> list:
+    act, cash = summary["activity"], summary["cash_symbol"]
+    traded = _traded_sessions(summary, fills)
+    return [
+        f"Rebalance rule fired on {act['rebalance_sessions']} sessions; {traded} executed rebalance fills "
+        f"(the rest had nothing executable, e.g. the first session or proceeds still unsettled)   ·   "
+        f"fills: {act['fills']} (rebalance {act['rebalance_fills']}, the rest park settled cash in {cash})   ·   "
+        f"sessions where the target was not reached at the open: {act['unfilled_target_days']}",
+        "Signal state (sessions): " + ", ".join(f"{k} {v}" for k, v in act["signal_state_sessions"].items()),
+    ]
+
+
 def notes(summary: dict) -> list:
     v = summary["validation"]
     cash = summary["cash_symbol"]
     products = ", ".join(summary["symbols"])
+    bench = summary.get("benchmark")
+    basis = "signed exposure" if summary.get("exposure") is not None else "each risk product's weight"
+    if _is_immediate(summary):
+        first = NON_DEPLOYABLE + " The settled-cash path is the comparison series."
+        settle = (f"Settlement: immediate. Sale proceeds are reused at the same open and no receivables are "
+                  f"carried. The settled-cash comparison uses rules {summary['settlement_rules']}. "
+                  f"Calendar: {v['settlement_calendar']}.")
+    else:
+        first = "Immediate proceeds reuse is a non-deployable benchmark for the settled-cash account."
+        settle = (f"Settlement: {summary['settlement']} (rules {summary['settlement_rules']}). Sale proceeds are "
+                  f"receivables until settled; only settled cash buys. Calendar: {v['settlement_calendar']}.")
+    costs = f"Costs {summary['cost_bps']} bps per traded notional, including the initial {cash} purchase."
+    if bench:
+        costs += f" Benchmark {bench}: buy at first open with {summary['benchmark_cost_bps']:g} bps, then hold."
+    else:
+        costs += " No buy-and-hold benchmark is configured."
     lines = [
-        "Immediate proceeds reuse is a non-deployable benchmark for the settled-cash account.",
+        first,
         f"Returns are the NAV of the whole funded basket ({products} + {cash} cash sleeve + unsettled "
         f"receivables). No single ticker's return is the strategy's return; fills are rebalances, not "
         f"round-trip trades.",
         f"Signals use completed sessions only: target decided at close t-1, executed at open t. Rebalance "
-        f"band {summary['band']:.0%} of signed exposure; held products are exited when their target is zero.",
-        f"Settlement: {summary['settlement']} (rules {summary['settlement_rules']}). Sale proceeds are "
-        f"receivables until settled; only settled cash buys. Calendar: {v['settlement_calendar']}.",
+        f"band {_band_pp(summary['band'])} on {basis}; held products are exited when their target is zero.",
+        settle,
         f"No borrowing or share shorting; minimum cash {v['min_cash']:.6g}, minimum shares {v['min_shares']:.6g}, "
         f"minimum receivable {v['min_unsettled']:.6g}; self-financing checked every session.",
-        f"Costs {summary['cost_bps']} bps per traded notional, including the initial {cash} purchase. "
-        f"Benchmark {summary.get('benchmark')}: buy at first open with {summary['benchmark_cost_bps']:g} bps, then hold.",
+        costs,
         f"Distributions: {v['distribution_treatment']}. No cash interest is added beyond the {cash} price.",
         "Not evaluated: " + ", ".join(summary.get("not_evaluated", [])) + ". Historical results only.",
     ]
@@ -334,23 +392,32 @@ def _text_block(fig, lines, x, y, width_chars=175, size=7.0, step=0.022):
     return y
 
 
-def _kpis(fig, summary, rect_y=0.80, h=0.085):
-    from ._pdf_v3 import _draw_kpi_tile
+def kpi_tiles(summary: dict, fills: pd.DataFrame | None = None) -> list:
+    """``(label, value, sub-label, positive)`` for the headline row."""
     full = summary["periods"]["Full period"]
     s = full["Strategy"]
     cash = summary["cash_symbol"]
     bench = summary.get("benchmark")
     b = full.get(bench, {}) if bench else {}
     c = full.get(f"{cash} (cash sleeve)", {})
-    tiles = [
+    cagr_sub = " · ".join(([f"{bench} {_pct(b.get('cagr'))}"] if bench else [])
+                          + [f"{cash} {_pct(c.get('cagr'))}"])
+    dd_sub = (f"{bench} {_pct(b.get('max_drawdown'))}" if bench
+              else f"{cash} {_pct(c.get('max_drawdown'))}")
+    return [
         ("Total return", _pct(s["total_return"]), f"{s['start']} → {s['end']}", s["total_return"] > 0),
-        ("CAGR", _pct(s["cagr"]), f"{bench} {_pct(b.get('cagr'))} · {cash} {_pct(c.get('cagr'))}", None),
-        ("Max drawdown", _pct(s["max_drawdown"]), f"{bench} {_pct(b.get('max_drawdown'))}", False),
+        ("CAGR", _pct(s["cagr"]), cagr_sub, None),
+        ("Max drawdown", _pct(s["max_drawdown"]), dd_sub, False),
         (f"Sharpe vs {cash}", _num(s.get("sharpe_cash_reference"), 3), f"rf=2%: {_num(s.get('sharpe_rf2'), 3)}", None),
         ("Volatility", _pct(s["volatility"]), f"{s['observations']} sessions", None),
         ("Costs paid", _money(summary["costs"]["total"]),
-         f"{summary['activity']['rebalance_sessions']} rebalance sessions", None),
+         f"{_traded_sessions(summary, fills)} sessions rebalanced", None),
     ]
+
+
+def _kpis(fig, summary, fills=None, rect_y=0.80, h=0.085):
+    from ._pdf_v3 import _draw_kpi_tile
+    tiles = kpi_tiles(summary, fills)
     w = 1.0 / len(tiles)
     for i, (label, value, sub, pos) in enumerate(tiles):
         ax = fig.add_axes([0.02 + i * w * 0.98, rect_y, w * 0.96, h])
@@ -368,7 +435,10 @@ def build_pages(art: dict, name: str) -> list:
     _header(fig, summary["strategy"], subtitle)
     fig.text(0.02, 0.89, "All figures are portfolio-NAV based: the strategy is the funded basket, "
              "not any single ticker.", fontsize=7.5, color=config.THEME["text_muted"], va="top")
-    _kpis(fig, summary)
+    if _is_immediate(summary):
+        fig.text(0.98, 0.89, NON_DEPLOYABLE_SHORT, fontsize=7.5, color=config.THEME["negative"],
+                 fontweight="bold", va="top", ha="right")
+    _kpis(fig, summary, art["fills"])
     plot_growth(daily, fig.add_axes([0.06, 0.42, 0.90, 0.34]))
     plot_drawdowns(daily, fig.add_axes([0.06, 0.06, 0.90, 0.29]))
     pages.append(fig)
@@ -376,7 +446,8 @@ def build_pages(art: dict, name: str) -> list:
     fig = plt.figure(figsize=config.FIG_FULL)
     _header(fig, "Holdings, exposure & signal activity", subtitle)
     plot_holdings(ledger, symbols, cash, fig.add_axes([0.06, 0.63, 0.90, 0.24]))
-    plot_exposure(ledger, summary["band"], fig.add_axes([0.06, 0.35, 0.90, 0.22]))
+    plot_exposure(ledger, summary["band"], fig.add_axes([0.06, 0.35, 0.90, 0.22]),
+                  signed=summary.get("exposure") is not None)
     plot_signals(art["signals"], ledger.index, symbols, fig.add_axes([0.06, 0.06, 0.90, 0.23]))
     pages.append(fig)
 
@@ -395,14 +466,8 @@ def build_pages(art: dict, name: str) -> list:
 
     fig = plt.figure(figsize=config.FIG_FULL)
     _header(fig, "Rebalance activity, validation & assumptions", subtitle)
-    act = summary["activity"]
     fig.text(0.02, 0.875, "ACTIVITY", fontsize=9.5, color=config.THEME["primary"], fontweight="bold")
-    y = _text_block(fig, [
-        f"Rebalance sessions: {act['rebalance_sessions']}   ·   fills: {act['fills']} "
-        f"(rebalance {act['rebalance_fills']}, the rest park settled cash in {cash})   ·   "
-        f"sessions where the target was not reached at the open: {act['unfilled_target_days']}",
-        "Signal state (sessions): " + ", ".join(f"{k} {v}" for k, v in act["signal_state_sessions"].items()),
-    ], 0.02, 0.85)
+    y = _text_block(fig, activity_lines(summary, art["fills"]), 0.02, 0.85)
     fills_ax = fig.add_axes([0.02, y - 0.36, 0.96, 0.33])
     _draw_table(fills_ax, recent_fills(art["fills"]), "Most recent rebalance fills", font=6.6)
     y = y - 0.42
@@ -434,7 +499,8 @@ def write_markdown(art: dict, md_path: str, image_dir: str) -> None:
         ("portfolio_nav.png", "Portfolio NAV vs benchmarks", plot_growth(daily)),
         ("drawdown.png", "Drawdown", plot_drawdowns(daily)),
         ("holdings.png", "Holdings", plot_holdings(ledger, summary["symbols"], summary["cash_symbol"])),
-        ("exposure.png", "Signed exposure", plot_exposure(ledger, summary["band"])),
+        ("exposure.png", "Signed exposure",
+         plot_exposure(ledger, summary["band"], signed=summary.get("exposure") is not None)),
         ("signals.png", "Signal activity", plot_signals(art["signals"], ledger.index, summary["symbols"])),
     ]
     for fname, _t, fig in charts:
@@ -450,6 +516,7 @@ def write_markdown(art: dict, md_path: str, image_dir: str) -> None:
         f"{_money(summary['final_nav'])}\n",
         "> All figures are portfolio-NAV based: the strategy is the funded basket "
         f"({', '.join(summary['symbols'])} + {summary['cash_symbol']}), not any single ticker.\n",
+        *([f"> **{NON_DEPLOYABLE}**\n"] if _is_immediate(summary) else []),
         f"{summary.get('description', '')}\n",
         "## Performance by period\n", _md_table(period_table(summary)),
         f"![Portfolio NAV]({rel}/portfolio_nav.png)\n", f"![Drawdown]({rel}/drawdown.png)\n",
@@ -459,7 +526,8 @@ def write_markdown(art: dict, md_path: str, image_dir: str) -> None:
         "## Calendar-year returns\n", _md_table(annual_table(art["annual"]).reset_index()),
         "## Transaction costs\n", _md_table(cost_table(summary)),
         "## Activity\n",
-        f"- Rebalance sessions: {summary['activity']['rebalance_sessions']}\n"
+        f"- Rebalance rule fired on {summary['activity']['rebalance_sessions']} sessions; "
+        f"{_traded_sessions(summary, art['fills'])} executed rebalance fills\n"
         f"- Fills: {summary['activity']['fills']} (rebalance {summary['activity']['rebalance_fills']})\n"
         f"- Unfilled target days: {summary['activity']['unfilled_target_days']}\n"
         f"- Signal-state sessions: {summary['activity']['signal_state_sessions']}\n",

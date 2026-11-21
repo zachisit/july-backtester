@@ -87,6 +87,26 @@ risk-weight drift instead of signed exposure.
 | `portfolio_benchmark_ticker` | `"SPY"` | buy-and-hold comparison (`None`/`""` disables); the cash sleeve is always shown too |
 | `portfolio_benchmark_cost_bps` | `5.0` | one-time benchmark entry cost |
 
+Invalid `portfolio_*` values refuse the run (`PortfolioConfigError`) before
+any data is fetched:
+
+- `portfolio_cost_bps` keys must be the strategy's own product tickers,
+  case-sensitive. An unknown key (`"vixy"`) is an error, not an ignored
+  entry, so a mistyped stress run cannot complete at the registered cost.
+  Every cost must be finite, `>= 0` and `< 10000` bps; the engine enforces
+  the same rule on its `cost_bps` argument.
+- `portfolio_rebalance_band` must be finite and `>= 0`;
+  `portfolio_settlement_rules` must be `[effective_date, lag >= 1]` pairs;
+  `portfolio_symbol_map` must map strings to non-empty strings.
+
+From the CLI, the three structured keys take JSON through `--set`:
+`portfolio_cost_bps` and `portfolio_symbol_map` a JSON object,
+`portfolio_settlement_rules` a JSON array, e.g.
+`--set 'portfolio_symbol_map={"vix": "$VIX", "vix3m": "$VIX3M"}'`. Malformed
+JSON, an invalid `portfolio_*` value and a data refusal all print one
+`[ERROR]` line and exit with status 1. Engine invariant failures
+(`FundingViolation`) still raise.
+
 Evaluation sessions are every bar of any product or the benchmark in
 `[start_date, end_date]`. The run is refused, with the offending dates listed,
 when any of these holds:
@@ -132,6 +152,22 @@ and `.md`. Every figure is built from the **portfolio NAV ledger**:
 3. Metrics per period (full period plus the plugin's `report_periods`),
    calendar-year returns, and costs by symbol.
 4. Rebalance activity, recent fills, validation results and assumptions.
+
+Reporting conventions worth knowing when reading the tearsheet:
+
+- Activity separates sessions where the rebalance rule *fired*
+  (`activity.rebalance_sessions`) from sessions that *executed* a rebalance
+  fill (`activity.rebalance_sessions_traded`). While sale proceeds are
+  unsettled the rule fires with nothing to trade. Purchases below the dust
+  threshold (`1e-14 x capital`) are not written to the fills ledger, as for
+  sales and cash parking; the NAV arithmetic is unchanged.
+- The band is printed in percentage points (`2 pp`, `2.5 pp`).
+- The cash sleeve's own "Sharpe vs cash sleeve" is shown as `—`: against
+  itself it differs only by its entry fee. `metrics.json` keeps the raw value.
+- With `portfolio_settlement: "immediate"` as the primary run, page 1, the
+  Markdown header and the notes mark the result as a non-deployable
+  benchmark, and the notes describe same-open reuse instead of settled cash.
+- With the benchmark disabled, tiles and notes omit it.
 
 The trade analyzer, Monte Carlo and WFA are not used for these runs. Basket
 rebalance fills have no meaningful per-trade P&L, so the report says these

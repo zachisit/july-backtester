@@ -18,6 +18,7 @@ Run-directory artifacts (``output/runs/<run_id>/``)::
     analyzer_csvs/<Portfolio>/<Strategy>.portfolio.json  marker -> report.py portfolio mode
     portfolio_runs/<Portfolio>/<Strategy>/
         ledger.csv            daily NAV, cash, receivables, shares, weights, costs
+        comparison_ledger.csv the same ledger under the other settlement mode
         fills.csv             every sale / purchase with settlement date
         signals.csv           strategy diagnostics (inputs, state, target weights)
         daily_returns.csv     strategy, immediate-settlement benchmark, cash sleeve, SPY
@@ -61,6 +62,10 @@ class PortfolioDataError(ValueError):
     """The fetched data cannot support a funded multi-asset run (missing sessions etc.)."""
 
 
+class PortfolioConfigError(ValueError):
+    """A ``portfolio_*`` config value (or the timeframe) is invalid for a target-weight run."""
+
+
 def _benchmark(config: dict):
     """Benchmark ticker; an explicit None or "" disables it."""
     if "portfolio_benchmark_ticker" in config:
@@ -82,6 +87,76 @@ def resolve_strategy(config: dict) -> tuple[str, dict]:
         raise KeyError(f"portfolio_strategy {name!r} is not a registered target-weight strategy. "
                        f"Available: {sorted(available)}")
     return name, available[name]
+
+
+def resolve_settings(entry: dict, config: dict) -> dict:
+    """Validated run settings: settlement mode and rules, band, costs, symbol map.
+
+    Every problem raises :class:`PortfolioConfigError`. In particular a cost
+    override keyed by anything other than one of the strategy's products is
+    refused: merging and ignoring it would run at the registered cost while
+    the log shows the override.
+    """
+    tf, mult = config.get("timeframe", "D"), config.get("timeframe_multiplier", 1)
+    if str(tf).upper() != "D" or int(mult or 1) != 1:
+        raise PortfolioConfigError(f"Target-weight portfolios run on daily bars only (timeframe='D', "
+                                   f"multiplier 1); got timeframe={tf!r}, multiplier={mult!r}")
+    settlement = _cfg(config, "portfolio_settlement")
+    if settlement not in (twp.SETTLED_ONLY, twp.IMMEDIATE):
+        raise PortfolioConfigError(f"portfolio_settlement must be 'settled_only' or 'immediate', "
+                                   f"got {settlement!r}")
+    raw_rules = _cfg(config, "portfolio_settlement_rules")
+    try:
+        rules = []
+        for effective, lag in raw_rules:
+            when = pd.Timestamp(effective)
+            if pd.isna(when) or isinstance(lag, bool) or int(lag) != lag or int(lag) < 1:
+                raise ValueError(f"bad rule {[effective, lag]!r}")
+            rules.append((str(effective), int(lag)))
+        if not rules:
+            raise ValueError("no rules")
+    except (TypeError, ValueError) as exc:
+        raise PortfolioConfigError(
+            "portfolio_settlement_rules must be a list of [effective_date, lag_sessions >= 1] pairs, "
+            "e.g. [['1900-01-01', 2], ['2024-05-28', 1]]; " + f"got {raw_rules!r} ({exc})") from exc
+    band = config.get("portfolio_rebalance_band")
+    if band is None:
+        band = entry["band"]
+    try:
+        band = float(band)
+    except (TypeError, ValueError):
+        band = float("nan")
+    if not (np.isfinite(band) and band >= 0):
+        raise PortfolioConfigError(f"portfolio_rebalance_band must be a finite number >= 0 "
+                                   f"(0.02 = 2 percentage points); got {config.get('portfolio_rebalance_band')!r}")
+    products = list(entry["symbols"]) + [entry["cash_symbol"]]
+    override = config.get("portfolio_cost_bps") or {}
+    if not isinstance(override, dict):
+        raise PortfolioConfigError(f"portfolio_cost_bps must be a mapping of product ticker to bps; "
+                                   f"got {override!r}")
+    unknown = sorted(str(k) for k in override if k not in products)
+    if unknown:
+        raise PortfolioConfigError(f"portfolio_cost_bps has keys that are not products of this strategy: "
+                                   f"{unknown}. Valid keys (case-sensitive): {products}")
+    cost_bps = dict(entry["cost_bps"])
+    cost_bps.update(override)
+    try:
+        twp._validate_costs(cost_bps, products)
+    except ValueError as exc:
+        raise PortfolioConfigError(f"portfolio_cost_bps / registered costs invalid: {exc}") from exc
+    symbol_map = _cfg(config, "portfolio_symbol_map")
+    if not isinstance(symbol_map, dict) or not all(isinstance(k, str) and isinstance(v, str) and v
+                                                   for k, v in symbol_map.items()):
+        raise PortfolioConfigError("portfolio_symbol_map must map a ticker or signal role to a provider "
+                                   "ticker, e.g. {'vix': '$VIX'}; " + f"got {symbol_map!r}")
+    try:
+        bench_cost = float(_cfg(config, "portfolio_benchmark_cost_bps"))
+    except (TypeError, ValueError):
+        bench_cost = float("nan")
+    if not (np.isfinite(bench_cost) and 0 <= bench_cost < 10000):
+        raise PortfolioConfigError("portfolio_benchmark_cost_bps must be finite, >= 0 and < 10000 bps")
+    return {"settlement": settlement, "rules": rules, "band": band, "cost_bps": cost_bps,
+            "symbol_map": dict(symbol_map), "benchmark_cost_bps": bench_cost}
 
 
 def _naive_daily(df: pd.DataFrame) -> pd.DataFrame:
@@ -233,21 +308,13 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
     from helpers.summary import _safe_strategy_name, safe_path_component
 
     name, entry = resolve_strategy(config)
-    tf, mult = config.get("timeframe", "D"), config.get("timeframe_multiplier", 1)
-    if str(tf).upper() != "D" or int(mult or 1) != 1:
-        raise ValueError(f"Target-weight portfolios run on daily bars only (timeframe='D', "
-                         f"multiplier 1); got timeframe={tf!r}, multiplier={mult!r}")
-    settlement = _cfg(config, "portfolio_settlement")
-    if settlement not in (twp.SETTLED_ONLY, twp.IMMEDIATE):
-        raise ValueError(f"portfolio_settlement must be 'settled_only' or 'immediate', got {settlement!r}")
-    rules = [tuple(r) for r in _cfg(config, "portfolio_settlement_rules")]
-    band = config.get("portfolio_rebalance_band")
-    band = entry["band"] if band is None else float(band)
-    cost_bps = dict(entry["cost_bps"])
-    cost_bps.update(config.get("portfolio_cost_bps") or {})
+    settings = resolve_settings(entry, config)
+    settlement, rules, band = settings["settlement"], settings["rules"], settings["band"]
+    cost_bps, bench_cost = settings["cost_bps"], settings["benchmark_cost_bps"]
     capital = float(config.get("initial_capital", 100000.0))
+    if not (np.isfinite(capital) and capital > 0):
+        raise PortfolioConfigError(f"initial_capital must be positive and finite; got {capital!r}")
     bench = _benchmark(config)
-    bench_cost = float(_cfg(config, "portfolio_benchmark_cost_bps"))
     products = list(entry["symbols"]) + [entry["cash_symbol"]]
     cash_symbol = entry["cash_symbol"]
 
@@ -329,6 +396,7 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
     states = signals["state"].value_counts().to_dict() if "state" in signals.columns else {}
     final_nav = float(ledger["nav"].iloc[-1])
     full = period_metrics["Full period"]
+    rebalance_fills = fills[fills["Reason"] == "rebalance"]
     summary = {
         "mode": MODE,
         "run_id": run_id,
@@ -352,9 +420,13 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
         "costs": {"total": float(ledger["cost"].sum()),
                   "by_symbol": {k: float(v) for k, v in cost_by_symbol.items()},
                   "traded_notional_by_symbol": {k: float(v) for k, v in notional_by_symbol.items()}},
+        # "rebalance_sessions" counts sessions where the rule fired; while sale
+        # proceeds are unsettled it can fire without trading, so the sessions
+        # that executed a rebalance fill are reported separately.
         "activity": {"rebalance_sessions": int(ledger["rebalanced"].sum()),
+                     "rebalance_sessions_traded": int(rebalance_fills["Date"].nunique()),
                      "fills": int(len(fills)),
-                     "rebalance_fills": int((fills["Reason"] == "rebalance").sum()) if len(fills) else 0,
+                     "rebalance_fills": int(len(rebalance_fills)),
                      "unfilled_target_days": int(ledger["target_unfilled_at_open"].sum()),
                      "signal_state_sessions": {str(k): int(v) for k, v in states.items()}},
         "validation": validation,

@@ -73,6 +73,34 @@ def cast_value(s: str) -> Any:
     return s
 
 
+class OverrideError(ValueError):
+    """A ``--set KEY=VALUE`` value could not be parsed for a structured key."""
+
+
+#: --set keys whose value is JSON, with the required top-level type and an example (#487).
+_JSON_SET_KEYS = {
+    "portfolio_cost_bps": (dict, '{"VIXY": 20, "SVXY": 20, "SGOV": 5}'),
+    "portfolio_symbol_map": (dict, '{"vix": "$VIX", "vix3m": "$VIX3M"}'),
+    "portfolio_settlement_rules": (list, '[["1900-01-01", 2], ["2024-05-28", 1]]'),
+}
+
+
+def _parse_json_override(key: str, raw: str):
+    """Decode a structured ``--set`` value; a clear :class:`OverrideError` otherwise."""
+    import json
+    kind, example = _JSON_SET_KEYS[key]
+    what = "object" if kind is dict else "array"
+    try:
+        value = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise OverrideError(f"--set {key}=... is not valid JSON ({exc.msg} at column {exc.colno}). "
+                            f"Expected a JSON {what}, e.g. --set '{key}={example}'") from exc
+    if not isinstance(value, kind):
+        raise OverrideError(f"--set {key}=... must be a JSON {what}, e.g. --set '{key}={example}'; "
+                            f"got {raw.strip()!r}")
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Parser builder
 # ---------------------------------------------------------------------------
@@ -385,12 +413,8 @@ def apply_overrides(config_dict: dict, args: argparse.Namespace) -> dict:
             print(f"[WARNING] --set value ignored (no '='): {item!r}", file=sys.stderr)
             continue
         k, v = item.split("=", 1)
-        if k.strip() == "portfolio_cost_bps":
-            import json
-            costs = json.loads(v)
-            if not isinstance(costs, dict):
-                raise ValueError("portfolio_cost_bps must be a JSON object keyed by ticker")
-            config_dict[k.strip()] = costs
+        if k.strip() in _JSON_SET_KEYS:
+            config_dict[k.strip()] = _parse_json_override(k.strip(), v)
         else:
             config_dict[k.strip()] = cast_value(v.strip())
 

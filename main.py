@@ -684,7 +684,12 @@ def main():
         return
 
     # Apply all CLI overrides to CONFIG before any downstream code reads it
-    apply_overrides(CONFIG, args)
+    from helpers.cli_config import OverrideError
+    try:
+        apply_overrides(CONFIG, args)
+    except OverrideError as _override_err:  # malformed structured --set value (#487)
+        print(f"\n[ERROR] {_override_err}\n")
+        sys.exit(1)
     # --- END ARGUMENT PARSING ---
 
     # --- S1: API KEY CHECK ---
@@ -785,11 +790,17 @@ def main():
     # NAV ledger. The single-asset pipeline below is not entered, so its
     # behaviour is unchanged when portfolio_strategy is unset (the default).
     if CONFIG.get("portfolio_strategy"):
-        from helpers.target_weight_runner import resolve_strategy, run_target_weight_backtest
+        from helpers.target_weight_runner import (
+            PortfolioConfigError, PortfolioDataError, resolve_settings, resolve_strategy,
+            run_target_weight_backtest,
+        )
         try:
             _tw_name, _tw_entry = resolve_strategy(CONFIG)
-        except KeyError as _tw_err:
-            print(f"\n[ERROR] {_tw_err}\n")
+            # Validated here as well so that --dry-run reports a bad portfolio_* value.
+            resolve_settings(_tw_entry, CONFIG)
+        except (KeyError, PortfolioConfigError) as _tw_err:
+            _tw_msg = _tw_err.args[0] if isinstance(_tw_err, KeyError) and _tw_err.args else _tw_err
+            print(f"\n[ERROR] {_tw_msg}\n")
             sys.exit(1)
         logger.info(f"  Run ID        : {run_folder_name}")
         logger.info(f"  Data provider : {CONFIG.get('data_provider', 'polygon')}")
@@ -797,7 +808,14 @@ def main():
         if args.dry_run:
             logger.info(f"[DRY RUN] Target-weight strategy '{_tw_name}' resolved; exiting before data fetch.")
             sys.exit(0)
-        run_target_weight_backtest(CONFIG, run_base_dir, run_folder_name, get_data_service())
+        try:
+            run_target_weight_backtest(CONFIG, run_base_dir, run_folder_name, get_data_service())
+        except (PortfolioConfigError, PortfolioDataError) as _tw_err:
+            # Expected, user-actionable refusals (bad portfolio_* value, data that
+            # cannot fund the ledger). Engine invariant failures still raise.
+            logger.error(f"Target-weight run refused: {_tw_err}")
+            print(f"\n[ERROR] {_tw_err}\n")
+            sys.exit(1)
         logger.info(f"Run complete in {time.monotonic() - start_time:.1f}s: {run_base_dir}")
         return
     # --- END TARGET-WEIGHT PORTFOLIO MODE ---

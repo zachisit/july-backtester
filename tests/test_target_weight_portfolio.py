@@ -606,3 +606,216 @@ class TestReviewRegressions:
         monkeypatch.setattr(sys, "argv", ["report.py", "--all", str(mixed)])
         report.main()
         assert calls == {"trade": ["Some_Strategy"], "portfolio": ["VIX_eVRP_Dual_SGOV_funded"]}
+
+
+# ---------------------------------------------------------------------------
+# Independent QA regressions (PR #489)
+# ---------------------------------------------------------------------------
+
+class TestQaEngineInputs:
+    """Costs, band and capital are validated instead of silently accepted."""
+
+    def test_negative_cost_rejected(self):
+        p = _flat()
+        with pytest.raises(ValueError, match="cost_bps"):
+            _sim(p, p, _targets(p.index, -0.2), cost_bps={"VIXY": 5, "SVXY": -5, "SGOV": 1})
+
+    def test_cost_key_that_is_not_a_traded_symbol_rejected(self):
+        p = _flat()
+        with pytest.raises(ValueError, match="svxy"):
+            _sim(p, p, _targets(p.index, -0.2), cost_bps={"svxy": 20})
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), 10000.0])
+    def test_non_finite_or_total_cost_rejected(self, bad):
+        p = _flat()
+        with pytest.raises(ValueError, match="cost_bps"):
+            _sim(p, p, _targets(p.index, -0.2), cost_bps={"SGOV": bad})
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -0.01])
+    def test_invalid_band_rejected(self, bad):
+        p = _flat()
+        with pytest.raises(ValueError, match="band"):
+            _sim(p, p, _targets(p.index, -0.2), band=bad)
+
+    @pytest.mark.parametrize("bad", [float("nan"), float("inf"), 0.0])
+    def test_invalid_capital_rejected(self, bad):
+        p = _flat()
+        with pytest.raises(ValueError, match="initial_capital"):
+            _sim(p, p, _targets(p.index, -0.2), initial_capital=bad)
+
+    def _runner_refuses(self, match, **cfg):
+        from helpers.target_weight_runner import PortfolioConfigError, run_target_weight_backtest
+        with pytest.raises(PortfolioConfigError, match=match):
+            run_target_weight_backtest(_config(**cfg), "/nonexistent", "x", _fetcher(synthetic_universe()))
+
+    def test_runner_refuses_mistyped_cost_override(self):
+        # Lower-case keys used to be merged, ignored, and the run completed at baseline costs.
+        self._runner_refuses("vixy", portfolio_cost_bps={"vixy": 20, "svxy": 20, "sgov": 5})
+
+    def test_runner_refuses_negative_cost_override(self):
+        self._runner_refuses("portfolio_cost_bps", portfolio_cost_bps={"VIXY": -500})
+
+    def test_runner_refuses_non_finite_band(self):
+        self._runner_refuses("portfolio_rebalance_band", portfolio_rebalance_band=float("nan"))
+
+    def test_runner_refuses_malformed_structured_keys(self):
+        self._runner_refuses("portfolio_symbol_map", portfolio_symbol_map='{"vix":"VIX"}')
+        self._runner_refuses("portfolio_settlement_rules", portfolio_settlement_rules=[["2024-05-28"]])
+
+    def test_valid_stress_override_still_runs(self, tmp_path):
+        from helpers.target_weight_runner import run_target_weight_backtest
+        s = run_target_weight_backtest(_config(portfolio_cost_bps={"VIXY": 20, "SVXY": 20, "SGOV": 5}),
+                                       str(tmp_path), "stress", _fetcher(synthetic_universe()))
+        assert s["cost_bps"] == {"VIXY": 20, "SVXY": 20, "SGOV": 5}
+
+
+class TestQaDustFills:
+    def test_no_dust_purchases_in_fills_ledger(self):
+        rng = np.random.default_rng(0)
+        n = 600
+        d = pd.bdate_range("2021-01-04", periods=n)
+        o = pd.DataFrame({s: 50 * np.exp(np.cumsum(rng.normal(0, v, n)))
+                          for s, v in (("VIXY", .05), ("SVXY", .03), ("SGOV", .0005))}, index=d)
+        c = o * np.exp(rng.normal(0, .01, (n, 3)))
+        e = rng.choice([-0.2, -0.1, 0, 0.2], size=n)
+        capital = 1e5
+        r = _sim(o, c, _targets(d, e), settlement=twp.IMMEDIATE, initial_capital=capital)
+        # Sales and cash parking already skip sub-threshold amounts; purchases must too.
+        assert (r.fills["Notional"] > 1e-14 * capital).all()
+        signed = r.fills.assign(q=np.where(r.fills["Side"] == "BUY", r.fills["Shares"], -r.fills["Shares"]))
+        for s in r.symbols:
+            cum = signed[signed["Symbol"] == s].groupby("Date")["q"].sum().reindex(d, fill_value=0).cumsum()
+            np.testing.assert_allclose(cum, r.ledger[f"{s}_shares"], atol=1e-9)
+
+
+class TestQaReport:
+    def _summary(self, portfolio_run, **over):
+        import copy
+        s = copy.deepcopy(portfolio_run[1])
+        s.update(over)
+        return s
+
+    def test_band_is_not_rounded_to_whole_percent(self, portfolio_run):
+        from trade_analyzer import portfolio_report as pr
+        text = " ".join(pr.notes(self._summary(portfolio_run, band=0.025)))
+        assert "2.5 pp" in text and "band 2%" not in text
+        assert "0.5 pp" in " ".join(pr.notes(self._summary(portfolio_run, band=0.005)))
+        ledger = pd.read_csv(portfolio_run[0] / "portfolio_runs" / "VIXY-SVXY-SGOV" /
+                             "VIX_eVRP_Dual_SGOV_funded" / "ledger.csv", index_col=0, parse_dates=True)
+        ledger["target_unfilled_at_open"] = True
+        fig = pr.plot_exposure(ledger, 0.025)
+        labels = [t.get_text() for t in fig.axes[0].get_legend().get_texts()]
+        import matplotlib.pyplot as plt
+        plt.close(fig)
+        assert any("2.5 pp" in x for x in labels)
+
+    def test_cash_sleeve_has_no_sharpe_against_itself(self, portfolio_run):
+        from trade_analyzer import portfolio_report as pr
+        table = pr.period_table(portfolio_run[1])
+        own = table[table["Series"] == "SGOV (cash sleeve)"]["Sharpe vs SGOV"]
+        assert len(own) and (own == "—").all()
+        strat = table[table["Series"] == "Strategy"]["Sharpe vs SGOV"]
+        assert (strat != "—").all()
+
+    def test_report_without_benchmark_never_prints_none(self, tmp_path, monkeypatch):
+        import report
+        from helpers.target_weight_runner import run_target_weight_backtest
+        run_target_weight_backtest(_config(portfolio_benchmark_ticker=None), str(tmp_path), "nobench",
+                                   _fetcher(synthetic_universe()))
+        monkeypatch.setattr(sys, "argv", ["report.py", "--all", str(tmp_path)])
+        report.main()
+        out = tmp_path / "detailed_reports" / "VIXY-SVXY-SGOV" / "VIX_eVRP_Dual_SGOV_funded"
+        text = (out / "VIX_eVRP_Dual_SGOV_funded.md").read_text()
+        assert "Benchmark None" not in text and "None N/A" not in text
+        assert "No buy-and-hold benchmark is configured" in text
+        from trade_analyzer import portfolio_report as pr
+        art = pr.load_artifacts(tmp_path / "analyzer_csvs" / "VIXY-SVXY-SGOV" / "VIX_eVRP_Dual_SGOV_funded.csv")
+        assert all("None" not in sub for _l, _v, sub, _p in pr.kpi_tiles(art["summary"], art["fills"]))
+
+    def test_immediate_primary_is_flagged_non_deployable(self, tmp_path, monkeypatch):
+        import report
+        from helpers.target_weight_runner import run_target_weight_backtest
+        run_target_weight_backtest(_config(portfolio_settlement="immediate"), str(tmp_path), "imm",
+                                   _fetcher(synthetic_universe()))
+        monkeypatch.setattr(sys, "argv", ["report.py", "--all", str(tmp_path)])
+        report.main()
+        out = tmp_path / "detailed_reports" / "VIXY-SVXY-SGOV" / "VIX_eVRP_Dual_SGOV_funded"
+        text = (out / "VIX_eVRP_Dual_SGOV_funded.md").read_text()
+        head = text.split("## Performance by period")[0]
+        assert "NON-DEPLOYABLE" in head
+        assert "only settled cash buys" not in text
+        assert "reused at the same open" in text
+
+    def test_settled_primary_keeps_settled_cash_statement(self, portfolio_run):
+        from trade_analyzer import portfolio_report as pr
+        text = " ".join(pr.notes(portfolio_run[1]))
+        assert "only settled cash buys" in text and "NON-DEPLOYABLE" not in text
+
+    def test_activity_separates_rule_fired_from_traded_sessions(self, portfolio_run):
+        run_dir, summary = portfolio_run
+        act = summary["activity"]
+        fills = pd.read_csv(run_dir / "portfolio_runs" / "VIXY-SVXY-SGOV" / "VIX_eVRP_Dual_SGOV_funded" /
+                            "fills.csv", parse_dates=["Date"])
+        traded = fills.loc[fills["Reason"] == "rebalance", "Date"].nunique()
+        assert act["rebalance_sessions_traded"] == traded
+        assert traded < act["rebalance_sessions"]  # session 0 and settlement waits fire without trading
+        from trade_analyzer import portfolio_report as pr
+        assert f"{traded} executed" in pr.activity_lines(summary, fills)[0]
+
+
+class TestQaCli:
+    def _parse(self, *sets):
+        from helpers.cli_config import apply_overrides, build_parser
+        args = build_parser().parse_args([x for s in sets for x in ("--set", s)])
+        return apply_overrides({}, args)
+
+    def test_structured_portfolio_keys_are_json_decoded(self):
+        cfg = self._parse('portfolio_symbol_map={"vix": "$VIX", "vix3m": "$VIX3M"}',
+                          'portfolio_settlement_rules=[["1900-01-01", 2], ["2024-05-28", 1]]',
+                          'portfolio_cost_bps={"VIXY": 20, "SVXY": 20, "SGOV": 5}',
+                          "portfolio_rebalance_band=0.03")
+        assert cfg["portfolio_symbol_map"] == {"vix": "$VIX", "vix3m": "$VIX3M"}
+        assert cfg["portfolio_settlement_rules"] == [["1900-01-01", 2], ["2024-05-28", 1]]
+        assert cfg["portfolio_cost_bps"] == {"VIXY": 20, "SVXY": 20, "SGOV": 5}
+        assert cfg["portfolio_rebalance_band"] == 0.03
+
+    @pytest.mark.parametrize("item", ["portfolio_cost_bps={VIXY:20}", "portfolio_cost_bps=[1,2]",
+                                      "portfolio_symbol_map=VIX", 'portfolio_settlement_rules={"a":1}'])
+    def test_malformed_structured_value_is_a_clear_error(self, item):
+        from helpers.cli_config import OverrideError
+        with pytest.raises(OverrideError, match=item.split("=")[0]):
+            self._parse(item)
+
+    def test_expected_refusal_exits_cleanly_without_traceback(self, tmp_path):
+        """A data refusal is reported as [ERROR] + exit 1, like an unknown strategy name."""
+        name = f"pytest489-{os.getpid()}"
+        cmd = [sys.executable, "main.py", "--provider", "parquet", "--parquet-dir", str(tmp_path),
+               "--start", "2020-07-01", "--end", "2021-07-30",
+               "--portfolio-strategy", PLUGIN, "--name", name]
+        res = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=120)
+        runs = os.path.join(PROJECT_ROOT, "output", "runs")
+        import shutil
+        for d in os.listdir(runs):
+            if d.startswith(name):
+                shutil.rmtree(os.path.join(runs, d), ignore_errors=True)
+        assert res.returncode == 1
+        assert "Traceback" not in res.stderr and "Traceback" not in res.stdout
+        assert "[ERROR]" in res.stdout + res.stderr and "No data for" in res.stdout + res.stderr
+
+    def test_dry_run_validates_portfolio_settings(self, tmp_path):
+        name = f"pytest489dry-{os.getpid()}"
+        cmd = [sys.executable, "main.py", "--provider", "parquet", "--parquet-dir", str(tmp_path),
+               "--start", "2020-07-01", "--end", "2021-07-30", "--dry-run",
+               "--portfolio-strategy", PLUGIN, "--name", name,
+               "--set", 'portfolio_cost_bps={"vixy": 20}']
+        res = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True, encoding="utf-8",
+                             errors="replace", timeout=120)
+        runs = os.path.join(PROJECT_ROOT, "output", "runs")
+        import shutil
+        for d in os.listdir(runs):
+            if d.startswith(name):
+                shutil.rmtree(os.path.join(runs, d), ignore_errors=True)
+        assert res.returncode == 1
+        assert "Traceback" not in res.stderr + res.stdout
+        assert "[ERROR]" in res.stdout and "vixy" in res.stdout

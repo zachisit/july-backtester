@@ -183,6 +183,29 @@ def _validate_inputs(opens, closes, targets, risk_symbols, cash_symbol):
     return symbols, op, cl, w
 
 
+def _validate_costs(cost_bps, symbols) -> np.ndarray:
+    """Per-symbol fee rate (fraction of traded notional), in *symbols* order.
+
+    A key that is not a traded symbol is refused rather than ignored: a
+    mistyped override (``"vixy"``) would otherwise run at the default cost and
+    look like a completed stress run. Fees must be finite, ``>= 0`` (a negative
+    fee would create NAV) and below 100% of notional.
+    """
+    cost_bps = dict(cost_bps or {})
+    unknown = [k for k in cost_bps if k not in symbols]
+    if unknown:
+        raise ValueError(f"cost_bps has keys that are not traded symbols: {unknown}. "
+                         f"Traded symbols (case-sensitive): {list(symbols)}")
+    try:
+        bps = np.array([float(cost_bps.get(s, 0.0)) for s in symbols], dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"cost_bps values must be numbers of basis points: {exc}") from exc
+    bad = [s for s, v in zip(symbols, bps) if not (np.isfinite(v) and 0 <= v < 10000)]
+    if bad:
+        raise ValueError(f"cost_bps must be finite, >= 0 and < 10000 bps; invalid for {bad}")
+    return bps / 10000
+
+
 def simulate_target_weights(
     opens: pd.DataFrame,
     closes: pd.DataFrame,
@@ -220,7 +243,8 @@ def simulate_target_weights(
     band : float
         Rebalance tolerance (0.02 = 2 percentage points).
     cost_bps : dict
-        Per-symbol cost in basis points of traded notional (default 0).
+        Per-symbol cost in basis points of traded notional (default 0). Keys
+        must be traded symbols; values finite, ``>= 0`` and ``< 10000``.
     settlement : "settled_only" | "immediate"
     settle_map : dict, optional
         Precomputed ``{trade_date: settlement_date}``; derived from the session
@@ -230,16 +254,15 @@ def simulate_target_weights(
     """
     if settlement not in _SETTLEMENT_MODES:
         raise ValueError(f"settlement must be one of {_SETTLEMENT_MODES}, got {settlement!r}")
-    if not (initial_capital > 0):
-        raise ValueError("initial_capital must be positive")
-    if band < 0:
-        raise ValueError("band must be >= 0")
+    if not (np.isfinite(initial_capital) and initial_capital > 0):
+        raise ValueError("initial_capital must be positive and finite")
+    if not (np.isfinite(band) and band >= 0):
+        raise ValueError("band must be finite and >= 0")
     risk_symbols = list(risk_symbols)
     symbols, op, cl, risk_w = _validate_inputs(opens, closes, targets, risk_symbols, cash_symbol)
     dates = opens.index
     n_risk = len(risk_symbols)
-    cost_bps = cost_bps or {}
-    fees = np.array([float(cost_bps.get(s, 0.0)) for s in symbols]) / 10000
+    fees = _validate_costs(cost_bps, symbols)
     coeffs = None
     if exposure is not None:
         missing = [s for s in risk_symbols if not float(exposure.get(s, 0.0))]
@@ -334,11 +357,15 @@ def simulate_target_weights(
                     cash -= purchase * (1 + fees[j])
                     cost += purchase * fees[j]
                     turnover += purchase / before
-                    fills.append({"Date": date, "Symbol": symbols[j], "Side": "BUY",
-                                  "Shares": purchase / op[i, j], "Price": op[i, j],
-                                  "Notional": purchase, "Cost": purchase * fees[j],
-                                  "NetCash": -purchase * (1 + fees[j]), "SettlementDate": date,
-                                  "Reason": "rebalance"})
+                    # The arithmetic above is kept for every non-zero amount (frozen-ledger
+                    # parity); only amounts above the dust threshold are fills, as for
+                    # sales and cash parking.
+                    if purchase > tiny:
+                        fills.append({"Date": date, "Symbol": symbols[j], "Side": "BUY",
+                                      "Shares": purchase / op[i, j], "Price": op[i, j],
+                                      "Notional": purchase, "Cost": purchase * fees[j],
+                                      "NetCash": -purchase * (1 + fees[j]), "SettlementDate": date,
+                                      "Reason": "rebalance"})
         # Every dollar of settled cash goes to the cash sleeve; receivables wait.
         k = len(symbols) - 1
         purchase = max(cash, 0) / (1 + fees[k])
