@@ -55,8 +55,8 @@ risk-weight drift instead of signed exposure.
 * **Timing.** Prior-close target, next-open execution. Session 0 starts 100%
   in the cash sleeve.
 * **Rebalance rule.** Trade on the first session, when a held risk product's
-  target is zero, when the sign of signed exposure changes, or when
-  `|target - current| > band`.
+  target is zero, when a targeted risk product is not held, when the sign of
+  signed exposure changes, or when `|target - current| > band`.
 * **Settlement.** Sales create receivables that settle on the `lag`-th
   eligible session after the trade (T+2, then T+1 from 2024-05-28). Only
   settled cash buys; receivables count in NAV but cannot be spent. Eligible
@@ -84,14 +84,29 @@ risk-weight drift instead of signed exposure.
 | `portfolio_rebalance_band` | `None` | override the plugin's band |
 | `portfolio_cost_bps` | `None` | per-symbol override, e.g. stress `{"VIXY": 20, "SVXY": 20, "SGOV": 5}` |
 | `portfolio_symbol_map` | `{}` | provider ticker remap, e.g. `{"vix": "$VIX", "vix3m": "$VIX3M"}` for a Norgate-named corpus |
-| `portfolio_benchmark_ticker` | `"SPY"` | buy-and-hold comparison; the cash sleeve is always shown too |
+| `portfolio_benchmark_ticker` | `"SPY"` | buy-and-hold comparison (`None`/`""` disables); the cash sleeve is always shown too |
 | `portfolio_benchmark_cost_bps` | `5.0` | one-time benchmark entry cost |
 
-`start_date` is the first evaluation session. It must not precede any
-product's first bar, because pre-inception history is never synthesised.
-Signal inputs are fetched `pit_warmup_days` earlier for warm-up. Every product
-and the benchmark must trade on every session, or the run is refused with the
-missing dates listed.
+Evaluation sessions are every bar of any product or the benchmark in
+`[start_date, end_date]`. The run is refused, with the offending dates listed,
+when any of these holds:
+
+- a product, the cash sleeve or the benchmark starts after the first session,
+  ends before the last one, or misses a session in between. Pre-inception
+  history is never synthesised and the window is never silently shortened;
+- a signal input misses a session, or has no history before the first
+  session (e.g. a provider history cap such as Polygon's `I:VIX` from
+  2023-02-14);
+- the timeframe is anything other than daily (`timeframe="D"`, multiplier 1).
+
+All inputs are fetched `max(pit_warmup_days, 60)` calendar days before
+`start_date` so that signals are warm.
+
+With `exposure` set, every risk symbol needs a non-zero coefficient, and each
+session may target at most one risk product. Otherwise signed exposure does
+not identify the basket; use `exposure=None` (per-product weight band)
+instead. A risk product with a positive target that is not held always
+triggers a rebalance.
 
 ## Run artifacts
 
@@ -174,7 +189,7 @@ The settlement calendar, the 90 unfilled-target sessions and the session count
 
 * **Settlement calendar source.** The study builds eligible days from the
   `exchange_calendars` XNYS calendar. The engine uses the data's own sessions
-  and does not add that dependency. Both remove federal holidays. On this
+  and does not add that dependency. Settlement lags must be >= 1 session. Both remove federal holidays. On this
   sample the two calendars are identical (checked by the parity script). A
   data set with a missing session is refused, so the two cannot drift
   silently. Settlement dates after the last session use business days. They

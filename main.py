@@ -728,7 +728,7 @@ def main():
     if not (0 < alloc <= 1.0):
         errors.append(f"  - allocation_per_trade ({alloc}) must be between 0 (exclusive) and 1.0 (inclusive)")
 
-    if not CONFIG.get("portfolios"):
+    if not CONFIG.get("portfolios") and not CONFIG.get("portfolio_strategy"):
         errors.append("  - portfolios is empty. Add at least one entry to run, e.g. \"My Symbols\": [\"AAPL\"].")
 
     # PR #187 Fix 6 — validator consolidation (review item: duplicate module)

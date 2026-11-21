@@ -485,3 +485,104 @@ def test_main_cli_end_to_end(tmp_path):
     finally:
         import shutil
         shutil.rmtree(run_dir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Adversarial-review regressions (#487)
+# ---------------------------------------------------------------------------
+
+class TestReviewRegressions:
+    def test_exposure_must_cover_every_risk_symbol(self):
+        p = _flat()
+        tw = pd.DataFrame({"VIXY": 0.0, "SVXY": 0.4}, index=p.index)
+        with pytest.raises(ValueError, match="non-zero coefficient"):
+            simulate_target_weights(p, p, tw, RISK, CASH, exposure={"VIXY": 1.0})
+
+    def test_exposure_mode_rejects_multi_product_rows(self):
+        p = _flat()
+        tw = pd.DataFrame({"VIXY": 0.1, "SVXY": 0.2}, index=p.index)
+        with pytest.raises(ValueError, match="at most one risk product"):
+            _sim(p, p, tw)
+
+    def test_three_products_weight_band_moves_between_same_sign_products(self):
+        dates = pd.bdate_range("2020-01-06", periods=6)
+        syms = ["A", "B", "C"]
+        p = pd.DataFrame(100.0, index=dates, columns=syms + [CASH])
+        tw = pd.DataFrame({"A": 0.5, "B": 0.0, "C": 0.1}, index=dates)
+        tw.iloc[2:, :2] = [0.3, 0.2]
+        r = simulate_target_weights(p, p, tw, syms, CASH, exposure=None, settlement=twp.IMMEDIATE)
+        last = r.ledger.iloc[-1]
+        assert last["A_weight"] == pytest.approx(0.3)
+        assert last["B_weight"] == pytest.approx(0.2)
+        assert last["C_weight"] == pytest.approx(0.1)
+
+    def test_zero_lag_settlement_rejected(self):
+        with pytest.raises(ValueError, match=">= 1"):
+            settlement_dates(pd.bdate_range("2024-01-02", periods=3), rules=(("1900-01-01", 0),))
+
+    def test_tz_aware_index_rejected(self):
+        p = _flat()
+        p.index = p.index.tz_localize("UTC")
+        with pytest.raises(ValueError, match="tz-naive"):
+            _sim(p, p, _targets(p.index, 0.0))
+
+    def _refused(self, uni, match, **cfg):
+        from helpers.target_weight_runner import PortfolioDataError, run_target_weight_backtest
+        with pytest.raises((PortfolioDataError, ValueError), match=match):
+            run_target_weight_backtest(_config(**cfg), "/nonexistent", "x", _fetcher(uni))
+
+    def test_short_cash_sleeve_history_refused(self):
+        uni = synthetic_universe()
+        uni["SGOV"] = uni["SGOV"].loc["2020-09-01":]
+        self._refused(uni, "SGOV starts")
+
+    def test_cash_sleeve_ending_early_refused(self):
+        uni = synthetic_universe()
+        uni["SGOV"] = uni["SGOV"].loc[:"2021-03-31"]
+        self._refused(uni, "SGOV ends")
+
+    def test_signal_input_late_start_refused(self):
+        uni = synthetic_universe()
+        uni["I:VIX"] = uni["I:VIX"].loc["2021-02-01":]
+        self._refused(uni, "signal input 'vix' starts")
+
+    def test_signal_input_gap_refused(self):
+        uni = synthetic_universe()
+        uni["I:VIX3M"] = uni["I:VIX3M"].drop(uni["I:VIX3M"].index[250])
+        self._refused(uni, "signal input 'vix3m' is missing 1 session")
+
+    def test_intraday_timeframe_refused(self):
+        self._refused(synthetic_universe(), "daily bars only", timeframe="H")
+
+    def test_benchmark_can_be_disabled(self, tmp_path):
+        from helpers.target_weight_runner import run_target_weight_backtest
+        _ensure_plugin_registered()
+        summary = run_target_weight_backtest(_config(portfolio_benchmark_ticker=None), str(tmp_path),
+                                             "nobench", _fetcher(synthetic_universe()))
+        assert "SPY" not in summary["periods"]["Full period"]
+
+    def test_signal_plot_handles_many_states(self):
+        from trade_analyzer.portfolio_report import plot_signals
+        idx = pd.bdate_range("2024-01-01", periods=12)
+        sig = pd.DataFrame({"x": np.arange(12.0), "state": [f"s{i % 7}" for i in range(12)]}, index=idx)
+        fig = plot_signals(sig, idx, [])
+        import matplotlib.pyplot as plt
+        plt.close(fig)
+
+    def test_report_all_mixed_run_dispatches_each_csv(self, portfolio_run, monkeypatch, tmp_path):
+        import shutil
+        import report
+        run_dir, _ = portfolio_run
+        mixed = tmp_path / "run"
+        shutil.copytree(run_dir, mixed)
+        normal = mixed / "analyzer_csvs" / "Plain" / "Some_Strategy.csv"
+        normal.parent.mkdir(parents=True)
+        normal.write_text("Date,Ex. date,Profit\n2021-01-04,2021-01-05,1\n")
+        calls = {"trade": [], "portfolio": []}
+        monkeypatch.setattr(report, "generate_trade_report",
+                            lambda df, out, name, cfg: calls["trade"].append(name))
+        monkeypatch.setattr(report, "generate_portfolio_report",
+                            lambda csv, out, name: calls["portfolio"].append(name))
+        monkeypatch.setattr(sys, "argv", ["report.py", "--all", str(mixed)])
+        report.main()
+        assert calls == {"trade": ["Some_Strategy"], "portfolio": ["VIX_eVRP_Dual_SGOV_funded"]}

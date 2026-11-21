@@ -209,7 +209,8 @@ def plot_signals(signals: pd.DataFrame, sessions: pd.DatetimeIndex, symbols: lis
         ax.plot(sig.index, sig[c], lw=0.8, color=_SERIES_COLORS[i % len(_SERIES_COLORS)], label=c)
     if "state" in sig.columns:
         states = [s for s in pd.unique(sig["state"].dropna())]
-        palette = {s: c for s, c in zip(sorted(states), ["#ffcdd2", "#c8e6c9", "#bbdefb", "#fff9c4", "#e1bee7"])}
+        shades = ["#ffcdd2", "#c8e6c9", "#bbdefb", "#fff9c4", "#e1bee7", "#ffe0b2", "#b2dfdb", "#d7ccc8"]
+        palette = {s: shades[k % len(shades)] for k, s in enumerate(sorted(states))}
         codes = sig["state"].fillna("n/a")
         runs = (codes != codes.shift()).cumsum()
         idx = sig.index

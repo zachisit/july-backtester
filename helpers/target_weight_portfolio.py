@@ -24,7 +24,8 @@ Accounting contract
   cash sleeve.
 * **Rebalance rule.** Trade only when (a) it is the first session, (b) a held
   risk product has a zero target weight, (c) the sign of the signed exposure
-  changes, or (d) ``|target exposure - current exposure| > band``. Exposure is
+  changes, (d) a risk product with a positive target is not held, or
+  (e) ``|target exposure - current exposure| > band``. Exposure is
   ``sum(exposure_coeff[s] * value[s]) / NAV`` (``band_basis="exposure"``), or
   the largest absolute risk-weight drift when the strategy declares no
   exposure coefficients (``band_basis="weights"``).
@@ -100,8 +101,11 @@ def settlement_lag(date: pd.Timestamp, rules=DEFAULT_SETTLEMENT_RULES) -> int:
     for effective, value in sorted(((pd.Timestamp(d), int(v)) for d, v in rules)):
         if date >= effective:
             lag = value
-    if lag is None or lag < 0:
+    if lag is None:
         raise ValueError(f"No settlement rule covers {date.date()}")
+    if lag < 1:
+        raise ValueError("settlement lag must be >= 1 session; use settlement='immediate' "
+                         "for same-open reuse of proceeds")
     return lag
 
 
@@ -130,9 +134,6 @@ def settlement_dates(sessions: pd.DatetimeIndex, rules=DEFAULT_SETTLEMENT_RULES,
     result = {}
     for date in sessions:
         lag = settlement_lag(date, rules)
-        if lag == 0:
-            result[date] = date
-            continue
         future = eligible[eligible > date]
         result[date] = future[lag - 1]
     return result
@@ -161,6 +162,8 @@ def _validate_inputs(opens, closes, targets, risk_symbols, cash_symbol):
     missing = [s for s in risk_symbols if s not in targets.columns]
     if missing:
         raise ValueError(f"targets is missing risk-symbol columns {missing}")
+    if getattr(opens.index, "tz", None) is not None:
+        raise ValueError("session index must be tz-naive dates")
     w = targets[list(risk_symbols)].to_numpy(dtype=float)
     if not np.isfinite(w).all():
         raise ValueError("target weights contain NaN/inf")
@@ -228,7 +231,17 @@ def simulate_target_weights(
     n_risk = len(risk_symbols)
     cost_bps = cost_bps or {}
     fees = np.array([float(cost_bps.get(s, 0.0)) for s in symbols]) / 10000
-    coeffs = None if exposure is None else [float(exposure.get(s, 0.0)) for s in symbols]
+    coeffs = None
+    if exposure is not None:
+        missing = [s for s in risk_symbols if not float(exposure.get(s, 0.0))]
+        if missing:
+            raise ValueError(f"exposure must give every risk symbol a non-zero coefficient; "
+                             f"missing/zero for {missing}. Use exposure=None to band on weights.")
+        if ((risk_w > 0).sum(axis=1) > 1).any():
+            raise ValueError("band_basis='exposure' needs at most one risk product targeted per "
+                             "session (otherwise exposure does not identify the basket); "
+                             "use exposure=None to band on per-product weights")
+        coeffs = [float(exposure.get(s, 0.0)) for s in symbols]
     if settlement == SETTLED_ONLY and settle_map is None:
         settle_map = settlement_dates(dates, settlement_rules)
     settle_map = settle_map or {}
@@ -275,7 +288,8 @@ def simulate_target_weights(
             drift = np.abs(weights[:n_risk] - old[:n_risk] / before)
             drift_trigger = bool(n_risk and drift.max() > band)
         product_exit = bool(np.any((q[:n_risk] > 0) & (weights[:n_risk] == 0)))
-        rebalance = i == 0 or product_exit or drift_trigger
+        product_entry = bool(np.any((q[:n_risk] == 0) & (weights[:n_risk] > 0)))
+        rebalance = i == 0 or product_exit or product_entry or drift_trigger
         cost = turnover = 0.0
         if rebalance:
             # Plan the allocation on post-cost NAV; purchases below are still

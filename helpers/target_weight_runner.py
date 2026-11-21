@@ -61,6 +61,13 @@ class PortfolioDataError(ValueError):
     """The fetched data cannot support a funded multi-asset run (missing sessions etc.)."""
 
 
+def _benchmark(config: dict):
+    """Benchmark ticker; an explicit None or "" disables it."""
+    if "portfolio_benchmark_ticker" in config:
+        return config["portfolio_benchmark_ticker"] or None
+    return CONFIG_DEFAULTS["portfolio_benchmark_ticker"]
+
+
 def _cfg(config: dict, key: str):
     value = config.get(key)
     return CONFIG_DEFAULTS[key] if value is None else value
@@ -109,7 +116,7 @@ def fetch_inputs(entry: dict, config: dict, fetcher) -> tuple[dict, dict]:
         requests[s] = symbol_map.get(s, s)
     for role, ticker in entry["signal_symbols"].items():
         requests[role] = symbol_map.get(role, symbol_map.get(ticker, ticker))
-    bench = _cfg(config, "portfolio_benchmark_ticker")
+    bench = _benchmark(config)
     if bench and bench not in requests:
         requests[bench] = symbol_map.get(bench, bench)
     data, provenance = {}, {}
@@ -127,26 +134,36 @@ def fetch_inputs(entry: dict, config: dict, fetcher) -> tuple[dict, dict]:
 
 
 def build_sessions(data: dict, products: list, cash_symbol: str, benchmark: str | None,
-                   start: str, end: str | None) -> pd.DatetimeIndex:
-    """Evaluation sessions: the cash sleeve's bars in [start, end].
+                   start: str, end: str | None, signal_roles=()) -> pd.DatetimeIndex:
+    """Evaluation sessions: every bar of any product or the benchmark in [start, end].
 
-    Every product (and the benchmark) must trade on every session, with
-    positive Open/Close. Starting before a product's inception is an error —
-    no pre-inception history is synthesised.
+    Every product (including the cash sleeve) and the benchmark must trade on
+    every session with positive Open/Close, and every signal input must have a
+    bar on every session and history before the first one. A product that
+    starts after the first session, or ends before the last, refuses the run:
+    no pre-inception history is synthesised and the window is never silently
+    shortened.
     """
     lo = pd.Timestamp(start)
     hi = pd.Timestamp(end) if end else None
-    cash = data[cash_symbol]
-    sessions = cash.index[(cash.index >= lo) & ((cash.index <= hi) if hi is not None else True)]
-    if sessions.empty:
-        raise PortfolioDataError(f"{cash_symbol} has no bars between {start} and {end}")
+    tradables = list(products) + ([benchmark] if benchmark else [])
+    union = pd.DatetimeIndex([])
+    for s in tradables:
+        idx = data[s].index
+        union = union.union(idx[(idx >= lo) & ((idx <= hi) if hi is not None else True)])
+    if union.empty:
+        raise PortfolioDataError(f"No product bars between {start} and {end}")
+    sessions = union
     problems = []
-    for s in list(products) + ([benchmark] if benchmark else []):
+    for s in tradables:
         df = data[s]
-        first = df.index.min()
-        if first > sessions[0]:
-            problems.append(f"{s} starts {first.date()}, after the first session "
-                            f"{sessions[0].date()}; set start_date >= {first.date()}")
+        if df.index.min() > sessions[0]:
+            problems.append(f"{s} starts {df.index.min().date()}, after the first session "
+                            f"{sessions[0].date()}; set start_date >= {df.index.min().date()}")
+            continue
+        if df.index.max() < sessions[-1]:
+            problems.append(f"{s} ends {df.index.max().date()}, before the last session "
+                            f"{sessions[-1].date()}; set end_date <= {df.index.max().date()}")
             continue
         missing = sessions.difference(df.index)
         if len(missing):
@@ -156,13 +173,18 @@ def build_sessions(data: dict, products: list, cash_symbol: str, benchmark: str 
         px = df.loc[sessions, ["Open", "Close"]]
         if not np.isfinite(px.to_numpy(dtype=float)).all() or (px <= 0).any().any():
             problems.append(f"{s} has missing or non-positive Open/Close on a session")
-    extra = set()
-    for s in products:
-        inside = data[s].index[(data[s].index >= sessions[0]) & (data[s].index <= sessions[-1])]
-        extra |= set(inside.difference(sessions))
-    if extra:
-        problems.append(f"{len(extra)} product session(s) absent from {cash_symbol}, e.g. "
-                        f"{sorted(str(d.date()) for d in extra)[:5]}")
+    for role in signal_roles:
+        df = data[role]
+        if df.index.min() >= sessions[0]:
+            problems.append(f"signal input {role!r} starts {df.index.min().date()}, with no history "
+                            f"before the first session {sessions[0].date()} (provider history cap?)")
+            continue
+        missing = sessions.difference(df.index)
+        if len(missing):
+            problems.append(f"signal input {role!r} is missing {len(missing)} session(s), e.g. "
+                            f"{[str(d.date()) for d in missing[:5]]}")
+        elif not np.isfinite(df.loc[sessions, "Close"].to_numpy(dtype=float)).all():
+            problems.append(f"signal input {role!r} has a missing Close on a session")
     if problems:
         raise PortfolioDataError("Target-weight run refused; the data cannot support a funded "
                                  "multi-asset ledger:\n  - " + "\n  - ".join(problems))
@@ -207,6 +229,10 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
     from helpers.summary import _safe_strategy_name, safe_path_component
 
     name, entry = resolve_strategy(config)
+    tf, mult = config.get("timeframe", "D"), config.get("timeframe_multiplier", 1)
+    if str(tf).upper() != "D" or int(mult or 1) != 1:
+        raise ValueError(f"Target-weight portfolios run on daily bars only (timeframe='D', "
+                         f"multiplier 1); got timeframe={tf!r}, multiplier={mult!r}")
     settlement = _cfg(config, "portfolio_settlement")
     if settlement not in (twp.SETTLED_ONLY, twp.IMMEDIATE):
         raise ValueError(f"portfolio_settlement must be 'settled_only' or 'immediate', got {settlement!r}")
@@ -216,7 +242,7 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
     cost_bps = dict(entry["cost_bps"])
     cost_bps.update(config.get("portfolio_cost_bps") or {})
     capital = float(config.get("initial_capital", 100000.0))
-    bench = _cfg(config, "portfolio_benchmark_ticker")
+    bench = _benchmark(config)
     bench_cost = float(_cfg(config, "portfolio_benchmark_cost_bps"))
     products = list(entry["symbols"]) + [entry["cash_symbol"]]
     cash_symbol = entry["cash_symbol"]
@@ -230,7 +256,8 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
 
     data, provenance = fetch_inputs(entry, config, fetcher)
     sessions = build_sessions(data, products, cash_symbol, bench,
-                              config["start_date"], config.get("end_date"))
+                              config["start_date"], config.get("end_date"),
+                              signal_roles=list(entry["signal_symbols"]))
     signals = compute_targets(entry, data, sessions)
     opens = pd.DataFrame({s: data[s]["Open"].reindex(sessions) for s in products})
     closes = pd.DataFrame({s: data[s]["Close"].reindex(sessions) for s in products})
