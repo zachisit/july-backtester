@@ -548,4 +548,24 @@ CONFIG = {
     # min(cpu_count(), number of tasks); 1 runs every task serially in one
     # invocation, keeping the combined summary. CLI: --workers N.
     "max_workers": None,
+
+    # ============================================================
+    # SECTION 32: TARGET-WEIGHT PORTFOLIO STRATEGIES (#487)
+    # ============================================================
+    # Fully funded multi-asset baskets (helpers/target_weight_portfolio.py),
+    # e.g. "VIX eVRP Dual (SGOV funded)". None (default) = the normal
+    # single-asset run; nothing below is read. A name runs that
+    # @register_target_weight plugin INSTEAD of `portfolios`/`strategies`.
+    # CLI: --portfolio-strategy "<name>". See docs/TARGET_WEIGHT_PORTFOLIOS.md.
+    "portfolio_strategy": None,
+    # "settled_only" = purchases use settled cash only (cash account);
+    # "immediate" = same-open reuse of sale proceeds (benchmark, not executable).
+    "portfolio_settlement": "settled_only",
+    # [effective_date, lag_sessions] rules: T+2, then T+1 from 2024-05-28.
+    "portfolio_settlement_rules": [["1900-01-01", 2], ["2024-05-28", 1]],
+    "portfolio_rebalance_band": None,       # None = the strategy's registered band
+    "portfolio_cost_bps": None,             # e.g. {"VIXY": 20, "SVXY": 20, "SGOV": 5}; None = strategy's
+    "portfolio_symbol_map": {},             # provider ticker remap, e.g. {"vix": "$VIX"}
+    "portfolio_benchmark_ticker": "SPY",    # buy-and-hold comparison (cash sleeve is always shown)
+    "portfolio_benchmark_cost_bps": 5.0,    # one-time entry cost on the benchmark
 }

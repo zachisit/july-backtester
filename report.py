@@ -45,6 +45,7 @@ from trade_analyzer.default_config import (
     WFA_SPLIT_RATIO,
 )
 from trade_analyzer.analyzer import generate_trade_report
+from trade_analyzer.portfolio_report import generate_portfolio_report, is_portfolio_csv
 
 
 def _load_equity_file(path: Path) -> "pd.Series | None":
@@ -448,6 +449,15 @@ def main():
         for csv_file in csv_files:
             report_name = csv_file.stem
             print(f"Processing: {csv_file}")
+            # Mirror analyzer_csvs/<Portfolio>/ so a strategy name shared by two
+            # portfolios does not overwrite the other's report (#479).
+            report_dir = str(Path(output_dir) / csv_file.parent.relative_to(analyzer_csvs_dir))
+            if is_portfolio_csv(csv_file):
+                # Target-weight basket (#487): the report is built from the
+                # portfolio NAV ledger, never from per-fill "trade" profits.
+                generate_portfolio_report(csv_file, report_dir, report_name)
+                count += 1
+                continue
             trades_df = pd.read_csv(csv_file)
             portfolio_timeline = _load_equity_file(csv_file.parent / f"{csv_file.stem}_equity.csv")
             this_config = {**config_params}
@@ -457,9 +467,6 @@ def main():
                                                     csv_file.parent.name)
             if _verdict_match is not None:
                 this_config['STRATEGY_VERDICT'] = _verdict_match
-            # Mirror analyzer_csvs/<Portfolio>/ so a strategy name shared by two
-            # portfolios does not overwrite the other's report (#479).
-            report_dir = str(Path(output_dir) / csv_file.parent.relative_to(analyzer_csvs_dir))
             this_config['BASE_OUTPUT_DIRECTORY'] = report_dir
             generate_trade_report(trades_df, report_dir, report_name, this_config)
             count += 1
@@ -516,6 +523,11 @@ def main():
             report_name = args.report_name
         else:
             report_name = os.path.splitext(os.path.basename(csv_path))[0]
+
+        if is_portfolio_csv(csv_path):
+            # Target-weight basket (#487): NAV-ledger tearsheet, not the trade analyzer.
+            generate_portfolio_report(csv_path, output_dir, report_name)
+            return
 
         print(f"Loading trades from: {csv_path}")
         trades_df = pd.read_csv(csv_path)
