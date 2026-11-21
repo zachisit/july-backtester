@@ -43,8 +43,6 @@ import pandas as pd  # noqa: E402
 
 STRATEGY_STEM = "VIX_eVRP_Dual_SGOV_funded"
 PORTFOLIO_DIR = "VIXY-SVXY-SGOV"
-REF_PRIMARY = "dual_combined_settled_only_vol5_sgov1"
-REF_IMMEDIATE = "dual_combined_immediate_benchmark_vol5_sgov1"
 PERIODS = {"full_sgov_history": "Full period", "2022_onward": "2022 onward",
            "t1_era": "T+1 era", "post_publication_seen": "Post publication"}
 METRICS = ["total_return", "cagr", "volatility", "max_drawdown", "sharpe_rf0", "sharpe_rf2",
@@ -93,11 +91,13 @@ def compare_ledger(tag, ours: pd.DataFrame, ref: pd.DataFrame, capital: float) -
     return out
 
 
-def compare_metrics(summary: dict, ref_metrics: pd.DataFrame) -> list:
+def compare_metrics(summary: dict, ref_metrics: pd.DataFrame, primary, immediate, baseline) -> list:
     out = []
     cash = summary["cash_symbol"]
-    names = {REF_PRIMARY: "Strategy", REF_IMMEDIATE: "Strategy (immediate settlement)",
-             "SGOV": f"{cash} (cash sleeve)", "SPY": summary.get("benchmark") or "SPY"}
+    names = {primary: "Strategy", immediate: "Strategy (immediate settlement)",
+             "SPY": summary.get("benchmark") or "SPY"}
+    if baseline:  # The reference includes SGOV on its own only at the baseline fee.
+        names["SGOV"] = f"{cash} (cash sleeve)"
     for _, row in ref_metrics.iterrows():
         if row["name"] not in names or row["sample"] not in PERIODS:
             continue
@@ -107,7 +107,7 @@ def compare_metrics(summary: dict, ref_metrics: pd.DataFrame) -> list:
             out.append({"check": f"metrics {row['name']}/{period}", "ok": False, "detail": "missing"})
             continue
         keys = list(METRICS) + ["observations"]
-        if row["name"] == REF_PRIMARY:
+        if row["name"] == primary:
             keys += list(STRATEGY_EXTRA)
         for k in keys:
             ref_v = row.get(k)
@@ -131,17 +131,26 @@ def run(run_dir: Path, ref_dir: Path) -> dict:
     ledger = pd.read_csv(art / "ledger.csv", index_col=0, parse_dates=True)
     daily = pd.read_csv(art / "daily_returns.csv", index_col=0, parse_dates=True)
     read = dict(index_col=0, parse_dates=True)
+    fees = summary["cost_bps"]
+    cost_pair = (fees["VIXY"], fees["SGOV"])
+    if fees["SVXY"] != fees["VIXY"] or cost_pair not in ((5, 1), (20, 5)) or summary["settlement"] != "settled_only":
+        raise ValueError("Expected settled-only primary run with baseline 5/1 or stress 20/5 bps")
+    suffix = "vol%d_sgov%d" % cost_pair
+    primary = "dual_combined_settled_only_" + suffix
+    immediate = "dual_combined_immediate_benchmark_" + suffix
     checks = compare_ledger("settled-cash ledger", ledger,
-                            pd.read_csv(ref_dir / "ledgers" / f"{REF_PRIMARY}.csv", **read), capital)
-    # The immediate-settlement path is recomputed with the same engine and inputs.
-    from helpers import target_weight_portfolio as twp
-    ref_imm = pd.read_csv(ref_dir / "ledgers" / f"{REF_IMMEDIATE}.csv", **read)
+                            pd.read_csv(ref_dir / "ledgers" / f"{primary}.csv", **read), capital)
+    # The engine writes both settlement ledgers from the same prices and targets.
+    ref_imm = pd.read_csv(ref_dir / "ledgers" / f"{immediate}.csv", **read)
+    alt = pd.read_csv(art / "comparison_ledger.csv", **read)
+    checks += compare_ledger("immediate ledger", alt, ref_imm, capital)
     imm_returns = daily["Strategy (immediate settlement)"]
     checks.append(_compare("immediate benchmark: return", imm_returns, ref_imm["return"], atol=1e-10))
     ref_daily = pd.read_csv(ref_dir / "daily_returns.csv", **read)
     cash = summary["cash_symbol"]
-    checks.append(_compare("cash-sleeve benchmark: return", daily[f"{cash} (cash sleeve)"],
-                           ref_daily["SGOV"], atol=1e-10))
+    if cost_pair == (5, 1):
+        checks.append(_compare("cash-sleeve benchmark: return", daily[f"{cash} (cash sleeve)"],
+                               ref_daily["SGOV"], atol=1e-10))
     checks.append(_compare("SPY benchmark: return", daily[summary.get("benchmark") or "SPY"],
                            ref_daily["SPY"], atol=1e-10))
     ref_cal = pd.read_csv(ref_dir / "settlement_calendar.csv", index_col=0,
@@ -151,7 +160,7 @@ def run(run_dir: Path, ref_dir: Path) -> dict:
     checks.append({"check": "settlement calendar",
                    "ok": bool(our_cal.index.equals(ref_cal.index)
                               and our_cal["settlement_date"].equals(ref_cal["settlement_date"]))})
-    checks += compare_metrics(summary, pd.read_csv(ref_dir / "metrics.csv"))
+    checks += compare_metrics(summary, pd.read_csv(ref_dir / "metrics.csv"), primary, immediate, cost_pair == (5, 1))
     nav_ratio = ledger["nav"].iloc[-1] / capital
     report = {"run_dir": str(run_dir), "reference_dir": str(ref_dir),
               "ledger_rtol": LEDGER_RTOL, "metric_atol": METRIC_ATOL,

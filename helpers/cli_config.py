@@ -385,7 +385,14 @@ def apply_overrides(config_dict: dict, args: argparse.Namespace) -> dict:
             print(f"[WARNING] --set value ignored (no '='): {item!r}", file=sys.stderr)
             continue
         k, v = item.split("=", 1)
-        config_dict[k.strip()] = cast_value(v.strip())
+        if k.strip() == "portfolio_cost_bps":
+            import json
+            costs = json.loads(v)
+            if not isinstance(costs, dict):
+                raise ValueError("portfolio_cost_bps must be a JSON object keyed by ticker")
+            config_dict[k.strip()] = costs
+        else:
+            config_dict[k.strip()] = cast_value(v.strip())
 
     return config_dict
 

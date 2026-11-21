@@ -283,6 +283,7 @@ def notes(summary: dict) -> list:
     cash = summary["cash_symbol"]
     products = ", ".join(summary["symbols"])
     lines = [
+        "Immediate proceeds reuse is a non-deployable benchmark for the settled-cash account.",
         f"Returns are the NAV of the whole funded basket ({products} + {cash} cash sleeve + unsettled "
         f"receivables). No single ticker's return is the strategy's return; fills are rebalances, not "
         f"round-trip trades.",

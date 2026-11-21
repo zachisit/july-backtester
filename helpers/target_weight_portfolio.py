@@ -109,12 +109,21 @@ def settlement_lag(date: pd.Timestamp, rules=DEFAULT_SETTLEMENT_RULES) -> int:
     return lag
 
 
+def xnys_sessions(start, end) -> pd.DatetimeIndex:
+    """US equity sessions, including exchange-only closures and unscheduled holidays."""
+    import exchange_calendars as xcals
+    start, end = pd.Timestamp(start), pd.Timestamp(end)
+    cal = xcals.get_calendar("XNYS", start=start - pd.Timedelta(days=7),
+                             end=end + pd.Timedelta(days=7))
+    dates = cal.sessions.tz_localize(None)
+    return dates[(dates >= start) & (dates <= end)]
+
+
 def settlement_dates(sessions: pd.DatetimeIndex, rules=DEFAULT_SETTLEMENT_RULES,
                      exclude_federal_holidays: bool = True) -> dict:
     """Map each trade date in *sessions* to the date its proceeds settle.
 
-    Eligible settlement days are the trading sessions themselves (the data's
-    own calendar), extended past the last session with business days, minus
+    Eligible settlement days are XNYS sessions minus
     US federal (bank) holidays when *exclude_federal_holidays*. Excluding bank
     holidays on which the exchange is open (Columbus Day, Veterans Day) is the
     conservative cash-account assumption used by the PR #179 study; it is not
@@ -125,8 +134,8 @@ def settlement_dates(sessions: pd.DatetimeIndex, rules=DEFAULT_SETTLEMENT_RULES,
         sessions = sessions.tz_localize(None)
     if sessions.empty:
         return {}
-    extension = pd.bdate_range(sessions[-1] + pd.Timedelta(days=1), periods=30)
-    eligible = sessions.union(extension)
+    last = sessions[-1] + pd.Timedelta(days=14 + 3 * max(int(lag) for _, lag in rules))
+    eligible = xnys_sessions(sessions[0], last)
     if exclude_federal_holidays:
         from pandas.tseries.holiday import USFederalHolidayCalendar
         holidays = USFederalHolidayCalendar().holidays(start=sessions[0], end=eligible[-1])

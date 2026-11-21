@@ -60,7 +60,7 @@ risk-weight drift instead of signed exposure.
 * **Settlement.** Sales create receivables that settle on the `lag`-th
   eligible session after the trade (T+2, then T+1 from 2024-05-28). Only
   settled cash buys; receivables count in NAV but cannot be spent. Eligible
-  sessions are the data's own trading sessions minus US federal (bank)
+  sessions are XNYS trading sessions minus US federal (bank)
   holidays. Days when the exchange is open but banks are closed (Columbus Day,
   Veterans Day) therefore do not settle. This is the conservative
   cash-account assumption, not a certified broker clearing calendar.
@@ -117,7 +117,7 @@ output/runs/<run_id>/
   analyzer_csvs/<Portfolio>/<Strategy>_equity.csv       daily portfolio NAV
   analyzer_csvs/<Portfolio>/<Strategy>.portfolio.json   marker -> report.py portfolio tearsheet
   portfolio_runs/<Portfolio>/<Strategy>/
-     ledger.csv  fills.csv  signals.csv  daily_returns.csv  annual_returns.csv
+     ledger.csv  comparison_ledger.csv  fills.csv  signals.csv  daily_returns.csv  annual_returns.csv
      settlement_calendar.csv  metrics.json
 ```
 
@@ -179,21 +179,28 @@ significant digits, so ledger values are compared at `rtol = 1e-10`. Metrics
 are recomputed at full precision and compared at `atol = 1e-9`. Booleans and
 counts must match exactly.
 
-Result on the frozen data: all **194/194** checks pass. The largest
-differences come from the reference CSV's rounding: ledger 5.0e-12,
-immediate-settlement returns 5.0e-14, SPY returns 4.7e-13, metrics ≤ 1.6e-11.
-The settlement calendar, the 90 unfilled-target sessions and the session count
-(1,483) are identical.
+Repeat the engine command with a different run name and
+`--set 'portfolio_cost_bps={"VIXY":20,"SVXY":20,"SGOV":5}'` to produce the
+stress run. Run the same report and parity commands on that directory. Each
+run writes the primary ledger and the alternate settlement ledger
+(`comparison_ledger.csv`). Same-open proceeds reuse is a non-deployable
+benchmark for this cash account. At baseline, parity compares to
+`dual_combined_settled_only_vol5_sgov1.csv` and
+`dual_combined_immediate_benchmark_vol5_sgov1.csv`. At stress it selects
+their `vol20_sgov5` twins. Both normalized NAV and daily returns use
+`abs(error) <= 1e-10 + 1e-10 * abs(reference)`. The reference SGOV
+buy-and-hold path includes only the baseline fee, so the parity checker
+compares that benchmark only at baseline.
+
+The frozen replay passes 211 checks at baseline and 173 under stress,
+including the full daily ledger for both settlement modes at both fee levels.
 
 ### Differences and limitations
 
-* **Settlement calendar source.** The study builds eligible days from the
-  `exchange_calendars` XNYS calendar. The engine uses the data's own sessions
-  and does not add that dependency. Settlement lags must be >= 1 session. Both remove federal holidays. On this
-  sample the two calendars are identical (checked by the parity script). A
-  data set with a missing session is refused, so the two cannot drift
-  silently. Settlement dates after the last session use business days. They
-  cannot affect results, because receivables count in NAV either way.
+* **Settlement calendar.** XNYS sessions from `exchange-calendars` 4.10.1
+  intersect US federal bank days, including beyond the end of the price
+  history. The runner rejects missing market sessions, invalid signal targets,
+  and duplicate dates. SPY warmup prices use consecutive XNYS sessions.
 * **Staged OHLCV.** The frozen panel carries only Open/Close. The staging
   script sets High/Low to max/min(Open, Close) and Volume to 0 to fit the
   provider schema. The engine reads only Open and Close.

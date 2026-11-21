@@ -231,6 +231,11 @@ class TestSettlementCalendar:
         assert m[pd.Timestamp("2024-10-11")] == pd.Timestamp("2024-10-15")
         assert m[pd.Timestamp("2024-10-10")] == pd.Timestamp("2024-10-11")
 
+    def test_last_session_before_good_friday(self):
+        # Friday is a bank day, but XNYS is closed even beyond the supplied data.
+        thursday = pd.Timestamp("2025-04-17")
+        assert settlement_dates(pd.DatetimeIndex([thursday]))[thursday] == pd.Timestamp("2025-04-21")
+
     def test_last_session_settles_after_data_end(self):
         sessions = pd.bdate_range("2023-03-01", periods=3)
         m = settlement_dates(sessions)
@@ -283,14 +288,14 @@ class TestVixEvrpSignal:
             assert out["state"].iloc[-1] == state, name
             assert out["target_exposure"].iloc[-1] == target, name
         warm = mod.evrp_dual_signal(spy, pd.Series(20.0, index=idx), pd.Series(25.0, index=idx))
-        assert (warm["target_exposure"].iloc[:10] == 0).all()  # needs 10 returns
+        assert warm["target_exposure"].iloc[:10].isna().all()  # needs 10 returns
 
-    def test_missing_vix_is_cash_and_basket_mapping(self, mod):
+    def test_missing_vix_has_no_target_and_basket_mapping(self, mod):
         idx = pd.bdate_range("2024-01-01", periods=15)
         spy = pd.Series(np.linspace(100, 110, 15), index=idx)
         vix = pd.Series(30.0, index=idx).drop(idx[-1])
         out = mod.evrp_dual_signal(spy, vix, pd.Series(40.0, index=idx))
-        assert out["state"].iloc[-1] == mod.STATE_CASH
+        assert pd.isna(out["target_exposure"].iloc[-1])
         w = mod.basket_from_exposure(pd.Series([-0.2, -0.1, 0.2, 0.0]))
         assert w.values.tolist() == [[0.0, 0.4], [0.0, 0.2], [0.2, 0.0], [0.0, 0.0]]
 
@@ -326,7 +331,7 @@ class TestRegistry:
 
 def synthetic_universe(seed=11, start="2020-01-01", n=420):
     rng = np.random.default_rng(seed)
-    idx = pd.bdate_range(start, periods=n)
+    idx = twp.xnys_sessions(start, pd.Timestamp(start) + pd.Timedelta(days=n*2))[:n]
     out = {}
 
     def ohlc(close, noise):
@@ -545,6 +550,21 @@ class TestReviewRegressions:
         uni = synthetic_universe()
         uni["I:VIX"] = uni["I:VIX"].loc["2021-02-01":]
         self._refused(uni, "signal input 'vix' starts")
+
+    def test_global_gap_refused(self):
+        uni = synthetic_universe()
+        date = pd.Timestamp("2020-09-01")
+        self._refused({s: df.drop(date) for s, df in uni.items()}, "missing 1 session")
+
+    def test_invalid_index_refused_instead_of_going_to_cash(self):
+        uni = synthetic_universe()
+        uni["I:VIX3M"].loc["2020-09-01", "Close"] = 0
+        self._refused(uni, "no target")
+
+    def test_short_spy_warmup_refused(self):
+        uni = synthetic_universe()
+        uni["SPY"] = uni["SPY"].loc["2020-06-30":]
+        self._refused(uni, "no target")
 
     def test_signal_input_gap_refused(self):
         uni = synthetic_universe()

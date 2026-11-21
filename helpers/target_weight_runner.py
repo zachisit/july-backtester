@@ -90,7 +90,9 @@ def _naive_daily(df: pd.DataFrame) -> pd.DataFrame:
     if idx.tz is not None:
         idx = idx.tz_convert("UTC").tz_localize(None)
     df.index = idx.normalize()
-    df = df[~df.index.duplicated(keep="last")].sort_index()
+    if df.index.has_duplicates:
+        raise PortfolioDataError("Duplicate daily input dates")
+    df = df.sort_index()
     return df
 
 
@@ -153,7 +155,9 @@ def build_sessions(data: dict, products: list, cash_symbol: str, benchmark: str 
         union = union.union(idx[(idx >= lo) & ((idx <= hi) if hi is not None else True)])
     if union.empty:
         raise PortfolioDataError(f"No product bars between {start} and {end}")
-    sessions = union
+    sessions = twp.xnys_sessions(lo, hi if hi is not None else union[-1])
+    if sessions.empty or len(union.difference(sessions)):
+        raise PortfolioDataError("Portfolio data contains dates outside XNYS trading sessions")
     problems = []
     for s in tradables:
         df = data[s]
@@ -320,7 +324,7 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
         "signal_timing": "target decided at close t-1, executed at open t; session 0 starts in the cash sleeve",
         "cash_interest_added": False,
         "distribution_treatment": "Adjusted total-return prices; distributions modelled as reinvested in the unit price, not as payment-date cash",
-        "settlement_calendar": "Data sessions minus US federal (bank) holidays, extended with business days; conservative, not a certified broker clearing calendar",
+        "settlement_calendar": "XNYS sessions minus US federal (bank) holidays; conservative, not a certified broker clearing calendar",
     }
     states = signals["state"].value_counts().to_dict() if "state" in signals.columns else {}
     final_nav = float(ledger["nav"].iloc[-1])
@@ -369,6 +373,7 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
     os.makedirs(csv_dir, exist_ok=True)
 
     ledger.to_csv(os.path.join(art_dir, "ledger.csv"), index_label="date", float_format="%.17g")
+    alt.ledger.to_csv(os.path.join(art_dir, "comparison_ledger.csv"), index_label="date", float_format="%.17g")
     fills.to_csv(os.path.join(art_dir, "fills.csv"), index=False, float_format="%.17g")
     signals.to_csv(os.path.join(art_dir, "signals.csv"), index_label="date", float_format="%.17g")
     daily.to_csv(os.path.join(art_dir, "daily_returns.csv"), index_label="date", float_format="%.17g")

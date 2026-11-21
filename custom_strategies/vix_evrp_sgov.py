@@ -45,13 +45,14 @@ def evrp_dual_signal(spy_close: pd.Series, vix: pd.Series, vix3m: pd.Series,
     ``target`` is the signed index exposure: ``-size`` (strong inverse),
     ``-size/2`` (weak inverse), ``+size`` (long vol) or ``0``. All inputs are
     aligned to *spy_close*'s sessions without forward-filling; a session with
-    a missing or non-positive VIX/VIX3M, or without ``window`` returns, is cash.
+    a missing or non-positive VIX/VIX3M, or without ``window`` returns, has an undefined target. The runner rejects undefined targets during evaluation.
     """
     vix = vix.reindex(spy_close.index)
     vix3m = vix3m.reindex(spy_close.index)
+    spy_close = spy_close.where(np.isfinite(spy_close) & spy_close.gt(0))
     rv = spy_close.pct_change(fill_method=None).rolling(window).std(ddof=1) * np.sqrt(252) * 100
     premium = vix - rv
-    valid = rv.notna() & vix.gt(0) & vix3m.gt(0)
+    valid = np.isfinite(rv) & np.isfinite(vix) & np.isfinite(vix3m) & vix.gt(0) & vix3m.gt(0)
     calm = vix.lt(vix3m)
     strong = valid & calm & premium.gt(0)
     weak = valid & calm & premium.le(0)
@@ -64,7 +65,7 @@ def evrp_dual_signal(spy_close: pd.Series, vix: pd.Series, vix3m: pd.Series,
     state.loc[strong] = STATE_STRONG_INVERSE
     state.loc[weak] = STATE_WEAK_INVERSE
     state.loc[long_vol] = STATE_LONG_VOL
-    return pd.DataFrame({"target_exposure": target, "state": state, "evrp": premium,
+    return pd.DataFrame({"target_exposure": target.where(valid), "state": state.where(valid), "evrp": premium,
                          "spy_realized_vol": rv, "vix": vix, "vix3m": vix3m})
 
 
@@ -91,6 +92,9 @@ def basket_from_exposure(target: pd.Series) -> pd.DataFrame:
                  "inverse via SVXY, long vol via VIXY, idle cash in SGOV."),
 )
 def vix_evrp_dual_sgov(data, window=10, size=0.2, **kwargs):
-    signal = evrp_dual_signal(data["spy"]["Close"], data["vix"]["Close"],
+    from helpers.target_weight_portfolio import xnys_sessions
+    spy = data["spy"]["Close"]
+    spy = spy.reindex(xnys_sessions(spy.index.min(), spy.index.max()))
+    signal = evrp_dual_signal(spy, data["vix"]["Close"],
                               data["vix3m"]["Close"], window=window, size=size)
     return pd.concat([basket_from_exposure(signal["target_exposure"]), signal], axis=1)
