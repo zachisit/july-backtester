@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 KNOWN_KEYS: set[str] = {
+    # SECTION 32: Target-weight portfolio strategies (#487)
+    "portfolio_strategy",
+    "portfolio_settlement",
+    "portfolio_settlement_rules",
+    "portfolio_rebalance_band",
+    "portfolio_cost_bps",
+    "portfolio_symbol_map",
+    "portfolio_benchmark_ticker",
+    "portfolio_benchmark_cost_bps",
     # SECTION 1: Data Provider
     "data_provider",
     "polygon_max_retries",

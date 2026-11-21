@@ -10,6 +10,7 @@ Python backtesting engine for US equities. Tests 20+ technical strategies across
 ## Entry Points
 - `main.py` — runs all entries in `portfolios`; a single-ticker basket like `"My Symbols": ["AAPL"]` replaces the old single-asset mode
 - `main.py --name "run-name"` — optional prefix for report folder and S3 path
+- `main.py --portfolio-strategy "<name>"` — run a fully funded **target-weight** basket (`@register_target_weight`, e.g. `"VIX eVRP Dual (SGOV funded)"`) instead of `portfolios` × `strategies`; see "Target-Weight Portfolio Strategies" below
 - `main.py --verbose` — print two additional tables beneath the default Core Performance table: Extended Metrics (RS(avg/min/last), MaxRcvry, AvgRcvry, Calmar, PF, WinRate, Trades, Expct(R), SQN) and Robustness (OOS P&L, WFA Verdict, RollWFA, Corr, MC, MC Score). Default output shows Core Performance only. `--verbose` / `--no-verbose` override the `verbose_output` config key at runtime; with neither flag the config value is used (`resolve_verbose` in `helpers/cli_config.py`).
 
 ## Versioning
@@ -35,6 +36,9 @@ helpers/wfa_rolling.py             # Rolling multi-fold WFA (get_fold_dates, eva
 helpers/ml_export.py               # ML trade feature export (export_trade_features)
 helpers/sensitivity.py             # Parameter sensitivity sweep (build_param_grid, label_for_params, is_sweep_enabled)
 helpers/regime.py                  # VIX regime heatmap (build_regime_heatmap, print_regime_heatmap, classify_vix_regime)
+helpers/target_weight_portfolio.py # Fully funded multi-asset target-weight engine: settled-cash NAV ledger, band rebalance, costs (#487)
+helpers/target_weight_runner.py    # --portfolio-strategy run: fetch/validate sessions, benchmarks, run artifacts (#487)
+trade_analyzer/portfolio_report.py # NAV-based portfolio tearsheet report.py dispatches to via <Strategy>.portfolio.json (#487)
 helpers/point_in_time.py           # Point-in-time index universe resolver for portfolios like "pit:nq100" and "pit:sp500"
 helpers/rule_based_universe.py     # Survivorship-free universe from the delisted-inclusive Parquet corpus ("rule:top500") — needs no index membership
 helpers/init_wizard.py             # First-time setup wizard invoked via python main.py --init
@@ -850,6 +854,17 @@ Every strategy x stop x portfolio task yields a result; none silently vanish (#4
 - `generate_per_portfolio_summary` ends with `Not shown: N with 0 trades, M errored`, listing the strategy names (errors with their message).
 - `generate_sensitivity_report` receives stubs and counts them as **not profitable**, so "profitable in X% of variants" includes zero-trade and crashed variants (labelled `[0 trades]` / `[ERROR]`).
 - Tests: `tests/test_main_results_accounting.py`.
+
+## Target-Weight Portfolio Strategies (#487)
+
+A separate, explicit path for fully funded **multi-asset baskets** (several products held at once + an idle-cash sleeve), which the per-symbol engine cannot express. Full reference: `docs/TARGET_WEIGHT_PORTFOLIOS.md`.
+
+- **Opt-in only.** `CONFIG["portfolio_strategy"]` (default `None`) / `--portfolio-strategy`. `main.py` returns from that branch before the single-asset pipeline; `get_active_strategies()` returns signal-kind plugins only, so `kind="target_weight"` plugins never reach the Pool. `report.py` uses the portfolio tearsheet only when `analyzer_csvs/<P>/<Strategy>.portfolio.json` exists. `helpers/portfolio_simulations.py` is untouched.
+- **Plugin:** `@register_target_weight(name, symbols, cash_symbol, signal_symbols, exposure, cost_bps, band, params, ...)`; `fn(data, **params) -> DataFrame` of per-close risk weights (>= 0, sum <= 1); extra columns are diagnostics. Plugin: `custom_strategies/vix_evrp_sgov.py`.
+- **Engine invariants** (`simulate_target_weights`): prior-close target → next-open execution, session 0 all cash sleeve; rebalance on first session / product exit / exposure sign change / `|drift| > band`; sale proceeds are receivables until settled (T+2, T+1 from 2024-05-28; data sessions minus US federal holidays); only settled cash buys; all settled cash parked in the cash sleeve each open; costs in bps of traded notional; no borrowing/negative cash/negative shares (`FundingViolation`), self-financing asserted every open.
+- **Artifacts:** `analyzer_csvs/<P>/<Strategy>.csv` (fills, not round trips), `_equity.csv` (NAV), `.portfolio.json` (marker), `portfolio_runs/<P>/<Strategy>/{ledger,fills,signals,daily_returns,annual_returns,settlement_calendar}.csv + metrics.json`, `overall_portfolio_summary.csv`, `llm_verdict.json` (vs SPY and the cash sleeve). The trade analyzer / MC / WFA are not used for these runs.
+- **PR #179 parity:** `scripts/vix_evrp_stage_frozen_inputs.py` (frozen, licensed inputs → git-ignored `output/frozen_inputs/`), then the CLI run, then `scripts/vix_evrp_parity.py` against `sgov_study.py --output <scratch>`: 194/194 checks pass (ledger rtol 1e-10 vs the reference's `%.12g` CSV, metrics atol 1e-9).
+- **Tests:** `tests/test_target_weight_portfolio.py` (funding/settlement/costs/band/causality/scale, signal states and causality, registry isolation, runner refusals, report dispatch; a `slow` end-to-end `main.py` → `report.py` test). Other test modules clear `_REGISTRY`, so those tests reload the plugin module when needed.
 
 ## Common Pitfalls
 - `get_bars_for_period('14d', TIMEFRAME, MULTIPLIER)` — always use this for indicator periods, not raw integers, so strategies work across timeframes

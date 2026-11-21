@@ -293,6 +293,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Cap the simulation pool at N workers (each holds a copy of the data). 1 = serial",
     )
 
+    parser.add_argument(
+        "--portfolio-strategy", dest="portfolio_strategy", metavar="NAME",
+        help="Run a fully funded target-weight portfolio strategy (e.g. "
+             "\"VIX eVRP Dual (SGOV funded)\") instead of portfolios x strategies",
+    )
+
     # ---- ESCAPE HATCH ----
     parser.add_argument(
         "--set", dest="overrides", action="append", metavar="KEY=VALUE",
@@ -323,6 +329,7 @@ _DIRECT_KEYS = [
     "save_individual_trades", "save_only_filtered_trades",
     "noise_injection_pct", "rolling_sharpe_window",
     "export_ml_features", "upload_to_s3", "max_workers",
+    "portfolio_strategy",
 ]
 
 
@@ -378,7 +385,14 @@ def apply_overrides(config_dict: dict, args: argparse.Namespace) -> dict:
             print(f"[WARNING] --set value ignored (no '='): {item!r}", file=sys.stderr)
             continue
         k, v = item.split("=", 1)
-        config_dict[k.strip()] = cast_value(v.strip())
+        if k.strip() == "portfolio_cost_bps":
+            import json
+            costs = json.loads(v)
+            if not isinstance(costs, dict):
+                raise ValueError("portfolio_cost_bps must be a JSON object keyed by ticker")
+            config_dict[k.strip()] = costs
+        else:
+            config_dict[k.strip()] = cast_value(v.strip())
 
     return config_dict
 
