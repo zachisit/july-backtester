@@ -17,7 +17,7 @@ CONFIG = {
     # ============================================================
     # "polygon" | "norgate" | "yahoo" | "csv"
     # polygon_api_secret_name: name of the env-var / .env key that holds the key.
-    "data_provider": "polygon",
+    "data_provider": "yahoo",
     "polygon_api_secret_name": "POLYGON_API_KEY",
     # Retries (exponential backoff, honours Retry-After) on HTTP 429/5xx per request. 0 = off.
     "polygon_max_retries": 5,
@@ -91,13 +91,13 @@ CONFIG = {
     # Norgate watchlist:      {"My WL": "norgate:WatchlistName"}
     "min_bars_required": 200,
     "portfolios": {
-        "My Symbols": ["AAPL"],
+        "SPY Only": ["SPY"],
     },
 
     # ============================================================
     # SECTION 8: ALLOCATION & EXECUTION
     # ============================================================
-    "allocation_per_trade": 0.10,   # fraction of equity per position
+    "allocation_per_trade": 1.0,   # fraction of equity per position
     "max_pct_adv": 0.05,            # max order size as % of 20-day avg daily volume
     "execution_time": "open",       # "open" = next-day open fill
     "roc_thresholds": [0.0, 0.5],
