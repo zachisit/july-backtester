@@ -41,7 +41,7 @@ Public API
 ----------
 run_rotation(data, rank_fn, config, *, regime_gate=None, params=None) -> dict | None
 run_rotation_from_config(data, config) -> dict | None   (honors rotation.enabled)
-build_rebalance_dates(data, rebalance_days) -> list[pd.Timestamp]
+build_rebalance_dates(data, rebalance_days, schedule=None) -> list[pd.Timestamp]
 WEIGHTING_SCHEMES -> dict[str, Callable]     (pluggable weighting registry)
 
 Deferred integration (finding F7)
@@ -78,6 +78,7 @@ _DEFAULT_ROTATION = {
     "rank_strategy": None,   # name of a registered rotation plugin (used by callers)
     "top_n": 5,
     "rebalance_days": 21,    # forced rebalance interval, in trading days
+    "rebalance_schedule": None,  # None = stride of rebalance_days (legacy) | "month_end" | "quarter_end" | [dates]
     "weighting": "equal",    # key into WEIGHTING_SCHEMES
     "sell_buffer_rank": 0,    # hysteresis: keep a holding while rank <= top_n + this
     "drift_trim_pct": 0.0,    # only trim/add when |weight - target| > this fraction
@@ -128,12 +129,28 @@ WEIGHTING_SCHEMES: dict[str, Callable] = {
 # ---------------------------------------------------------------------------
 # Rebalance calendar
 # ---------------------------------------------------------------------------
-def build_rebalance_dates(data: dict, rebalance_days: int) -> list:
-    """Every ``rebalance_days``-th trading date across the union of all symbols.
+_CALENDAR_SCHEDULES = {"month_end": (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12), "quarter_end": (3, 6, 9, 12)}
 
-    The union of per-symbol indices is the master trading calendar; we sample it
-    at a fixed stride so the cadence is deterministic and provider-agnostic. The
-    final date is always included so the last window is not silently dropped.
+
+def build_rebalance_dates(data: dict, rebalance_days: int, schedule=None) -> list:
+    """Rebalance (signal) dates on the master trading calendar.
+
+    The union of per-symbol indices is the master trading calendar.
+
+    * ``schedule=None`` (default, legacy): every ``rebalance_days``-th trading
+      date, sampled at a fixed stride so the cadence is deterministic and
+      provider-agnostic. The final date is always included so the last window
+      is not silently dropped.
+    * ``schedule="month_end"`` / ``"quarter_end"``: the last trading date of each
+      calendar month / of Mar, Jun, Sep, Dec. Calendar rules suit strategies
+      whose holdings are re-formed on a calendar (index-style quarterly
+      reconstitution); a trading-day stride drifts against the calendar.
+    * ``schedule=[dates]``: explicit signal dates. Each is snapped to the last
+      trading date on or before it; dates before the first bar are dropped and
+      duplicates collapse. ``rebalance_days`` is ignored for both non-stride modes.
+
+    A signal on the final bar executes nothing (there is no next bar), so a
+    calendar period whose last date is the data's last bar is a harmless no-op.
     """
     all_dates: set = set()
     for df in data.values():
@@ -143,11 +160,36 @@ def build_rebalance_dates(data: dict, rebalance_days: int) -> list:
     if not trading_dates:
         return []
 
-    stride = max(1, int(rebalance_days))
-    dates = trading_dates[::stride]
-    if trading_dates[-1] not in dates:
-        dates.append(trading_dates[-1])
-    return dates
+    if schedule is None:
+        stride = max(1, int(rebalance_days))
+        dates = trading_dates[::stride]
+        if trading_dates[-1] not in dates:
+            dates.append(trading_dates[-1])
+        return dates
+
+    cal = pd.DatetimeIndex(trading_dates)
+    if isinstance(schedule, str):
+        months = _CALENDAR_SCHEDULES.get(schedule)
+        if months is None:
+            raise ValueError(
+                f"rotation.rebalance_schedule {schedule!r} is not recognised; use None, "
+                f"{sorted(_CALENDAR_SCHEDULES)} or a list of dates"
+            )
+        last_of_month = pd.Series(cal, index=cal).groupby([cal.year, cal.month]).max()
+        return [d for d in last_of_month.tolist() if d.month in months]
+
+    out: list = []
+    for raw in schedule:
+        d = pd.Timestamp(raw)
+        if cal.tz is not None and d.tz is None:
+            d = d.tz_localize(cal.tz)
+        i = cal.searchsorted(d, side="right") - 1
+        if i < 0:
+            continue
+        snapped = cal[i]
+        if not out or snapped != out[-1]:
+            out.append(snapped)
+    return sorted(set(out))
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +284,7 @@ def run_rotation(
     drift_trim = max(0.0, float(rcfg.get("drift_trim_pct", 0.0)))
     weighting = rcfg.get("weighting", "equal")
     rebalance_days = int(rcfg.get("rebalance_days", 21))
+    rebalance_schedule = rcfg.get("rebalance_schedule")
     # Scale-invariant relative cap only (issue #293) — NO absolute-dollar cap.
     max_pos_pct = float(config.get("max_position_pct", 1.0))
     initial_capital = float(config.get("initial_capital", 100_000.0))
@@ -260,7 +303,7 @@ def run_rotation(
     # Per-symbol instrument metadata (tested cost/accounting primitives).
     insts = {sym: _inst.resolve_instrument(sym, config) for sym in data}
 
-    rebalance_dates = build_rebalance_dates(data, rebalance_days)
+    rebalance_dates = build_rebalance_dates(data, rebalance_days, rebalance_schedule)
     if not rebalance_dates:
         return None
 

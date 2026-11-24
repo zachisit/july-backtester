@@ -525,6 +525,9 @@ CONFIG = {
         "rank_strategy": None,     # name of a @register_rotation plugin to run
         "top_n": 5,                # number of names held at once
         "rebalance_days": 21,      # forced rebalance interval (trading days)
+        "rebalance_schedule": None,  # None = every rebalance_days bars (default) |
+                                   #   "month_end" | "quarter_end" (last trading day of
+                                   #   Mar/Jun/Sep/Dec) | explicit list of signal dates
         "weighting": "equal",      # "equal" (1/top_n) | "fixed_alloc" (allocation_per_trade)
         "sell_buffer_rank": 0,     # hysteresis: keep a holding while its rank
                                    #   <= top_n + sell_buffer_rank (reduces churn)
