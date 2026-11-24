@@ -678,3 +678,54 @@ class TestTerminalBarAddIsBlocked:
         for t in res_terminal["trade_log"]:
             assert not (pd.Timestamp(t["EntryDate"]) == terminal_date
                         and pd.Timestamp(t["ExitDate"]) == terminal_date)
+
+
+# ---------------------------------------------------------------------------
+# Calendar / explicit rebalance schedules (rotation.rebalance_schedule)
+# ---------------------------------------------------------------------------
+def _business_day_universe(start="2020-01-01", end="2020-12-31"):
+    idx = pd.bdate_range(start, end)
+    n = len(idx)
+    out = {}
+    for sym, slope in (("A", 1.0), ("B", 0.5)):
+        p = 100 + np.arange(n, dtype=float) * slope
+        out[sym] = pd.DataFrame({"Open": p, "High": p * 1.01, "Low": p * 0.99, "Close": p, "Volume": 1e6}, index=idx)
+    return out
+
+
+class TestRebalanceSchedule:
+    def test_default_none_is_byte_identical_to_stride(self):
+        data = _linear_universe(n_days=100)
+        assert rotation.build_rebalance_dates(data, 21) == rotation.build_rebalance_dates(data, 21, None)
+
+    def test_quarter_end_is_last_trading_day_of_mar_jun_sep_dec(self):
+        data = _business_day_universe()
+        dates = rotation.build_rebalance_dates(data, 21, "quarter_end")
+        assert [d.strftime("%Y-%m-%d") for d in dates] == ["2020-03-31", "2020-06-30", "2020-09-30", "2020-12-31"]
+
+    def test_month_end_handles_weekend_month_ends(self):
+        data = _business_day_universe()
+        dates = rotation.build_rebalance_dates(data, 21, "month_end")
+        assert len(dates) == 12
+        # 2020-05-31 is a Sunday -> the last trading day is Friday 2020-05-29
+        assert pd.Timestamp("2020-05-29") in dates and pd.Timestamp("2020-05-31") not in dates
+
+    def test_explicit_dates_snap_back_drop_early_and_dedupe(self):
+        data = _business_day_universe()
+        dates = rotation.build_rebalance_dates(
+            data, 21, ["2019-06-28", "2020-05-30", "2020-05-31", "2020-05-29", "2020-09-30"])
+        assert dates == [pd.Timestamp("2020-05-29"), pd.Timestamp("2020-09-30")]
+
+    def test_unknown_schedule_name_raises(self):
+        with pytest.raises(ValueError, match="rebalance_schedule"):
+            rotation.build_rebalance_dates(_business_day_universe(), 21, "weekly")
+
+    def test_run_rotation_trades_only_after_quarter_ends(self):
+        data = _business_day_universe()
+        cfg = _base_config(top_n=1, rebalance_schedule="quarter_end", drift_trim_pct=0.0)
+        rank = lambda d, t, **k: ["A"] if t.month in (3, 9) else ["B"]  # noqa: E731
+        res = rotation.run_rotation(data, rank, cfg)
+        assert res is not None
+        # fills land on the bar after each quarter-end signal (next Open), never in between
+        fills = sorted({pd.Timestamp(t["EntryDate"]) for t in res["trade_log"]})
+        assert fills == [pd.Timestamp(x) for x in ("2020-04-01", "2020-07-01", "2020-10-01")]
