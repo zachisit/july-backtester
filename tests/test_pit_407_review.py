@@ -135,6 +135,16 @@ class TestOverrides:
         m = _map([("CPPRQ-202102", "1990-01-02", "2021-02-01")])
         assert resolve_security_id("JCP", "2010-06-30", m)[0] == "CPPRQ-202102"
 
+    def test_atge_devry_tenure_uses_the_delisted_devry_security(self):
+        # ATGE's 2009-2012 S&P tenure was DeVry (traded as DV until 2017-05-23);
+        # bare DV is DoubleVerify, which must never be picked for those dates.
+        m = _map([("DV-201705", "2003-09-10", "2017-05-23"), ("DV", "2021-04-21", "2026-09-28")])
+        assert resolve_security_id("ATGE", "2010-06-30", m)[0] == "DV-201705"
+
+    def test_atge_override_without_the_devry_file_fails_closed(self):
+        m = _map([("DV", "2021-04-21", "2026-09-28")])
+        assert resolve_security_id("ATGE", "2010-06-30", m)[0] is None
+
     def test_every_override_window_is_ordered_and_names_a_security(self):
         for ticker, windows in pit.PIT_PARQUET_SECURITY_OVERRIDES.items():
             for start, end, target in windows:
