@@ -18,7 +18,10 @@ Run-directory artifacts (``output/runs/<run_id>/``)::
     analyzer_csvs/<Portfolio>/<Strategy>.portfolio.json  marker -> report.py portfolio mode
     portfolio_runs/<Portfolio>/<Strategy>/
         ledger.csv            daily NAV, cash, receivables, shares, weights, costs
-        comparison_ledger.csv the same ledger under the other settlement mode
+        comparison_ledger.csv the same ledger under the classic alternate mode
+                              (immediate, or settled_only for an immediate run)
+        comparison_ledger_<mode>.csv  the ledger under each non-primary mode
+        gfv_restricted_lots.csv  gfv_aware shares bought with unsettled proceeds + free dates
         fills.csv             every sale / purchase with settlement date
         signals.csv           strategy diagnostics (inputs, state, target weights)
         daily_returns.csv     strategy, immediate-settlement benchmark, cash sleeve, SPY
@@ -52,7 +55,16 @@ CONFIG_DEFAULTS = {
     "portfolio_symbol_map": {},             # {ticker_or_role: provider_ticker}
     "portfolio_benchmark_ticker": "SPY",
     "portfolio_benchmark_cost_bps": 5.0,
+    "portfolio_allow_price_only": False,    # True = run on split-only (no dividend) prices
 }
+
+#: Settlement series in report order. Every run simulates all three.
+SETTLEMENT_ORDER = (twp.SETTLED_ONLY, twp.GFV_AWARE, twp.IMMEDIATE)
+
+#: price_basis values (see :func:`price_basis`).
+TOTAL_RETURN = "total_return"
+PRICE_ONLY = "price_only"
+AS_SUPPLIED = "as_supplied"
 
 MARKER_SUFFIX = ".portfolio.json"
 MODE = "target_weight_portfolio"
@@ -89,6 +101,32 @@ def resolve_strategy(config: dict) -> tuple[str, dict]:
     return name, available[name]
 
 
+def price_basis(config: dict) -> tuple[str, str]:
+    """``(basis, description)`` of the prices the configured provider returns.
+
+    Distributions only reach a funded basket's NAV through total-return
+    adjusted prices; the engine adds no cash flows. PR #489 review #2:
+    Polygon's ``adjusted=true`` is split-only, so ``price_adjustment=
+    "total_return"`` on Polygon silently drops dividends (for SGOV, the whole
+    T-bill yield). Local files cannot be verified by the engine.
+    """
+    provider = str(config.get("data_provider") or "polygon").lower()
+    adjustment = config.get("price_adjustment", "total_return")
+    if adjustment != "total_return":
+        return PRICE_ONLY, (f"price_adjustment={adjustment!r}: prices are not adjusted for distributions, "
+                            f"so dividends are excluded from NAV")
+    if provider == "norgate":
+        return TOTAL_RETURN, "Norgate total-return adjusted prices; distributions reinvested in the unit price"
+    if provider == "yahoo":
+        return TOTAL_RETURN, ("Yahoo Finance auto-adjusted prices (splits and dividends); distributions "
+                              "reinvested in the unit price")
+    if provider == "polygon":
+        return PRICE_ONLY, ("Polygon adjusted=true prices are split-adjusted only; dividends are not "
+                            "included, so distributions are excluded from NAV")
+    return AS_SUPPLIED, (f"prices as supplied by the {provider} files; the engine cannot verify whether "
+                         f"they are total-return adjusted (distributions are included only if they are)")
+
+
 def resolve_settings(entry: dict, config: dict) -> dict:
     """Validated run settings: settlement mode and rules, band, costs, symbol map.
 
@@ -102,9 +140,23 @@ def resolve_settings(entry: dict, config: dict) -> dict:
         raise PortfolioConfigError(f"Target-weight portfolios run on daily bars only (timeframe='D', "
                                    f"multiplier 1); got timeframe={tf!r}, multiplier={mult!r}")
     settlement = _cfg(config, "portfolio_settlement")
-    if settlement not in (twp.SETTLED_ONLY, twp.IMMEDIATE):
-        raise PortfolioConfigError(f"portfolio_settlement must be 'settled_only' or 'immediate', "
+    if settlement not in SETTLEMENT_ORDER:
+        raise PortfolioConfigError(f"portfolio_settlement must be one of {list(SETTLEMENT_ORDER)}, "
                                    f"got {settlement!r}")
+    basis, basis_text = price_basis(config)
+    allow_price_only = config.get("portfolio_allow_price_only", False)
+    if not isinstance(allow_price_only, bool):
+        raise PortfolioConfigError(f"portfolio_allow_price_only must be True or False; got {allow_price_only!r}")
+    if basis == PRICE_ONLY and not allow_price_only:
+        raise PortfolioConfigError(
+            f"Target-weight run refused: {basis_text}. A funded basket's cash sleeve earns its yield "
+            f"only through distributions, so the result would be silently wrong. Use a total-return "
+            f"provider (--provider norgate or yahoo, or parquet/csv files you have adjusted), or set "
+            f"portfolio_allow_price_only=True to run anyway (the report will say price-only).")
+    valid_from = entry.get("valid_from")
+    if valid_from and pd.Timestamp(config["start_date"]) < pd.Timestamp(valid_from[0]):
+        raise PortfolioConfigError(f"{entry.get('name') or 'This strategy'} is only valid from "
+                                   f"{valid_from[0]}: {valid_from[1]}. Set start_date >= {valid_from[0]}.")
     raw_rules = _cfg(config, "portfolio_settlement_rules")
     try:
         rules = []
@@ -155,8 +207,44 @@ def resolve_settings(entry: dict, config: dict) -> dict:
         bench_cost = float("nan")
     if not (np.isfinite(bench_cost) and 0 <= bench_cost < 10000):
         raise PortfolioConfigError("portfolio_benchmark_cost_bps must be finite, >= 0 and < 10000 bps")
+    try:
+        rf = float(config.get("risk_free_rate", 0.05) or 0.0)
+    except (TypeError, ValueError):
+        rf = float("nan")
+    if not np.isfinite(rf):
+        raise PortfolioConfigError(f"risk_free_rate must be a finite number; got {config.get('risk_free_rate')!r}")
     return {"settlement": settlement, "rules": rules, "band": band, "cost_bps": cost_bps,
-            "symbol_map": dict(symbol_map), "benchmark_cost_bps": bench_cost}
+            "symbol_map": dict(symbol_map), "benchmark_cost_bps": bench_cost,
+            "price_basis": basis, "price_basis_text": basis_text, "risk_free_rate": rf}
+
+
+def substitutions(entry: dict, config: dict) -> dict:
+    """``{logical name: provider ticker}`` for every product, benchmark or signal
+    input that ``portfolio_symbol_map`` replaces with a *different* ticker.
+
+    The data checks (inception, coverage) run on the substituted series, so a
+    map such as ``{"SGOV": "BIL"}`` runs a different cash product under the
+    SGOV label. It is allowed, but the run records and the report states it
+    (PR #489 review #4).
+    """
+    symbol_map = dict(_cfg(config, "portfolio_symbol_map") or {})
+
+    def _bare(t):
+        return str(t).upper().lstrip("$").replace("I:", "").replace("^", "")
+
+    out = {}
+    names = list(entry["symbols"]) + [entry["cash_symbol"]]
+    bench = _benchmark(config)
+    if bench:
+        names.append(bench)
+    for s in names:
+        if s in symbol_map and _bare(symbol_map[s]) != _bare(s):
+            out[s] = symbol_map[s]
+    for role, ticker in entry["signal_symbols"].items():
+        mapped = symbol_map.get(role, symbol_map.get(ticker, ticker))
+        if _bare(mapped) != _bare(ticker):
+            out[f"{role} ({ticker})"] = mapped
+    return out
 
 
 def _naive_daily(df: pd.DataFrame) -> pd.DataFrame:
@@ -196,13 +284,15 @@ def fetch_inputs(entry: dict, config: dict, fetcher) -> tuple[dict, dict]:
     bench = _benchmark(config)
     if bench and bench not in requests:
         requests[bench] = symbol_map.get(bench, bench)
-    data, provenance = {}, {}
+    data, provenance, fetched = {}, {}, {}
     for key, ticker in requests.items():
-        df = fetcher(ticker, fetch_start, end, config)
-        if df is None or len(df) == 0:
-            raise PortfolioDataError(f"No data for {key!r} (requested as {ticker!r}) "
-                                     f"between {fetch_start} and {end}")
-        df = _naive_daily(df)
+        if ticker not in fetched:  # e.g. SPY as both the "spy" signal and the benchmark
+            raw = fetcher(ticker, fetch_start, end, config)
+            if raw is None or len(raw) == 0:
+                raise PortfolioDataError(f"No data for {key!r} (requested as {ticker!r}) "
+                                         f"between {fetch_start} and {end}")
+            fetched[ticker] = _naive_daily(raw)
+        df = fetched[ticker].copy()
         data[key] = df
         provenance[key] = {"ticker": ticker, "first": str(df.index[0].date()),
                            "last": str(df.index[-1].date()), "rows": int(len(df)),
@@ -311,6 +401,8 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
     settings = resolve_settings(entry, config)
     settlement, rules, band = settings["settlement"], settings["rules"], settings["band"]
     cost_bps, bench_cost = settings["cost_bps"], settings["benchmark_cost_bps"]
+    rf = settings["risk_free_rate"]
+    subs = substitutions(entry, config)
     capital = float(config.get("initial_capital", 100000.0))
     if not (np.isfinite(capital) and capital > 0):
         raise PortfolioConfigError(f"initial_capital must be positive and finite; got {capital!r}")
@@ -323,6 +415,9 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
     logger.info(f"  Strategy   : {name}")
     logger.info(f"  Products   : {entry['symbols']} + cash sleeve {cash_symbol}")
     logger.info(f"  Settlement : {settlement}   band: {band:.2%}   costs (bps): {cost_bps}")
+    logger.info(f"  Prices     : {settings['price_basis']} — {settings['price_basis_text']}")
+    for logical, ticker in subs.items():
+        logger.warning(f"  Substituted: {logical} is run on {ticker!r} (portfolio_symbol_map)")
     logger.info("=" * 60)
 
     data, provenance = fetch_inputs(entry, config, fetcher)
@@ -337,20 +432,24 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
     common = dict(exposure=entry["exposure"], band=band, cost_bps=cost_bps,
                   settle_map=settle_map, settlement_rules=rules, initial_capital=capital)
 
-    result = twp.simulate_target_weights(opens, closes, targets, entry["symbols"], cash_symbol,
-                                         settlement=settlement, **common)
-    other = twp.IMMEDIATE if settlement == twp.SETTLED_ONLY else twp.SETTLED_ONLY
-    alt = twp.simulate_target_weights(opens, closes, targets, entry["symbols"], cash_symbol,
-                                      settlement=other, **common)
+    runs = {mode: twp.simulate_target_weights(opens, closes, targets, entry["symbols"], cash_symbol,
+                                              settlement=mode, **common)
+            for mode in SETTLEMENT_ORDER}
+    result = runs[settlement]
+    # comparison_ledger.csv keeps its original meaning (the parity script reads it).
+    other = twp.IMMEDIATE if settlement != twp.IMMEDIATE else twp.SETTLED_ONLY
+    alt = runs[other]
     zero = pd.DataFrame(0.0, index=sessions, columns=list(entry["symbols"]))
     cash_only = twp.simulate_target_weights(opens, closes, zero, entry["symbols"], cash_symbol,
                                             settlement=twp.SETTLED_ONLY, **common)
     cash_ref = closes[cash_symbol].pct_change(fill_method=None)
     cash_ref.iloc[0] = closes[cash_symbol].iloc[0] / opens[cash_symbol].iloc[0] - 1
 
-    series = {"Strategy": result.returns,
-              f"Strategy ({other} settlement)": alt.returns,
-              f"{cash_symbol} (cash sleeve)": cash_only.returns}
+    series = {"Strategy": result.returns}
+    for mode in SETTLEMENT_ORDER:
+        if mode != settlement:
+            series[f"Strategy ({mode} settlement)"] = runs[mode].returns
+    series[f"{cash_symbol} (cash sleeve)"] = cash_only.returns
     if bench:
         series[bench] = twp.buy_and_hold_returns(data[bench]["Open"].reindex(sessions),
                                                  data[bench]["Close"].reindex(sessions), bench_cost)
@@ -361,7 +460,8 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
     for label, m in masks.items():
         period_metrics[label] = {}
         for col in daily.columns:
-            period_metrics[label][col] = twp.performance_metrics(daily[col][m], cash_ref[m])
+            period_metrics[label][col] = twp.performance_metrics(daily[col][m], cash_ref[m],
+                                                                 risk_free_rate=rf)
         led = result.ledger[m]
         period_metrics[label]["Strategy"].update({
             "mean_cash_sleeve_weight": float(led[f"{cash_symbol}_weight"].mean()),
@@ -390,7 +490,8 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
         "self_financing_checked_each_session": True,
         "signal_timing": "target decided at close t-1, executed at open t; session 0 starts in the cash sleeve",
         "cash_interest_added": False,
-        "distribution_treatment": "Adjusted total-return prices; distributions modelled as reinvested in the unit price, not as payment-date cash",
+        "price_basis": settings["price_basis"],
+        "distribution_treatment": settings["price_basis_text"],
         "settlement_calendar": "XNYS sessions minus US federal (bank) holidays; conservative, not a certified broker clearing calendar",
     }
     states = signals["state"].value_counts().to_dict() if "state" in signals.columns else {}
@@ -410,7 +511,11 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
         "cost_bps": cost_bps,
         "band": band,
         "settlement": settlement,
+        "settlement_modes": list(SETTLEMENT_ORDER),
         "settlement_rules": [list(r) for r in rules],
+        "risk_free_rate": rf,
+        "price_basis": settings["price_basis"],
+        "substitutions": subs,
         "benchmark": bench,
         "benchmark_cost_bps": bench_cost,
         "initial_capital": capital,
@@ -446,6 +551,12 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
 
     ledger.to_csv(os.path.join(art_dir, "ledger.csv"), index_label="date", float_format="%.17g")
     alt.ledger.to_csv(os.path.join(art_dir, "comparison_ledger.csv"), index_label="date", float_format="%.17g")
+    runs[twp.GFV_AWARE].restrictions.to_csv(os.path.join(art_dir, "gfv_restricted_lots.csv"), index=False,
+                                            float_format="%.17g")
+    for mode in SETTLEMENT_ORDER:
+        if mode != settlement:
+            runs[mode].ledger.to_csv(os.path.join(art_dir, f"comparison_ledger_{mode}.csv"),
+                                     index_label="date", float_format="%.17g")
     fills.to_csv(os.path.join(art_dir, "fills.csv"), index=False, float_format="%.17g")
     signals.to_csv(os.path.join(art_dir, "signals.csv"), index_label="date", float_format="%.17g")
     daily.to_csv(os.path.join(art_dir, "daily_returns.csv"), index_label="date", float_format="%.17g")
@@ -469,7 +580,7 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
            "Start": s["start"], "End": s["end"], "Sessions": s["observations"],
            "Total Return": s["total_return"], "CAGR": s["cagr"], "Max Drawdown": s["max_drawdown"],
            "Volatility": s["volatility"], "Sharpe vs cash sleeve": s.get("sharpe_cash_reference"),
-           "Sharpe (rf=2%)": s["sharpe_rf2"], "Calmar": s["calmar"],
+           f"Sharpe (rf={rf:.2%})": s["sharpe_rf"], "Calmar": s["calmar"],
            "Total Cost": summary["costs"]["total"], "Rebalance Sessions": summary["activity"]["rebalance_sessions"],
            "Unfilled Target Days": summary["activity"]["unfilled_target_days"]}
     for col in daily.columns[1:]:

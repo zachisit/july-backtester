@@ -400,7 +400,8 @@ class TestRunnerArtifacts:
         assert not v["cash_or_holdings_negative"] and v["min_cash"] >= 0 and v["min_shares"] >= 0
         assert summary["periods"]["Full period"]["Strategy"]["start"] == "2020-07-01"
         assert set(summary["periods"]["Full period"]) == {
-            "Strategy", "Strategy (immediate settlement)", "SGOV (cash sleeve)", "SPY"}
+            "Strategy", "Strategy (gfv_aware settlement)", "Strategy (immediate settlement)",
+            "SGOV (cash sleeve)", "SPY"}
         equity = pd.read_csv(run_dir / "analyzer_csvs" / "VIXY-SVXY-SGOV" /
                              "VIX_eVRP_Dual_SGOV_funded_equity.csv", index_col=0)
         assert equity["Equity"].iloc[-1] == pytest.approx(summary["final_nav"])
@@ -743,13 +744,14 @@ class TestQaReport:
         text = (out / "VIX_eVRP_Dual_SGOV_funded.md").read_text()
         head = text.split("## Performance by period")[0]
         assert "NON-DEPLOYABLE" in head
-        assert "only settled cash buys" not in text
+        assert "headline: immediate" in text
         assert "reused at the same open" in text
 
     def test_settled_primary_keeps_settled_cash_statement(self, portfolio_run):
         from trade_analyzer import portfolio_report as pr
         text = " ".join(pr.notes(portfolio_run[1]))
-        assert "only settled cash buys" in text and "NON-DEPLOYABLE" not in text
+        assert "headline: settled_only" in text and "only settled cash buys" in text
+        assert "NON-DEPLOYABLE" not in text
 
     def test_activity_separates_rule_fired_from_traded_sessions(self, portfolio_run):
         run_dir, summary = portfolio_run
@@ -819,3 +821,257 @@ class TestQaCli:
         assert res.returncode == 1
         assert "Traceback" not in res.stderr + res.stdout
         assert "[ERROR]" in res.stdout and "vixy" in res.stdout
+
+
+# ---------------------------------------------------------------------------
+# PR #489 review (Shardul, 2026-11-24)
+# ---------------------------------------------------------------------------
+
+def _exit_market(seed, n=40):
+    """The review's repro: hold 40% SVXY for 10 sessions, then a zero target."""
+    rng = np.random.default_rng(seed)
+    d = pd.bdate_range("2021-01-04", periods=n)
+    cl = pd.DataFrame(100 * np.exp(np.cumsum(rng.normal(0, [0.05, 0.05, 0.0005], (n, 3)), 0)),
+                      index=d, columns=["VIXY", "SVXY", "SGOV"])
+    op = cl.shift(1).fillna(cl.iloc[0]) * np.exp(rng.normal(0, 0.01, (n, 3)))
+    w = pd.DataFrame(0.0, index=d, columns=RISK)
+    w.iloc[:10, 1] = 0.4
+    return op, cl, w
+
+
+class TestReviewResidualShares:
+    """#1: a full exit must leave exactly zero shares, or the band is off for good."""
+
+    @pytest.mark.parametrize("mode", [twp.SETTLED_ONLY, twp.GFV_AWARE, twp.IMMEDIATE])
+    def test_full_exit_leaves_exactly_zero_shares(self, mode):
+        # Seed 74 left 4.3e-19 SVXY shares and rebalanced on 27/27 later sessions.
+        for seed in (74, *range(60)):
+            op, cl, w = _exit_market(seed)
+            led = _sim(op, cl, w, band=0.02, settlement=mode).ledger
+            after = led.iloc[16:]  # exited and settled by then in every mode
+            assert (after["SVXY_shares"] == 0.0).all(), seed
+            # Target unchanged (all cash sleeve) and within band: no rebalance.
+            assert not after["rebalanced"].any(), seed
+
+    def test_dust_holding_with_zero_target_is_cleared(self):
+        p = _flat(8)
+        w = _targets(p.index, 0.0)
+        r = _sim(p, p, w, cost_bps={})
+        # Inject dust directly: a 1e-19 share remainder must not keep "product_exit" firing.
+        led = _sim(p, p, w.assign(SVXY=[1e-20] + [0.0] * 7), cost_bps={}).ledger
+        assert (led["SVXY_shares"].iloc[2:] == 0).all()
+        assert not led["rebalanced"].iloc[2:].any()
+        assert r.ledger["nav"].iloc[-1] == pytest.approx(1.0)
+
+
+def _replay_gfv_audit(fills: pd.DataFrame, lots: pd.DataFrame, risk: list):
+    """Independent check of the good-faith rule from the fills and restricted lots.
+
+    No SELL may take shares that are still restricted on its date, and every
+    lot is backed by a BUY of at least that many shares on the same date.
+    """
+    bought = fills[fills["Side"] == "BUY"].groupby(["Date", "Symbol"])["Shares"].sum()
+    for (d, s), sh in lots.groupby(["Date", "Symbol"])["Shares"].sum().items():
+        assert sh <= bought.get((d, s), 0.0) * (1 + 1e-9) + 1e-12, (d, s)
+    held = {s: 0.0 for s in risk}
+    for f in fills.itertuples(index=False):
+        if f.Symbol not in risk:
+            continue
+        if f.Side == "BUY":
+            held[f.Symbol] += f.Shares
+        else:
+            mine = lots[(lots["Symbol"] == f.Symbol) & (lots["Date"] < f.Date) & (lots["FreeDate"] > f.Date)]
+            assert f.Shares <= held[f.Symbol] - mine["Shares"].sum() + 1e-9, (f.Date, f.Symbol)
+            held[f.Symbol] -= f.Shares
+
+
+class TestReviewGfvAware:
+    """#3: a Reg T cash account may buy with unsettled proceeds, without free-riding."""
+
+    def test_unsettled_proceeds_buy_risk_but_not_cash_sleeve(self):
+        p = _flat()
+        r = _sim(p, p, _targets(p.index, -0.2), cost_bps={}, settlement=twp.GFV_AWARE)
+        led = r.ledger
+        # Unlike settled_only (which waits two sessions), the target is reached on day 1.
+        assert led["SVXY_weight"].iloc[1] == pytest.approx(0.4)
+        assert not led["target_unfilled_at_open"].iloc[1]
+        buy = r.fills[(r.fills["Symbol"] == "SVXY") & (r.fills["Side"] == "BUY")].iloc[0]
+        assert buy["UnsettledFunding"] == pytest.approx(0.4)
+        assert buy["RestrictedUntil"] == r.settlement_map[p.index[1]]
+        # The SGOV sale's receivable was spent, so nothing is left unsettled.
+        assert led["unsettled"].iloc[1] == pytest.approx(0.0, abs=1e-12)
+
+    def test_restricted_shares_are_not_sold_before_settlement(self):
+        p = _flat(8)
+        t = pd.Series(0.0, index=p.index)
+        t.iloc[0] = -0.2  # buy SVXY on day 1 with unsettled SGOV proceeds
+        r = _sim(p, p, _targets(p.index, t), cost_bps={}, settlement=twp.GFV_AWARE)
+        led = r.ledger
+        settles = r.settlement_map[p.index[1]]  # T+2 -> day 3
+        # Target is zero from day 2, but the shares are locked until they free up.
+        assert led.loc[:settles - pd.Timedelta(days=1), "SVXY_shares"].iloc[1:].gt(0).all()
+        assert led["target_unfilled_at_open"].iloc[2]
+        sells = r.fills[(r.fills["Symbol"] == "SVXY") & (r.fills["Side"] == "SELL")]
+        assert (sells["Date"] >= settles).all() and len(sells) == 1
+        assert led["SVXY_shares"].iloc[-1] == 0.0
+
+    @pytest.mark.parametrize("seed", range(6))
+    def test_random_paths_obey_good_faith_rule_and_fund(self, seed):
+        opens, closes, rng = _random_market(seed)
+        exposure = rng.choice([-0.2, -0.1, 0.0, 0.2], size=len(opens))
+        r = _sim(opens, closes, _targets(opens.index, exposure), settlement=twp.GFV_AWARE,
+                 initial_capital=250_000.0)
+        led = r.ledger
+        assert (led["cash"] >= 0).all() and (led["unsettled"] >= -1e-9).all()
+        value = sum(led[f"{s}_value"] for s in r.symbols) + led["cash"] + led["unsettled"]
+        np.testing.assert_allclose(value, led["nav"], rtol=1e-12)
+        assert len(r.restrictions) > 0  # the path does exercise unsettled-funded buys
+        _replay_gfv_audit(r.fills, r.restrictions, RISK)
+        # Cash-sleeve purchases never use unsettled money.
+        assert (r.fills.loc[r.fills["Symbol"] == CASH, "UnsettledFunding"].fillna(0) == 0).all()
+
+    def test_audit_catches_a_free_ride(self):
+        # The audit is not hollow: a sale of restricted shares must fail it.
+        d = pd.Timestamp("2021-01-05")
+        fills = pd.DataFrame([
+            {"Date": d, "Symbol": "SVXY", "Side": "BUY", "Shares": 10.0},
+            {"Date": d + pd.Timedelta(days=1), "Symbol": "SVXY", "Side": "SELL", "Shares": 10.0},
+        ])
+        lots = pd.DataFrame([{"Date": d, "Symbol": "SVXY", "Shares": 4.0, "FreeDate": d + pd.Timedelta(days=2)}])
+        with pytest.raises(AssertionError):
+            _replay_gfv_audit(fills, lots, RISK)
+        _replay_gfv_audit(fills.assign(Shares=[10.0, 6.0]), lots, RISK)  # the free part may go
+
+    def test_gfv_without_receivables_equals_settled_only(self):
+        # With no sales there are no receivables, so the two modes must coincide.
+        p = _flat()
+        a = _sim(p, p, _targets(p.index, 0.0), settlement=twp.GFV_AWARE).ledger
+        b = _sim(p, p, _targets(p.index, 0.0), settlement=twp.SETTLED_ONLY).ledger
+        pd.testing.assert_frame_equal(a, b)
+
+    def test_runner_reports_all_three_settlement_series(self, portfolio_run):
+        run_dir, summary = portfolio_run
+        assert summary["settlement_modes"] == ["settled_only", "gfv_aware", "immediate"]
+        art = run_dir / "portfolio_runs" / "VIXY-SVXY-SGOV" / "VIX_eVRP_Dual_SGOV_funded"
+        for f in ("comparison_ledger.csv", "comparison_ledger_gfv_aware.csv",
+                  "comparison_ledger_immediate.csv"):
+            assert (art / f).is_file(), f
+        # comparison_ledger.csv keeps its meaning (the parity script reads it): immediate.
+        a = pd.read_csv(art / "comparison_ledger.csv")
+        b = pd.read_csv(art / "comparison_ledger_immediate.csv")
+        pd.testing.assert_frame_equal(a, b)
+
+    def test_gfv_can_be_the_headline(self, tmp_path):
+        from helpers.target_weight_runner import run_target_weight_backtest
+        s = run_target_weight_backtest(_config(portfolio_settlement="gfv_aware"), str(tmp_path), "gfv",
+                                       _fetcher(synthetic_universe()))
+        assert s["settlement"] == "gfv_aware"
+        assert "Strategy (settled_only settlement)" in s["periods"]["Full period"]
+
+    def test_report_explains_settled_only_is_stricter_than_reg_t(self, portfolio_run):
+        from trade_analyzer import portfolio_report as pr
+        text = " ".join(pr.notes(portfolio_run[1]))
+        assert "Stricter than Regulation T" in text and "good-faith" in text
+
+
+class TestReviewPriceBasis:
+    """#2: Polygon adjusted=true is split-only; funded baskets need total return."""
+
+    @pytest.mark.parametrize("provider,adj,basis", [
+        ("polygon", "total_return", "price_only"),
+        ("norgate", "total_return", "total_return"),
+        ("yahoo", "total_return", "total_return"),
+        ("yahoo", "none", "price_only"),
+        ("parquet", "total_return", "as_supplied"),
+        ("csv", "total_return", "as_supplied"),
+    ])
+    def test_price_basis_by_provider(self, provider, adj, basis):
+        from helpers.target_weight_runner import price_basis
+        assert price_basis({"data_provider": provider, "price_adjustment": adj})[0] == basis
+
+    def test_polygon_refused_by_default(self):
+        from helpers.target_weight_runner import PortfolioConfigError, resolve_settings, resolve_strategy
+        cfg = _config(data_provider="polygon", price_adjustment="total_return")
+        _, entry = resolve_strategy(cfg)
+        with pytest.raises(PortfolioConfigError, match="split-adjusted only"):
+            resolve_settings(entry, cfg)
+
+    def test_price_only_opt_in_is_labelled(self, tmp_path):
+        from helpers.target_weight_runner import run_target_weight_backtest
+        from trade_analyzer import portfolio_report as pr
+        s = run_target_weight_backtest(_config(data_provider="polygon", portfolio_allow_price_only=True),
+                                       str(tmp_path), "po", _fetcher(synthetic_universe()))
+        assert s["validation"]["price_basis"] == "price_only"
+        assert "total-return" not in s["validation"]["distribution_treatment"].replace("not total-return", "")
+        assert any(line.startswith("PRICE-ONLY INPUTS") for line in pr.flag_lines(s))
+
+    def test_total_return_text_never_hardcoded(self, portfolio_run):
+        # The synthetic provider is unverifiable: the run must not claim total return.
+        v = portfolio_run[1]["validation"]
+        assert v["price_basis"] == "as_supplied"
+        assert "cannot verify" in v["distribution_treatment"]
+
+
+class TestReviewSymbolMapAndValidity:
+    """#4: SVXY's -0.5 coefficient is dated; substitutions are labelled."""
+
+    def test_start_before_svxy_deleverage_refused(self):
+        from helpers.target_weight_runner import PortfolioConfigError, resolve_settings, resolve_strategy
+        cfg = _config(start_date="2017-06-01")
+        _, entry = resolve_strategy(cfg)
+        with pytest.raises(PortfolioConfigError, match="2018-02-28"):
+            resolve_settings(entry, cfg)
+
+    def test_substituted_cash_sleeve_is_labelled(self, tmp_path):
+        from helpers.target_weight_runner import run_target_weight_backtest
+        from trade_analyzer import portfolio_report as pr
+        uni = synthetic_universe()
+        uni["BIL"] = uni["SGOV"]
+        s = run_target_weight_backtest(_config(portfolio_symbol_map={"SGOV": "BIL"}), str(tmp_path), "sub",
+                                       _fetcher(uni))
+        assert s["substitutions"] == {"SGOV": "BIL"}
+        assert any("SGOV is run on BIL" in line for line in pr.flag_lines(s))
+
+    def test_provider_spelling_is_not_a_substitution(self):
+        from helpers.target_weight_runner import resolve_strategy, substitutions
+        cfg = _config(portfolio_symbol_map={"vix": "$VIX", "vix3m": "^VIX3M"})
+        _, entry = resolve_strategy(cfg)
+        assert substitutions(entry, cfg) == {}
+
+
+class TestReviewNits:
+    def test_sharpe_uses_configured_risk_free_rate(self, tmp_path):
+        from helpers.target_weight_runner import run_target_weight_backtest
+        s = run_target_weight_backtest(_config(risk_free_rate=0.05), str(tmp_path), "rf",
+                                       _fetcher(synthetic_universe()))
+        m = s["periods"]["Full period"]["Strategy"]
+        assert s["risk_free_rate"] == 0.05 and m["risk_free_rate"] == 0.05
+        assert m["sharpe_rf"] == pytest.approx(m["sharpe_rf2"] - 0.03 / m["volatility"])
+        summary_csv = pd.read_csv(tmp_path / "overall_portfolio_summary.csv")
+        assert "Sharpe (rf=5.00%)" in summary_csv.columns
+
+    def test_shared_ticker_fetched_once(self):
+        from helpers.target_weight_runner import fetch_inputs, resolve_strategy
+        calls = []
+        base = _fetcher(synthetic_universe())
+
+        def counting(symbol, *a):
+            calls.append(symbol)
+            return base(symbol, *a)
+        cfg = _config()
+        _, entry = resolve_strategy(cfg)
+        data, _ = fetch_inputs(entry, cfg, counting)
+        assert calls.count("SPY") == 1
+        assert data["spy"] is not data["SPY"] and data["spy"].equals(data["SPY"])
+
+    def test_staging_manifest_has_no_absolute_path_and_accepts_crlf(self, tmp_path):
+        import hashlib
+        sys.path.insert(0, os.path.join(PROJECT_ROOT, "scripts"))
+        import vix_evrp_stage_frozen_inputs as st
+        lf = b"Date,Open\n2020-01-02,1\n"
+        (tmp_path / "a.csv").write_bytes(lf.replace(b"\n", b"\r\n"))  # autocrlf checkout
+        (tmp_path / "SHA256SUMS").write_text(f"{hashlib.sha256(lf).hexdigest()}  a.csv\n")
+        assert st.verify_checksums(tmp_path, ["a.csv"]) == {"a.csv": hashlib.sha256(lf).hexdigest()}
+        (tmp_path / "a.csv").write_bytes(b"tampered\r\n")
+        with pytest.raises(SystemExit, match="Checksum mismatch"):
+            st.verify_checksums(tmp_path, ["a.csv"])

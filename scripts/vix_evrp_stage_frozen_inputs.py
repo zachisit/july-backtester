@@ -45,6 +45,11 @@ def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _sha256_lf(path: Path) -> str:
+    """SHA256 after CRLF -> LF, for a Windows checkout with core.autocrlf=true."""
+    return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+
+
 def verify_checksums(study: Path, files: list[str]) -> dict:
     sums = {}
     for line in (study / "SHA256SUMS").read_text().splitlines():
@@ -54,6 +59,8 @@ def verify_checksums(study: Path, files: list[str]) -> dict:
     out = {}
     for rel in files:
         actual = _sha256(study / rel)
+        if sums.get(rel) != actual and sums.get(rel) == _sha256_lf(study / rel):
+            actual = sums[rel]  # same bytes once git's CRLF conversion is undone
         if sums.get(rel) != actual:
             raise SystemExit(f"Checksum mismatch for {rel}: SHA256SUMS={sums.get(rel)} actual={actual}")
         out[rel] = actual
@@ -79,7 +86,8 @@ def stage(study: Path, out: Path) -> dict:
         df = pd.read_csv(study / rel, **read)
         frames[name] = _ohlcv(df["Open"], df["Close"])
     out.mkdir(parents=True, exist_ok=True)
-    manifest = {"source_study": str(study), "source_sha256": checksums, "files": {}}
+    # Only the study folder's name: an absolute path would leak a local machine path.
+    manifest = {"source_study": study.resolve().name, "source_sha256": checksums, "files": {}}
     for name, df in frames.items():
         path = out / f"{name}.parquet"
         df.to_parquet(path)

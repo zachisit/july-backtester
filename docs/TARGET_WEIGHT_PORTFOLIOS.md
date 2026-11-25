@@ -58,34 +58,62 @@ risk-weight drift instead of signed exposure.
   target is zero, when a targeted risk product is not held, when the sign of
   signed exposure changes, or when `|target - current| > band`.
 * **Settlement.** Sales create receivables that settle on the `lag`-th
-  eligible session after the trade (T+2, then T+1 from 2024-05-28). Only
-  settled cash buys; receivables count in NAV but cannot be spent. Eligible
-  sessions are XNYS trading sessions minus US federal (bank)
-  holidays. Days when the exchange is open but banks are closed (Columbus Day,
-  Veterans Day) therefore do not settle. This is the conservative
-  cash-account assumption, not a certified broker clearing calendar.
-  `portfolio_settlement: "immediate"` reuses proceeds at the same open and is
-  reported only as a benchmark.
+  eligible session after the trade (T+2, then T+1 from 2024-05-28).
+  Receivables count in NAV. Eligible sessions are XNYS trading sessions minus
+  US federal (bank) holidays. Days when the exchange is open but banks are
+  closed (Columbus Day, Veterans Day) therefore do not settle, and
+  `USFederalHolidayCalendar` also moves Saturday holidays to the Friday
+  (2021-06-18, 2021-12-31, 2023-11-10), which the Fed does not observe. This
+  is a conservative assumption, not a certified broker clearing calendar.
+  Every run simulates three settlement modes and reports all of them;
+  `portfolio_settlement` picks the headline:
+
+  | Mode | Rule | Use |
+  |---|---|---|
+  | `settled_only` (default) | only settled cash buys | stricter than Regulation T; the PR #179 parity path |
+  | `gfv_aware` | risk purchases may spend unsettled proceeds, but those shares are never sold before the proceeds settle; the cash sleeve buys with settled cash only | the Reg T cash-account rule (no good-faith violations) |
+  | `immediate` | proceeds reused at the same open, unrestricted | upper bound; can commit good-faith violations, not executable |
+
+  On the frozen PR #179 window the gap between `settled_only` (6.43% CAGR)
+  and `gfv_aware` (8.84%) is mostly model conservatism. It is **not** a cost
+  a real cash account pays. `immediate` gives 8.63%. The gfv_aware
+  restrictions are written per lot to `gfv_restricted_lots.csv`, and each
+  BUY fill records `UnsettledFunding` / `RestrictedUntil`.
 * **Stale intentions never execute.** Each open re-reads the latest prior-close target.
 * **Costs** are in bps of traded notional on every sale and purchase,
   including the initial cash-sleeve buy. Units are fractional, there are no
   minimum commissions, and positions are not liquidated at the end.
-* **Distributions** are carried by adjusted (total-return) prices, i.e.
-  reinvested in the unit price, not booked as payment-date cash. No cash
-  interest is added beyond the cash-sleeve product's own return.
+* **Distributions** reach NAV only through total-return adjusted prices
+  (reinvested in the unit price). The engine adds no cash flows and no cash
+  interest beyond the cash-sleeve product's own return. The runner
+  classifies the provider's prices (`validation.price_basis`) and derives the
+  report's distribution text from it:
+
+  | Provider (`price_adjustment="total_return"`) | `price_basis` |
+  |---|---|
+  | `norgate` | `total_return` |
+  | `yahoo` (`auto_adjust=True`) | `total_return` |
+  | `polygon` | `price_only`: `adjusted=true` is **split-only**, so dividends are lost (for SGOV, the whole T-bill yield) |
+  | `parquet`, `csv` | `as_supplied`: the engine cannot verify your files |
+  | any provider with `price_adjustment` other than `"total_return"` | `price_only` |
+
+  A `price_only` run is refused unless `portfolio_allow_price_only=True`. In
+  that case page 1 of the report carries a PRICE-ONLY flag.
 
 ## Config / CLI
 
 | Key | Default | Meaning |
 |---|---|---|
 | `portfolio_strategy` | `None` | Name of a `@register_target_weight` plugin; `None` = normal run. CLI `--portfolio-strategy` |
-| `portfolio_settlement` | `"settled_only"` | or `"immediate"` (benchmark) |
+| `portfolio_settlement` | `"settled_only"` | headline series: `"settled_only"`, `"gfv_aware"` or `"immediate"`; all three are always reported |
 | `portfolio_settlement_rules` | `[["1900-01-01", 2], ["2024-05-28", 1]]` | `[effective_date, lag]` |
 | `portfolio_rebalance_band` | `None` | override the plugin's band |
 | `portfolio_cost_bps` | `None` | per-symbol override, e.g. stress `{"VIXY": 20, "SVXY": 20, "SGOV": 5}` |
-| `portfolio_symbol_map` | `{}` | provider ticker remap, e.g. `{"vix": "$VIX", "vix3m": "$VIX3M"}` for a Norgate-named corpus |
+| `portfolio_symbol_map` | `{}` | provider ticker remap, e.g. `{"vix": "$VIX", "vix3m": "$VIX3M"}` for a Norgate-named corpus. A remap to a *different* instrument (e.g. `{"SGOV": "BIL"}`) runs, but is recorded in `metrics.json["substitutions"]` and flagged on page 1, because the inception and coverage checks then apply to the substitute |
 | `portfolio_benchmark_ticker` | `"SPY"` | buy-and-hold comparison (`None`/`""` disables); the cash sleeve is always shown too |
 | `portfolio_benchmark_cost_bps` | `5.0` | one-time benchmark entry cost |
+| `portfolio_allow_price_only` | `False` | run on `price_only` inputs anyway (see Distributions) |
+| `risk_free_rate` | `0.05` | the repo-wide key; used for the tearsheet's rf Sharpe (`sharpe_rf`). `metrics.json` also keeps `sharpe_rf2` at a fixed 2% for parity with the study |
 
 Invalid `portfolio_*` values refuse the run (`PortfolioConfigError`) before
 any data is fetched:
@@ -117,7 +145,10 @@ when any of these holds:
 - a signal input misses a session, or has no history before the first
   session (e.g. a provider history cap such as Polygon's `I:VIX` from
   2023-02-14);
-- the timeframe is anything other than daily (`timeframe="D"`, multiplier 1).
+- the timeframe is anything other than daily (`timeframe="D"`, multiplier 1);
+- `start_date` is before the plugin's `valid_from` date. The VIX eVRP plugin
+  declares `2018-02-28`, because SVXY was a -1x product before then and its
+  `-0.5` exposure coefficient would be wrong.
 
 All inputs are fetched `max(pit_warmup_days, 60)` calendar days before
 `start_date` so that signals are warm.
@@ -137,15 +168,16 @@ output/runs/<run_id>/
   analyzer_csvs/<Portfolio>/<Strategy>_equity.csv       daily portfolio NAV
   analyzer_csvs/<Portfolio>/<Strategy>.portfolio.json   marker -> report.py portfolio tearsheet
   portfolio_runs/<Portfolio>/<Strategy>/
-     ledger.csv  comparison_ledger.csv  fills.csv  signals.csv  daily_returns.csv  annual_returns.csv
-     settlement_calendar.csv  metrics.json
+     ledger.csv  comparison_ledger.csv  comparison_ledger_<mode>.csv  gfv_restricted_lots.csv
+     fills.csv  signals.csv  daily_returns.csv  annual_returns.csv  settlement_calendar.csv  metrics.json
 ```
 
 `python report.py --all output/runs/<run_id>` (or single-file mode on the
 fills CSV) writes `detailed_reports/<Portfolio>/<Strategy>/<Strategy>.pdf`
 and `.md`. Every figure is built from the **portfolio NAV ledger**:
 
-1. KPIs, NAV vs SPY / cash sleeve / immediate-settlement benchmark, and drawdown.
+1. KPIs, NAV vs SPY / cash sleeve / the other two settlement series, and
+   drawdown. PRICE-ONLY and SUBSTITUTED INPUT flags sit under the title.
 2. Holdings (products, cash sleeve, unsettled receivables), target vs executed
    signed exposure (with sessions where the target was not reached at the
    open), and signal inputs/state.

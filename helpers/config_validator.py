@@ -38,6 +38,7 @@ KNOWN_KEYS: set[str] = {
     "portfolio_symbol_map",
     "portfolio_benchmark_ticker",
     "portfolio_benchmark_cost_bps",
+    "portfolio_allow_price_only",
     # SECTION 1: Data Provider
     "data_provider",
     "polygon_max_retries",

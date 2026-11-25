@@ -421,6 +421,7 @@ def register_target_weight(
     portfolio_name: str | None = None,
     report_periods: dict | None = None,
     description: str = "",
+    valid_from: tuple[str, str] | None = None,
 ) -> Callable:
     """Register a fully funded **target-weight** portfolio plugin (issue #487).
 
@@ -448,6 +449,9 @@ def register_target_weight(
     band : rebalance tolerance (0.02 = 2 percentage points)
     portfolio_name : label for run folders/reports (default: joined tickers)
     report_periods : ``{label: (start, end_or_None)}`` sub-periods to report
+    valid_from : ``(date, reason)``; the runner refuses a ``start_date`` before
+        *date* (e.g. a product whose leverage, and so its ``exposure``
+        coefficient, changed on that date)
     """
     def decorator(fn: Callable) -> Callable:
         _REGISTRY[name] = {
@@ -465,6 +469,8 @@ def register_target_weight(
             "portfolio_name": portfolio_name or "-".join(list(symbols) + [cash_symbol]),
             "report_periods": dict(report_periods or {}),
             "description":    description,
+            "name":           name,
+            "valid_from":     None if valid_from is None else (str(valid_from[0]), str(valid_from[1])),
         }
         return fn
 

@@ -8,6 +8,10 @@ their per-fill "profit" would misstate the strategy. Every return, drawdown
 and ratio here is computed from the **portfolio NAV ledger** of the whole
 basket (risk products + cash sleeve + unsettled receivables).
 
+Every run shows three settlement series (``settled_only``, ``gfv_aware``,
+``immediate``); the headline is ``portfolio_settlement``. Price-only inputs
+and ``portfolio_symbol_map`` substitutions are flagged on page 1.
+
 Output: ``<output_dir>/<report_name>/<report_name>.pdf`` (4 A4-landscape
 pages, house navy/gold identity) and ``.md`` with PNG charts in ``images/``.
 """
@@ -97,6 +101,40 @@ NON_DEPLOYABLE = ("NON-DEPLOYABLE BENCHMARK: this run reuses sale proceeds at th
                   "(portfolio_settlement=immediate); it is not a cash-account result.")
 #: Page-1 flag; short enough to sit beside the NAV-basis line without overlapping it.
 NON_DEPLOYABLE_SHORT = "NON-DEPLOYABLE BENCHMARK RUN (immediate proceeds reuse): not a cash-account result"
+
+#: What each settlement series means (PR #489 review #3).
+SETTLEMENT_TEXT = {
+    "settled_only": ("settled_only: only settled cash buys. Stricter than Regulation T, so the gap to "
+                     "gfv_aware is model conservatism, not a cost a cash account must pay."),
+    "gfv_aware": ("gfv_aware: the Reg T cash-account rule. Risk purchases may use unsettled sale "
+                  "proceeds, but shares bought that way are never sold before those proceeds settle "
+                  "(no good-faith violations); the cash sleeve is bought with settled cash only."),
+    "immediate": ("immediate: proceeds reused at the same open with no restriction. An upper bound that "
+                  "can commit good-faith violations; not executable in a cash account."),
+}
+
+
+def _price_only(summary: dict) -> bool:
+    return summary.get("validation", {}).get("price_basis") == "price_only"
+
+
+def _sharpe_rf(summary: dict, m: dict):
+    """``(label, value)`` of the risk-free Sharpe; pre-#489-review runs only have rf=2%."""
+    if "sharpe_rf" in m:
+        return f"Sharpe rf={float(summary.get('risk_free_rate', m.get('risk_free_rate', 0.0))):.2%}", m["sharpe_rf"]
+    return "Sharpe rf=2%", m.get("sharpe_rf2")
+
+
+def flag_lines(summary: dict) -> list:
+    """Warnings that must sit on page 1 and at the top of the Markdown."""
+    out = []
+    if _price_only(summary):
+        out.append("PRICE-ONLY INPUTS: " + summary["validation"]["distribution_treatment"]
+                   + f". The {summary['cash_symbol']} sleeve's yield is missing from NAV.")
+    for logical, ticker in (summary.get("substitutions") or {}).items():
+        out.append(f"SUBSTITUTED INPUT: {logical} is run on {ticker} (portfolio_symbol_map); "
+                   f"results are not those of {logical.split(' ')[0]}.")
+    return out
 
 
 def _traded_sessions(summary: dict, fills: pd.DataFrame | None) -> int:
@@ -270,19 +308,22 @@ def period_table(summary: dict) -> pd.DataFrame:
             # entry fee, so a ratio of that to ~zero excess volatility is not a
             # performance figure. metrics.json keeps the raw value.
             sharpe = "—" if name == own else _num(m.get("sharpe_cash_reference"), 3)
+            rf_label, rf_value = _sharpe_rf(summary, m)
             rows.append({"Period": period, "Series": name,
                          "Start": m.get("start"), "End": m.get("end"),
                          "Total return": _pct(m.get("total_return")), "CAGR": _pct(m.get("cagr")),
                          "Max DD": _pct(m.get("max_drawdown")), "Volatility": _pct(m.get("volatility")),
                          f"Sharpe vs {cash}": sharpe,
-                         "Sharpe rf=2%": _num(m.get("sharpe_rf2"), 3)})
+                         rf_label: _num(rf_value, 3)})
     return pd.DataFrame(rows)
 
 
 def annual_table(annual: pd.DataFrame) -> pd.DataFrame:
     out = annual.copy()
     out.index = out.index.astype(str)
-    out.columns = [c.replace(" settlement)", ")") for c in out.columns]
+    # "Strategy (gfv_aware settlement)" -> "gfv_aware": three settlement series must fit the page.
+    out.columns = [c.replace("Strategy (", "").replace(" settlement)", "") if c.endswith(" settlement)")
+                   else c for c in out.columns]
     return out.apply(lambda col: col.map(lambda v: _pct(v, 1, signed=True)))
 
 
@@ -328,21 +369,23 @@ def notes(summary: dict) -> list:
     products = ", ".join(summary["symbols"])
     bench = summary.get("benchmark")
     basis = "signed exposure" if summary.get("exposure") is not None else "each risk product's weight"
+    primary = summary["settlement"]
+    modes = summary.get("settlement_modes") or ["settled_only", "immediate"]
     if _is_immediate(summary):
-        first = NON_DEPLOYABLE + " The settled-cash path is the comparison series."
-        settle = (f"Settlement: immediate. Sale proceeds are reused at the same open and no receivables are "
-                  f"carried. The settled-cash comparison uses rules {summary['settlement_rules']}. "
-                  f"Calendar: {v['settlement_calendar']}.")
+        first = NON_DEPLOYABLE + " The cash-account paths are the comparison series."
     else:
-        first = "Immediate proceeds reuse is a non-deployable benchmark for the settled-cash account."
-        settle = (f"Settlement: {summary['settlement']} (rules {summary['settlement_rules']}). Sale proceeds are "
-                  f"receivables until settled; only settled cash buys. Calendar: {v['settlement_calendar']}.")
+        first = ("Immediate proceeds reuse is a non-deployable upper bound; gfv_aware is the Reg T "
+                 "cash-account reference.")
+    settle = (f"Settlement (headline: {primary}; rules {summary['settlement_rules']}; calendar: "
+              f"{v['settlement_calendar']}). " + " ".join(SETTLEMENT_TEXT[m] for m in modes if m in SETTLEMENT_TEXT))
     costs = f"Costs {summary['cost_bps']} bps per traded notional, including the initial {cash} purchase."
+    costs += f" The {cash} cash-sleeve comparison pays the same {cash} cost on its initial purchase."
     if bench:
         costs += f" Benchmark {bench}: buy at first open with {summary['benchmark_cost_bps']:g} bps, then hold."
     else:
         costs += " No buy-and-hold benchmark is configured."
     lines = [
+        *flag_lines(summary),
         first,
         f"Returns are the NAV of the whole funded basket ({products} + {cash} cash sleeve + unsettled "
         f"receivables). No single ticker's return is the strategy's return; fills are rebalances, not "
@@ -354,6 +397,8 @@ def notes(summary: dict) -> list:
         f"minimum receivable {v['min_unsettled']:.6g}; self-financing checked every session.",
         costs,
         f"Distributions: {v['distribution_treatment']}. No cash interest is added beyond the {cash} price.",
+        f"Sharpe vs {cash} uses {cash}'s own daily return as the cash rate; the rf Sharpe uses the run's "
+        f"risk_free_rate ({_pct(summary.get('risk_free_rate', 0.02))}).",
         "Not evaluated: " + ", ".join(summary.get("not_evaluated", [])) + ". Historical results only.",
     ]
     return lines
@@ -408,7 +453,8 @@ def kpi_tiles(summary: dict, fills: pd.DataFrame | None = None) -> list:
         ("Total return", _pct(s["total_return"]), f"{s['start']} → {s['end']}", s["total_return"] > 0),
         ("CAGR", _pct(s["cagr"]), cagr_sub, None),
         ("Max drawdown", _pct(s["max_drawdown"]), dd_sub, False),
-        (f"Sharpe vs {cash}", _num(s.get("sharpe_cash_reference"), 3), f"rf=2%: {_num(s.get('sharpe_rf2'), 3)}", None),
+        (f"Sharpe vs {cash}", _num(s.get("sharpe_cash_reference"), 3),
+         "{}: {}".format(_sharpe_rf(summary, s)[0].replace("Sharpe ", ""), _num(_sharpe_rf(summary, s)[1], 3)), None),
         ("Volatility", _pct(s["volatility"]), f"{s['observations']} sessions", None),
         ("Costs paid", _money(summary["costs"]["total"]),
          f"{_traded_sessions(summary, fills)} sessions rebalanced", None),
@@ -438,8 +484,13 @@ def build_pages(art: dict, name: str) -> list:
     if _is_immediate(summary):
         fig.text(0.98, 0.89, NON_DEPLOYABLE_SHORT, fontsize=7.5, color=config.THEME["negative"],
                  fontweight="bold", va="top", ha="right")
-    _kpis(fig, summary, art["fills"])
-    plot_growth(daily, fig.add_axes([0.06, 0.42, 0.90, 0.34]))
+    flags = flag_lines(summary)[:3]
+    for k, line in enumerate(flags):
+        fig.text(0.02, 0.873 - 0.016 * k, line, fontsize=7.2, color=config.THEME["negative"],
+                 fontweight="bold", va="top")
+    shift = 0.016 * len(flags)  # make room for the flags above the KPI row
+    _kpis(fig, summary, art["fills"], rect_y=0.80 - shift)
+    plot_growth(daily, fig.add_axes([0.06, 0.42, 0.90, 0.34 - shift]))
     plot_drawdowns(daily, fig.add_axes([0.06, 0.06, 0.90, 0.29]))
     pages.append(fig)
 
@@ -468,9 +519,12 @@ def build_pages(art: dict, name: str) -> list:
     _header(fig, "Rebalance activity, validation & assumptions", subtitle)
     fig.text(0.02, 0.875, "ACTIVITY", fontsize=9.5, color=config.THEME["primary"], fontweight="bold")
     y = _text_block(fig, activity_lines(summary, art["fills"]), 0.02, 0.85)
-    fills_ax = fig.add_axes([0.02, y - 0.36, 0.96, 0.33])
-    _draw_table(fills_ax, recent_fills(art["fills"]), "Most recent rebalance fills", font=6.6)
-    y = y - 0.42
+    # Fewer fill rows when page-1 flags add lines to the notes below.
+    n_fills = max(3, 7 - 2 * len(flag_lines(summary)))
+    height = 0.04 + 0.024 * n_fills
+    fills_ax = fig.add_axes([0.02, y - 0.03 - height, 0.96, height])
+    _draw_table(fills_ax, recent_fills(art["fills"], n=n_fills), "Most recent rebalance fills", font=6.6)
+    y = y - height - 0.08
     fig.text(0.02, y, "ASSUMPTIONS, VALIDATION & LIMITATIONS", fontsize=9.5,
              color=config.THEME["primary"], fontweight="bold")
     _text_block(fig, notes(summary), 0.02, y - 0.03)
@@ -517,6 +571,7 @@ def write_markdown(art: dict, md_path: str, image_dir: str) -> None:
         "> All figures are portfolio-NAV based: the strategy is the funded basket "
         f"({', '.join(summary['symbols'])} + {summary['cash_symbol']}), not any single ticker.\n",
         *([f"> **{NON_DEPLOYABLE}**\n"] if _is_immediate(summary) else []),
+        *[f"> **{line}**\n" for line in flag_lines(summary)],
         f"{summary.get('description', '')}\n",
         "## Performance by period\n", _md_table(period_table(summary)),
         f"![Portfolio NAV]({rel}/portfolio_nav.png)\n", f"![Drawdown]({rel}/drawdown.png)\n",

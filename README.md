@@ -198,9 +198,15 @@ run through a separate engine path with a settled-cash NAV ledger and their
 own tearsheet:
 
 ```sh
-python main.py --portfolio-strategy "VIX eVRP Dual (SGOV funded)" --start 2020-05-28 --end 2026-04-22
+python main.py --provider yahoo --portfolio-strategy "VIX eVRP Dual (SGOV funded)" --start 2020-06-01 --end 2026-04-22
 python report.py --all output/runs/<run_id>
 ```
+
+Funded baskets need total-return prices, because the cash sleeve's yield
+arrives as distributions. Use `yahoo`, `norgate`, or parquet/CSV files you have
+adjusted yourself. The default `polygon` provider is refused for these runs:
+its `adjusted=true` prices are split-only. Polygon's `I:VIX` history also
+starts in 2023.
 
 See [docs/TARGET_WEIGHT_PORTFOLIOS.md](docs/TARGET_WEIGHT_PORTFOLIOS.md).
 

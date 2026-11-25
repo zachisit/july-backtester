@@ -30,10 +30,18 @@ Accounting contract
   the largest absolute risk-weight drift when the strategy declares no
   exposure coefficients (``band_basis="weights"``).
 * **Settlement.** Sale proceeds become a *receivable* that settles on the
-  ``lag``-th eligible settlement session after the trade date
-  (``settlement="settled_only"``). Only settled cash may buy. Receivables are
-  part of NAV but cannot be spent. ``settlement="immediate"`` is a benchmark
-  that reuses proceeds the same open; it is not a cash-account result.
+  ``lag``-th eligible settlement session after the trade date. Three modes:
+
+  - ``"settled_only"``: only settled cash may buy; receivables are part of NAV
+    but cannot be spent. Stricter than Regulation T, so it understates what a
+    real cash account can do (PR #489 review).
+  - ``"gfv_aware"``: the Reg T cash-account rule. Risk-product purchases may
+    use unsettled sale proceeds, but shares bought that way are *restricted*
+    and are never sold before the proceeds that paid for them settle (selling
+    them earlier is a good-faith violation). The cash sleeve is bought with
+    settled cash only.
+  - ``"immediate"``: reuses proceeds at the same open with no restriction. A
+    non-deployable upper bound: it can commit good-faith violations.
 * **Stale intentions are never executed.** Each open re-reads the latest
   prior-close target; there is no order queue.
 * **Idle cash.** Every open, all settled cash left after the desired risk
@@ -42,8 +50,11 @@ Accounting contract
 * **Costs.** ``cost_bps[symbol]`` per traded notional on both sales and
   purchases, including the initial cash-sleeve purchase. Fractional units, no
   minimum commission, no terminal liquidation.
-* **Prices.** Adjusted (total-return) Open/Close are used, so distributions are
-  modelled as reinvested in the unit price — not as a payment-date cash flow.
+* **Prices.** The engine applies whatever Open/Close it is given and adds no
+  cash flows. Distributions are therefore only included when the inputs are
+  total-return adjusted; the runner records (and by default enforces) whether
+  the data provider certifies that (see ``price_basis`` in
+  :mod:`helpers.target_weight_runner`).
 
 The trade loop is a generalisation of the frozen standalone ledger in
 private-strategies PR #179 (``sgov_study.simulate_funded``); arithmetic order
@@ -59,8 +70,11 @@ import numpy as np
 import pandas as pd
 
 SETTLED_ONLY = "settled_only"
+GFV_AWARE = "gfv_aware"
 IMMEDIATE = "immediate"
-_SETTLEMENT_MODES = (SETTLED_ONLY, IMMEDIATE)
+_SETTLEMENT_MODES = (SETTLED_ONLY, GFV_AWARE, IMMEDIATE)
+#: Modes that carry sale proceeds as receivables on a settlement calendar.
+_RECEIVABLE_MODES = (SETTLED_ONLY, GFV_AWARE)
 
 #: US equities: T+2 before the SEC T+1 cut-over on 2024-05-28, T+1 after.
 DEFAULT_SETTLEMENT_RULES = (("1900-01-01", 2), ("2024-05-28", 1))
@@ -81,6 +95,10 @@ class TargetWeightResult:
     initial_capital: float
     settlement: str
     settlement_map: dict = field(default_factory=dict)
+    #: gfv_aware only: one row per restricted lot (Date, Symbol, Shares, FreeDate):
+    #: shares bought with unsettled proceeds that may not be sold before FreeDate.
+    restrictions: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(
+        columns=["Date", "Symbol", "Shares", "FreeDate"]))
 
     @property
     def nav(self) -> pd.Series:
@@ -137,6 +155,11 @@ def settlement_dates(sessions: pd.DatetimeIndex, rules=DEFAULT_SETTLEMENT_RULES,
     last = sessions[-1] + pd.Timedelta(days=14 + 3 * max(int(lag) for _, lag in rules))
     eligible = xnys_sessions(sessions[0], last)
     if exclude_federal_holidays:
+        # Note: USFederalHolidayCalendar moves a Saturday holiday to the
+        # preceding Friday (e.g. 2021-06-18, 2021-12-31, 2023-11-10), which the
+        # Federal Reserve does not observe. Those NYSE sessions are therefore
+        # treated as non-settlement days: slightly more conservative than the
+        # bank calendar, and kept for parity with the PR #179 study.
         from pandas.tseries.holiday import USFederalHolidayCalendar
         holidays = USFederalHolidayCalendar().holidays(start=sessions[0], end=eligible[-1])
         eligible = eligible[~eligible.isin(holidays)]
@@ -206,6 +229,34 @@ def _validate_costs(cost_bps, symbols) -> np.ndarray:
     return bps / 10000
 
 
+def _pay_gfv(amount, cash, receivables, lots, unit_cost):
+    """Fund a gfv_aware risk purchase: settled cash first, then receivables.
+
+    Receivables are consumed earliest-settling first and reduced in place.
+    The shares paid for with each receivable become a restricted lot that is
+    free on that receivable's settlement date. ``unit_cost`` is the all-in
+    cost of one share (price x (1 + fee)). The caller deducts the settled-cash
+    part from ``cash``. Returns ``[(settlement_date, amount), ...]`` of the
+    receivables used.
+    """
+    used_list = []
+    rest = amount - min(max(cash, 0.0), amount)
+    for rec in sorted(receivables, key=lambda r: r[0]):
+        if rest <= 0:
+            break
+        used = min(rec[1], rest)
+        if used <= 0:
+            continue
+        rec[1] -= used
+        rest -= used
+        lots.append([rec[0], used / unit_cost])
+        used_list.append((rec[0], used))
+    receivables[:] = [r for r in receivables if r[1] > 0]
+    if rest > 1e-9 * max(amount, 1.0):
+        raise FundingViolation("gfv_aware purchase exceeds settled cash plus receivables")
+    return used_list
+
+
 def simulate_target_weights(
     opens: pd.DataFrame,
     closes: pd.DataFrame,
@@ -245,7 +296,7 @@ def simulate_target_weights(
     cost_bps : dict
         Per-symbol cost in basis points of traded notional (default 0). Keys
         must be traded symbols; values finite, ``>= 0`` and ``< 10000``.
-    settlement : "settled_only" | "immediate"
+    settlement : "settled_only" | "gfv_aware" | "immediate"
     settle_map : dict, optional
         Precomputed ``{trade_date: settlement_date}``; derived from the session
         calendar and *settlement_rules* when omitted.
@@ -274,7 +325,7 @@ def simulate_target_weights(
                              "session (otherwise exposure does not identify the basket); "
                              "use exposure=None to band on per-product weights")
         coeffs = [float(exposure.get(s, 0.0)) for s in symbols]
-    if settlement == SETTLED_ONLY and settle_map is None:
+    if settlement in _RECEIVABLE_MODES and settle_map is None:
         settle_map = settlement_dates(dates, settlement_rules)
     settle_map = settle_map or {}
 
@@ -298,15 +349,22 @@ def simulate_target_weights(
             raise FundingViolation("Basket would require leverage")
         return w
 
+    gfv = settlement == GFV_AWARE
     q = np.zeros(len(symbols))
+    # gfv_aware: per risk product, [free_date, shares] lots bought with unsettled
+    # proceeds. They may not be sold before free_date (good-faith violation).
+    restricted: list = [[] for _ in range(n_risk)]
     cash, previous = scale, scale
     receivables: list = []
-    rows, fills = [], []
+    rows, fills, lot_log = [], [], []
     for i, date in enumerate(dates):
         due = sum(value for when, value in receivables if when <= date)
         cash += due
-        receivables = [(when, value) for when, value in receivables if when > date]
+        receivables = [[when, value] for when, value in receivables if when > date]
         pending = sum(value for _, value in receivables)
+        if gfv:
+            for j in range(n_risk):
+                restricted[j] = [lot for lot in restricted[j] if lot[0] > date]
         old = q * op[i]
         before = float(old.sum()) + cash + pending
         weights = _basket(i)
@@ -332,9 +390,22 @@ def simulate_target_weights(
             desired_values = weights * after
             sells = np.maximum(old - desired_values, 0.0)
             for j, sale in enumerate(sells):
+                full_exit = bool(weights[j] == 0)
+                if gfv and j < n_risk and restricted[j]:
+                    # Shares bought with still-unsettled proceeds cannot be sold yet.
+                    locked = sum(shares for _, shares in restricted[j])
+                    sale = min(sale, max(q[j] - locked, 0.0) * op[i, j])
+                    full_exit = False
                 if sale <= tiny:
+                    if full_exit and q[j] > 0:
+                        # Residual dust (value <= tiny) of a product being exited:
+                        # clear it, otherwise "held with a zero target" fires a
+                        # rebalance on every later session (PR #489 review #1).
+                        q[j] = 0.0
                     continue
-                q[j] = max(q[j] - sale / op[i, j], 0.0)
+                # A full exit sells every share; ``q - sale/price`` can leave
+                # ~1e-17 shares of floating-point residue (PR #489 review #1).
+                q[j] = 0.0 if full_exit else max(q[j] - sale / op[i, j], 0.0)
                 expense = sale * fees[j]
                 proceeds = sale - expense
                 cost += expense
@@ -343,7 +414,7 @@ def simulate_target_weights(
                 if settlement == IMMEDIATE:
                     cash += proceeds
                 else:
-                    receivables.append((settles, proceeds))
+                    receivables.append([settles, proceeds])
                 fills.append({"Date": date, "Symbol": symbols[j], "Side": "SELL",
                               "Shares": sale / op[i, j], "Price": op[i, j], "Notional": sale,
                               "Cost": expense, "NetCash": proceeds, "SettlementDate": settles,
@@ -351,10 +422,22 @@ def simulate_target_weights(
             # Desired risk holdings have priority over parking idle cash.
             for j in range(n_risk):
                 deficit = max(desired_values[j] - q[j] * op[i, j], 0.0)
-                purchase = min(deficit, max(cash, 0) / (1 + fees[j]))
+                spendable = max(cash, 0)
+                if gfv:
+                    spendable += sum(value for _, value in receivables)
+                purchase = min(deficit, spendable / (1 + fees[j]))
                 if purchase:
                     q[j] += purchase / op[i, j]
-                    cash -= purchase * (1 + fees[j])
+                    unsettled_used = []
+                    if gfv:
+                        unsettled_used = _pay_gfv(purchase * (1 + fees[j]), cash, receivables, restricted[j],
+                                 (1 + fees[j]) * op[i, j])
+                        cash = max(cash, 0) - min(max(cash, 0), purchase * (1 + fees[j]))
+                        lot_log.extend({"Date": date, "Symbol": symbols[j], "FreeDate": when,
+                                        "Shares": amt / ((1 + fees[j]) * op[i, j])}
+                                       for when, amt in unsettled_used)
+                    else:
+                        cash -= purchase * (1 + fees[j])
                     cost += purchase * fees[j]
                     turnover += purchase / before
                     # The arithmetic above is kept for every non-zero amount (frozen-ledger
@@ -365,7 +448,10 @@ def simulate_target_weights(
                                       "Shares": purchase / op[i, j], "Price": op[i, j],
                                       "Notional": purchase, "Cost": purchase * fees[j],
                                       "NetCash": -purchase * (1 + fees[j]), "SettlementDate": date,
-                                      "Reason": "rebalance"})
+                                      "Reason": "rebalance",
+                                      "UnsettledFunding": float(sum(a for _, a in unsettled_used)),
+                                      "RestrictedUntil": (max(d for d, _ in unsettled_used)
+                                                          if unsettled_used else pd.NaT)})
         # Every dollar of settled cash goes to the cash sleeve; receivables wait.
         k = len(symbols) - 1
         purchase = max(cash, 0) / (1 + fees[k])
@@ -412,13 +498,16 @@ def simulate_target_weights(
         rows.append(row)
         previous = nav
     ledger = pd.DataFrame(rows).set_index("date")
+    # UnsettledFunding / RestrictedUntil (gfv_aware only): how much of a purchase
+    # was paid with unsettled proceeds, and the latest date those shares free up.
     fill_cols = ["Date", "Symbol", "Side", "Shares", "Price", "Notional", "Cost",
-                 "NetCash", "SettlementDate", "Reason"]
+                 "NetCash", "SettlementDate", "Reason", "UnsettledFunding", "RestrictedUntil"]
     fills_df = pd.DataFrame(fills, columns=fill_cols)
     return TargetWeightResult(ledger=ledger, fills=fills_df, symbols=symbols,
                               cash_symbol=cash_symbol, initial_capital=scale,
                               settlement=settlement,
-                              settlement_map=dict(settle_map) if settlement == SETTLED_ONLY else {})
+                              settlement_map=dict(settle_map) if settlement in _RECEIVABLE_MODES else {},
+                              restrictions=pd.DataFrame(lot_log, columns=["Date", "Symbol", "Shares", "FreeDate"]))
 
 
 # ---------------------------------------------------------------------------
@@ -438,14 +527,16 @@ def buy_and_hold_returns(open_: pd.Series, close: pd.Series, entry_cost_bps: flo
 
 
 def performance_metrics(returns: pd.Series, cash_reference: pd.Series | None = None,
-                        periods_per_year: int = 252) -> dict:
+                        periods_per_year: int = 252, risk_free_rate: float = 0.02) -> dict:
     """Return-series metrics, matching the PR #179 study's definitions.
 
     Drawdown is measured against ``max(1, running peak)`` of the growth path so
     an initial cost is a drawdown from the starting capital. CAGR annualises by
     ``sessions / periods_per_year``. ``sharpe_cash_reference`` is the
     annualised mean excess return over *cash_reference* divided by the
-    annualised excess volatility.
+    annualised excess volatility. ``sharpe_rf`` uses *risk_free_rate* (the
+    run's ``risk_free_rate`` config); ``sharpe_rf2`` is kept at a fixed 2% for
+    parity with the study's ``metrics.csv``.
     """
     returns = returns.astype(float)
     wealth = (1 + returns).cumprod()
@@ -457,6 +548,9 @@ def performance_metrics(returns: pd.Series, cash_reference: pd.Series | None = N
            "volatility": float(vol), "max_drawdown": float(dd.min()),
            "sharpe_rf0": float(returns.mean() * periods_per_year / vol) if vol else None,
            "sharpe_rf2": float((returns.mean() * periods_per_year - .02) / vol) if vol else None,
+           "sharpe_rf": (float((returns.mean() * periods_per_year - risk_free_rate) / vol)
+                         if vol else None),
+           "risk_free_rate": float(risk_free_rate),
            "calmar": cagr / abs(float(dd.min())) if dd.min() else None,
            "observations": int(len(returns)),
            "start": str(returns.index[0].date()), "end": str(returns.index[-1].date())}

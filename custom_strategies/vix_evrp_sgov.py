@@ -19,6 +19,8 @@ execution. Locked conventions (private-strategies PR #179):
 * The signed underlying-index exposure is VIXY ``+1`` and SVXY ``-0.5`` per
   unit of value (SVXY's -0.5x daily objective), so 40% SVXY is -20% index
   exposure. Rebalance band: 2 percentage points of that signed exposure.
+  SVXY was -1x until 2018-02-28, so the plugin refuses earlier start dates
+  (``valid_from``).
 * Costs: 5 bps per traded notional on VIXY/SVXY, 1 bp on SGOV.
 * No stops, no margin, no share shorting; purchases use settled cash.
 
@@ -90,6 +92,10 @@ def basket_from_exposure(target: pd.Series) -> pd.DataFrame:
                     "Post publication": ("2025-06-24", None)},
     description=("eVRP (VIX minus 10-day SPY realized vol) x VIX/VIX3M term structure; "
                  "inverse via SVXY, long vol via VIXY, idle cash in SGOV."),
+    # SVXY's -0.5 coefficient is its objective since 2018-02-28; before that it
+    # was a -1x product, so an earlier start would mis-map exposure and the band.
+    valid_from=("2018-02-28", "SVXY became a -0.5x product on 2018-02-28 (it was -1x before), "
+                              "and the exposure map uses -0.5"),
 )
 def vix_evrp_dual_sgov(data, window=10, size=0.2, **kwargs):
     from helpers.target_weight_portfolio import xnys_sessions
