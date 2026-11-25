@@ -919,7 +919,9 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         # when an opening order is placed (#490). Cash is the start-of-bar cash.
         # A position that exits at this open is therefore valued at its gross
         # opening price (realised proceeds differ only by its exit slippage and
-        # commission), and a stop that fills later in the bar is not anticipated.
+        # commission), and a stop that fills later in the bar is not anticipated
+        # in THIS figure. (The cash / buying-power clamps and the heat book are
+        # still read after this bar's exits; that is pre-existing, see #495.)
         # Under "close" the fill is the bar's last print, so close-marked equity
         # is causally available and is kept unchanged.
         _mark = _mtm_open if execution_time == "open" else _mtm_close

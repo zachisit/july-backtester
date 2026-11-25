@@ -80,6 +80,28 @@ def test_open_entry_size_is_invariant_to_same_bar_close():
     assert len(set(shares.values())) == 1, shares
 
 
+def _short_gap_book(aaa_close_d3):
+    # AAA: signal -2 on d0 -> short at d1 open 100 (25% of 100k = 250 sh), held.
+    # d3: AAA opens 100 and closes at `aaa_close_d3`.
+    # BBB: signal d2 -> long at d3 open 50, sized at that open.
+    aaa = _frame([100, 100, 100, 100, 100, 100],
+                 [100, 100, 100, aaa_close_d3, 100, 100])
+    bbb = _frame([50] * 6, [50] * 6)
+    return _run({"AAA": aaa, "BBB": bbb},
+                {"AAA": [-2, 0, 0, 0, 0, 0], "BBB": [0, 0, 1, 0, 0, 0]},
+                alloc=0.25)
+
+
+def test_open_entry_size_ignores_held_short_same_bar_close():
+    # The held short is marked at AAA's d3 Open (100): unrealised P&L 0, so
+    # equity at the open is 100,000 -> 25% / 50 = 500 sh whatever AAA closes at.
+    # Marking it at the d3 Close gave 562.5 / 500 / 437.5 sh for closes 50/100/150.
+    res = {c: _short_gap_book(aaa_close_d3=c) for c in (50, 100, 150)}
+    for c, r in res.items():
+        assert _trade(r, "AAA")["Shares"] == 250.0, c
+        assert _trade(r, "BBB")["Shares"] == 500.0, c
+
+
 def test_open_entry_uses_prior_close_when_held_symbol_has_no_bar():
     # AAA has no d3 bar: its last known price at the d3 open is the d2 Close (120).
     idx_aaa = _IDX.delete(3)
