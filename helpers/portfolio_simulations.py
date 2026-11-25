@@ -645,6 +645,19 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         prior = df.loc[:at_date, 'Close'].dropna()
         return prior.iloc[-1] if len(prior) else None
 
+    def _mtm_open(df, at_date):
+        """Price used to mark a held position when sizing an order that fills at
+        `at_date`'s Open (execution_time="open", issue #490): the bar's own Open
+        when present and non-NaN, else the most recent non-NaN Close strictly
+        BEFORE `at_date`, else None. Never reads `at_date`'s Close, which is not
+        known when an opening order is placed."""
+        if at_date in df.index:
+            o = df.at[at_date, 'Open']
+            if pd.notna(o):
+                return o
+        prior = df.loc[df.index < at_date, 'Close'].dropna()
+        return prior.iloc[-1] if len(prior) else None
+
     def _initial_long_stop(symbol, df, signal_date, raw_entry_price, entry_price):
         """Resolve long stop/trail state for both heat admission and the final fill."""
         inst = instruments[symbol]
@@ -895,23 +908,33 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         kelly_completed_count = len(trade_log) if execution_time == "open" else None
         if _delist_on:
             _liquidate_delisted(date)
-        # --- EQUITY CALCULATION ---
+        # --- SIZING EQUITY ---
+        # Drives every sizing and heat decision this iteration (all entry paths,
+        # long and short). It is NOT the recorded timeline point: that is taken
+        # at the end of the bar, post-trade and marked at the Close (#438).
+        #
+        # Under execution_time="open" every entry fills at this bar's Open, so
+        # the held book is marked at this bar's Open (prior Close if the bar or
+        # its Open is missing) -- never at this bar's Close, which is not known
+        # when an opening order is placed (#490). Cash is the start-of-bar cash.
+        # A position that exits at this open is therefore valued at its gross
+        # opening price (realised proceeds differ only by its exit slippage and
+        # commission), and a stop that fills later in the bar is not anticipated.
+        # Under "close" the fill is the bar's last print, so close-marked equity
+        # is causally available and is kept unchanged.
+        _mark = _mtm_open if execution_time == "open" else _mtm_close
         current_market_value = 0.0
         for symbol, pos in positions.items():
-            close_price = _mtm_close(portfolio_data[symbol], date)
-            if close_price is not None:
-                current_market_value += _equity_contribution(instruments[symbol], pos, close_price, side="long")
+            mark_price = _mark(portfolio_data[symbol], date)
+            if mark_price is not None:
+                current_market_value += _equity_contribution(instruments[symbol], pos, mark_price, side="long")
 
         for symbol, spos in short_positions.items():
-            cur = _mtm_close(portfolio_data[symbol], date)
+            cur = _mark(portfolio_data[symbol], date)
             if cur is not None:
                 current_market_value += _inst.unrealized_pnl(
                     instruments[symbol], spos['shares'], spos['entry_price'], cur, side="short")
 
-        # Start-of-bar equity: drives sizing and heat decisions this iteration.
-        # The RECORDED timeline point is taken at the end of the bar (issue #438)
-        # so it reflects this bar's fills; this value must stay as-is so share
-        # counts do not change.
         total_equity = cash + current_market_value
 
         # --- SAME-BAR RE-ENTRY GUARD (execution_time="open") ---

@@ -4,6 +4,7 @@
 
 ### Fixes
 
+- **Results change (`execution_time="open"`).** Entries that fill at a bar's Open are now sized, and heat-checked, from equity marked at that bar's Open. Held positions use the bar's Open, or the prior Close when the bar or its Open is missing. Previously the held book was marked at the same bar's Close, which is not known when an opening order is placed (#490). Share counts change only for entries made while other positions are held. Entries from an all-cash book, and `execution_time="close"` runs, are unchanged. The recorded equity curve was already post-trade and close-marked (#438); it moves only through the changed share counts.
 - `report.py` writes tearsheets to `detailed_reports/<Portfolio>/<Strategy>/`, mirroring `analyzer_csvs/<Portfolio>/`, in both `--all` and single-file mode. A strategy name shared by two portfolios of one run no longer overwrites the first portfolio's PDF/Markdown (#479). Explicit `--output-dir` (single-file mode only; `--all` now warns that it ignores it) and CSVs outside `analyzer_csvs/<Portfolio>/` are unchanged; old run folders are not moved. Existing run folders are not migrated: their old flat `detailed_reports/<Strategy>/` folders stay in place, and regenerating writes the per-portfolio folders alongside them without deleting anything.
 
 ## [1.16.0] — 2026-10-24
