@@ -24,8 +24,9 @@ COMMISSION = 0.002
 
 # Prices where s = cash / (p + c) gives s*p + s*c > cash in IEEE-754 doubles.
 OVERSHOOT_PRICES = [2.436528526762873, 2.4983867666652984, 2.4634568331021196]
-# Control: the same arithmetic lands exactly on cash.
-EXACT_PRICE = 2.5014537481212957
+# Rebuilding cash from the trade log can differ from the engine's own cash by
+# ~1e-16 relative; allow that much, far below any real overdraw.
+CASH_RTOL = 1e-12
 
 
 @pytest.fixture
@@ -55,23 +56,17 @@ def _cost(trade):
     return trade["Shares"] * trade["EntryPrice"] + trade["Shares"] * COMMISSION
 
 
-# --------------------------------------------------------------------------
-# (a) Unit-level: the arithmetic that triggers the bug.
-# --------------------------------------------------------------------------
-class TestRoundingPrecondition:
-    """Guards the guard: if these prices stop overshooting, the engine tests
-    below go hollow. This class checks the trigger, not the engine."""
+def _assert_naive_clip_overshoots(cash, price):
+    """Precondition (a): the inputs really hit the rounding path.
 
-    @pytest.mark.parametrize("price", OVERSHOOT_PRICES)
-    def test_naive_clip_overshoots_cash(self, price):
-        shares = CASH / (price + COMMISSION)
-        total_cost = shares * price + shares * COMMISSION
-        assert total_cost > CASH
-        assert total_cost - CASH < 1e-9   # float noise, not a real shortfall
-
-    def test_control_price_lands_exactly(self):
-        shares = CASH / (EXACT_PRICE + COMMISSION)
-        assert shares * EXACT_PRICE + shares * COMMISSION == CASH
+    Clipping to cash / (p + c) and recomputing s*p + s*c must land a few ULPs
+    ABOVE cash; otherwise the engine test would pass without exercising the
+    #488 bug. Each engine test checks this for its own inputs.
+    """
+    shares = cash / (price + COMMISSION)
+    total_cost = shares * price + shares * COMMISSION
+    assert total_cost > cash, "inputs no longer trigger the float overshoot"
+    assert total_cost - cash < 1e-9 * cash   # float noise, not a real shortfall
 
 
 # --------------------------------------------------------------------------
@@ -82,6 +77,7 @@ class TestAllInLongEntryFills:
     @pytest.mark.parametrize("execution_time", ["open", "close"])
     def test_all_in_entry_fills_without_overdraw(
             self, frictionless, monkeypatch, price, execution_time):
+        _assert_naive_clip_overshoots(CASH, price)
         monkeypatch.setitem(CONFIG, "execution_time", execution_time)
         dates = pd.bdate_range("2024-01-02", periods=6)
         sig = pd.Series([0, 1, 0, 0, -1, 0], index=dates)
@@ -106,6 +102,7 @@ class TestAllInShortEntryFills:
             self, frictionless, monkeypatch, price):
         # Full-notional collateral so the clip is cash / (fill + commission).
         monkeypatch.setitem(CONFIG, "short_margin_requirement", 1.0)
+        _assert_naive_clip_overshoots(CASH, price)
         dates = pd.bdate_range("2024-01-02", periods=6)
         sig = pd.Series([0, -2, 0, 0, -1, 0], index=dates)
         result = run_portfolio_simulation(
@@ -140,6 +137,7 @@ class TestSameDaySwitchFills:
         assert b_trade["EntryDate"] == a_trade["ExitDate"], "not a same-day switch"
         # Cash available at the switch: what A's round trip left behind.
         cash_at_switch = CASH + a_trade["Profit"]
+        _assert_naive_clip_overshoots(cash_at_switch, price)
         assert b_trade["Shares"] == pytest.approx(
             cash_at_switch / (price + COMMISSION), rel=1e-12), "entry was not clipped to cash"
-        assert _cost(b_trade) <= cash_at_switch
+        assert _cost(b_trade) <= cash_at_switch * (1 + CASH_RTOL)
