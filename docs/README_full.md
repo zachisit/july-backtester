@@ -374,7 +374,7 @@ The common swing-book rule: risk X% of equity to the stop, capped at Y% of equit
 When more signals fire than cash, heat or the per-bar caps allow, `entry_priority` decides the order they are tried in. `"alphabetical"` is a hidden selection rule: it favours A-names. `"score"` orders by a column the strategy returns next to `Signal`:
 
 ```python
-df["entry_score"] = med20_dollar_volume   # computed only from data known at the signal bar
+df["entry_score"] = df["RSI_14"]   # any column computed only from data known at the signal bar
 ```
 
 ```python
