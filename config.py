@@ -478,6 +478,15 @@ CONFIG = {
     # Sleeve A parity: an ARMED trailing_atr trail fills at the exact trail level
     # (gap or not). Set "open" to apply stop_gap_fill to armed trails too.
     "stop_gap_fill_armed_trail": "level",
+    # Entry-day gap through the initial stop (issue #499). A structural stop
+    # (atr / signal_bar) is fixed before the fill; when the fill (the open under
+    # execution_time="open") is already AT OR BEYOND it, the stop was gapped
+    # through before it could rest. "skip" (default) = no trade, counted in
+    # sizing_diagnostics as skipped_gap_below_stop. "exit_at_open" = take the
+    # entry and stop out at the same fill, ExitReason "Stop Loss (gap)".
+    # Any coarse stop that fills at a gap-through open is also labelled
+    # "Stop Loss (gap)" in the trade log.
+    "gap_below_stop_on_entry": "skip",
     # Fill-bar stop check (issue #426). Under execution_time="open" the entry fills at
     # the bar Open, so that bar's Low (High for shorts) is live against the initial
     # stop: a breach closes the trade on the fill bar. False = legacy (first stop
