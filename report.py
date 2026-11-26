@@ -138,24 +138,68 @@ def _load_initial_capital(run_dir: Path) -> float | None:
     return None
 
 
-def _fallback_initial_capital(timeline: "pd.Series | None", equity_path: Path) -> float | None:
+#: Tolerances for the curve-vs-trades scale check in :func:`_curve_is_in_dollars`.
+#: A dollar curve's total change matches the trade log's total Profit closely
+#: (exactly when open positions are marked out at the end); a normalised curve
+#: (starting at 1.0 or 100) misses by orders of magnitude.
+_CURVE_PROFIT_REL_TOL = 0.5      # of the larger of |sum(Profit)| and |curve change|
+_CURVE_LEVEL_REL_TOL = 0.25      # of the curve's first point
+
+
+def _curve_is_in_dollars(values: "pd.Series", trades_df: "pd.DataFrame | None") -> bool:
+    """Whether an equity curve is on the same dollar scale as the trade log.
+
+    Compares the curve's total change (last - first) with ``sum(Profit)``.
+    Position-size bounds don't work here: a compounding strategy's later
+    positions exceed its starting capital, and rotation lots keep their first
+    ``EntryDate`` while top-ups are folded in at an average cost. The mismatch
+    allowed is the larger of half the profit/change and a quarter of the
+    curve's level, so realised-only logs (open positions excluded) still pass.
+    Returns True (keep the curve) when the trade log has no usable Profit.
+    """
+    if trades_df is None or trades_df.empty or "Profit" not in trades_df.columns:
+        return True
+    profit = pd.to_numeric(trades_df["Profit"], errors="coerce").dropna()
+    if profit.empty:
+        return True
+    total_profit = float(profit.sum())
+    change = float(values.iloc[-1] - values.iloc[0])
+    mismatch = abs(change - total_profit)
+    allowed = max(_CURVE_PROFIT_REL_TOL * max(abs(total_profit), abs(change)),
+                  _CURVE_LEVEL_REL_TOL * abs(float(values.iloc[0])))
+    return mismatch <= allowed
+
+
+def _fallback_initial_capital(timeline: "pd.Series | None", equity_path: Path,
+                              trades_df: "pd.DataFrame | None" = None) -> float | None:
     """Initial capital when neither --equity nor config_snapshot.json gives one.
 
     Uses the first point of the companion ``<stem>_equity.csv``: the engine's
     ``portfolio_timeline`` starts at the first bar of the run, so that value is
     the end-of-first-bar equity: the starting capital plus only that bar's P&L
     and costs (zero when nothing is held on the first bar) -- far closer than a
-    fixed default. Returns None, after printing a
-    WARNING that the analyzer default is being assumed, when there is no usable
-    curve either; every %-based figure then depends on that guess.
+    fixed default.
+
+    The curve is rejected when it is plainly not in dollars, i.e. when its
+    total change does not match the trades' total Profit (see
+    :func:`_curve_is_in_dollars`): a normalised curve (e.g. starting at 1.0).
+
+    Returns None, after printing a WARNING that the analyzer default is being
+    assumed, when there is no usable curve; every %-based figure then depends
+    on that guess.
     """
     if timeline is not None:
         values = pd.to_numeric(timeline, errors="coerce").dropna()
         if not values.empty and float(values.iloc[0]) > 0:
             capital = float(values.iloc[0])
-            print(f"Initial capital inferred from the first point of {equity_path.name}: "
-                  f"{capital:,.2f} (end-of-first-bar equity; pass --equity to override)")
-            return capital
+            if not _curve_is_in_dollars(values, trades_df):
+                print(f"WARNING: ignoring {equity_path.name} as a capital source: its change "
+                      f"({values.iloc[-1] - values.iloc[0]:,.2f}) does not match the trades' "
+                      f"total Profit, so the curve is not in dollars (normalised?).")
+            else:
+                print(f"Initial capital inferred from the first point of {equity_path.name}: "
+                      f"{capital:,.2f} (end-of-first-bar equity; pass --equity to override)")
+                return capital
     print(f"WARNING: no initial capital found (no --equity, no config_snapshot.json "
           f"initial_capital, no usable {equity_path.name}); assuming "
           f"${INITIAL_EQUITY:,.0f}. Total return, CAGR, Calmar, drawdown %, turnover "
@@ -482,7 +526,8 @@ def main():
                 this_config['PORTFOLIO_TIMELINE'] = portfolio_timeline
             if args.equity is None and initial_capital is None:
                 _fallback = _fallback_initial_capital(
-                    portfolio_timeline, csv_file.parent / f"{csv_file.stem}_equity.csv")
+                    portfolio_timeline, csv_file.parent / f"{csv_file.stem}_equity.csv",
+                    trades_df)
                 if _fallback is not None:
                     this_config['INITIAL_EQUITY'] = _fallback
             _verdict_match = _match_strategy_verdict(_strategy_verdicts, csv_file.stem,
@@ -564,7 +609,7 @@ def main():
         _equity_path = Path(csv_path).parent / f"{Path(csv_path).stem}_equity.csv"
         portfolio_timeline = _load_equity_file(_equity_path)
         if args.equity is None and initial_capital is None:
-            initial_capital = _fallback_initial_capital(portfolio_timeline, _equity_path)
+            initial_capital = _fallback_initial_capital(portfolio_timeline, _equity_path, trades_df)
         config_params = {
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,

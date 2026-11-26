@@ -438,10 +438,12 @@ class TestQaFollowups:
         run_dir, _ = _write_run_dir(tmp_path, trade_log, timeline, with_snapshot=False,
                                     inputs_capital=INITIAL_CAPITAL)
         df, cfg = _report_config(run_dir, monkeypatch)
-        # No snapshot: the headline capital now comes from the equity curve's
-        # first point. Force the analyzer default back in to prove the WFA
-        # still uses the inputs' capital, not INITIAL_EQUITY.
-        assert cfg["INITIAL_EQUITY"] == pytest.approx(timeline.iloc[0])
+        # No snapshot, and this synthetic curve does not reconcile with the
+        # trades' total Profit, so report.py rejects it as a capital source and
+        # the headline falls back to the analyzer default. Pin 50,000 explicitly
+        # either way: the point is that the WFA still uses the inputs' capital,
+        # not INITIAL_EQUITY.
+        assert cfg.get("INITIAL_EQUITY", 50_000) == 50_000
         cfg = {**cfg, "INITIAL_EQUITY": 50_000}
         split_date, res = _analyzer_wfa(df, cfg)
         assert split_date == ref_split
