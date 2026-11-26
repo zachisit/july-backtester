@@ -2104,6 +2104,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         allocation_pct=allocation_pct,
                         **_s_sizing_kwargs,
                     )
+                    _s_sized_zero = not (shares > 0)   # the sizer itself declined (#500 log)
 
                     # size_mults, which this leg also dropped. It is a public
                     # parameter of run_portfolio_simulation and the long path
@@ -2163,7 +2164,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     while shares * _s_budget_price + _inst.commission(inst_se, shares) > _s_bp:
                         shares = float(np.nextafter(shares, 0.0))
                     if shares <= 0:
-                        _cand(symbol, "short", sig_date, False, "cash")
+                        _cand(symbol, "short", sig_date, False,
+                              "zero_size" if _s_sized_zero else "cash")
                         continue
 
 
@@ -2194,7 +2196,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
                     # Match the cash-long minimum meaningful equity size.
                     if shares <= 0.001:
-                        _cand(symbol, "short", sig_date, False, "cash")
+                        _cand(symbol, "short", sig_date, False,
+                              "zero_size" if _s_sized_zero else "cash")
                         continue
                     # --- PER-BAR ENTRY LIMITS (#500) ---
                     _s_bar_risk = (shares * (_s_stop - _s_entry_fill)
@@ -2763,6 +2766,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
                 # Integer contracts for futures; fractional shares pass through for equities.
                 shares = _inst.round_units(inst, shares)
+                if inst.integer_units and shares < 1:
+                    _sized_zero = True   # target under one contract: a size outcome, not cash
 
                 # --- AFFORDABILITY (margin-mode aware) ---
                 commission_cost = _inst.commission(inst, shares)
@@ -3158,6 +3163,14 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         # Caught by this ticket's own tests, not by inspection.
         if not _shadow:
             _sizing_diag.log_report()
+            if _cand_log_on and entry_candidates:
+                # The zero-trade run returns None (callers branch on it), so the
+                # candidate log cannot ride home on the result; summarise it here
+                # instead of dropping it (#500 QA round 2).
+                _why = pd.Series([c["skipped_reason"] for c in entry_candidates]).value_counts()
+                logger.warning("No trades: %d entry candidates, all skipped (%s)",
+                               len(entry_candidates),
+                               ", ".join(f"{k}={v}" for k, v in _why.items()))
         return None
 
     duration_list = [t['HoldDuration'] for t in trade_log]

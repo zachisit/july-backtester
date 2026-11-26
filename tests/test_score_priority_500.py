@@ -273,3 +273,28 @@ class TestQARegressions:
                  stop={"type": "signal_bar_low", "offset": 0.01}, alloc=0.10)
         rows = [c["skipped_reason"] for c in r["entry_candidates"] if c["Symbol"] == "AAA"]
         assert rows == ["zero_size"]
+
+
+class TestQARound2:
+    def test_equity_short_zero_size_label(self):
+        n = 10
+        rows = [(100, 101, 99, 100)] * n
+        data = {"AAA": _f(rows), "ZZZ": _f(rows)}
+        sigs = {"AAA": _sig(data["AAA"], {3: -2}), "ZZZ": _sig(data["ZZZ"], {2: 1})}
+        aux = {k: pd.DataFrame({"entry_score": 1.0}, index=d.index) for k, d in data.items()}
+        r = _run(data, sigs, aux, {"position_sizing_method": "fixed_risk", "risk_per_trade": 0.005,
+                                   "max_position_pct": 0.05},
+                 stop={"type": "signal_bar_low", "offset": 0.01}, alloc=0.10)
+        rows = [c["skipped_reason"] for c in r["entry_candidates"] if c["Symbol"] == "AAA"]
+        assert rows == ["zero_size"]
+
+    def test_zero_trade_run_still_reports_candidates(self, caplog):
+        import logging
+        n = 8
+        data = {"AAA": _f([(100, 101, 99, 100)] * n)}
+        sigs = {"AAA": _sig(data["AAA"], {2: 1})}
+        aux = {"AAA": pd.DataFrame({"entry_score": 1.0}, index=data["AAA"].index)}
+        with caplog.at_level(logging.WARNING, logger="helpers.portfolio_simulations"):
+            r = _run(data, sigs, aux, {"max_new_positions_per_bar": 0})
+        assert r is None
+        assert "No trades: 1 entry candidates" in caplog.text and "bar_count=1" in caplog.text
