@@ -149,6 +149,8 @@ KNOWN_KEYS: set[str] = {
     "stop_gap_fill",
     "stop_gap_fill_armed_trail",
     "gap_below_stop_on_entry",
+    "time_stop",
+    "risk_per_trade",
     "entry_bar_stop_check",
     "open_exec_same_bar_reentry_guard",
     "intrabar_timeframe",

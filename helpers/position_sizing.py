@@ -55,7 +55,7 @@ def calculate_position_size(
     ----------
     method : str
         Position sizing method: "fixed", "kelly", "vol_parity", "risk_parity",
-        "risk_pct_capped", "fixed_contracts"
+        "risk_pct_capped", "fixed_contracts", "fixed_risk"
     equity : float
         Current total portfolio equity
     price : float
@@ -105,11 +105,47 @@ def calculate_position_size(
     elif method == "fixed_contracts":
         return _fixed_contracts(config)
 
+    elif method == "fixed_risk":
+        return _fixed_risk(equity, price, config, **kwargs)
+
     else:
         logger.warning(
             f"Unknown position sizing method '{method}'. Falling back to 'fixed'."
         )
         return _fixed_allocation(equity, price, config, allocation_pct=allocation_pct)
+
+
+def _fixed_risk(equity: float, price: float, config: dict, **kwargs) -> float:
+    """Fixed-risk sizing with a notional cap (#501): the common swing-book rule.
+
+        units = floor(min(risk_per_trade * equity / ((entry - stop) * point_value),
+                          max_position_pct * equity / (entry * point_value)))
+
+    ``stop_distance_points`` is ``entry - stop`` per unit, resolved by the engine
+    from the SAME stop resolver that sets the position's stop, so sizing and the
+    stop cannot drift apart (#391). A missing or non-positive distance -- no
+    stop, or a stop at/above the fill -- takes no position.
+
+    ``equity`` is whatever the engine passes as sizing equity; under
+    ``execution_time="open"`` that is the start-of-bar mark (#490).
+    ``max_position_pct`` caps one position's notional as a fraction of equity
+    (default 1.0 = no cap beyond the cash clamp). Gross exposure stays bounded
+    by cash because equities pay full notional at entry.
+    """
+    stop_distance_points = kwargs.get("stop_distance_points")
+    point_value = float(kwargs.get("point_value", 1.0) or 1.0)
+    if (not stop_distance_points or stop_distance_points <= 0
+            or price is None or price <= 0 or equity <= 0):
+        _record_missing_stop(kwargs)
+        return 0.0
+    risk = float(config.get("risk_per_trade", 0.005))
+    by_risk = risk * equity / (float(stop_distance_points) * point_value)
+    cap = config.get("max_position_pct", 1.0)
+    units = by_risk
+    if cap is not None:
+        by_cap = float(cap) * equity / (price * point_value)
+        units = min(units, by_cap)
+    return float(max(0.0, np.floor(units + 1e-9)))
 
 
 def _fixed_allocation(equity: float, price: float, config: dict, allocation_pct: float | None = None) -> float:
@@ -222,7 +258,7 @@ def _record_sizing_diagnostic(kwargs, reason, detail=None):
 
 
 def _record_missing_stop(kwargs):
-    known_types = {"none", "percentage", "points", "atr", "trailing_atr", "signal_bar"}
+    known_types = {"none", "percentage", "points", "atr", "trailing_atr", "signal_bar", "signal_bar_low"}
     reason = ("no_stop_distance" if kwargs.get("stop_type", "none") in known_types
               else "unsupported_stop_type")
     detail = (f"stop type {kwargs.get('stop_type')!r}"

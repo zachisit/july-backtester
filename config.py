@@ -343,6 +343,16 @@ CONFIG = {
     # 1.0 = no limit (allow full portfolio risk)
     "max_portfolio_heat": 0.10,
 
+    # --- "fixed_risk" method (issue #501) ---------------------------------
+    # shares = floor(min(risk_per_trade * equity / (entry - stop),
+    #                    max_position_pct * equity / entry))
+    # The stop is the one the position actually gets (same resolver), so this
+    # needs a stop type that yields a level: percentage, points, atr, signal_bar,
+    # signal_bar_low, trailing_atr. No stop / stop at or above entry -> no trade.
+    # max_position_pct (SECTION 30) is shared with rotation: a per-position
+    # notional cap as a fraction of equity. Default 1.0 = no cap beyond cash.
+    "risk_per_trade": 0.005,
+
     # --- "risk_pct_capped" method (issue #385) ---------------------------
     # These three existed only in config_validator.KNOWN_KEYS, so the
     # CONFIG.get(..., default) in helpers/position_sizing.py always applied
@@ -489,6 +499,13 @@ CONFIG = {
     # Any coarse stop that fills at a gap-through open is also labelled
     # "Stop Loss (gap)" in the trade log.
     "gap_below_stop_on_entry": "skip",
+    # Session-count time stop (issue #501). None = off. {"sessions": N, "exit":
+    # "next_open"} exits at the open of session N+1 after entry (the entry bar is
+    # session 1); "close" exits at the close of session N. A stop hit earlier
+    # wins. Counts the symbol's own trading sessions, not calendar days.
+    # ExitReason "Time Stop". A "time_stop" key inside a stop_loss_configs entry
+    # overrides this for that stop config only.
+    "time_stop": None,
     # Fill-bar stop check (issue #426). Under execution_time="open" the entry fills at
     # the bar Open, so that bar's Low (High for shorts) is live against the initial
     # stop: a breach closes the trade on the fill bar. False = legacy (first stop

@@ -335,6 +335,40 @@ A stop is a resting order, so the engine fills it the way a broker would:
 
   Stops anchored to the entry price (`percentage`, `points`, `trailing_atr`) can never trigger this.
 
+#### Fixed-risk sizing, signal-bar-low stop, time stop (#501)
+
+The common swing-book rule: risk X% of equity to the stop, capped at Y% of equity in notional, plus an optional time exit.
+
+```python
+"position_sizing_method": "fixed_risk",
+"risk_per_trade": 0.005,          # 0.5% of equity lost if the stop is hit
+"max_position_pct": 0.05,         # no position larger than 5% of equity (notional)
+"stop_loss_configs": [
+    # Initial stop = the signal bar's UNADJUSTED low minus $0.01, rounded to cents
+    # (how a broker order is placed), mapped onto the adjusted price scale.
+    {"type": "signal_bar_low", "offset": 0.01},
+    # ... optionally trailed: 3 x ATR(10) under the highest high, raised only.
+    {"type": "signal_bar_low", "offset": 0.01, "trail_atr": 3.0, "atr_period": 10},
+    # ... or with a 20-session time stop, exiting at the next open.
+    {"type": "signal_bar_low", "offset": 0.01,
+     "time_stop": {"sessions": 20, "exit": "next_open"}},
+],
+```
+
+- **`fixed_risk`**: `shares = floor(min(risk_per_trade × equity / (entry − stop), max_position_pct × equity / entry))`. The stop is the one the position actually gets, resolved by the same function. With no stop, or a stop at or above the fill, there is no trade. Under `execution_time: "open"`, `equity` is the start-of-bar mark (see #490). Gross exposure stays bounded by cash.
+- **`signal_bar_low`** (long only). The raw low comes from, in order:
+  1. a `raw_low` column the strategy returns next to `Signal`;
+  2. a `Low_raw` / `raw_low` column on the price frame;
+  3. the adjusted `Low`, with a one-time warning per symbol, in which case the offset is in adjusted dollars.
+
+  The raw stop is converted with the signal bar's own factor `Low_adj / Low_raw`, so a later split does not move it. `round_cents: false` turns off the rounding.
+- **Trail** (`trail_atr` > 0): runs after each bar's stop check, including the entry bar. The candidate is `max(entry fill, highs from the entry bar through the prior bar) − trail_atr × ATR(atr_period)` at the prior bar, and the stop is only ever raised. ATR here is the simple mean true range, expanding at the series start, matching the live scanner. A level set on bar *j* is first checked on bar *j+1*.
+- **`time_stop`**: `{"sessions": N, "exit": "next_open" | "close"}`, set per stop config or globally as `CONFIG["time_stop"]`. The entry bar is session 1.
+  - `next_open` exits at the open of session N+1, before that bar's stop check.
+  - `close` exits at the close of session N.
+
+  A stop hit on an earlier bar wins. Sessions are the symbol's own trading bars, not calendar days. The exit reason is `Time Stop`.
+
 ### Slippage and Commission
 
 ```python
