@@ -304,3 +304,43 @@ class TestTimeStop:
         t = _run(df, [1] + [0] * 9, SBL, {"max_position_pct": 1.0,
                                           "time_stop": {"sessions": 3, "exit": "next_open"}})["trade_log"][0]
         assert pd.Timestamp(t["ExitDate"]) == df.index[4]
+
+
+# ---------------------------------------------------------------------------
+# Adversarial-QA regressions (#503 review)
+FUT_INST = {"default_asset_class": "equity", "overrides": {},
+            "futures_initial_margin_pct": 0.10, "futures_commission_per_contract": 0.0,
+            "futures_slippage_ticks": 0.0}
+
+
+class TestQARegressions:
+    def test_futures_short_fixed_risk_sized_like_the_long(self):
+        df = _frame(_flat(10, 5000.0))
+        cfg = {"risk_per_trade": 0.005, "max_position_pct": 5.0, "instruments": FUT_INST}
+        stop = {"type": "points", "value": 20.0}        # $100/contract -> 5 contracts
+        lsig, ssig = [0] * 10, [0] * 10
+        lsig[2], ssig[2] = 1, -2
+        rl = _run({"MESM6": df}, {"MESM6": lsig}, stop, cfg)
+        rs = _run({"MESM6": df}, {"MESM6": ssig}, stop, cfg)
+        assert rl["trade_log"][0]["Shares"] == 5
+        assert rs["trade_log"][0]["Shares"] == 5
+
+    @pytest.mark.parametrize("mode,exit_bar,col", [("next_open", 1 + 3, "Open"),
+                                                   ("close", 1 + 2, "Close")])
+    def test_time_stop_on_shorts(self, mode, exit_bar, col):
+        df = _frame([(100 - i, 101 - i, 99 - i, 100 - i) for i in range(10)])
+        stop = {"type": "percentage", "value": 0.5, "time_stop": {"sessions": 3, "exit": mode}}
+        r = _run(df, [-2] + [0] * 9, stop, {"position_sizing_method": "fixed"})
+        t = r["trade_log"][0]
+        assert t["ExitReason"] == TIME_STOP_REASON
+        assert pd.Timestamp(t["ExitDate"]) == df.index[exit_bar]
+
+    def test_next_open_time_stop_does_not_block_same_open_reentry(self):
+        # Entry bar1; N=2 next_open exits at bar3's open; a fresh signal on bar2
+        # (level trigger) re-enters at bar3's open, as a strategy exit would allow.
+        df = _frame([(100 + i, 101 + i, 99 + i, 100 + i) for i in range(8)])
+        stop = {**SBL, "time_stop": {"sessions": 2, "exit": "next_open"}}
+        sig = [1, 0, 1, 0, 0, 0, 0, 0]
+        r = _run(df, sig, stop, {"max_position_pct": 1.0, "entry_trigger": "level"})
+        ents = [pd.Timestamp(t["EntryDate"]) for t in r["trade_log"]]
+        assert df.index[3] in ents

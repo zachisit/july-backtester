@@ -433,6 +433,19 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     _edge_masks = None if _entry_trigger == "level" else _build_entry_edge_masks(signals)
     _ts_cfg = _time_stop_cfg(stop_config)   # (sessions, mode) or None (#501)
 
+    def _is_at_open_exit(reason):
+        """Exit filled at this bar's Open under execution_time="open": a same-bar
+        re-entry at that open is not blocked. A next_open time stop is a
+        market-on-open exit, so it counts; a close-mode one does not."""
+        return (reason in _AT_OPEN_EXIT_REASONS
+                or (reason == TIME_STOP_REASON and _ts_cfg is not None
+                    and _ts_cfg[1] == "next_open"))
+
+    if stop_config.get("type") == "signal_bar_low" and any(
+            (s == -2).any() for s in signals.values()):
+        logger.warning("signal_bar_low is a long-only stop type: short entries in this "
+                       "run carry no stop (#501)")
+
     # Dynamic HTB rate compounding based on timeframe (fixes issue #55)
     bars_per_year = get_bars_per_year(CONFIG)
     htb_rate_per_bar = (1.0 + htb_rate_annual) ** (1.0 / bars_per_year) - 1.0 if htb_rate_annual > 0 else 0.0
@@ -1358,7 +1371,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             log_entry.update(pos.get('features', {}))
             trade_log.append(log_entry)
             exited_symbols.append(symbol)
-            if _guard_same_bar and exit_reason not in _AT_OPEN_EXIT_REASONS:
+            if _guard_same_bar and not _is_at_open_exit(exit_reason):
                 _open_entry_blocked.add(symbol)
 
         for symbol in exited_symbols: del positions[symbol]
@@ -1388,6 +1401,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             elif not pit_member:
                 cover_raw = row.get('Open' if execution_time == 'open' else 'Close')
                 cover_reason = "PIT Membership Exit"
+
+            # TIME STOP, next_open (#501, mirror of the long side)
+            if pd.isna(cover_raw) and _ts_cfg is not None and _ts_cfg[1] == "next_open":
+                if _sessions_held(symbol, spos, date) >= _ts_cfg[0]:
+                    _ts_px = row.get('Open')
+                    if pd.isna(_ts_px):
+                        _ts_px = row.get('Close')
+                    if pd.notna(_ts_px):
+                        cover_raw, cover_reason = _ts_px, TIME_STOP_REASON
 
             # STOP-LOSS (short is stopped when the High trades up through the stop)
             if (pd.isna(cover_raw) and stop_config.get("type") != "none"
@@ -1455,6 +1477,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     cover_raw = row.get('Open' if execution_time == 'open' else 'Close')
                     cover_reason = "Short Cover"
 
+            # TIME STOP, close (#501, mirror of the long side)
+            if pd.isna(cover_raw) and _ts_cfg is not None and _ts_cfg[1] == "close":
+                if _sessions_held(symbol, spos, date) >= _ts_cfg[0] - 1 and pd.notna(row.get('Close')):
+                    cover_raw, cover_reason = row.get('Close'), TIME_STOP_REASON
+
             # Not covering this bar → trail the short stop and move on.
             if pd.isna(cover_raw):
                 if stop_config.get("type") == "atr" and pd.notna(spos.get('stop_loss_level')):
@@ -1516,7 +1543,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             })
             trade_log[-1].update(spos.get('features', {}))
             short_exited.append(symbol)
-            if _guard_same_bar and cover_reason not in _AT_OPEN_EXIT_REASONS:
+            if _guard_same_bar and not _is_at_open_exit(cover_reason):
                 _open_entry_blocked.add(symbol)
         for symbol in short_exited:
             del short_positions[symbol]
@@ -1810,7 +1837,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     # to 0 forever as price appreciates.
                     _s_per_contract_margin = _inst.margin_required(inst_se, 1, ep)
                     if _s_sizing_method not in ("risk_pct_capped",
-                                                "fixed_contracts"):
+                                                "fixed_contracts", "fixed_risk"):
                         shares = ((shares * _s_entry_fill)
                                   / _s_per_contract_margin
                                   if _s_per_contract_margin > 0 else 0.0)
@@ -2003,7 +2030,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     # this is identity today; it is here so the branch stays
                     # correct if a non-unit-value CASH_FULL instrument appears.
                     if (_s_eq_sizing_method not in
-                            ("risk_pct_capped", "fixed_contracts")
+                            ("risk_pct_capped", "fixed_contracts", "fixed_risk")
                             and inst_se.point_value != 1.0):
                         shares = shares / inst_se.point_value
 
