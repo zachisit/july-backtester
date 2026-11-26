@@ -210,3 +210,66 @@ class TestLookAheadGuard:
         aux["S02"].iloc[0, 0] = 99.0
         res = _run(data, sigs, aux, {"max_new_positions_per_bar": 3}, alloc=0.05)
         assert "S02" in _taken(res)
+
+
+# ---------------------------------------------------------------------------
+# Adversarial-QA regressions (#504 review)
+def _f(rows):
+    idx = pd.bdate_range("2024-01-02", periods=len(rows))
+    idx.name = "Datetime"
+    o, h, l, c = zip(*rows)
+    return pd.DataFrame({"Open": o, "High": h, "Low": l, "Close": c, "Volume": 1e6},
+                        index=idx, dtype=float)
+
+
+def _sig(df, pairs):
+    s = pd.Series(0.0, index=df.index)
+    for i, v in pairs.items():
+        s.iloc[i] = v
+    return s
+
+
+class TestQARegressions:
+    def test_shadow_keeps_minus2_as_a_long_exit(self):
+        n = 30
+        data = {"AAA": _f([(100, 101, 99, 100)] * n),
+                "BBB": _f([(100 + i, 101 + i, 99 + i, 100 + i) for i in range(n)])}
+        sigs = {"AAA": _sig(data["AAA"], {3: 1}), "BBB": _sig(data["BBB"], {3: 1, 8: -2})}
+        aux = {k: pd.DataFrame({"entry_score": 1.0}, index=d.index) for k, d in data.items()}
+        r = _run(data, sigs, aux, {"max_new_positions_per_bar": 1, "shadow_skipped_candidates": True},
+                 stop={"type": "none"}, alloc=0.10)
+        cand = [c for c in r["entry_candidates"] if c["Symbol"] == "BBB" and c["Side"] == "long"][0]
+        free = _run(data, sigs, aux, {"log_entry_candidates": False}, stop={"type": "none"}, alloc=0.10)
+        real = [t for t in free["trade_log"] if t["Symbol"] == "BBB"][0]
+        assert cand["ShadowExitDate"] == real["ExitDate"]
+        assert cand["ShadowReturnPct"] == pytest.approx(real["ProfitPct"])
+
+    @pytest.mark.parametrize("label", ["Score", " SCORE ", "score"])
+    def test_priority_value_is_normalised(self, label):
+        res = _run(*_book({"AAA": 1.0, "BBB": 2.0, "CCC": 3.0}),
+                   {"entry_priority": label, "max_new_positions_per_bar": 1}, alloc=0.10)
+        assert _taken(res) == ["CCC"]
+
+    def test_short_heat_rejection_is_logged(self):
+        n = 10
+        data = {"AAA": _f([(100, 101, 99, 100)] * n), "ZZZ": _f([(100, 101, 99, 100)] * n)}
+        sigs = {"AAA": _sig(data["AAA"], {3: -2}), "ZZZ": _sig(data["ZZZ"], {2: 1})}
+        aux = {k: pd.DataFrame({"entry_score": 1.0}, index=d.index) for k, d in data.items()}
+        r = _run(data, sigs, aux, {"max_portfolio_heat": 0.006, "target_risk_per_trade": 0.05},
+                 alloc=0.10)
+        rows = [(c["Side"], c["Taken"], c["skipped_reason"]) for c in r["entry_candidates"]
+                if c["Symbol"] == "AAA"]
+        assert rows == [("short", False, "heat")]
+
+    def test_zero_size_is_not_labelled_cash(self):
+        n = 10
+        rows = [(100, 101, 99, 100)] * n
+        rows[4] = (95, 96, 94, 95)                 # opens below the bar-3 low -> no stop distance
+        data = {"AAA": _f(rows), "ZZZ": _f([(100, 101, 99, 100)] * n)}
+        sigs = {"AAA": _sig(data["AAA"], {3: 1}), "ZZZ": _sig(data["ZZZ"], {2: 1})}
+        aux = {k: pd.DataFrame({"entry_score": 1.0}, index=d.index) for k, d in data.items()}
+        r = _run(data, sigs, aux, {"position_sizing_method": "fixed_risk", "risk_per_trade": 0.005,
+                                   "max_position_pct": 0.05, "gap_below_stop_on_entry": "ignore"},
+                 stop={"type": "signal_bar_low", "offset": 0.01}, alloc=0.10)
+        rows = [c["skipped_reason"] for c in r["entry_candidates"] if c["Symbol"] == "AAA"]
+        assert rows == ["zero_size"]

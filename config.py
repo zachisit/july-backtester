@@ -282,7 +282,7 @@ CONFIG = {
     "max_new_positions_per_bar": None,   # int, or None = no limit
     "max_new_risk_per_bar": None,        # fraction of equity: sum of shares*(entry-stop)
     # Candidate audit log: every signalled entry with its score, whether it was
-    # taken and why not (cash | heat | bar_risk | bar_count | adv | duplicate_symbol
+    # taken and why not (cash | heat | bar_risk | bar_count | adv | zero_size | duplicate_symbol
     # | same_bar_reentry | pit | gap_below_stop). Saved as *_entry_candidates.csv.
     "log_entry_candidates": False,
     # Shadow outcome for budget-skipped candidates (needs log_entry_candidates):

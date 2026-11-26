@@ -388,8 +388,8 @@ df["entry_score"] = med20_dollar_volume   # computed only from data known at the
 
 - The engine reads the score at the **signal bar** only.
 - `"score"` with no `entry_score` column fails the run. It does not fall back to alphabetical.
-- The per-bar caps apply after cash, ADV and heat, in priority order. A candidate that fails a cap is skipped and the next one is tried.
-- The candidate log has one row per signalled entry: score, `Taken`, and `skipped_reason`, which is one of `cash`, `heat`, `bar_risk`, `bar_count`, `adv`, `duplicate_symbol`, `same_bar_reentry`, `pit` or `gap_below_stop`. Taken trades also carry `EntryScore` in the trade log.
+- The per-bar caps apply after cash, ADV and heat, in priority order. A candidate that fails a cap is skipped and the next one is tried. The caps are shared by both legs, and shorts are processed before longs on a bar, so in a long/short book shorts use the caps first. Score order holds within each leg; the run warns once if a long is refused by a cap that shorts had already used.
+- The candidate log has one row per signalled entry: score, `Taken`, and `skipped_reason`, which is one of `cash`, `heat`, `bar_risk`, `bar_count`, `adv`, `zero_size` (the sizing method returned nothing, e.g. no stop distance), `duplicate_symbol`, `same_bar_reentry`, `pit` or `gap_below_stop`. Taken trades also carry `EntryScore` in the trade log.
 - **Shadow returns** re-run each budget-skipped candidate through the same engine, as the only position in a one-symbol book. The result is in `ShadowReturnPct`, `ShadowExitDate` and `ShadowExitReason`.
   - The trade is cut `shadow_horizon_bars` (260) after the fill.
   - It costs one extra simulation per skipped candidate, so leave it off for busy universes unless you need the audit.

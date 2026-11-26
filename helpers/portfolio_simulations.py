@@ -485,7 +485,14 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             return "bar_risk"
         return None
 
-    def _bar_admit(new_risk):
+    # The bar's caps are shared by both legs, and the short leg runs before the
+    # long leg, so with both active shorts consume the caps first (score order
+    # holds WITHIN a leg). Said once per run rather than silently.
+    _cross_leg_warned = [False]
+
+    def _bar_admit(new_risk, side="long"):
+        if side == "short":
+            _bar_new["short_n"] = _bar_new.get("short_n", 0) + 1
         _bar_new["n"] += 1
         _bar_new["risk"] += float(new_risk) if pd.notna(new_risk) else 0.0
 
@@ -1124,7 +1131,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 del book[symbol]
 
     for date in portfolio_timeline.index:
-        _bar_new["n"], _bar_new["risk"] = 0, 0.0
+        _bar_new["n"], _bar_new["risk"], _bar_new["short_n"] = 0, 0.0, 0
         # Freeze before delisting, ordinary exits, and fill-bar stops can append
         # outcomes unavailable to an order at this bar's open.
         kelly_completed_count = len(trade_log) if execution_time == "open" else None
@@ -1604,7 +1611,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             del short_positions[symbol]
 
         # --- SHORT ENTRY (signal = -2, not already in any position) ---
-        _priority = CONFIG.get("entry_priority", "alphabetical")
+        _priority = _priority_cfg
         if _priority == "signal_date":
             def _short_sig_key(item):
                 sym, _df = item
@@ -1639,14 +1646,19 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     if _is_entry_bar(signals, _edge_masks, symbol, _sdl, -2):
                         _cand(symbol, "short", _sdl, False, "duplicate_symbol")
                 continue
+            sig_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
+            _s_sig_here = _cand_log_on and _is_entry_bar(signals, _edge_masks, symbol, sig_date, -2)
             if symbol in _open_entry_blocked:
+                if _s_sig_here:
+                    _cand(symbol, "short", sig_date, False, "same_bar_reentry")
                 continue
             if _is_delisted(symbol, date):
                 continue
             if (not _pit_flag(symbol, date, '_pit_member', True)
                     or _pit_flag(symbol, date, '_pit_force_exit', False)):
+                if _s_sig_here:
+                    _cand(symbol, "short", sig_date, False, "pit")
                 continue
-            sig_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
             if _is_entry_bar(signals, _edge_masks, symbol, sig_date, -2):
                 ep = df.loc[date].get('Open' if execution_time == 'open' else 'Close')
                 if pd.isna(ep) or ep <= 0:
@@ -1928,6 +1940,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                                 _fs_risk(shares), total_equity,
                                                 CONFIG.get("max_portfolio_heat", 1.0)):
                         _sizing_diag.record("rejected_by_heat", symbol)
+                        _cand(symbol, "short", sig_date, False, "heat")
                         continue
 
                     # Same contract-volume cap and prior-bar ADV timing as longs.
@@ -1965,10 +1978,12 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if _s_max_by_margin < shares:
                             _sizing_diag.record("clamped_by_cash", symbol)
                         if _s_max_by_margin <= 0:
+                            _cand(symbol, "short", sig_date, False, "cash")
                             continue
                         shares = min(shares, _s_max_by_margin)
                     shares = _inst.round_units(inst_se, shares)
                     if shares < 1:
+                        _cand(symbol, "short", sig_date, False, "zero_size")
                         continue
                     # Registered for later entries' gates from the FINAL count
                     # (#317), as the long path does.
@@ -1998,6 +2013,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             _s_margin = _inst.margin_required(inst_se, shares, _s_entry_fill)
                             commission = _inst.commission(inst_se, shares)
                         if shares < 1 or _s_margin + commission > cash - reserved_margin:
+                            _cand(symbol, "short", sig_date, False, "cash")
                             continue
                     _fs_new_risk = _fs_risk(shares)
                     if not check_portfolio_heat({**positions, **short_positions},
@@ -2015,7 +2031,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     if _blr is not None:
                         _cand(symbol, "short", sig_date, False, _blr)
                         continue
-                    _bar_admit(_s_bar_risk)
+                    _bar_admit(_s_bar_risk, "short")
                     _cand(symbol, "short", sig_date, True, shares=shares, fill=_s_entry_fill)
                     reserved_margin += _s_margin
                     cash -= commission
@@ -2048,6 +2064,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     _s_bp = cash - reserved_short_collateral
                     if _s_bp <= 1e-9 * max(total_equity, 1.0):
                         _sizing_diag.record("clamped_by_cash", symbol)
+                        _cand(symbol, "short", sig_date, False, "cash")
                         continue
 
                     # #386: honour position_sizing_method here. This branch
@@ -2126,6 +2143,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     if not check_portfolio_heat({**positions, **short_positions},
                                                 _s_new_risk, total_equity, _s_max_heat):
                         _sizing_diag.record("rejected_by_heat", symbol)
+                        _cand(symbol, "short", sig_date, False, "heat")
                         continue
 
                     # Clamp the desired units to free buying power, including
@@ -2137,6 +2155,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _short_margin_req if _short_margin_req > 0 else 1.0)
                     _s_unit_budget = _s_budget_price + _inst.commission(inst_se, 1.0)
                     if _s_unit_budget <= 0:
+                        _cand(symbol, "short", sig_date, False, "cash")
                         continue
                     if _s_bp / _s_unit_budget < shares:
                         _sizing_diag.record("clamped_by_cash", symbol)
@@ -2144,6 +2163,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     while shares * _s_budget_price + _inst.commission(inst_se, shares) > _s_bp:
                         shares = float(np.nextafter(shares, 0.0))
                     if shares <= 0:
+                        _cand(symbol, "short", sig_date, False, "cash")
                         continue
 
 
@@ -2154,6 +2174,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if pd.notna(_s_adv20) and _s_adv20 > 0:
                             _s_max_shares = _s_adv20 * _s_max_pct_adv
                             if _s_max_shares <= 0:
+                                _cand(symbol, "short", sig_date, False, "adv")
                                 continue
                             if _s_max_shares < shares:
                                 _sizing_diag.record("clamped_by_adv", symbol)
@@ -2183,7 +2204,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     if _blr is not None:
                         _cand(symbol, "short", sig_date, False, _blr)
                         continue
-                    _bar_admit(_s_bar_risk)
+                    _bar_admit(_s_bar_risk, "short")
                     _cand(symbol, "short", sig_date, True, shares=shares, fill=_s_entry_fill)
                     commission = _inst.commission(inst_se, shares)
                     cash -= commission   # proceeds and collateral cancel; only commission is a real cash cost
@@ -2646,6 +2667,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # Apply the per-signal size multiplier (entry-queue / ML band)
                 # to the sized position before the heat check.
                 shares = shares * _size_mult
+                _sized_zero = not (shares > 0)   # sizing itself declined (e.g. no stop distance)
 
                 # risk_pct_capped and fixed_contracts already answer in UNITS
                 # (contracts/shares); the other four return equity-equivalent
@@ -2794,7 +2816,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
                 # Final check: Ensure we can afford the trade and it's a meaningful size
                 if not can_afford:
-                    _cand(symbol, "long", signal_date, False, "cash")
+                    _cand(symbol, "long", signal_date, False, "zero_size" if _sized_zero else "cash")
                 if can_afford:
                     # --- CAPTURE FEATURES AT ENTRY ---
                     # Read from the SIGNAL bar, not the fill bar (issue #310).
@@ -2889,6 +2911,12 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     _blr = _bar_limit_reason(_bar_risk_new, total_equity)
                     if _blr is not None:
                         _cand(symbol, "long", signal_date, False, _blr)
+                        if _bar_new.get("short_n", 0) and not _cross_leg_warned[0]:
+                            _cross_leg_warned[0] = True
+                            logger.warning(
+                                "max_new_*_per_bar: shorts are admitted before longs on a bar, "
+                                "so a long was refused by a cap that shorts had already used "
+                                "(score order applies within each leg, not across them; #500)")
                         continue
                     _bar_admit(_bar_risk_new)
                     _cand(symbol, "long", signal_date, True, shares=shares, fill=entry_price)
@@ -3194,10 +3222,16 @@ def _attach_shadow_returns(candidates, portfolio_data, signals, initial_capital,
             continue
         i_sig, i_fill = df.index.get_loc(sig_d), df.index.get_loc(fill)
         sub = df.iloc[max(0, i_sig - 300): i_fill + horizon + 1]
-        entry_v = 1 if c["Side"] == "long" else -2
         sig = signals[sym].reindex(sub.index).astype(float).copy()
-        sig[(sig == 1) | (sig == -2)] = 0.0
-        sig.loc[sig_d] = entry_v
+        if c["Side"] == "long":
+            # -2 also exits a long: keep it as an exit (-1), drop every other entry.
+            sig[sig == 1] = 0.0
+            sig[sig == -2] = -1.0
+            sig.loc[sig_d] = 1.0
+        else:
+            # a 1 never covers a short; drop it and every other short entry.
+            sig[(sig == 1) | (sig == -2)] = 0.0
+            sig.loc[sig_d] = -2.0
         aux = None
         if signal_aux and sym in signal_aux:
             aux = {sym: signal_aux[sym].reindex(sub.index)}
