@@ -331,6 +331,7 @@ A stop is a resting order, so the engine fills it the way a broker would:
 - **Entry day gap below the stop.** A structural stop (`atr`, `signal_bar`) is fixed before the fill. If the fill price (the open) is already at or below it, the stop was gapped through before it could rest. `gap_below_stop_on_entry` decides what happens:
   - `"skip"` (default): no trade. Counted in `sizing_diagnostics` as `skipped_gap_below_stop`.
   - `"exit_at_open"`: take the entry and stop out at the same open (`Stop Loss (gap)`), paying slippage and commission both ways.
+  - `"ignore"`: legacy (pre-#499). Enter anyway; a `signal_bar` level above the fill is not armed (the trade has no stop), an `atr` level above it fires on the fill bar.
 
   Stops anchored to the entry price (`percentage`, `points`, `trailing_atr`) can never trigger this.
 

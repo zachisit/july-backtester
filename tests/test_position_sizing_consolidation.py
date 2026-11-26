@@ -901,7 +901,10 @@ class TestBothStopLaddersCoverTheSameStopTypes:
         sig.iloc[2], sig.iloc[8] = 1, -1
         cfg = {**_FUT_CFG, "position_sizing_method": "risk_pct_capped",
                "execution_time": "open", "max_portfolio_heat": 1.0,
-               "max_pct_adv": 0.0}
+               "max_pct_adv": 0.0,
+               # Legacy entry-gap mode: the default (#499 "skip") declines
+               # this gapped fill before sizing, so the ladder is never asked.
+               "gap_below_stop_on_entry": "ignore"}
         with patch.dict("config.CONFIG", cfg, clear=False):
             with patch.object(ps, "calculate_position_size", _spy):
                 ps.run_portfolio_simulation(

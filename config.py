@@ -484,6 +484,8 @@ CONFIG = {
     # through before it could rest. "skip" (default) = no trade, counted in
     # sizing_diagnostics as skipped_gap_below_stop. "exit_at_open" = take the
     # entry and stop out at the same fill, ExitReason "Stop Loss (gap)".
+    # "ignore" = legacy pre-#499 behaviour (enter anyway; a signal_bar level
+    # above the fill is not armed, an atr level above it fires on the fill bar).
     # Any coarse stop that fills at a gap-through open is also labelled
     # "Stop Loss (gap)" in the trade log.
     "gap_below_stop_on_entry": "skip",

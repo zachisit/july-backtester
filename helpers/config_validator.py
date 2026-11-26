@@ -344,9 +344,9 @@ def validate_config(config: dict) -> list[str]:
     # gap_below_stop_on_entry (#499): only "exit_at_open" opts out of the
     # default; anything else runs as "skip", so say so instead of guessing.
     gm = config.get("gap_below_stop_on_entry")
-    if gm is not None and str(gm).strip().lower() not in {"skip", "exit_at_open"}:
+    if gm is not None and str(gm).strip().lower() not in {"skip", "exit_at_open", "ignore"}:
         msg = (f"WARNING: gap_below_stop_on_entry '{gm}' is not a known mode "
-               f"(expected 'skip' or 'exit_at_open') -- the run will fall back to 'skip'")
+               f"(expected 'skip', 'exit_at_open' or 'ignore') -- the run will fall back to 'skip'")
         warnings.append(msg)
         logger.warning(msg)
 

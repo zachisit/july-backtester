@@ -159,10 +159,17 @@ def _stop_exit_reason(stop_config, fill, stop_level, side="long"):
     return f"Stop Loss ({stop_config.get('type')})"
 
 
+# Stop types whose level is fixed before the fill (not anchored to it), so the
+# fill can already be through them on the entry bar (#499).
+_STRUCTURAL_STOP_TYPES = frozenset({"atr", "signal_bar", "signal_bar_low"})
+
+
 def _entry_gap_mode():
-    """``gap_below_stop_on_entry`` (#499): "skip" (default) | "exit_at_open"."""
+    """``gap_below_stop_on_entry`` (#499): "skip" (default) | "exit_at_open" |
+    "ignore" (legacy, pre-#499: enter anyway -- a signal_bar stop above the fill
+    is simply not armed, an atr stop above it fires on the fill bar)."""
     mode = str(CONFIG.get("gap_below_stop_on_entry", "skip")).strip().lower()
-    return "exit_at_open" if mode == "exit_at_open" else "skip"
+    return mode if mode in ("exit_at_open", "ignore") else "skip"
 
 
 def _prearm_decision(high, low, stop_level, target, window_bars, side="long",
@@ -1466,7 +1473,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             _s_target = _s_trail_anchor - _eff * (_t1 / _sm)
                 # Entry-day gap through the initial stop (#499, mirror of the long side).
                 _s_gap_exit_now = False
-                if pd.notna(_s_gap_lvl) and ep >= _s_gap_lvl:
+                if (pd.notna(_s_gap_lvl) and ep >= _s_gap_lvl
+                        and _entry_gap_mode() != "ignore"):
                     if _entry_gap_mode() == "skip":
                         _sizing_diag.record("skipped_gap_below_stop", symbol)
                         continue
@@ -2037,7 +2045,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             # takes the entry and stops out at the same fill. Anchored-to-entry
             # stops (percentage/points/trailing_atr) can never trigger this.
             _gap_exit_now = False
-            if stop_config.get("type", "none") != "none":
+            if (stop_config.get("type") in _STRUCTURAL_STOP_TYPES
+                    and _entry_gap_mode() != "ignore"):
                 _gap_lvl = _initial_long_stop(symbol, df, signal_date, raw_entry_price,
                                               entry_price, guard=False)[0]
                 if pd.notna(_gap_lvl) and raw_entry_price <= _gap_lvl:
