@@ -362,7 +362,7 @@ The common swing-book rule: risk X% of equity to the stop, capped at Y% of equit
   3. the adjusted `Low`, with a one-time warning per symbol, in which case the offset is in adjusted dollars.
 
   The raw stop is converted with the signal bar's own factor `Low_adj / Low_raw`, so a later split does not move it. `round_cents: false` turns off the rounding.
-- **Trail** (`trail_atr` > 0): runs after each bar's stop check, including the entry bar. The candidate is `max(entry fill, highs from the entry bar through the prior bar) − trail_atr × ATR(atr_period)` at the prior bar, and the stop is only ever raised. ATR here is the simple mean true range, expanding at the series start, matching the live scanner. A level set on bar *j* is first checked on bar *j+1*.
+- **Trail** (`trail_atr` > 0): runs after each bar's stop check, including the entry bar. The candidate is `max(entry fill, highs from the entry bar through the prior bar) − trail_atr × ATR(atr_period)` at the prior bar, and the stop is only ever raised. ATR here is the simple mean true range, expanding at the series start. A level set on bar *j* is first checked on bar *j+1*.
 - **`time_stop`**: `{"sessions": N, "exit": "next_open" | "close"}`, set per stop config or globally as `CONFIG["time_stop"]`. The entry bar is session 1.
   - `next_open` exits at the open of session N+1, before that bar's stop check.
   - `close` exits at the close of session N.
