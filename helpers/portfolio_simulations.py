@@ -167,9 +167,8 @@ _STRUCTURAL_STOP_TYPES = frozenset({"atr", "signal_bar", "signal_bar_low"})
 def _simple_atr(df, period):
     """Mean true range over ``period`` bars, expanding at the series start.
 
-    The first bar's TR is High - Low (no prior close). This is the live 2575
-    scanner's ATR(10) (simple mean, not Wilder), used by the ``signal_bar_low``
-    trail (#501). Scale-invariant, so it is computed on the engine's adjusted
+    The first bar's TR is High - Low (no prior close). A simple mean, not
+    Wilder's smoothing, used by the ``signal_bar_low`` trail (#501). Scale-invariant, so it is computed on the engine's adjusted
     bars and applied to an adjusted stop.
     """
     h, l, c = df['High'], df['Low'], df['Close']
@@ -779,7 +778,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             stop_raw = round(stop_raw, 2)
         if stop_raw <= 0:
             return np.nan
-        return stop_raw * (float(adj_low) / float(raw_low))
+        # Round away float noise from the factor: 13.676 * (a/a) came back as
+        # 13.675999999999998, so a bar whose Low printed exactly at the stop
+        # never touched it. 8 dp is far below any price tick.
+        return round(stop_raw * (float(adj_low) / float(raw_low)), 8)
 
     def _sbl_trail_update(symbol, pos, date):
         """Ratchet a ``signal_bar_low`` trail after the bar's stop check (#501).
@@ -788,7 +790,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                - trail_atr * ATR(atr_period) at the prior bar,
         raised only, then this bar's High is folded into the running max. The
         level set here is first checked on the NEXT bar (next-day activation),
-        matching the live scanner's --update-stops timing.
+        i.e. a stop order updated after the close and working from the next session.
         """
         mult = stop_config.get("trail_atr")
         if not mult or mult <= 0:

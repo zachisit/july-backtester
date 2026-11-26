@@ -189,6 +189,19 @@ class TestSignalBarLow:
         t = _run(df, [1, 0, 0, 0], SBL)["trade_log"][0]
         assert t["ExitPrice"] == pytest.approx(90.0) and t["ExitReason"] == "Stop Loss (gap)"
 
+    def test_exact_touch_after_factor_mapping_stops_out(self):
+        """Raw low 34.20 on an adjusted series at factor 0.4: stop_raw 34.19 maps
+        to 13.676, but 34.19 * (13.68 / 34.2) is 13.675999999999998 in floats, so
+        a later Low printed at exactly 13.676 never touched it (adversarial QA on
+        #233). The mapped stop is rounded, so an exact touch fills."""
+        df = _frame([(13.9, 14.0, 13.68, 13.8), (14.0, 14.2, 13.676, 13.9),
+                     (13.9, 14.0, 13.8, 13.9), (13.9, 14.0, 13.8, 13.9)])
+        aux = pd.DataFrame({"raw_low": [34.2, np.nan, np.nan, np.nan]}, index=df.index)
+        t = _run(df, [1, 0, 0, 0], SBL, {"max_position_pct": 1.0}, aux=aux)["trade_log"][0]
+        assert t["ExitReason"] == "Stop Loss (signal_bar_low)"
+        assert t["ExitPrice"] == pytest.approx(13.676)
+        assert t["ExitDate"].startswith(str(df.index[1].date()))
+
     def test_entry_open_below_stop_is_skipped(self):
         df = _frame([(100, 101, 95, 100), (94, 95, 93, 94), (94, 95, 93, 94)])
         assert _run(df, [1, 0, 0], SBL) is None
