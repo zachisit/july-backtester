@@ -360,7 +360,7 @@ def _is_entry_bar(signals, edge_masks, symbol, sig_date, entry_value):
     return bool(_sym_masks[entry_value].loc[sig_date])
 
 
-def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config, size_mults=None, delisting_dates=None, intrabar_data=None, start_date=None, signal_aux=None):
+def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config, size_mults=None, delisting_dates=None, intrabar_data=None, start_date=None, signal_aux=None, _shadow=False):
     """
     Runs a portfolio simulation with integrated stop-loss handling and logs
     a rich set of features for each trade for future machine learning analysis.
@@ -447,6 +447,58 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             (s == -2).any() for s in signals.values()):
         logger.warning("signal_bar_low is a long-only stop type: short entries in this "
                        "run carry no stop (#501)")
+    # --- SCORE PRIORITY + PER-BAR ENTRY LIMITS + CANDIDATE LOG (#500) ---
+    _priority_cfg = str(CONFIG.get("entry_priority", "alphabetical")).strip().lower()
+    if _priority_cfg == "score" and not _shadow and not any(
+            aux is not None and "entry_score" in aux.columns
+            for aux in (signal_aux or {}).values()):
+        raise ValueError(
+            "entry_priority='score' needs an 'entry_score' column returned by the "
+            "strategy next to 'Signal' (computed from data known at the signal bar); "
+            "none was supplied. It does not fall back to alphabetical (#500).")
+    _score_desc = not bool(CONFIG.get("entry_score_ascending", False))
+    _max_new_n = None if _shadow else CONFIG.get("max_new_positions_per_bar")
+    _max_new_risk = None if _shadow else CONFIG.get("max_new_risk_per_bar")
+    _cand_log_on = (not _shadow) and bool(CONFIG.get("log_entry_candidates", False))
+    entry_candidates = []
+    _bar_new = {"n": 0, "risk": 0.0}
+
+    def _entry_score(symbol, sig_date):
+        return _aux_value(symbol, sig_date, "entry_score")
+
+    def _score_key(symbol, sig_date):
+        """Sort key: signalled bars first, by score (desc by default), NaN score
+        last among them, ties alphabetical. Non-signalled bars sort after."""
+        sc = _entry_score(symbol, sig_date)
+        if pd.isna(sc):
+            return (1, 0.0, symbol)
+        return (0, -float(sc) if _score_desc else float(sc), symbol)
+
+    def _bar_limit_reason(new_risk, equity):
+        """None when the per-bar caps admit one more entry with ``new_risk``
+        dollars at risk, else the skip reason. Checked after every other gate,
+        so a failure skips this candidate and the loop tries the next."""
+        if _max_new_n is not None and _bar_new["n"] + 1 > int(_max_new_n):
+            return "bar_count"
+        if (_max_new_risk is not None and pd.notna(new_risk)
+                and _bar_new["risk"] + new_risk > float(_max_new_risk) * max(equity, 0.0) + 1e-9):
+            return "bar_risk"
+        return None
+
+    def _bar_admit(new_risk):
+        _bar_new["n"] += 1
+        _bar_new["risk"] += float(new_risk) if pd.notna(new_risk) else 0.0
+
+    def _cand(symbol, side, sig_date, taken, reason=None, shares=None, fill=None):
+        if not _cand_log_on:
+            return
+        entry_candidates.append({
+            "Date": date.isoformat(), "Symbol": symbol, "Side": side,
+            "SignalDate": sig_date.isoformat() if pd.notna(sig_date) else None,
+            "Score": _entry_score(symbol, sig_date), "Taken": bool(taken),
+            "skipped_reason": None if taken else reason,
+            "Shares": shares, "FillPrice": fill,
+        })
 
     # Dynamic HTB rate compounding based on timeframe (fixes issue #55)
     bars_per_year = get_bars_per_year(CONFIG)
@@ -1072,6 +1124,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 del book[symbol]
 
     for date in portfolio_timeline.index:
+        _bar_new["n"], _bar_new["risk"] = 0, 0.0
         # Freeze before delisting, ordinary exits, and fill-bar stops can append
         # outcomes unavailable to an order at this bar's open.
         kelly_completed_count = len(trade_log) if execution_time == "open" else None
@@ -1562,6 +1615,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     return (0, str(sd), sym)
                 return (1, "", sym)
             _short_items = sorted(portfolio_data.items(), key=_short_sig_key)
+        elif _priority == "score":
+            _short_items = sorted(
+                portfolio_data.items(),
+                key=lambda it: _score_key(
+                    it[0], prev_trading_dates[it[0]].get(date) if execution_time == "open" else date))
         elif _priority == "random_seed":
             # Seeded per bar from (seed, date, side): a different order every
             # bar, identical across runs with the same seed (#412). One RNG
@@ -1573,7 +1631,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         else:
             _short_items = sorted(portfolio_data.items(), key=lambda x: x[0])
         for symbol, df in _short_items:
-            if date not in df.index or symbol in positions or symbol in short_positions:
+            if date not in df.index:
+                continue
+            if symbol in positions or symbol in short_positions:
+                if _cand_log_on:
+                    _sdl = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
+                    if _is_entry_bar(signals, _edge_masks, symbol, _sdl, -2):
+                        _cand(symbol, "short", _sdl, False, "duplicate_symbol")
                 continue
             if symbol in _open_entry_blocked:
                 continue
@@ -1659,6 +1723,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         and _entry_gap_mode() != "ignore"):
                     if _entry_gap_mode() == "skip":
                         _sizing_diag.record("skipped_gap_below_stop", symbol)
+                        _cand(symbol, "short", sig_date, False, "gap_below_stop")
                         continue
                     _s_gap_exit_now = True
                 _s_ir = float(_s_stop - ep) if (pd.notna(_s_stop) and _s_stop > ep) else None
@@ -1944,6 +2009,14 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     _s_final_ir = (_s_stop - _s_entry_fill
                                    if _s_impact_add > 0 and pd.notna(_s_stop)
                                    and _s_stop > _s_entry_fill else _s_ir)
+                    _s_bar_risk = (shares * inst_se.point_value * (_s_stop - _s_entry_fill)
+                                   if pd.notna(_s_stop) and _s_stop > _s_entry_fill else _fs_new_risk)
+                    _blr = _bar_limit_reason(_s_bar_risk, total_equity)
+                    if _blr is not None:
+                        _cand(symbol, "short", sig_date, False, _blr)
+                        continue
+                    _bar_admit(_s_bar_risk)
+                    _cand(symbol, "short", sig_date, True, shares=shares, fill=_s_entry_fill)
                     reserved_margin += _s_margin
                     cash -= commission
                     short_positions[symbol] = {
@@ -2100,7 +2173,18 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
                     # Match the cash-long minimum meaningful equity size.
                     if shares <= 0.001:
+                        _cand(symbol, "short", sig_date, False, "cash")
                         continue
+                    # --- PER-BAR ENTRY LIMITS (#500) ---
+                    _s_bar_risk = (shares * (_s_stop - _s_entry_fill)
+                                   if pd.notna(_s_stop) and _s_stop > _s_entry_fill
+                                   else _inst.notional(inst_se, shares, _s_entry_fill) * _s_stop_dist)
+                    _blr = _bar_limit_reason(_s_bar_risk, total_equity)
+                    if _blr is not None:
+                        _cand(symbol, "short", sig_date, False, _blr)
+                        continue
+                    _bar_admit(_s_bar_risk)
+                    _cand(symbol, "short", sig_date, True, shares=shares, fill=_s_entry_fill)
                     commission = _inst.commission(inst_se, shares)
                     cash -= commission   # proceeds and collateral cancel; only commission is a real cash cost
                     # Reserve collateral off the FINAL (post-ADV-cap) notional (#430).
@@ -2181,6 +2265,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     return (0, str(sd), sym)
                 return (1, "", sym)
             _entry_items = sorted(portfolio_data.items(), key=_long_sig_key)
+        elif _priority == "score":
+            _entry_items = sorted(
+                portfolio_data.items(),
+                key=lambda it: _score_key(
+                    it[0], prev_trading_dates[it[0]].get(date) if execution_time == "open" else date))
         elif _priority == "random_seed":
             # Per-bar seed, see the short-entry block above (#412).
             _rng_long = _random.Random(f"{CONFIG.get('entry_random_seed', 42)}|{date}|long")
@@ -2210,13 +2299,25 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             # stop), so a hold-state series that still reads 1 does not re-buy
             # the bar it was stopped out of. (A PIT cover cannot reach here: the
             # membership / force-exit check just below refuses the entry.)
-            if symbol in positions or symbol in short_positions: continue
+            if _cand_log_on:
+                _sd_log = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
+                _sig_here = _is_entry_bar(signals, _edge_masks, symbol, _sd_log, 1)
+            else:
+                _sig_here = False
+            if symbol in positions or symbol in short_positions:
+                if _sig_here:
+                    _cand(symbol, "long", _sd_log, False, "duplicate_symbol")
+                continue
             if symbol in _open_entry_blocked:
+                if _sig_here:
+                    _cand(symbol, "long", _sd_log, False, "same_bar_reentry")
                 continue
             if _is_delisted(symbol, date):
                 continue
             if (not _pit_flag(symbol, date, '_pit_member', True)
                     or _pit_flag(symbol, date, '_pit_force_exit', False)):
+                if _sig_here:
+                    _cand(symbol, "long", _sd_log, False, "pit")
                 continue
             raw_entry_price, entry_exec_date = np.nan, pd.NaT
             signal_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
@@ -2243,6 +2344,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 if pd.notna(_gap_lvl) and raw_entry_price <= _gap_lvl:
                     if _entry_gap_mode() == "skip":
                         _sizing_diag.record("skipped_gap_below_stop", symbol)
+                        _cand(symbol, "long", signal_date, False, "gap_below_stop")
                         continue
                     _gap_exit_now = True
 
@@ -2252,6 +2354,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                           else reserved_short_collateral)
             if entry_price > 0 and _bp <= 0:
                 _sizing_diag.record("clamped_by_cash", symbol)
+                _cand(symbol, "long", signal_date, False, "cash")
             if entry_price > 0 and _bp > 0:
                 # --- PER-SIGNAL SIZE MULTIPLIER ---
                 # Apply per-signal size multiplier when the strategy provides one
@@ -2601,6 +2704,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 if not check_portfolio_heat({**positions, **short_positions},
                                             new_position_risk, total_equity, max_heat):
                     _sizing_diag.record("rejected_by_heat", symbol)
+                    _cand(symbol, "long", signal_date, False, "heat")
                     continue
 
                 # Cash constraint (equity full-notional pre-clamp; futures clamp on margin below)
@@ -2618,6 +2722,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         max_shares_allowed = adv_20 * max_pct_adv
                         if max_shares_allowed <= 0:
                             _sizing_diag.record("clamped_by_adv", symbol)
+                            _cand(symbol, "long", signal_date, False, "adv")
                             continue
                         if max_shares_allowed < shares:
                             _sizing_diag.record("clamped_by_adv", symbol)
@@ -2673,7 +2778,9 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _sizing_diag.record("clamped_by_cash", symbol)
                         # Robustly calculate the absolute maximum number of shares we can possibly afford
                         shares = _bp / (entry_price + CONFIG['commission_per_share'])
-                        if shares <= 0: continue  # Cannot afford even a fraction of a share
+                        if shares <= 0:  # Cannot afford even a fraction of a share
+                            _cand(symbol, "long", signal_date, False, "cash")
+                            continue
                         # Recalculate final total cost with the affordable share size
                         total_cost = (shares * entry_price) + (shares * CONFIG['commission_per_share'])
                         # Division followed by separate notional/fee products can
@@ -2686,6 +2793,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     can_afford = _bp >= total_cost and shares > 0.001
 
                 # Final check: Ensure we can afford the trade and it's a meaningful size
+                if not can_afford:
+                    _cand(symbol, "long", signal_date, False, "cash")
                 if can_afford:
                     # --- CAPTURE FEATURES AT ENTRY ---
                     # Read from the SIGNAL bar, not the fill bar (issue #310).
@@ -2771,7 +2880,21 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if not check_portfolio_heat({**positions, **short_positions},
                                                     _final_risk, total_equity, max_heat):
                             _sizing_diag.record("rejected_by_heat", symbol)
+                            _cand(symbol, "long", signal_date, False, "heat")
                             continue
+                    # --- PER-BAR ENTRY LIMITS (#500), after every other gate ---
+                    _bar_risk_new = (shares * inst.point_value * (entry_price - stop_loss_level)
+                                     if pd.notna(stop_loss_level) and stop_loss_level < entry_price
+                                     else _final_risk)
+                    _blr = _bar_limit_reason(_bar_risk_new, total_equity)
+                    if _blr is not None:
+                        _cand(symbol, "long", signal_date, False, _blr)
+                        continue
+                    _bar_admit(_bar_risk_new)
+                    _cand(symbol, "long", signal_date, True, shares=shares, fill=entry_price)
+                    _sc_feat = _entry_score(symbol, signal_date)
+                    if pd.notna(_sc_feat):
+                        features['EntryScore'] = _sc_feat
                     positions[symbol] = {
                         'shares': shares, 'entry_price': entry_price,
                         'raw_entry_price': raw_entry_price,
@@ -3005,7 +3128,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         # as a strategy finding. Logging only on the success path would have
         # left the headline case silent, which is the defect being fixed.
         # Caught by this ticket's own tests, not by inspection.
-        _sizing_diag.log_report()
+        if not _shadow:
+            _sizing_diag.log_report()
         return None
 
     duration_list = [t['HoldDuration'] for t in trade_log]
@@ -3020,9 +3144,74 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # default and fires per entry, so a per-site warning is thousands of lines
     # on a thin universe and gets filtered out within a day. The counts also go
     # on the result, so a test asserts them instead of scraping a log.
-    _sizing_diag.log_report()
+    if not _shadow:
+        _sizing_diag.log_report()
+
+    if _cand_log_on and CONFIG.get("shadow_skipped_candidates", False):
+        _attach_shadow_returns(entry_candidates, portfolio_data, signals, initial_capital,
+                               allocation_pct, spy_df, vix_df, tnx_df, stop_config,
+                               signal_aux, intrabar_data)
+    _extra = {"entry_candidates": entry_candidates} if _cand_log_on else {}
 
     return {**metrics, "pnl_percent": final_pnl_percent, "Trades": len(pnl_list),
             "trade_pnl_list": pnl_list, "trade_log": trade_log, "initial_capital": initial_capital,
             "portfolio_timeline": portfolio_timeline.dropna(),
-            "sizing_diagnostics": _sizing_diag.as_dict(), **survivorship_stats}
+            "sizing_diagnostics": _sizing_diag.as_dict(), **survivorship_stats, **_extra}
+
+
+# Skip reasons that are selection / budget effects -- the ones a shadow return
+# is meant to audit. Structural refusals (duplicate symbol, PIT, gap) are not
+# trades the book chose against, so they get no shadow.
+_SHADOW_REASONS = frozenset({"cash", "heat", "bar_risk", "bar_count", "adv"})
+
+
+def _attach_shadow_returns(candidates, portfolio_data, signals, initial_capital,
+                           allocation_pct, spy_df, vix_df, tnx_df, stop_config,
+                           signal_aux, intrabar_data):
+    """Hypothetical outcome of every budget-skipped candidate (#500).
+
+    Each one is re-run through ``run_portfolio_simulation`` itself -- the same
+    fills, stops, trail, time stop and strategy exits -- as the only position in
+    an otherwise empty one-symbol book, entered on the bar it was skipped. Only
+    the candidate's own entry signal is kept; later exit signals stay. The
+    frame is cut ``shadow_horizon_bars`` (default 260) after the fill, so a
+    trade still open there is marked at that close (ExitReason "End of
+    Backtest"). Adds ShadowReturnPct / ShadowExitDate / ShadowExitReason.
+    """
+    horizon = int(CONFIG.get("shadow_horizon_bars", 260) or 260)
+    for c in candidates:
+        if c.get("Taken") or c.get("skipped_reason") not in _SHADOW_REASONS:
+            continue
+        sym = c["Symbol"]
+        df = portfolio_data.get(sym)
+        if df is None or c.get("SignalDate") is None:
+            continue
+        fill = pd.Timestamp(c["Date"])
+        sig_d = pd.Timestamp(c["SignalDate"])
+        if fill.tzinfo is None and df.index.tz is not None:
+            fill, sig_d = fill.tz_localize(df.index.tz), sig_d.tz_localize(df.index.tz)
+        if fill not in df.index or sig_d not in df.index:
+            continue
+        i_sig, i_fill = df.index.get_loc(sig_d), df.index.get_loc(fill)
+        sub = df.iloc[max(0, i_sig - 300): i_fill + horizon + 1]
+        entry_v = 1 if c["Side"] == "long" else -2
+        sig = signals[sym].reindex(sub.index).astype(float).copy()
+        sig[(sig == 1) | (sig == -2)] = 0.0
+        sig.loc[sig_d] = entry_v
+        aux = None
+        if signal_aux and sym in signal_aux:
+            aux = {sym: signal_aux[sym].reindex(sub.index)}
+        ib = {sym: intrabar_data[sym]} if intrabar_data and sym in intrabar_data else None
+        res = run_portfolio_simulation(
+            {sym: sub}, {sym: sig}, initial_capital, allocation_pct, spy_df, vix_df,
+            tnx_df, stop_config, intrabar_data=ib, start_date=fill, signal_aux=aux,
+            _shadow=True)
+        if not res:
+            continue
+        t = next((t for t in res["trade_log"]
+                  if pd.Timestamp(t["EntryDate"]) == fill.tz_localize(None)
+                  or t["EntryDate"] == fill.isoformat()), None)
+        if t is not None:
+            c["ShadowReturnPct"] = t["ProfitPct"]
+            c["ShadowExitDate"] = t["ExitDate"]
+            c["ShadowExitReason"] = t["ExitReason"]

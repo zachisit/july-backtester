@@ -369,6 +369,31 @@ The common swing-book rule: risk X% of equity to the stop, capped at Y% of equit
 
   A stop hit on an earlier bar wins. Sessions are the symbol's own trading bars, not calendar days. The exit reason is `Time Stop`.
 
+#### Which signals get taken on a busy bar (#500)
+
+When more signals fire than cash, heat or the per-bar caps allow, `entry_priority` decides the order they are tried in. `"alphabetical"` is a hidden selection rule: it favours A-names. `"score"` orders by a column the strategy returns next to `Signal`:
+
+```python
+df["entry_score"] = med20_dollar_volume   # computed only from data known at the signal bar
+```
+
+```python
+"entry_priority": "score",
+"entry_score_ascending": False,    # highest score first; ties alphabetical; NaN last
+"max_new_positions_per_bar": None, # e.g. 5
+"max_new_risk_per_bar": 0.02,      # sum of shares * (entry - stop) for new entries <= 2% of equity
+"log_entry_candidates": True,      # writes *_entry_candidates.csv next to the trade log
+"shadow_skipped_candidates": True, # hypothetical return of every budget-skipped candidate
+```
+
+- The engine reads the score at the **signal bar** only.
+- `"score"` with no `entry_score` column fails the run. It does not fall back to alphabetical.
+- The per-bar caps apply after cash, ADV and heat, in priority order. A candidate that fails a cap is skipped and the next one is tried.
+- The candidate log has one row per signalled entry: score, `Taken`, and `skipped_reason`, which is one of `cash`, `heat`, `bar_risk`, `bar_count`, `adv`, `duplicate_symbol`, `same_bar_reentry`, `pit` or `gap_below_stop`. Taken trades also carry `EntryScore` in the trade log.
+- **Shadow returns** re-run each budget-skipped candidate through the same engine, as the only position in a one-symbol book. The result is in `ShadowReturnPct`, `ShadowExitDate` and `ShadowExitReason`.
+  - The trade is cut `shadow_horizon_bars` (260) after the fill.
+  - It costs one extra simulation per skipped candidate, so leave it off for busy universes unless you need the audit.
+
 ### Slippage and Commission
 
 ```python
