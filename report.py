@@ -138,6 +138,32 @@ def _load_initial_capital(run_dir: Path) -> float | None:
     return None
 
 
+def _fallback_initial_capital(timeline: "pd.Series | None", equity_path: Path) -> float | None:
+    """Initial capital when neither --equity nor config_snapshot.json gives one.
+
+    Uses the first point of the companion ``<stem>_equity.csv``: the engine's
+    ``portfolio_timeline`` starts at the first bar of the run, so that value is
+    the end-of-first-bar equity: the starting capital plus only that bar's P&L
+    and costs (zero when nothing is held on the first bar) -- far closer than a
+    fixed default. Returns None, after printing a
+    WARNING that the analyzer default is being assumed, when there is no usable
+    curve either; every %-based figure then depends on that guess.
+    """
+    if timeline is not None:
+        values = pd.to_numeric(timeline, errors="coerce").dropna()
+        if not values.empty and float(values.iloc[0]) > 0:
+            capital = float(values.iloc[0])
+            print(f"Initial capital inferred from the first point of {equity_path.name}: "
+                  f"{capital:,.2f} (end-of-first-bar equity; pass --equity to override)")
+            return capital
+    print(f"WARNING: no initial capital found (no --equity, no config_snapshot.json "
+          f"initial_capital, no usable {equity_path.name}); assuming "
+          f"${INITIAL_EQUITY:,.0f}. Total return, CAGR, Calmar, drawdown %, turnover "
+          f"and Monte Carlo figures all depend on it -- pass --equity <capital> "
+          f"if the backtest used a different starting capital.")
+    return None
+
+
 def _load_strategy_verdicts(run_dir: Path) -> list[dict]:
     """Load llm_verdict.json from a run directory if present.
 
@@ -332,8 +358,9 @@ def main():
         type=float,
         default=None,
         help=f"Initial equity for the analysis. If omitted, auto-loaded from "
-             f"config_snapshot.json's initial_capital when available, else "
-             f"falls back to {INITIAL_EQUITY}. The walk-forward (WFA) section "
+             f"config_snapshot.json's initial_capital when available, else the "
+             f"first value of the companion <stem>_equity.csv, else falls back to "
+             f"{INITIAL_EQUITY} with a WARNING. The walk-forward (WFA) section "
              f"ignores this when the run has wfa_inputs.json: it always uses the "
              f"run's own initial capital so it matches main.py.",
     )
@@ -453,6 +480,11 @@ def main():
             this_config = {**config_params}
             if portfolio_timeline is not None:
                 this_config['PORTFOLIO_TIMELINE'] = portfolio_timeline
+            if args.equity is None and initial_capital is None:
+                _fallback = _fallback_initial_capital(
+                    portfolio_timeline, csv_file.parent / f"{csv_file.stem}_equity.csv")
+                if _fallback is not None:
+                    this_config['INITIAL_EQUITY'] = _fallback
             _verdict_match = _match_strategy_verdict(_strategy_verdicts, csv_file.stem,
                                                     csv_file.parent.name)
             if _verdict_match is not None:
@@ -529,8 +561,10 @@ def main():
         # Pair the curve with the trades CSV it was written beside, never with
         # --report-name: that would score this CSV's trades on another
         # strategy's curve (#477).
-        portfolio_timeline = _load_equity_file(
-            Path(csv_path).parent / f"{Path(csv_path).stem}_equity.csv")
+        _equity_path = Path(csv_path).parent / f"{Path(csv_path).stem}_equity.csv"
+        portfolio_timeline = _load_equity_file(_equity_path)
+        if args.equity is None and initial_capital is None:
+            initial_capital = _fallback_initial_capital(portfolio_timeline, _equity_path)
         config_params = {
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
