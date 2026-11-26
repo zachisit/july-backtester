@@ -629,7 +629,7 @@ class TestAdjustedPriceScreen474:
     @pytest.fixture(autouse=True)
     def _reset_warning(self, monkeypatch):
         import helpers.rule_based_universe as rbu
-        monkeypatch.setattr(rbu, "_ADJUSTED_PRICE_WARNED", False)
+        monkeypatch.setattr(rbu, "_ADJUSTED_PRICE_WARNED", set())
 
     def test_price_screen_off_by_default(self):
         assert DEFAULTS["universe_min_price"] == 0.0
@@ -657,6 +657,33 @@ class TestAdjustedPriceScreen474:
         with caplog.at_level(logging.WARNING, logger="helpers.rule_based_universe"):
             resolve_universe("2015-06-30", _cfg(corpus))
         assert not [r for r in caplog.records if "ADJUSTED closes" in r.getMessage()]
+
+    def test_new_threshold_warns_again(self, corpus, caplog):
+        """#475 review: the once-flag was process-global, so a second portfolio
+        or run in the same process with a different threshold got no warning
+        and the message named only the first value."""
+        import logging
+        with caplog.at_level(logging.WARNING, logger="helpers.rule_based_universe"):
+            resolve_universe("2015-06-30", _cfg(corpus, universe_min_price=5.0))
+            resolve_universe("2015-06-30", _cfg(corpus, universe_min_price=2.0))
+            resolve_universe("2016-06-30", _cfg(corpus, universe_min_price=2.0))
+        hits = [r.getMessage() for r in caplog.records if "ADJUSTED closes" in r.getMessage()]
+        assert len(hits) == 2
+        assert "universe_min_price=5.0" in hits[0] and "universe_min_price=2.0" in hits[1]
+
+    @pytest.mark.parametrize("bad", [-1, -0.01, float("nan"), float("inf"), "5", True, [5]])
+    def test_invalid_threshold_rejected(self, corpus, bad):
+        """#475 review: -1 / NaN silently disabled the screen, True acted as $1,
+        a string raised a bare TypeError. Each now fails loudly, up front."""
+        with pytest.raises(ValueError, match="universe_min_price"):
+            resolve_universe("2015-06-30", _cfg(corpus, universe_min_price=bad))
+
+    @pytest.mark.parametrize("ok", [0, 0.0, 5, 2.5])
+    def test_valid_thresholds_accepted(self, corpus, ok):
+        resolve_universe("2015-06-30", _cfg(corpus, universe_min_price=ok))
+
+    def test_none_falls_back_to_default(self, corpus):
+        assert "PENNY" in resolve_universe("2015-06-30", _cfg(corpus, universe_min_price=None))
 
     def test_dollar_volume_screen_unaffected(self, corpus):
         """The liquidity screen that replaces the price screen still removes THIN."""

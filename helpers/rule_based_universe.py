@@ -59,6 +59,7 @@ bare-ticker fallback entirely.
 from __future__ import annotations
 
 import logging
+import math
 import os
 import re
 from datetime import datetime
@@ -97,8 +98,12 @@ DEFAULTS = {
     # "close" on date D depends on splits/dividends that happen after D. A
     # nominal-price screen on it is look-ahead: at $5 it removed AAPL ($0.95
     # adjusted), NVDA and AMZN from the 2005 top-500 — mostly future winners.
-    # The dollar-volume screen (split-invariant: price/k * volume*k) already
-    # removes illiquid microcaps. Setting this > 0 still works but warns.
+    # The dollar-volume screen (split-invariant: price/k * volume*k)
+    # removes the illiquid tail but NOT every penny name: with it off,
+    # rule:us_all (and large top-N) admits genuine sub-$1 and bankrupt names
+    # that the old screen excluded correctly (#475 review). A correct as-of
+    # screen needs the split history to un-adjust closes (#508).
+    # Setting this > 0 still works but warns.
     "universe_min_price": 0.0,
     "universe_min_dollar_volume": 1_000_000.0,
     "universe_min_bars": 252,
@@ -432,17 +437,30 @@ def _liquidity_at(path: str, as_of: pd.Timestamp, adv_window: int):
     return float(df["Close"].iloc[-1]), dollar_volume, len(df)
 
 
-_ADJUSTED_PRICE_WARNED = False
+_ADJUSTED_PRICE_WARNED: set = set()
+
+
+def _validate_min_price(value) -> float:
+    """``universe_min_price`` must be a finite number >= 0 (#475 review).
+
+    Before, ``-1`` and ``NaN`` silently switched the screen off, ``True``
+    acted as $1 and a string raised a bare ``TypeError`` mid-schedule."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"universe_min_price must be a number >= 0, got {value!r}")
+    value = float(value)
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"universe_min_price must be a finite number >= 0, got {value!r}")
+    return value
 
 
 def _warn_adjusted_price_screen(min_price: float) -> None:
-    """Warn (once per process) that a nominal-price screen on adjusted closes
-    is look-ahead-biased (#474). Once, because a re-based schedule calls
-    ``resolve_universe`` ~20+ times per run."""
-    global _ADJUSTED_PRICE_WARNED
-    if _ADJUSTED_PRICE_WARNED:
+    """Warn that a nominal-price screen on adjusted closes is look-ahead-biased
+    (#474). Once per distinct threshold per process, because a re-based
+    schedule calls ``resolve_universe`` ~20+ times per run, but a second
+    portfolio or run with a different threshold still gets its own warning."""
+    if min_price in _ADJUSTED_PRICE_WARNED:
         return
-    _ADJUSTED_PRICE_WARNED = True
+    _ADJUSTED_PRICE_WARNED.add(min_price)
     logger.warning(
         "rule universe: universe_min_price=%s is applied to retrospectively "
         "ADJUSTED closes, so eligibility on date D depends on splits/dividends "
@@ -483,8 +501,8 @@ def resolve_universe(as_of, config: dict | None = None,
         val = config.get(key, DEFAULTS[key])
         return DEFAULTS[key] if val is None and key != "universe_top_n" else val
 
-    min_price = _cfg("universe_min_price")
-    if min_price and min_price > 0:
+    min_price = _validate_min_price(_cfg("universe_min_price"))
+    if min_price > 0:
         _warn_adjusted_price_screen(min_price)
     min_dollar_volume = _cfg("universe_min_dollar_volume")
     min_bars = _cfg("universe_min_bars")
