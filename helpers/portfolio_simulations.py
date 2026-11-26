@@ -434,12 +434,14 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     _ts_cfg = _time_stop_cfg(stop_config)   # (sessions, mode) or None (#501)
 
     def _is_at_open_exit(reason):
-        """Exit filled at this bar's Open under execution_time="open": a same-bar
-        re-entry at that open is not blocked. A next_open time stop is a
-        market-on-open exit, so it counts; a close-mode one does not."""
-        return (reason in _AT_OPEN_EXIT_REASONS
-                or (reason == TIME_STOP_REASON and _ts_cfg is not None
-                    and _ts_cfg[1] == "next_open"))
+        """Exits that do NOT block a same-bar re-entry under the #401 guard.
+
+        A time stop is deliberately NOT one of them, even in next_open mode: the
+        re-entry would have been decided on the prior bar while the position was
+        still held, which is exactly the case the guard exists to refuse (a
+        gapped stop that fills at the open blocks for the same reason). Kept as
+        a function so the rule is stated in one place (#501 QA round 2)."""
+        return reason in _AT_OPEN_EXIT_REASONS
 
     if stop_config.get("type") == "signal_bar_low" and any(
             (s == -2).any() for s in signals.values()):
@@ -2160,6 +2162,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _close_short_now(symbol, _spos0, date, _cov0,
                                          _stop_exit_reason(stop_config, _cov0, _spos0['stop_loss_level'], "short"))
                         del short_positions[symbol]
+                # --- ENTRY BAR survived: 1-session close time stop (#501, mirror of the long side) ---
+                if (symbol in short_positions and _ts_cfg is not None and _ts_cfg == (1, "close")
+                        and short_positions[symbol]['entry_date'] == date
+                        and pd.notna(df.loc[date].get('Close'))):
+                    _close_short_now(symbol, short_positions[symbol], date,
+                                     df.loc[date].get('Close'), TIME_STOP_REASON)
+                    del short_positions[symbol]
 
         # --- POSITION ENTRY LOGIC ---
         if _priority == "signal_date":

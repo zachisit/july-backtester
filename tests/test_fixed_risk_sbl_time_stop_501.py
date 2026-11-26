@@ -335,12 +335,21 @@ class TestQARegressions:
         assert t["ExitReason"] == TIME_STOP_REASON
         assert pd.Timestamp(t["ExitDate"]) == df.index[exit_bar]
 
-    def test_next_open_time_stop_does_not_block_same_open_reentry(self):
-        # Entry bar1; N=2 next_open exits at bar3's open; a fresh signal on bar2
-        # (level trigger) re-enters at bar3's open, as a strategy exit would allow.
+    def test_next_open_time_stop_blocks_same_open_reentry(self):
+        # Entry bar1; N=2 next_open exits at bar3's open. A signal on bar2 was decided
+        # while the position was still held, so the #401 guard refuses a re-buy at
+        # that same open (as it does after a gapped stop); bar4 may enter.
         df = _frame([(100 + i, 101 + i, 99 + i, 100 + i) for i in range(8)])
         stop = {**SBL, "time_stop": {"sessions": 2, "exit": "next_open"}}
-        sig = [1, 0, 1, 0, 0, 0, 0, 0]
+        sig = [1, 0, 1, 1, 0, 0, 0, 0]
         r = _run(df, sig, stop, {"max_position_pct": 1.0, "entry_trigger": "level"})
         ents = [pd.Timestamp(t["EntryDate"]) for t in r["trade_log"]]
-        assert df.index[3] in ents
+        assert df.index[3] not in ents
+        assert df.index[4] in ents
+
+    def test_one_session_close_time_stop_on_short_exits_entry_bar(self):
+        df = _frame([(100 - i, 101 - i, 99 - i, 100 - i) for i in range(6)])
+        stop = {"type": "percentage", "value": 0.5, "time_stop": {"sessions": 1, "exit": "close"}}
+        t = _run(df, [-2, 0, 0, 0, 0, 0], stop, {"position_sizing_method": "fixed"})["trade_log"][0]
+        assert t["EntryDate"] == t["ExitDate"]
+        assert t["ExitReason"] == TIME_STOP_REASON
