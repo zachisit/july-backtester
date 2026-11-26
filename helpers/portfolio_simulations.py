@@ -2671,6 +2671,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # to the sized position before the heat check.
                 shares = shares * _size_mult
                 _sized_zero = not (shares > 0)   # sizing itself declined (e.g. no stop distance)
+                _adv_cut = False                  # the ADV cap reduced this order
 
                 # risk_pct_capped and fixed_contracts already answer in UNITS
                 # (contracts/shares); the other four return equity-equivalent
@@ -2751,6 +2752,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             continue
                         if max_shares_allowed < shares:
                             _sizing_diag.record("clamped_by_adv", symbol)
+                            _adv_cut = True
                         shares = min(shares, max_shares_allowed)
 
                 # --- VOLUME-BASED MARKET IMPACT ---
@@ -2766,7 +2768,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
                 # Integer contracts for futures; fractional shares pass through for equities.
                 shares = _inst.round_units(inst, shares)
-                if inst.integer_units and shares < 1:
+                if inst.integer_units and shares < 1 and not _adv_cut:
                     _sized_zero = True   # target under one contract: a size outcome, not cash
 
                 # --- AFFORDABILITY (margin-mode aware) ---
@@ -2821,7 +2823,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
                 # Final check: Ensure we can afford the trade and it's a meaningful size
                 if not can_afford:
-                    _cand(symbol, "long", signal_date, False, "zero_size" if _sized_zero else "cash")
+                    _cand(symbol, "long", signal_date, False,
+                          "zero_size" if _sized_zero
+                          else "adv" if (_adv_cut and inst.integer_units and shares < 1)
+                          else "cash")
                 if can_afford:
                     # --- CAPTURE FEATURES AT ENTRY ---
                     # Read from the SIGNAL bar, not the fill bar (issue #310).

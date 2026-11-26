@@ -298,3 +298,15 @@ class TestQARound2:
             r = _run(data, sigs, aux, {"max_new_positions_per_bar": 0})
         assert r is None
         assert "No trades: 1 entry candidates" in caplog.text and "bar_count=1" in caplog.text
+
+    def test_futures_long_cut_below_one_contract_by_adv_is_labelled_adv(self):
+        n = 8
+        data = {"MESM6": _f([(5000, 5010, 4990, 5000)] * n), "AAA": _f([(100, 101, 99, 100)] * n)}
+        sigs = {"MESM6": _sig(data["MESM6"], {2: 1}), "AAA": _sig(data["AAA"], {2: 1})}
+        aux = {k: pd.DataFrame({"entry_score": 1.0}, index=d.index) for k, d in data.items()}
+        inst = {"default_asset_class": "equity", "overrides": {},
+                "futures_initial_margin_pct": 0.10, "futures_commission_per_contract": 0.0,
+                "futures_slippage_ticks": 0.0}
+        r = _run(data, sigs, aux, {"instruments": inst, "max_pct_adv": 1e-7}, alloc=0.10)
+        mes = [c["skipped_reason"] for c in r["entry_candidates"] if c["Symbol"] == "MESM6"]
+        assert mes == ["adv"]
