@@ -2387,21 +2387,32 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     can_afford = shares >= 1 and (_margin + commission_cost) <= (cash - reserved_margin)
                 else:
                     # Equity cash_full: full notional + commission debited from cash.
-                    total_cost = _inst.margin_required(inst, shares, entry_price) + commission_cost
+                    # Every cost below is priced by _entry_cost, the same
+                    # instrument helpers that set the `total_cost` debited from
+                    # cash on fill, so the affordability test and the charged
+                    # cost cannot diverge (#496). The clamp used to recompute it
+                    # as `shares * price + shares * CONFIG['commission_per_share']`,
+                    # ignoring a per-symbol commission_value / point_value
+                    # override: it sized off the global commission and debited
+                    # a cost different from the commission the trade log booked.
+                    def _entry_cost(units):
+                        return (_inst.margin_required(inst, units, entry_price)
+                                + _inst.commission(inst, units))
+                    total_cost = _entry_cost(shares)
                     if total_cost > _bp:
                         _sizing_diag.record("clamped_by_cash", symbol)
-                        # Robustly calculate the absolute maximum number of shares we can possibly afford
-                        shares = _bp / (entry_price + CONFIG['commission_per_share'])
+                        # Largest size the cash covers, from the per-unit cost.
+                        _unit_cost = _entry_cost(1.0)
+                        shares = _bp / _unit_cost if _unit_cost > 0 else 0.0
                         if shares <= 0: continue  # Cannot afford even a fraction of a share
-                        # Recalculate final total cost with the affordable share size
-                        total_cost = (shares * entry_price) + (shares * CONFIG['commission_per_share'])
+                        total_cost = _entry_cost(shares)
                         # Division followed by separate notional/fee products can
-                        # round a fully affordable trade a few ULPs above cash.
-                        # Step down to a representable size that really fits,
-                        # rather than rejecting the entire entry or overdrawing.
+                        # round a fully affordable trade a few ULPs above cash
+                        # (#488). Step down to a representable size that really
+                        # fits, rather than rejecting the entire entry or overdrawing.
                         while total_cost > _bp:
                             shares = float(np.nextafter(shares, 0.0))
-                            total_cost = (shares * entry_price) + (shares * CONFIG['commission_per_share'])
+                            total_cost = _entry_cost(shares)
                     can_afford = _bp >= total_cost and shares > 0.001
 
                 # Final check: Ensure we can afford the trade and it's a meaningful size

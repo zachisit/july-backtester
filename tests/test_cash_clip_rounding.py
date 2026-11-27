@@ -141,3 +141,65 @@ class TestSameDaySwitchFills:
         assert b_trade["Shares"] == pytest.approx(
             cash_at_switch / (price + COMMISSION), rel=1e-12), "entry was not clipped to cash"
         assert _cost(b_trade) <= cash_at_switch * (1 + CASH_RTOL)
+
+
+# --------------------------------------------------------------------------
+# (d) #496: the long clamp and step-down price the entry through the same
+#     instrument helpers that charge the fill, not through the global
+#     commission_per_share. A per-symbol commission override used to make the
+#     clamp size off one cost while the fill and the exit charged another.
+# --------------------------------------------------------------------------
+# (commission_value, commission_model, price). Each price makes
+# s = cash / (p + commission_value) overshoot cash, so the step-down loop
+# itself runs under the overridden commission.
+OVERRIDE_CASES = [
+    (0.0, "per_share", 2.535882004306689),
+    (0.05, "per_share", 2.0465826806177563),
+    (1.0, "per_contract", 2.573025940277384),
+]
+
+
+def _assert_clip_overshoots(cash, price, commission):
+    shares = cash / (price + commission)
+    total_cost = shares * price + shares * commission
+    assert total_cost > cash, "inputs no longer trigger the float overshoot"
+    assert total_cost - cash < 1e-9 * cash
+
+
+class TestLongClipUsesInstrumentCost:
+    @pytest.mark.parametrize("commission_value, commission_model, price", OVERRIDE_CASES)
+    @pytest.mark.parametrize("execution_time", ["open", "close"])
+    def test_clip_and_charge_use_overridden_commission(
+            self, frictionless, monkeypatch, commission_value, commission_model,
+            price, execution_time):
+        # Self-guard: the override must differ from the global, or the old
+        # inline formula would agree with the helper and the test proves nothing.
+        assert commission_value != COMMISSION
+        _assert_clip_overshoots(CASH, price, commission_value)
+        monkeypatch.setitem(CONFIG, "execution_time", execution_time)
+        monkeypatch.setitem(CONFIG, "instruments", {"overrides": {"T": {
+            "commission_model": commission_model,
+            "commission_value": commission_value,
+        }}})
+        dates = pd.bdate_range("2024-01-02", periods=6)
+        sig = pd.Series([0, 1, 0, 0, -1, 0], index=dates)
+        result = run_portfolio_simulation(
+            {"T": _flat(dates, price)}, {"T": sig}, CASH, 1.0,
+            None, None, None, {"type": "none"})
+        assert result is not None and result["trade_log"], "all-in entry was dropped"
+        trade, = result["trade_log"]
+        shares, fill = trade["Shares"], trade["EntryPrice"]
+
+        # Clipped against the instrument's commission, not the global one.
+        assert shares == pytest.approx(CASH / (price + commission_value), rel=1e-12)
+        assert shares != pytest.approx(CASH / (price + COMMISSION), rel=1e-9)
+        # The cost affordability tested is the cost charged, and it fits.
+        assert shares * fill + shares * commission_value <= CASH
+        # Both sides charged the instrument commission (flat price, no slippage).
+        assert trade["Profit"] == pytest.approx(-2 * shares * commission_value, abs=1e-6)
+        # Cash accounting closes: what the entry debited is what the trade log
+        # says it cost. The pre-#496 clamp debited the global commission while
+        # the log booked the override, leaving these apart by
+        # shares * |override - global|.
+        final_equity = result["portfolio_timeline"].iloc[-1]
+        assert final_equity == pytest.approx(CASH + trade["Profit"], rel=CASH_RTOL)
