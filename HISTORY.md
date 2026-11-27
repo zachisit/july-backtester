@@ -6,6 +6,7 @@
 
 - **Gap-through stop fills are labelled `Stop Loss (gap)`** when a stop fills worse than its level (#499/#502). Numbers are unchanged; only `ExitReason` differs.
 - **An entry whose fill is already through its structural stop (`atr`, `signal_bar`) is skipped** by default (`gap_below_stop_on_entry: "skip"`, #499/#502). Previously a `signal_bar` entry was taken with no stop and an `atr` entry stopped out on the fill bar. Set `"ignore"` to reproduce older runs.
+- **New: `fixed_risk` sizing, a `signal_bar_low` stop (raw low minus an offset, rounded to cents, with an optional ATR trail) and a session-count `time_stop`** (#501/#503). All opt-in; existing configs are unchanged. A cash-clamped `fixed_risk` entry can still come out fractional until #507 is fixed.
 
 ## [1.17.0] — 2026-11-27
 

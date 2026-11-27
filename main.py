@@ -356,6 +356,10 @@ def _classify_short_lived(window_idx, start_date, end_date, tol_days=7):
     return reasons
 
 
+# Strategy-output columns forwarded to the engine next to Signal (#500/#501).
+_SIGNAL_AUX_COLUMNS = ("raw_low", "entry_score")
+
+
 def run_single_simulation(args):
     """
     Function to run one combination of (portfolio, strategy, stop-loss).
@@ -416,6 +420,14 @@ def run_single_simulation(args):
 
         # The simulator now handles stop-loss logic internally.
         final_signals = {symbol: df['Signal'] for symbol, df in base_signals_with_dfs.items()}
+        # Optional per-bar columns a strategy may return next to Signal: the raw
+        # (unadjusted) signal-bar low for the signal_bar_low stop (#501) and an
+        # entry score for entry_priority="score" (#500). Read at the signal bar.
+        signal_aux = {}
+        for symbol, df in base_signals_with_dfs.items():
+            _aux_cols = [c for c in _SIGNAL_AUX_COLUMNS if c in df.columns]
+            if _aux_cols:
+                signal_aux[symbol] = df[_aux_cols]
 
         # --- PIT SIGNAL GATING ---
         # When the portfolio was built from a ``pit:`` universe, apply two filters:
@@ -447,6 +459,7 @@ def run_single_simulation(args):
             delisting_dates=delisting_dates_global,
             intrabar_data=intrabar_data_global,
             start_date=CONFIG["start_date"],
+            signal_aux=signal_aux or None,
         )
         
         # Zero trades: run_portfolio_simulation returns None. Return a stub so the
