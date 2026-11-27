@@ -188,6 +188,11 @@ def save_trades_to_csv(result, local_folder, run_id):
 
     try:
         pd.DataFrame(result['trade_log']).to_csv(local_filepath, index=False)
+        # Entry-candidate audit log (#500), written next to the trade log when
+        # the run had log_entry_candidates on.
+        if result.get('entry_candidates'):
+            _cand_path = os.path.join(local_folder, f"{symbol}_{strategy_name_safe}_entry_candidates.csv")
+            pd.DataFrame(result['entry_candidates']).to_csv(_cand_path, index=False)
 
         # Upload to S3 if enabled
         s3_bucket = CONFIG.get("s3_reports_bucket")

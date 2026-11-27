@@ -167,6 +167,12 @@ KNOWN_KEYS: set[str] = {
     "entry_priority",
     "entry_random_seed",
     "entry_trigger",
+    "entry_score_ascending",
+    "max_new_positions_per_bar",
+    "max_new_risk_per_bar",
+    "log_entry_candidates",
+    "shadow_skipped_candidates",
+    "shadow_horizon_bars",
     "nq100_pit_path",
     # Merged Norgate+Polygon provider (merged_data_root registered in SECTION 1)
     "merged_quality_filter_enabled",

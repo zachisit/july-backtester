@@ -227,6 +227,8 @@ CONFIG = {
     #                            (entry_random_seed, date): reproducible for a
     #                            given seed; run several seeds for a sensitivity
     #                            distribution (#412)
+    # "score"                  — by the strategy's per-bar `entry_score` column
+    #                            at the signal bar (#500); see the keys below
     "entry_priority": "alphabetical",
     "entry_random_seed": 42,
 
@@ -270,6 +272,23 @@ CONFIG = {
     # Asymmetry to know: -2 exits a long, but 1 does not cover a short, so a
     # direct -2 -> 1 stays short; a flip needs a -1 bar in between.
     "entry_trigger": "edge",
+    # Score priority + per-bar limits (issue #500). entry_priority="score" takes
+    # a bar's entries in order of the strategy's `entry_score` column (read at
+    # the signal bar), descending unless entry_score_ascending=True, ties
+    # alphabetical. No entry_score column -> the run fails (no silent fallback).
+    "entry_score_ascending": False,
+    # Per-bar caps on NEW entries, applied after cash / ADV / heat in priority
+    # order; a candidate that fails is skipped and the next one is tried.
+    "max_new_positions_per_bar": None,   # int, or None = no limit
+    "max_new_risk_per_bar": None,        # fraction of equity: sum of shares*(entry-stop)
+    # Candidate audit log: every signalled entry with its score, whether it was
+    # taken and why not (cash | heat | bar_risk | bar_count | adv | zero_size | duplicate_symbol
+    # | same_bar_reentry | pit | gap_below_stop). Saved as *_entry_candidates.csv.
+    "log_entry_candidates": False,
+    # Shadow outcome for budget-skipped candidates (needs log_entry_candidates):
+    # each is re-run alone through the same engine. Slow on busy universes.
+    "shadow_skipped_candidates": False,
+    "shadow_horizon_bars": 260,
 
     # ============================================================
     # SECTION 21: VERBOSE SUMMARY TABLE
