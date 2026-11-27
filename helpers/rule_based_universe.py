@@ -16,9 +16,12 @@ investable set*. An index roster is one way to get one. A **rule** is another,
 and it needs no membership data at all::
 
     universe(D) = { s : s has bars on D
-                    and close(s, D)             >= min_price
+                    and close(s, D)             >= min_price   (default 0 = off, #474)
                     and dollar_volume_20d(s, D) >= min_dollar_volume
                     and history(s, D)           >= min_bars }
+
+(``close`` is the corpus's ADJUSTED close, so a non-zero ``min_price`` is
+look-ahead: it depends on splits/dividends after D. Off by default — #474.)
 
 optionally capped to the top N by dollar volume for a fixed-size universe
 comparable across dates (a liquidity-ranked stand-in for an index's size
@@ -56,6 +59,8 @@ bare-ticker fallback entirely.
 from __future__ import annotations
 
 import logging
+import math
+import numbers
 import os
 import re
 from datetime import datetime
@@ -89,7 +94,18 @@ def resolve_parquet_dir(config: dict | None) -> str:
 
 
 DEFAULTS = {
-    "universe_min_price": 5.0,
+    # Default OFF (#474). The corpus stores only retrospectively ADJUSTED
+    # prices (Norgate total-return, then Polygon split-adjusted), so a stock's
+    # "close" on date D depends on splits/dividends that happen after D. A
+    # nominal-price screen on it is look-ahead: at $5 it removed AAPL ($0.95
+    # adjusted), NVDA and AMZN from the 2005 top-500 — mostly future winners.
+    # The dollar-volume screen (split-invariant: price/k * volume*k)
+    # removes the illiquid tail but NOT every penny name: with it off,
+    # rule:us_all (and large top-N) admits genuine sub-$1 and bankrupt names
+    # that the old screen excluded correctly (#475 review). A correct as-of
+    # screen needs the split history to un-adjust closes (#508).
+    # Setting this > 0 still works but warns.
+    "universe_min_price": 0.0,
     "universe_min_dollar_volume": 1_000_000.0,
     "universe_min_bars": 252,
     "universe_top_n": None,
@@ -422,6 +438,41 @@ def _liquidity_at(path: str, as_of: pd.Timestamp, adv_window: int):
     return float(df["Close"].iloc[-1]), dollar_volume, len(df)
 
 
+_ADJUSTED_PRICE_WARNED: set = set()
+
+
+def _validate_min_price(value) -> float:
+    """``universe_min_price`` must be a finite number >= 0 (#475 review).
+
+    Before, ``-1`` and ``NaN`` silently switched the screen off, ``True``
+    acted as $1 and a string raised a bare ``TypeError`` mid-schedule."""
+    # numbers.Real covers numpy ints/floats (np.int64, np.float32) from a sweep
+    # or a stats file; bool is a Real subclass and is rejected explicitly.
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
+        raise ValueError(f"universe_min_price must be a number >= 0, got {value!r}")
+    value = float(value)
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"universe_min_price must be a finite number >= 0, got {value!r}")
+    return value
+
+
+def _warn_adjusted_price_screen(min_price: float) -> None:
+    """Warn that a nominal-price screen on adjusted closes is look-ahead-biased
+    (#474). Once per distinct threshold per process, because a re-based
+    schedule calls ``resolve_universe`` ~20+ times per run, but a second
+    portfolio or run with a different threshold still gets its own warning."""
+    if min_price in _ADJUSTED_PRICE_WARNED:
+        return
+    _ADJUSTED_PRICE_WARNED.add(min_price)
+    logger.warning(
+        "rule universe: universe_min_price=%s is applied to retrospectively "
+        "ADJUSTED closes, so eligibility on date D depends on splits/dividends "
+        "after D (look-ahead; it excludes the early history of future split "
+        "winners such as AAPL/NVDA/AMZN). The corpus has no as-traded price. "
+        "Set universe_min_price=0.0 (the default) unless you accept this bias. "
+        "See issue #474.", min_price)
+
+
 def resolve_universe(as_of, config: dict | None = None,
                      span_index: pd.DataFrame | None = None) -> list[str]:
     """Return the security IDs investable as of *as_of*.
@@ -453,7 +504,9 @@ def resolve_universe(as_of, config: dict | None = None,
         val = config.get(key, DEFAULTS[key])
         return DEFAULTS[key] if val is None and key != "universe_top_n" else val
 
-    min_price = _cfg("universe_min_price")
+    min_price = _validate_min_price(_cfg("universe_min_price"))
+    if min_price > 0:
+        _warn_adjusted_price_screen(min_price)
     min_dollar_volume = _cfg("universe_min_dollar_volume")
     min_bars = _cfg("universe_min_bars")
     top_n = config.get("universe_top_n", DEFAULTS["universe_top_n"])

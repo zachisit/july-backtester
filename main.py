@@ -679,6 +679,26 @@ def _correlation_csv_path(run_folder_name, portfolio_name):
         f"{safe_path_component(portfolio_name)}_strategy_correlation.csv")
 
 
+
+def build_config_snapshot(config: dict) -> dict:
+    """The run's config plus the module defaults it fell back to (#475 review).
+
+    A key left unset is not in CONFIG, so a later default change (such as
+    ``universe_min_price``, #474) would silently change what re-running an old
+    config means. ``_resolved_defaults`` records the value each such key
+    actually resolved to; a ``None`` falls back to the default, as the module does."""
+    snapshot = dict(config)
+    try:
+        from helpers.rule_based_universe import DEFAULTS as rbu_defaults
+    except Exception:  # never lose the snapshot over this extra record
+        return snapshot
+    snapshot["_resolved_defaults"] = {
+        "rule_based_universe": {
+            k: (config[k] if config.get(k) is not None else v) for k, v in rbu_defaults.items()
+        },
+    }
+    return snapshot
+
 def main():
     # --- ARGUMENT PARSING (full parser, applied before any CONFIG reads) ---
     from helpers.cli_config import build_parser, apply_overrides, print_help_config, resolve_verbose
@@ -778,8 +798,9 @@ def main():
 
     try:
         _snapshot_path = os.path.join(run_base_dir, "config_snapshot.json")
+        _snapshot = build_config_snapshot(CONFIG)
         with open(_snapshot_path, "w", encoding="utf-8") as _f:
-            _json.dump(CONFIG, _f, indent=2, default=_config_serializer)
+            _json.dump(_snapshot, _f, indent=2, default=_config_serializer)
     except Exception as _e:
         print(f"[WARNING] Could not write config_snapshot.json: {_e}")
     # --- END C1 ---

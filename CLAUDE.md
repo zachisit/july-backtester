@@ -176,7 +176,7 @@ A survivorship-free investable set derived from **observable liquidity**, requir
 
 ```
 universe(D) = { s : s has bars on D
-                and close(s, D)             >= universe_min_price
+                and close(s, D)             >= universe_min_price   (default 0 = off, #474)
                 and dollar_volume_20d(s, D) >= universe_min_dollar_volume
                 and history(s, D)           >= universe_min_bars }
 ```
@@ -199,7 +199,9 @@ capped to `universe_top_n` by dollar volume.
 
 Per-bar resolution is deliberately *not* offered: `resolve_universe` costs ~10s/date because it reopens real Parquet files, so ~5,000 trading days is ~14 hours just to build the schedule. `pit:`'s per-bar mask is cheap only because it reads pre-existing membership YAML rather than price data. The span index is built **once** and reused across re-base dates — rebuilding it per date multiplies the expensive part by `len(dates)`.
 
-**Config keys:** `universe_min_price` (5.0), `universe_min_dollar_volume` (1e6), `universe_min_bars` (252), `universe_top_n` (None), `universe_adv_window` (20), `universe_exclude_prefixes` (`("$", "#")`), `universe_exclude_symbols` (`()`), `universe_rebase` (`"annual"`).
+**Config keys:** `universe_min_price` (**0.0 = off**, #474), `universe_min_dollar_volume` (1e6), `universe_min_bars` (252), `universe_top_n` (None), `universe_adv_window` (20), `universe_exclude_prefixes` (`("$", "#")`), `universe_exclude_symbols` (`()`), `universe_rebase` (`"annual"`).
+
+**The price screen is off by default (#474).** The corpus stores only retrospectively *adjusted* prices (Norgate total-return, then Polygon split-adjusted) and no as-traded close or split history, so `close(s, D)` depends on splits and dividends **after** D. A `$5` screen on it is look-ahead: it removed 15 of the 2005 top-500 (AAPL at an adjusted $0.95, NVDA $0.18, AMZN $2.23, ...), 14 in 2010, 8 in 2015 and 0 in 2024; a re-base on a crash date is worse (62 of the top-500 on 2009-03-02). Those are mostly future split winners, so AAPL first entered `rule:us_liquid_500` in 2008 and NVDA in 2020. **Cost of turning it off:** the dollar-volume screen removes the illiquid tail, not every penny name. `rule:us_all` (and a large `universe_top_n`) now admits genuine sub-$1 and bankrupt names the old screen excluded correctly (2024-01-02: 396 passing names under $5, 27 under $1). A correct as-of screen needs the split history to un-adjust each close (#508). An explicit `universe_min_price > 0` still applies and logs a `WARNING` once per threshold; it must be a finite number >= 0 (`ValueError` otherwise). **Residual look-ahead:** total-return adjustment scales price by the cumulative dividend factor but not volume, so early dollar volume is understated by up to that factor. That moves names across `universe_min_dollar_volume` and, under `universe_top_n`, changes membership itself, not only ranking.
 
 **Three traps this handles, each of which silently corrupts results:**
 1. **`Datetime` is not column 0** (order is `Open, High, Low, Close, Volume, Datetime` — it is the pandas index). Locating it by position reads float OHLC as nanosecond timestamps and yields **1970** dates. It is located by *name*.
@@ -227,7 +229,7 @@ A stock-selection strategy holding SPY is partly holding the benchmark it's meas
 
 It is curated, not exhaustive — a new or obscure ETF can pass. **`etf_report(universe)`** returns `{etfs, n_etfs, n_total, pct}` so that gap is visible rather than assumed away.
 
-**Tests:** `tests/test_rule_based_universe.py` — 31 tests on a synthetic corpus (no submodule dependency): security identity incl. share-class-vs-delisting (`BRK-A` vs `BRK-199001`), the 1970 trap, mixed tz-aware/naive files, each screen, ticker-reuse resolution, and survivorship present-then-absent.
+**Tests:** `tests/test_rule_based_universe.py` — 104 tests on a synthetic corpus (no submodule dependency): security identity incl. share-class-vs-delisting (`BRK-A` vs `BRK-199001`), the 1970 trap, mixed tz-aware/naive files, each screen, ticker-reuse resolution, and survivorship present-then-absent.
 
 ## `pit:` + parquet resolves to SECURITY IDs (#407)
 
@@ -419,8 +421,9 @@ printed extreme. The level is **static — it does not trail**.
   protective side), a structural level is decoupled from the fill, so under `execution_time="open"`
   a next-open that gaps *through* the extreme leaves the stop on the WRONG side of entry (long: a
   level above the fill; short: below it). Both entry branches therefore only arm the stop when it is
-  actually protective (`_lvl < entry_price` long / `_lvl > ep` short); otherwise they fall through
-  to no stop. Without this an inverted stop fires the next bar and fills at the phantom level *in the
+  actually protective (`_lvl < entry_price` long / `_lvl > ep` short). Since #499 the entry is
+  normally not taken at all: `gap_below_stop_on_entry` defaults to `"skip"` (or `"exit_at_open"`
+  stops out at the same open), and the old enter-with-no-stop behaviour needs `"ignore"`. Without this an inverted stop fires the next bar and fills at the phantom level *in the
   trade's favor* — a spurious profitable "Stop Loss" that flatters P&L/win-rate and poisons
   `InitialRisk`/`RMultiple`. Pairing with `intrabar_resolution` reduces the phantom-fill magnitude
   but does not replace the guard.
