@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import logging
 import math
+import numbers
 import os
 import re
 from datetime import datetime
@@ -445,7 +446,9 @@ def _validate_min_price(value) -> float:
 
     Before, ``-1`` and ``NaN`` silently switched the screen off, ``True``
     acted as $1 and a string raised a bare ``TypeError`` mid-schedule."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    # numbers.Real covers numpy ints/floats (np.int64, np.float32) from a sweep
+    # or a stats file; bool is a Real subclass and is rejected explicitly.
+    if isinstance(value, bool) or not isinstance(value, numbers.Real):
         raise ValueError(f"universe_min_price must be a number >= 0, got {value!r}")
     value = float(value)
     if not math.isfinite(value) or value < 0:

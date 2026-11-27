@@ -26,6 +26,7 @@ from helpers.rule_based_universe import (
     parse_rule_spec,
     parse_security,
     resolve_universe,
+    _validate_min_price,
 )
 
 
@@ -671,7 +672,8 @@ class TestAdjustedPriceScreen474:
         assert len(hits) == 2
         assert "universe_min_price=5.0" in hits[0] and "universe_min_price=2.0" in hits[1]
 
-    @pytest.mark.parametrize("bad", [-1, -0.01, float("nan"), float("inf"), "5", True, [5]])
+    @pytest.mark.parametrize("bad", [-1, -0.01, float("nan"), float("inf"), "5", True, [5],
+                                     np.bool_(True), np.float32("nan"), np.int64(-1)])
     def test_invalid_threshold_rejected(self, corpus, bad):
         """#475 review: -1 / NaN silently disabled the screen, True acted as $1,
         a string raised a bare TypeError. Each now fails loudly, up front."""
@@ -680,6 +682,13 @@ class TestAdjustedPriceScreen474:
 
     @pytest.mark.parametrize("ok", [0, 0.0, 5, 2.5])
     def test_valid_thresholds_accepted(self, corpus, ok):
+        resolve_universe("2015-06-30", _cfg(corpus, universe_min_price=ok))
+
+    @pytest.mark.parametrize("ok", [np.int64(5), np.int32(1), np.float32(2.5), np.float64(2.5)])
+    def test_numpy_thresholds_accepted(self, corpus, ok):
+        """#475 review nit 1: a threshold from np.arange or a stats file is a
+        valid number; only np.float64 used to pass (it subclasses float)."""
+        assert _validate_min_price(ok) == float(ok)
         resolve_universe("2015-06-30", _cfg(corpus, universe_min_price=ok))
 
     def test_none_falls_back_to_default(self, corpus):

@@ -229,7 +229,7 @@ A stock-selection strategy holding SPY is partly holding the benchmark it's meas
 
 It is curated, not exhaustive — a new or obscure ETF can pass. **`etf_report(universe)`** returns `{etfs, n_etfs, n_total, pct}` so that gap is visible rather than assumed away.
 
-**Tests:** `tests/test_rule_based_universe.py` — 97 tests on a synthetic corpus (no submodule dependency): security identity incl. share-class-vs-delisting (`BRK-A` vs `BRK-199001`), the 1970 trap, mixed tz-aware/naive files, each screen, ticker-reuse resolution, and survivorship present-then-absent.
+**Tests:** `tests/test_rule_based_universe.py` — 104 tests on a synthetic corpus (no submodule dependency): security identity incl. share-class-vs-delisting (`BRK-A` vs `BRK-199001`), the 1970 trap, mixed tz-aware/naive files, each screen, ticker-reuse resolution, and survivorship present-then-absent.
 
 ## `pit:` + parquet resolves to SECURITY IDs (#407)
 
