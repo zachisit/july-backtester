@@ -142,21 +142,48 @@ def _stop_gap_mode(stop_config, pos):
     return "open"
 
 
-GAP_STOP_REASON = "Stop Loss (gap)"
+# Every gap-through stop label starts with this prefix (#511). Count gap exits
+# with ``is_gap_stop_reason`` / ``startswith(GAP_STOP_PREFIX)``, never by an
+# exact string: the label carries the stop type after the prefix.
+GAP_STOP_PREFIX = "Stop Loss (gap, "
 
 
-def _stop_exit_reason(stop_config, fill, stop_level, side="long"):
-    """Exit reason for a stop fill (#499).
+def _stop_type_label(stop_config, pos=None):
+    """The ``<type>`` part of a stop exit label (#511).
+
+    The configured stop type, except a ``signal_bar_low`` stop that its ATR
+    trail has moved off the initial level, which reads
+    ``"signal_bar_low trail"``.
+    """
+    stype = stop_config.get('type')
+    if stype == "signal_bar_low" and pos is not None and pos.get('sbl_trail_raised'):
+        return "signal_bar_low trail"
+    return f"{stype}"
+
+
+def _gap_stop_reason(stop_config, pos=None):
+    """``"Stop Loss (gap, <type>)"`` -- a stop filled worse than its level (#511)."""
+    return f"{GAP_STOP_PREFIX}{_stop_type_label(stop_config, pos)})"
+
+
+def is_gap_stop_reason(reason):
+    """True for any gap-through stop exit label (#499/#511)."""
+    return isinstance(reason, str) and reason.startswith(GAP_STOP_PREFIX)
+
+
+def _stop_exit_reason(stop_config, fill, stop_level, side="long", pos=None):
+    """Exit reason for a stop fill (#499, #511).
 
     A fill strictly WORSE than the stop level -- the bar opened beyond it, or
-    sub-bar data showed a gap through it -- is tagged ``"Stop Loss (gap)"`` so
-    gap-throughs can be counted in the trade log. A fill at the level keeps the
-    historical ``"Stop Loss (<type>)"`` label.
+    sub-bar data showed a gap through it -- is tagged
+    ``"Stop Loss (gap, <type>)"`` so gap-throughs can be counted in the trade
+    log. A fill at the level keeps ``"Stop Loss (<type>)"``. ``<type>`` is the
+    same in both (see ``_stop_type_label``).
     """
     if fill is not None and pd.notna(fill) and pd.notna(stop_level):
         if (side == "long" and fill < stop_level) or (side == "short" and fill > stop_level):
-            return GAP_STOP_REASON
-    return f"Stop Loss ({stop_config.get('type')})"
+            return _gap_stop_reason(stop_config, pos)
+    return f"Stop Loss ({_stop_type_label(stop_config, pos)})"
 
 
 # Stop types whose level is fixed before the fill (not anchored to it), so the
@@ -794,6 +821,9 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
     _sbl_atr_cache: dict = {}
     _sbl_warned = set()
+    # (symbol, signal_date) whose signal_bar_low level came from the adjusted
+    # Low because no raw low was supplied; read when the entry is taken (#511).
+    _sbl_fallback_bars = set()
 
     def _aux_value(symbol, at_date, column):
         """Strategy-supplied value at ``at_date`` (signal_aux), else NaN."""
@@ -826,7 +856,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 if _c in df.columns and pd.notna(df.at[signal_date, _c]):
                     raw_low = df.at[signal_date, _c]
                     break
-        if pd.isna(raw_low) or raw_low <= 0:
+        _used_adjusted = pd.isna(raw_low) or raw_low <= 0
+        if _used_adjusted:
             if symbol not in _sbl_warned:
                 _sbl_warned.add(symbol)
                 logger.warning("signal_bar_low: no raw low for %s; using the adjusted "
@@ -837,6 +868,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             stop_raw = round(stop_raw, 2)
         if stop_raw <= 0:
             return np.nan
+        if _used_adjusted:
+            _sbl_fallback_bars.add((symbol, signal_date))
         # Round away float noise from the factor: 13.676 * (a/a) came back as
         # 13.675999999999998, so a bar whose Low printed exactly at the stop
         # never touched it. 8 dp is far below any price tick.
@@ -867,6 +900,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 cur = pos.get('stop_loss_level')
                 if pd.isna(cur) or cand > cur:
                     pos['stop_loss_level'] = cand
+                    # Label only (#511): the stop now sits at a trail level.
+                    pos['sbl_trail_raised'] = True
         h = df.at[date, 'High'] if date in df.index else np.nan
         if pd.notna(h) and h > pos['sbl_max_h']:
             pos['sbl_max_h'] = float(h)
@@ -1234,7 +1269,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     if _decision == "stop":
                         raw_exit_price = _fill
                         exit_date = date
-                        exit_reason = _stop_exit_reason(stop_config, _fill, pos['stop_loss_level'], "long")
+                        exit_reason = _stop_exit_reason(stop_config, _fill, pos['stop_loss_level'], "long", pos)
                     # "arm" / "hold": leave raw_exit_price NaN — the TRAIL block below
                     # calls _update_trailing_atr_stop, which arms + seeds off THIS same
                     # bar's High when the target was reached (idempotent on "hold").
@@ -1244,7 +1279,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         pos['stop_loss_level'], portfolio_data[symbol].loc[date].get('Open'),
                         "long", _stop_gap_mode(stop_config, pos))
                     exit_date = date
-                    exit_reason = f"Stop Loss ({stop_config['type']})"
+                    exit_reason = f"Stop Loss ({_stop_type_label(stop_config, pos)})"
                     # Sub-bar resolution: refine the fill from finer-resolution bars
                     # when enabled + available — a gap through the stop fills at the
                     # (worse) sub-bar open rather than optimistically at the stop.
@@ -1258,7 +1293,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _fill, _ = _intrabar.resolve_stop_fill(_day_bars, pos['stop_loss_level'], side="long")
                         if _fill is not None:
                             raw_exit_price = _fill
-                    exit_reason = _stop_exit_reason(stop_config, raw_exit_price, pos['stop_loss_level'], "long")
+                    exit_reason = _stop_exit_reason(stop_config, raw_exit_price, pos['stop_loss_level'], "long", pos)
 
             # --- STRATEGY-BASED EXIT (full <= -1) or PARTIAL SCALE-OUT (-1 < s < 0) ---
             partial_fraction = 0.0
@@ -1493,7 +1528,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         gap_mode=_stop_gap_mode(stop_config, spos))
                     if _decision == "stop":
                         cover_raw = _fill
-                        cover_reason = _stop_exit_reason(stop_config, _fill, spos['stop_loss_level'], "short")
+                        cover_reason = _stop_exit_reason(stop_config, _fill, spos['stop_loss_level'], "short", spos)
                     # "arm" / "hold": leave cover_raw NaN — the trail-update below arms
                     # + seeds off THIS same bar's Low when the target was reached.
                 elif pd.notna(cur_high) and cur_high >= spos['stop_loss_level']:
@@ -1501,7 +1536,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     cover_raw = _coarse_stop_fill(
                         spos['stop_loss_level'], row.get('Open'),
                         "short", _stop_gap_mode(stop_config, spos))
-                    cover_reason = f"Stop Loss ({stop_config['type']})"
+                    cover_reason = f"Stop Loss ({_stop_type_label(stop_config, spos)})"
                     # See mirrored long-side comment: skip gap-refinement once the ATR
                     # trail has armed, matching the reference's exact-level trail fill.
                     if (_intrabar_on and symbol in intrabar_data
@@ -1511,7 +1546,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _fill, _ = _intrabar.resolve_stop_fill(_day_bars, spos['stop_loss_level'], side="short")
                         if _fill is not None:
                             cover_raw = _fill
-                    cover_reason = _stop_exit_reason(stop_config, cover_raw, spos['stop_loss_level'], "short")
+                    cover_reason = _stop_exit_reason(stop_config, cover_raw, spos['stop_loss_level'], "short", spos)
 
             # MAINTENANCE MARGIN / MARGIN CALL (futures short)
             if pd.isna(cover_raw):
@@ -2234,7 +2269,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
                 # --- ENTRY-DAY GAP: exit_at_open (#499, mirror of the long side) ---
                 if _s_gap_exit_now and symbol in short_positions:
-                    _close_short_now(symbol, short_positions[symbol], date, ep, GAP_STOP_REASON)
+                    _close_short_now(symbol, short_positions[symbol], date, ep,
+                                     _gap_stop_reason(stop_config, short_positions[symbol]))
                     del short_positions[symbol]
                 # --- ENTRY-BAR EVALUATION (opt-in, mirror of the long entry-bar check) ---
                 elif (_intrabar_on and symbol in short_positions and stop_config.get("type") == "trailing_atr"
@@ -2249,7 +2285,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _wbars0, side="short")
                     if _dec0 == "stop":
                         _close_short_now(symbol, _spos0, date, _fill0,
-                                         _stop_exit_reason(stop_config, _fill0, _spos0['stop_loss_level'], "short"))
+                                         _stop_exit_reason(stop_config, _fill0, _spos0['stop_loss_level'], "short", _spos0))
                         del short_positions[symbol]
                     else:
                         _update_trailing_atr_stop(_spos0, df, date, stop_config, side="short")
@@ -2270,7 +2306,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             if _refined0 is not None:
                                 _cov0 = _refined0
                         _close_short_now(symbol, _spos0, date, _cov0,
-                                         _stop_exit_reason(stop_config, _cov0, _spos0['stop_loss_level'], "short"))
+                                         _stop_exit_reason(stop_config, _cov0, _spos0['stop_loss_level'], "short", _spos0))
                         del short_positions[symbol]
                 # --- ENTRY BAR survived: 1-session close time stop (#501, mirror of the long side) ---
                 if (symbol in short_positions and _ts_cfg is not None and _ts_cfg == (1, "close")
@@ -2953,6 +2989,10 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     if stop_config.get("type") == "signal_bar_low":
                         # Running max for the trail starts at the entry fill (#501).
                         positions[symbol]['sbl_max_h'] = float(raw_entry_price)
+                        # Count, per entry taken, a level built on the adjusted
+                        # Low (#511). The once-per-symbol warning still fires.
+                        if (symbol, signal_date) in _sbl_fallback_bars:
+                            _sizing_diag.record("sbl_adjusted_fallback", symbol)
                     if inst.margin_mode == _inst.INITIAL_MARGIN:
                         reserved_margin += _margin
                         cash -= commission_cost
@@ -2962,7 +3002,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     # --- ENTRY-DAY GAP: exit_at_open (#499) ---
                     if _gap_exit_now:
                         _close_long_now(symbol, positions[symbol], date, raw_entry_price,
-                                        GAP_STOP_REASON)
+                                        _gap_stop_reason(stop_config, positions[symbol]))
                         del positions[symbol]
                     # --- ENTRY-BAR EVALUATION (opt-in, trailing_atr + intrabar_resolution) ---
                     # The reference Sleeve A mechanic checks the stop/target starting ON
@@ -2983,7 +3023,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             _wbars0, side="long")
                         if _dec0 == "stop":
                             _close_long_now(symbol, _pos0, date, _fill0,
-                                            _stop_exit_reason(stop_config, _fill0, _pos0['stop_loss_level'], "long"))
+                                            _stop_exit_reason(stop_config, _fill0, _pos0['stop_loss_level'], "long", _pos0))
                             del positions[symbol]
                         else:
                             # "arm" / "hold": _update_trailing_atr_stop arms + seeds off
@@ -3012,7 +3052,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                 if _refined0 is not None:
                                     _fill0 = _refined0
                             _close_long_now(symbol, _pos0, date, _fill0,
-                                            _stop_exit_reason(stop_config, _fill0, _pos0['stop_loss_level'], "long"))
+                                            _stop_exit_reason(stop_config, _fill0, _pos0['stop_loss_level'], "long", _pos0))
                             del positions[symbol]
                     # --- ENTRY BAR survived: signal_bar_low trail + 1-session time stop (#501) ---
                     if symbol in positions:

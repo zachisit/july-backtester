@@ -1,12 +1,13 @@
 # tests/test_gap_stop_499.py
 """
-Issue #499: gap-through stop fills, the "Stop Loss (gap)" exit reason, and the
+Issue #499: gap-through stop fills, the "Stop Loss (gap, <type>)" exit reason
+(#511 added the type), and the
 entry-day gap below a structural stop (gap_below_stop_on_entry).
 
 The fill rule itself (min(stop, Open) long / max(stop, Open) short) shipped in
 #425; tests/test_stop_gap_fill.py pins it. This file pins what #499 adds:
 
-  TestGapLabel          -- gap fills are labelled "Stop Loss (gap)", non-gap fills keep
+  TestGapLabel          -- gap fills are labelled "Stop Loss (gap, <type>)", non-gap fills keep
                            "Stop Loss (<type>)" (long, short, both execution modes)
   TestEntryDayGap       -- a signal_bar / atr stop that the entry open is already
                            through: "skip" (default) vs "exit_at_open", long + short
@@ -28,7 +29,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from helpers.portfolio_simulations import (  # noqa: E402
-    GAP_STOP_REASON, _stop_exit_reason, run_portfolio_simulation,
+    _stop_exit_reason, is_gap_stop_reason, run_portfolio_simulation,
 )
 
 SLIP = 0.0005
@@ -44,6 +45,8 @@ BASE_CFG = {
 }
 
 PCT = {"type": "percentage", "value": 0.05}
+GAP_PCT = "Stop Loss (gap, percentage)"
+GAP_SIGBAR = "Stop Loss (gap, signal_bar)"
 SIGBAR = {"type": "signal_bar", "buffer": 0.0, "bars_back": 0}
 
 
@@ -72,11 +75,11 @@ def _run(df, signal_vals, stop_cfg, cfg_over=None, full=False):
 # ---------------------------------------------------------------------------
 class TestStopExitReasonHelper:
     def test_long(self):
-        assert _stop_exit_reason(PCT, 80.0, 95.0, "long") == GAP_STOP_REASON
+        assert _stop_exit_reason(PCT, 80.0, 95.0, "long") == GAP_PCT
         assert _stop_exit_reason(PCT, 95.0, 95.0, "long") == "Stop Loss (percentage)"
 
     def test_short(self):
-        assert _stop_exit_reason(PCT, 120.0, 105.0, "short") == GAP_STOP_REASON
+        assert _stop_exit_reason(PCT, 120.0, 105.0, "short") == GAP_PCT
         assert _stop_exit_reason(PCT, 105.0, 105.0, "short") == "Stop Loss (percentage)"
 
     def test_nan_fill_is_not_a_gap(self):
@@ -93,7 +96,7 @@ class TestGapLabel:
 
     def test_open_below_stop_and_low_below_stop_fills_at_open(self):
         t = _run(self._long((80, 82, 78, 81)), [1, 1, 1, 1], PCT)[0]
-        assert t["ExitReason"] == GAP_STOP_REASON
+        assert t["ExitReason"] == GAP_PCT
         assert t["ExitPrice"] == pytest.approx(80.0 * (1 - SLIP), abs=1e-9)
 
     def test_open_above_stop_low_below_fills_at_stop_unchanged(self):
@@ -104,7 +107,7 @@ class TestGapLabel:
     def test_close_execution_also_labels_gap(self):
         t = _run(self._long((80, 82, 78, 81)), [0, 1, 1, 1], PCT,
                  {"execution_time": "close"})[0]
-        assert t["ExitReason"] == GAP_STOP_REASON
+        assert t["ExitReason"] == GAP_PCT
 
     def test_level_mode_never_labels_gap(self):
         t = _run(self._long((80, 82, 78, 81)), [1, 1, 1, 1], PCT,
@@ -118,7 +121,7 @@ class TestGapLabel:
 
     def test_short_open_above_stop_fills_at_open(self):
         t = _run(self._short((120, 122, 118, 121)), [-2, -2, -2, -2], PCT)[0]
-        assert t["ExitReason"] == GAP_STOP_REASON
+        assert t["ExitReason"] == GAP_PCT
         assert t["ExitPrice"] == pytest.approx(120.0 * (1 + SLIP), abs=1e-9)
 
     def test_short_open_below_stop_high_above_fills_at_stop(self):
@@ -157,7 +160,7 @@ class TestEntryDayGap:
                  {"gap_below_stop_on_entry": "exit_at_open"})
         assert len(t) == 1
         t = t[0]
-        assert t["ExitReason"] == GAP_STOP_REASON
+        assert t["ExitReason"] == GAP_SIGBAR
         assert t["EntryDate"] == t["ExitDate"]
         assert t["EntryPrice"] == pytest.approx(90.0 * (1 + SLIP), abs=1e-9)
         assert t["ExitPrice"] == pytest.approx(90.0 * (1 - SLIP), abs=1e-9)
@@ -187,11 +190,11 @@ class TestEntryDayGap:
         assert res is None or res["trade_log"] == []
         t = _run(df, [0, 1, 1, 1, 1], {"type": "atr", "multiplier": 3.0},
                  {"gap_below_stop_on_entry": "exit_at_open"})
-        assert len(t) == 1 and t[0]["ExitReason"] == GAP_STOP_REASON
+        assert len(t) == 1 and t[0]["ExitReason"] == "Stop Loss (gap, atr)"
 
     def test_percentage_stop_never_triggers_entry_gap(self):
         t = _run(self._long_gap(), [0, 1, 1, 1, 1], PCT)
-        assert len(t) == 1 and t[0]["ExitReason"] != GAP_STOP_REASON
+        assert len(t) == 1 and not is_gap_stop_reason(t[0]["ExitReason"])
 
     def _short_gap(self):
         # bar1 high 105 -> short stop 105. bar2 opens 110 (already above).
@@ -206,7 +209,7 @@ class TestEntryDayGap:
         t = _run(self._short_gap(), [0, -2, -2, -2, -2], SIGBAR,
                  {"gap_below_stop_on_entry": "exit_at_open"})
         assert len(t) == 1
-        assert t[0]["ExitReason"] == GAP_STOP_REASON
+        assert t[0]["ExitReason"] == GAP_SIGBAR
         assert t[0]["EntryDate"] == t[0]["ExitDate"]
         assert t[0]["ExitPrice"] == pytest.approx(110.0 * (1 + SLIP), abs=1e-9)
 
@@ -253,7 +256,7 @@ class TestNeverBetter:
             assert a_["ExitPrice"] <= b_["ExitPrice"] + 1e-9
             assert a_["ProfitPct"] <= b_["ProfitPct"] + 1e-12
         assert sum(t["Profit"] for t in n_tl) <= sum(t["Profit"] for t in o_tl) + 1e-6
-        n_gap = sum(t["ExitReason"] == GAP_STOP_REASON for t in n_tl)
+        n_gap = sum(is_gap_stop_reason(t["ExitReason"]) for t in n_tl)
         if n_gap:
             assert sum(t["Profit"] for t in n_tl) < sum(t["Profit"] for t in o_tl)
 
@@ -263,7 +266,7 @@ class TestNeverBetter:
         for seed in range(15):
             df, sig = _random_fixture(seed)
             res = _run(df, sig, PCT, full=True)
-            n += sum(t["ExitReason"] == GAP_STOP_REASON for t in res["trade_log"])
+            n += sum(is_gap_stop_reason(t["ExitReason"]) for t in res["trade_log"])
         assert n >= 5
 
 

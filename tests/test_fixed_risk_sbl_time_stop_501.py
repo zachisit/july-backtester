@@ -187,7 +187,7 @@ class TestSignalBarLow:
         assert t["ExitPrice"] == pytest.approx(94.99) and t["ExitReason"] == "Stop Loss (signal_bar_low)"
         df = _frame([(100, 101, 95, 100), (100, 101, 99, 100), (90, 92, 88, 91), (91, 92, 90, 91)])
         t = _run(df, [1, 0, 0, 0], SBL)["trade_log"][0]
-        assert t["ExitPrice"] == pytest.approx(90.0) and t["ExitReason"] == "Stop Loss (gap)"
+        assert t["ExitPrice"] == pytest.approx(90.0) and t["ExitReason"] == "Stop Loss (gap, signal_bar_low)"
 
     def test_exact_touch_after_factor_mapping_stops_out(self):
         """Raw low 34.20 on an adjusted series at factor 0.4: stop_raw 34.19 maps
@@ -258,7 +258,7 @@ class TestTrail:
         r = _run(df, [1, 0, 0, 0, 0, 0], {**self.TRAIL, "trail_atr": 0.1}, {"max_position_pct": 1.0})
         t = r["trade_log"][0]
         assert pd.Timestamp(t["ExitDate"]) == df.index[4]
-        assert t["ExitReason"] == "Stop Loss (gap)"            # opened 101 under ~196
+        assert t["ExitReason"] == "Stop Loss (gap, signal_bar_low trail)"  # opened 101 under ~196
 
 
 # ---------------------------------------------------------------------------

@@ -431,6 +431,21 @@ printed extreme. The level is **static — it does not trail**.
   fire-and-hold cases, buffer widening, `InitialRisk` measured from the signal-bar extreme, a
   no-trail regression, and gap-through-entry cases that assert the protective-side guard.
 
+### Stop exit labels (#499, #511)
+
+- A stop filled at its level logs `ExitReason "Stop Loss (<type>)"`; one filled worse than its
+  level (gap-through open, gapped sub-bar, or `gap_below_stop_on_entry: "exit_at_open"`) logs
+  `"Stop Loss (gap, <type>)"`. `<type>` is the stop type and is the same in both labels.
+- A `signal_bar_low` stop that its ATR trail has moved off the initial level reads
+  `signal_bar_low trail` (flag `pos['sbl_trail_raised']`, set in `_sbl_trail_update`).
+- Built by `_stop_exit_reason` / `_gap_stop_reason` in `helpers/portfolio_simulations.py`. Count
+  gap exits with `is_gap_stop_reason(reason)` (prefix `GAP_STOP_PREFIX = "Stop Loss (gap, "`), never
+  by exact string. The pre-#511 label was the bare `"Stop Loss (gap)"`.
+- `sizing_diagnostics["sbl_adjusted_fallback"]` counts `signal_bar_low` entries whose level came
+  from the adjusted Low (no `raw_low` aux value, no `Low_raw`/`raw_low` column). It shows in the
+  "Position sizing: N conditions recorded" report; the once-per-symbol warning stays.
+- **Tests**: `tests/test_gap_label_sbl_fallback_511.py`.
+
 ## Data Providers
 
 ### Yahoo Finance (`data_provider = "yahoo"`)

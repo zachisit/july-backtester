@@ -213,7 +213,7 @@ def test_prearm_both_hit_1min_resolves_to_stop_gap_aware_long():
     t = res["trade_log"][0]
     assert pd.Timestamp(t["ExitDate"]) == df.index[2]
     assert t["ExitPrice"] == pytest.approx(97.0)             # gapped through the stop -> fills at the gap open
-    assert t["ExitReason"] == "Stop Loss (gap)"              # labelled as a gap-through (#499)
+    assert t["ExitReason"] == "Stop Loss (gap, trailing_atr)"  # labelled as a gap-through (#499/#511)
 
 
 def test_armed_trail_stop_ignores_gap_fill_long():
