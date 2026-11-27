@@ -355,7 +355,7 @@ The common swing-book rule: risk X% of equity to the stop, capped at Y% of equit
 ],
 ```
 
-- **`fixed_risk`**: `shares = floor(min(risk_per_trade × equity / (entry − stop), max_position_pct × equity / entry))`. The stop is the one the position actually gets, resolved by the same function. With no stop, or a stop at or above the fill, there is no trade. Under `execution_time: "open"`, `equity` is the start-of-bar mark (see #490). Gross exposure stays bounded by cash.
+- **`fixed_risk`**: `shares = floor(min(risk_per_trade × equity / (entry − stop), max_position_pct × equity / entry))`. The stop is the one the position actually gets, resolved by the same function. With no stop, or a stop at or above the fill, there is no trade. Under `execution_time: "open"`, `equity` is the start-of-bar mark (see #490). Gross exposure stays bounded by cash. When cash is short, the cash clamp runs after the floor and does not round, so a cash-clamped entry can come out with a fractional share count (#507).
 - **`signal_bar_low`** (long only). The raw low comes from, in order:
   1. a `raw_low` column the strategy returns next to `Signal`;
   2. a `Low_raw` / `raw_low` column on the price frame;
