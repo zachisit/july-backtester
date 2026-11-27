@@ -260,6 +260,12 @@ def _build_entry_edge_masks(signals):
     return masks
 
 
+# Exit reasons whose fill is at the bar's Open under execution_time="open".
+# Every other exit (stop, margin call, last-close PIT) fills after the open and
+# blocks a same-bar, same-symbol entry -- see the guard in the date loop.
+_AT_OPEN_EXIT_REASONS = frozenset({"Strategy Exit", "Short Cover", "PIT Membership Exit"})
+
+
 def _is_entry_bar(signals, edge_masks, symbol, sig_date, entry_value):
     """
     True when ``symbol`` may be ENTERED on ``sig_date`` for ``entry_value``
@@ -908,6 +914,22 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         # counts do not change.
         total_equity = cash + current_market_value
 
+        # --- SAME-BAR RE-ENTRY GUARD (execution_time="open") ---
+        # Under "open" every entry on this bar fills at the bar's Open, i.e.
+        # BEFORE anything that happens intrabar. A stop, margin call or
+        # last-close PIT liquidation fills after the open, so a same-symbol
+        # entry booked at this bar's open would be bought while the position it
+        # "replaces" was still held -- a temporally inverted fill (#401
+        # follow-up). Exits that themselves fill at the open (a strategy exit
+        # or an at-open PIT exit) do not block: a -2 that closes a long and
+        # opens a short at the same open is a genuine reversal. A stop that
+        # gapped and filled AT the open still blocks: the entry was decided on
+        # the prior bar's signal while that position was open, and booking both
+        # is the same phantom round trip #401 removed for hold-state series.
+        _guard_same_bar = (execution_time == "open"
+                           and CONFIG.get("open_exec_same_bar_reentry_guard", True))
+        _open_entry_blocked = set()
+
         # --- POSITION MANAGEMENT (EXITS) ---
         exited_symbols = []
         for symbol, pos in list(positions.items()):
@@ -1147,6 +1169,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             log_entry.update(pos.get('features', {}))
             trade_log.append(log_entry)
             exited_symbols.append(symbol)
+            if _guard_same_bar and exit_reason not in _AT_OPEN_EXIT_REASONS:
+                _open_entry_blocked.add(symbol)
 
         for symbol in exited_symbols: del positions[symbol]
 
@@ -1302,6 +1326,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             })
             trade_log[-1].update(spos.get('features', {}))
             short_exited.append(symbol)
+            if _guard_same_bar and cover_reason not in _AT_OPEN_EXIT_REASONS:
+                _open_entry_blocked.add(symbol)
         for symbol in short_exited:
             del short_positions[symbol]
 
@@ -1329,6 +1355,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             _short_items = sorted(portfolio_data.items(), key=lambda x: x[0])
         for symbol, df in _short_items:
             if date not in df.index or symbol in positions or symbol in short_positions:
+                continue
+            if symbol in _open_entry_blocked:
                 continue
             if _is_delisted(symbol, date):
                 continue
@@ -1927,13 +1955,18 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             # strategy never intended. A flip is still expressible as a two-bar
             # sequence: -1 on one bar covers the short, then 1 on a later bar
             # enters the long. A stop or margin exit earlier in this bar also
-            # frees the symbol before this loop; whether a 1 on that bar can then
-            # enter is decided by entry_trigger (#401): under the default "edge"
+            # frees the symbol before this loop. Under execution_time="open" the
+            # same-bar guard (_open_entry_blocked) refuses that entry outright,
+            # since it would fill at an open that precedes the exit. Under
+            # "close", whether a 1 on that bar can enter is decided by
+            # entry_trigger (#401): under the default "edge"
             # only a genuine transition into 1 does (e.g. -2 -> 1 after a short
             # stop), so a hold-state series that still reads 1 does not re-buy
             # the bar it was stopped out of. (A PIT cover cannot reach here: the
             # membership / force-exit check just below refuses the entry.)
             if symbol in positions or symbol in short_positions: continue
+            if symbol in _open_entry_blocked:
+                continue
             if _is_delisted(symbol, date):
                 continue
             if (not _pit_flag(symbol, date, '_pit_member', True)

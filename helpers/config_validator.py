@@ -149,6 +149,7 @@ KNOWN_KEYS: set[str] = {
     "stop_gap_fill",
     "stop_gap_fill_armed_trail",
     "entry_bar_stop_check",
+    "open_exec_same_bar_reentry_guard",
     "intrabar_timeframe",
     "intrabar_multiplier",
     "intrabar_parquet_source",

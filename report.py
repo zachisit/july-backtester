@@ -5,6 +5,10 @@ Usage:
     python report.py path/to/strategy.csv
     python report.py output/runs/2026-03-02_14-00-00/analyzer_csvs/Nasdaq_100/EMA_Regime.csv
     python report.py --all output/runs/2026-03-02_14-00-00
+
+Reports for CSVs under a run's analyzer_csvs/<Portfolio>/ are written to
+detailed_reports/<Portfolio>/<Strategy>/, mirroring analyzer_csvs/, so a
+strategy name shared by two portfolios keeps both reports (#479).
 """
 import argparse
 import json
@@ -51,7 +55,22 @@ def _load_equity_file(path: Path) -> "pd.Series | None":
         df = pd.read_csv(path, index_col=0, parse_dates=True)
         if df.empty:
             return None
-        return df.iloc[:, 0].rename("Equity")
+        series = df.iloc[:, 0].rename("Equity")
+        if not isinstance(series.index, pd.DatetimeIndex):
+            # Offsets that change mid-file (e.g. a DST transition, -05:00 then
+            # -04:00) leave a text index. Parse each stamp and keep its wall
+            # time -- what helpers.wfa does to the in-memory curve main.py
+            # used (tz_localize(None)) -- so the WFA boundaries line up (#477).
+            parsed = pd.DatetimeIndex([
+                (lambda ts: ts.tz_localize(None) if ts.tzinfo is not None else ts)(
+                    pd.Timestamp(v)) if pd.notna(v) else pd.NaT
+                for v in series.index
+            ])
+            series.index = parsed
+            series = series[series.index.notna()]
+            if series.empty:
+                return None
+        return series
     except Exception:
         return None
 
@@ -155,6 +174,69 @@ def _portfolio_dir_for(name: str) -> str:
     return safe_path_component(name) if name else ""
 
 
+#: Files main.py writes at the top of a run folder; used to tell the run's
+#: ``analyzer_csvs/`` from a portfolio or parent folder with the same name.
+_RUN_MARKERS = ("config_snapshot.json", "wfa_inputs.json", "llm_verdict.json",
+                "overall_portfolio_summary.csv")
+
+
+def _run_layout(csv_path) -> "tuple[Path | None, Path]":
+    """``(run_dir, portfolio_subdir)`` for a CSV inside a run's ``analyzer_csvs/``.
+
+    ``run/analyzer_csvs/Nasdaq_100/Strat.csv`` -> ``(<abs>/run,
+    Path("Nasdaq_100"))``. Reports are written to
+    ``run/detailed_reports/<portfolio_subdir>/<strategy>/`` so the same strategy
+    name in two portfolios of one run gets two reports instead of the second
+    overwriting the first (#479). A CSV directly under ``analyzer_csvs/`` gives
+    ``Path()`` for the subdir; a CSV outside any run gives ``(None, Path())``.
+
+    When several folders are named ``analyzer_csvs`` -- a parent folder, or a
+    portfolio that happens to have that name -- the run's is the innermost one
+    whose parent holds a run file (``config_snapshot.json``,
+    ``wfa_inputs.json``, ...). The path is searched as given first
+    (``abspath``, no symlink resolution), so a symlinked ``analyzer_csvs/``
+    folder still counts. Only if that finds no run file is it searched again
+    with ``os.path.realpath``, so ``link/..`` follows the filesystem instead of
+    collapsing lexically onto the wrong run. With no run file anywhere, the
+    innermost ``analyzer_csvs`` wins (resolved path first, then as given).
+    That keeps single-file mode pointing at the same run, folder and config as
+    ``--all``.
+    """
+    def _search(parts):
+        candidates = [i for i, name in enumerate(parts[:-1]) if name == "analyzer_csvs"]
+        marked = next((i for i in reversed(candidates)
+                       if any((Path(*parts[:i]) / m).is_file() for m in _RUN_MARKERS)),
+                      None)
+        return candidates, marked
+
+    lexical_path = os.path.abspath(str(csv_path))
+    lexical = Path(lexical_path).parts
+    lex_candidates, idx = _search(lexical)
+    # Normalising collapses ``link/..`` by name; trust the as-given match only
+    # if it still names the file actually read, else pair trades with the
+    # wrong run's config.
+    if idx is not None and not (os.path.exists(lexical_path)
+                                and os.path.samefile(lexical_path, csv_path)):
+        idx = None
+    parts = lexical
+    if idx is None:
+        resolved = Path(os.path.realpath(str(csv_path))).parts
+        real_candidates, idx = _search(resolved)
+        if idx is not None or real_candidates:
+            parts = resolved
+            idx = idx if idx is not None else real_candidates[-1]
+        elif lex_candidates:
+            idx = lex_candidates[-1]
+        else:
+            return None, Path()
+    return Path(*parts[:idx]), Path(*parts[idx + 1:-1])
+
+
+def _portfolio_subdir(csv_path) -> Path:
+    """The folder(s) between the run's ``analyzer_csvs/`` and *csv_path* (#479)."""
+    return _run_layout(csv_path)[1]
+
+
 def _match_strategy_verdict(verdicts: list[dict], strategy_stem: str,
                             portfolio_dir: str) -> dict | None:
     """Find the llm_verdict entry matching a per-strategy CSV file.
@@ -202,6 +284,22 @@ def _load_wfa_split_ratio(run_dir: Path) -> float | None:
     return None
 
 
+def _load_wfa_inputs(run_dir: Path) -> dict | None:
+    """Read the WFA inputs main.py used (``wfa_inputs.json``) from a run directory.
+
+    Returns ``{wfa_split_ratio, wfa_split_date, actual_start, actual_end}``, or
+    None for runs written before #477 (the analyzer then falls back to a
+    labelled closed-trade approximation).
+    """
+    from helpers.wfa import load_wfa_inputs
+    inputs = load_wfa_inputs(run_dir)
+    if inputs is not None and inputs.get("initial_capital") is None:
+        # The run's own capital, never --equity or the analyzer default: the
+        # analyzer only claims parity with main.py when this is set.
+        inputs["initial_capital"] = _load_initial_capital(run_dir)
+    return inputs
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate a detailed PDF/Markdown trade analysis report from a CSV file."
@@ -217,13 +315,17 @@ def main():
         "--all",
         type=str,
         metavar="RUN_DIR",
-        help="Path to a run directory (e.g. output/runs/2026-03-02_15-12-32). Generates reports for all CSVs found under analyzer_csvs/.",
+        help="Path to a run directory (e.g. output/runs/2026-03-02_15-12-32). Generates reports for all CSVs found under analyzer_csvs/, "
+             "written to detailed_reports/<Portfolio>/<Strategy>/ (mirroring analyzer_csvs/<Portfolio>/).",
     )
 
     parser.add_argument(
         "--output-dir",
         default=None,
-        help="Root directory for report output. Auto-detected from the CSV path when inside output/runs/<run_id>/analyzer_csvs/.",
+        help="Root directory for report output. Auto-detected from the CSV path when inside "
+             "output/runs/<run_id>/analyzer_csvs/<Portfolio>/ (-> <run_id>/detailed_reports/<Portfolio>/). "
+             "When given, the report goes to <output-dir>/<report-name>/ exactly. "
+             "Single-file mode only: ignored (with a warning) with --all.",
     )
     parser.add_argument(
         "--equity",
@@ -231,7 +333,9 @@ def main():
         default=None,
         help=f"Initial equity for the analysis. If omitted, auto-loaded from "
              f"config_snapshot.json's initial_capital when available, else "
-             f"falls back to {INITIAL_EQUITY}.",
+             f"falls back to {INITIAL_EQUITY}. The walk-forward (WFA) section "
+             f"ignores this when the run has wfa_inputs.json: it always uses the "
+             f"run's own initial capital so it matches main.py.",
     )
     parser.add_argument(
         "--report-name",
@@ -278,6 +382,10 @@ def main():
     if args.all:
         # --- Batch mode ---
         run_dir = Path(args.all)
+        if args.output_dir is not None:
+            print(f"WARNING: --output-dir is ignored with --all; reports are written to "
+                  f"{run_dir / 'detailed_reports'}/<Portfolio>/<Strategy>/. "
+                  f"--output-dir applies to single-file mode only.")
         analyzer_csvs_dir = run_dir / "analyzer_csvs"
         if not analyzer_csvs_dir.is_dir():
             print(f"ERROR: analyzer_csvs/ not found under: {args.all}")
@@ -299,6 +407,10 @@ def main():
         wfa_ratio = _load_wfa_split_ratio(run_dir)
         if wfa_ratio is not None:
             print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
+        wfa_inputs = _load_wfa_inputs(run_dir)
+        if wfa_inputs is not None:
+            print(f"WFA inputs loaded from wfa_inputs.json: split {wfa_inputs['wfa_split_date']} "
+                  f"({wfa_inputs['actual_start']} -> {wfa_inputs['actual_end']})")
 
         # Load risk-free rate from this run's config_snapshot.json (if present)
         risk_free_rate = _load_risk_free_rate(run_dir)
@@ -319,6 +431,7 @@ def main():
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
             'WFA_SPLIT_RATIO': wfa_ratio,
+            'WFA_INPUTS': wfa_inputs,
             'NOISE_CSV_PATH': str(_noise_csv) if _noise_csv.is_file() else None,
         }
         if bars_per_year is not None:
@@ -344,7 +457,11 @@ def main():
                                                     csv_file.parent.name)
             if _verdict_match is not None:
                 this_config['STRATEGY_VERDICT'] = _verdict_match
-            generate_trade_report(trades_df, output_dir, report_name, this_config)
+            # Mirror analyzer_csvs/<Portfolio>/ so a strategy name shared by two
+            # portfolios does not overwrite the other's report (#479).
+            report_dir = str(Path(output_dir) / csv_file.parent.relative_to(analyzer_csvs_dir))
+            this_config['BASE_OUTPUT_DIRECTORY'] = report_dir
+            generate_trade_report(trades_df, report_dir, report_name, this_config)
             count += 1
 
         print(f"Generated {count} reports in {output_dir}")
@@ -357,35 +474,36 @@ def main():
             sys.exit(1)
 
         # Dynamically determine output directory based on the CSV path.
-        # If the CSV lives inside a run's analyzer_csvs/ folder, route the report
-        # to detailed_reports/ inside the same run directory.
+        # If the CSV lives inside a run's analyzer_csvs/<Portfolio>/ folder,
+        # route the report to detailed_reports/<Portfolio>/ inside the same run
+        # directory -- the same place --all writes it (#479). An explicit
+        # --output-dir is used exactly as given.
+        _run_dir, _portfolio = _run_layout(csv_path)
         if args.output_dir is not None:
             output_dir = args.output_dir
+        elif _run_dir is not None:
+            output_dir = str(_run_dir / "detailed_reports" / _portfolio)
         else:
-            csv_parts = Path(csv_path).parts
-            if "analyzer_csvs" in csv_parts:
-                idx = csv_parts.index("analyzer_csvs")
-                base_run_dir = Path(*csv_parts[:idx])
-                output_dir = str(base_run_dir / "detailed_reports")
-            else:
-                output_dir = "detailed_reports"
+            output_dir = "detailed_reports"
 
         # Load timeframe-aware annualization factor, WFA split ratio, and risk-free rate
         # from config_snapshot.json if the CSV is inside a run dir
         wfa_ratio = None
+        wfa_inputs = None
         bars_per_year = None
         risk_free_rate = None
         initial_capital = None
-        csv_parts = Path(csv_path).parts
-        if "analyzer_csvs" in csv_parts:
-            idx = csv_parts.index("analyzer_csvs")
-            _run_dir = Path(*csv_parts[:idx])
+        if _run_dir is not None:
             bars_per_year = _load_bars_per_year(_run_dir)
             if bars_per_year is not None:
                 print(f"Bars per year loaded from config_snapshot.json: {bars_per_year}")
             wfa_ratio = _load_wfa_split_ratio(_run_dir)
             if wfa_ratio is not None:
                 print(f"WFA split ratio loaded from config_snapshot.json: {wfa_ratio}")
+            wfa_inputs = _load_wfa_inputs(_run_dir)
+            if wfa_inputs is not None:
+                print(f"WFA inputs loaded from wfa_inputs.json: split {wfa_inputs['wfa_split_date']} "
+                      f"({wfa_inputs['actual_start']} -> {wfa_inputs['actual_end']})")
             risk_free_rate = _load_risk_free_rate(_run_dir)
             if risk_free_rate is not None:
                 print(f"Risk-free rate loaded from config_snapshot.json: {risk_free_rate}")
@@ -404,17 +522,20 @@ def main():
         print(f"Loaded {len(trades_df)} trades.")
 
         _noise_csv_single = None
-        csv_parts_check = Path(csv_path).parts
-        if "analyzer_csvs" in csv_parts_check:
-            idx_check = csv_parts_check.index("analyzer_csvs")
-            _candidate = Path(*csv_parts_check[:idx_check]) / "noise_sample_data.csv"
+        if _run_dir is not None:
+            _candidate = _run_dir / "noise_sample_data.csv"
             if _candidate.is_file():
                 _noise_csv_single = str(_candidate)
-        portfolio_timeline = _load_equity_file(Path(csv_path).parent / f"{report_name}_equity.csv")
+        # Pair the curve with the trades CSV it was written beside, never with
+        # --report-name: that would score this CSV's trades on another
+        # strategy's curve (#477).
+        portfolio_timeline = _load_equity_file(
+            Path(csv_path).parent / f"{Path(csv_path).stem}_equity.csv")
         config_params = {
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
             'WFA_SPLIT_RATIO': wfa_ratio,
+            'WFA_INPUTS': wfa_inputs,
             'NOISE_CSV_PATH': _noise_csv_single,
         }
         if portfolio_timeline is not None:

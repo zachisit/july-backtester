@@ -348,6 +348,11 @@ def generate_wfa_summary(wfa_result: dict, wfa_split_date: str | None, wfa_split
     oos_pct = 100 - is_pct
     lines.append(f"Split Ratio   : {is_pct}% In-Sample / {oos_pct}% Out-of-Sample")
     lines.append(f"IS/OOS Boundary : {wfa_split_date}")
+    basis_note = wfa_result.get("wfa_basis_note")
+    if basis_note:
+        lines.append(f"Basis           : {basis_note[0].upper()}{basis_note[1:]}")
+    elif wfa_result.get("wfa_basis") == "run":
+        lines.append("Basis           : run's own WFA inputs, mark-to-market (matches main.py)")
     lines.append("")
 
     oos_pnl = wfa_result.get("oos_pnl_pct")

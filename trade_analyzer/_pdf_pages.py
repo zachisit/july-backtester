@@ -723,6 +723,11 @@ def build_wfa_page(
     T = _T()
     fig = plt.figure(figsize=config.FIG_FULL)
     _add_page_title(fig, 'Walk-Forward Analysis (WFA)')
+    _basis_note = wfa_result.get('wfa_basis_note')
+    if _basis_note:
+        # Never let a tearsheet number silently differ from main.py's (#477).
+        fig.text(0.5, 0.925, f"Basis: {_basis_note}", ha='center', va='center',
+                 fontsize=7.5, color=T['negative'], style='italic', wrap=True)
 
     gs = mgridspec.GridSpec(2, 2, figure=fig,
                             top=0.91, bottom=0.06, left=0.08, right=0.97,

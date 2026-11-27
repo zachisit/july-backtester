@@ -483,6 +483,14 @@ CONFIG = {
     # stop: a breach closes the trade on the fill bar. False = legacy (first stop
     # check on the NEXT bar). No effect under execution_time="close".
     "entry_bar_stop_check": True,
+    # Same-bar re-entry guard (#401 follow-up). Under execution_time="open" an
+    # entry fills at the bar Open, before any intrabar exit. True = a symbol
+    # closed this bar by a stop, margin call or last-close PIT liquidation
+    # cannot be re-entered (either side) at this bar's open, which would be a
+    # fill booked while the old position was still held. Exits that fill at
+    # the open (strategy exit / cover) do not block. False = legacy. No effect
+    # under execution_time="close".
+    "open_exec_same_bar_reentry_guard": True,
     # Finer-resolution timeframe fetched per symbol when intrabar_resolution is on.
     "intrabar_timeframe": "MIN",     # "MIN" | "H"
     "intrabar_multiplier": 1,        # e.g. 5 for 5-minute sub-bars

@@ -383,7 +383,8 @@ class TestFreshSignalOnTheStopBar:
     bar 4 reads 0, so bar 5 is a genuine transition. Under execution_time
     "close" that is executable; under "open" it books an entry at the open of
     a bar whose stop fired intrabar, which is the narrow follow-up #401 split
-    out. This pins the current behaviour so that follow-up visibly flips it."""
+    out. That follow-up is now the open-mode guard (TestOpenExecSameBarGuard);
+    this close-mode pin is intentionally unchanged by it."""
 
     CLOSES = [100.0, 101.0, 102.0, 101.0, 100.0, 94.0, 95.0, 96.0, 97.0, 98.0]
 
@@ -463,3 +464,118 @@ class TestConfigValidation:
 
     def test_absent_key_is_not_a_warning(self):
         assert not [w for w in validate_config({}) if "entry_trigger" in w]
+
+
+# --------------------------------------------------------------------------
+# Same-bar re-entry guard under execution_time="open" (#401 follow-up)
+# --------------------------------------------------------------------------
+def _open_frame(side):
+    """Open != Close, so an intrabar stop is distinct from a gap. Bar 5 trades
+    through a 5% stop intrabar (Low 94 long / High 108 short) but opens at 100,
+    above (below) the stop, so the stop fill is intrabar, after the open."""
+    opens = [100.0, 100.0, 101.0, 102.0, 101.0, 100.0, 95.0, 96.0, 97.0, 98.0]
+    closes = [100.0, 101.0, 102.0, 101.0, 100.0, 99.0, 95.0, 96.0, 97.0, 98.0]
+    n = len(opens)
+    idx = pd.bdate_range("2024-01-02", periods=n)
+    if side == "long":
+        high = [max(o, c) * 1.005 for o, c in zip(opens, closes)]
+        low = [o * 0.99 if i != 5 else 94.0 for i, o in enumerate(opens)]
+    else:
+        high = [o * 1.01 if i != 5 else 108.0 for i, o in enumerate(opens)]
+        low = [o * 0.995 for o in opens]
+    return pd.DataFrame(
+        {"Open": opens, "High": high, "Low": low, "Close": closes,
+         "Volume": [50_000_000] * n, "ATR_14": [1.0] * n,
+         "RSI_14": [50.0] * n, "SMA_200": closes},
+        index=idx,
+    ), idx
+
+
+class TestOpenExecSameBarGuard:
+    """A fresh entry signal on the bar BEFORE the stop bar asks to fill at the
+    stop bar's open. Under execution_time="open" that open precedes the
+    intrabar stop, so booking it means buying while the old position is still
+    held. The guard refuses it; the legacy flag reproduces the inversion."""
+
+    STOP = {"type": "percentage", "value": 0.05}
+
+    def _run(self, side, guard=True, extra_sig=None, execution_time="open"):
+        frame, idx = _open_frame(side)
+        v = 1 if side == "long" else -2
+        sig = pd.Series(0.0, index=idx)
+        sig.iloc[1] = v
+        sig.iloc[4] = v      # fresh edge: bar 3 reads 0
+        for k, val in (extra_sig or {}).items():
+            sig.iloc[k] = val
+        with patch.dict(CONFIG, {"execution_time": execution_time,
+                                 "open_exec_same_bar_reentry_guard": guard}):
+            res = run_portfolio_simulation(
+                {"X": frame}, {"X": sig}, 100_000.0, 0.5,
+                None, None, None, self.STOP)
+        return pd.DataFrame(res["trade_log"]), idx
+
+    @pytest.mark.parametrize("side", ["long", "short"])
+    def test_guard_refuses_entry_at_the_stop_bar_open(self, side):
+        log, idx = self._run(side)
+        assert len(log) == 1, log[["Trade", "EntryDate", "ExitDate", "ExitReason"]]
+        assert "Stop Loss" in str(log.iloc[0]["ExitReason"])
+        assert pd.Timestamp(log.iloc[0]["ExitDate"]) == idx[5]
+
+    @pytest.mark.parametrize("side", ["long", "short"])
+    def test_legacy_flag_books_the_inverted_fill(self, side):
+        """Positive control: proves the scenario actually reaches the guard."""
+        log, idx = self._run(side, guard=False)
+        assert len(log) == 2
+        assert log.iloc[1]["EntryDate"] == log.iloc[0]["ExitDate"]
+        assert pd.Timestamp(log.iloc[1]["EntryDate"]) == idx[5]
+        assert "Stop Loss" in str(log.iloc[0]["ExitReason"])
+
+    def test_guard_blocks_the_opposite_side_too(self):
+        """Long stopped intrabar on bar 5, -2 on bar 4 asks for a short at bar
+        5's open: at that open the long was still held."""
+        frame, idx = _open_frame("long")
+        sig = pd.Series(0.0, index=idx)
+        sig.iloc[1] = 1
+        sig.iloc[4] = 0
+        with patch.dict(CONFIG, {"execution_time": "open"}):
+            # Pin the ordering the engine actually uses: the stop is checked
+            # before the strategy exit, so bar 5 books a stop, not a -2 exit.
+            sig_short = sig.copy(); sig_short.iloc[4] = -2
+            res = run_portfolio_simulation(
+                {"X": frame}, {"X": sig_short}, 100_000.0, 0.5,
+                None, None, None, self.STOP)
+        log = pd.DataFrame(res["trade_log"])
+        assert not any(str(t).startswith("Short") and pd.Timestamp(d) == idx[5]
+                       for t, d in zip(log["Trade"], log["EntryDate"])), log
+
+    def test_next_bar_entry_is_unaffected(self):
+        """The guard is one bar wide: a signal on the stop bar enters the next
+        open as before."""
+        log, idx = self._run("long", extra_sig={4: 0, 5: 1})
+        assert len(log) == 2
+        assert pd.Timestamp(log.iloc[1]["EntryDate"]) == idx[6]
+
+    def test_close_execution_is_unaffected(self):
+        """Under "close" the stop fills intrabar before the close entry, which
+        is executable; the guard must not apply (TestFreshSignalOnTheStopBar)."""
+        on, _ = self._run("long", guard=True, extra_sig={4: 0, 5: 1}, execution_time="close")
+        off, _ = self._run("long", guard=False, extra_sig={4: 0, 5: 1}, execution_time="close")
+        assert len(on) == len(off) == 2
+        assert on.iloc[1]["EntryDate"] == on.iloc[0]["ExitDate"]
+
+    def test_strategy_exit_reversal_at_the_open_still_flips(self):
+        """-2 on a held long closes it at the open and opens a short at the
+        same open -- a genuine reversal, both fills at one open. No stop."""
+        frame, idx = _open_frame("long")
+        frame["Low"] = frame["Open"] * 0.999
+        sig = pd.Series(0.0, index=idx)
+        sig.iloc[1] = 1
+        sig.iloc[4] = -2
+        with patch.dict(CONFIG, {"execution_time": "open"}):
+            res = run_portfolio_simulation(
+                {"X": frame}, {"X": sig}, 100_000.0, 0.5,
+                None, None, None, {"type": "none"})
+        log = pd.DataFrame(res["trade_log"])
+        shorts = log[log["Trade"].astype(str).str.startswith("Short")]
+        assert len(shorts) == 1
+        assert pd.Timestamp(shorts.iloc[0]["EntryDate"]) == idx[5]

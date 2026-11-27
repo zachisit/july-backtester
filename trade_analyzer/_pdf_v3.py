@@ -212,7 +212,11 @@ def build_v3_page1(meta: dict, M: dict) -> plt.Figure:
     fig.text(0.05, 0.882, subline, ha="left", va="center",
              fontsize=8.5, color=T["text_muted"])
     if meta.get("oos_date"):
-        fig.text(0.95, 0.882, f"Walk-forward OOS split · {meta['oos_date']}",
+        _oos_label = f"Walk-forward OOS split · {meta['oos_date']}"
+        if meta.get("wfa_approx"):
+            # Split not taken from the run's own inputs; flag it (#477).
+            _oos_label += " (closed-trade approximation)"
+        fig.text(0.95, 0.882, _oos_label,
                  ha="right", va="center", fontsize=8, color=T["text_muted"],
                  style="italic")
 
@@ -604,6 +608,7 @@ def generate_tearsheet_v3(report_data: dict, output_path: str) -> str:
         "total_trades": M.get("total_trades"),
         "duration_years": dur_years,
         "oos_date": wfa_split_date,
+        "wfa_approx": (report_data.get("wfa_result") or {}).get("wfa_basis") == "approximation",
     }
     series = {
         "daily_equity": daily_equity,
