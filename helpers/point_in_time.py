@@ -889,6 +889,11 @@ PIT_PARQUET_SECURITY_OVERRIDES: dict[str, list[tuple[str, str, str]]] = {
     "RHAT": [(*_ALL, "RHT-201907")],
     "DISCK": [("2005-07-06", "2008-09-17", "WBD")],       # Discovery Holding, before the C class listed
     "LMCA": [("2012-12-01", "2013-01-31", "LMCA-201604")],  # listed 17 days after the index add
+    # DeVry (CRSP PERMNO 76708) traded as DV until 2017-05-23, then renamed to
+    # Adtalem (ATGE). The roster names it ATGE for its 2009-06-09..2012-09-05
+    # tenure, but the corpus has no ATGE file and bare DV is DoubleVerify (2021+).
+    # The history lives in DV-201705 (norgate-data#52); this needs that file.
+    "ATGE": [("2004-01-01", "2017-05-23", "DV-201705")],
     # BK -> BNY (2026-05-21). Needed while the corpus held the rename as two
     # files (norgate-data#16); once repaired, BNY holds BK's whole history and
     # _renames.json resolves earlier dates too, so this stays correct either way.
