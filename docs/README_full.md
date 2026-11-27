@@ -315,6 +315,26 @@ Everything goes in the `portfolios` dictionary in `config.py`. Comment out entri
 
 Include multiple entries to test each strategy with each stop type in the same run. Be aware that each additional stop type multiplies the total number of simulations.
 
+#### Stop fills, gap-throughs and the entry day (#425, #426, #499)
+
+A stop is a resting order, so the engine fills it the way a broker would:
+
+| Bar | Long stop fill | Short stop fill | `ExitReason` |
+| --- | --- | --- | --- |
+| Opens inside the stop, trades through it | the stop level | the stop level | `Stop Loss (<type>)` |
+| Opens beyond the stop (gap-through) | `min(stop, Open)` | `max(stop, Open)` | `Stop Loss (gap)` |
+
+- The existing slippage model (and market impact, if enabled) is applied on top of the gap fill, as on every other exit.
+- `stop_gap_fill: "level"` restores the legacy always-at-the-stop fill (optimistic; for A/B comparisons only). An armed `trailing_atr` trail keeps its exact-level fill unless `stop_gap_fill_armed_trail: "open"`.
+- With `intrabar_resolution` on and finer bars supplied, the sub-bar fill wins; a fill worse than the stop is still labelled `Stop Loss (gap)`.
+- **Entry bar.** Under `execution_time: "open"` the fill bar's own Low (High for shorts) is checked against the initial stop (`entry_bar_stop_check`, default on). A bar that opens above the stop and trades through it stops out at the stop.
+- **Entry day gap below the stop.** A structural stop (`atr`, `signal_bar`) is fixed before the fill. If the fill price (the open) is already at or below it, the stop was gapped through before it could rest. `gap_below_stop_on_entry` decides what happens:
+  - `"skip"` (default): no trade. Counted in `sizing_diagnostics` as `skipped_gap_below_stop`.
+  - `"exit_at_open"`: take the entry and stop out at the same open (`Stop Loss (gap)`), paying slippage and commission both ways.
+  - `"ignore"`: legacy (pre-#499). Enter anyway; a `signal_bar` level above the fill is not armed (the trade has no stop), an `atr` level above it fires on the fill bar.
+
+  Stops anchored to the entry price (`percentage`, `points`, `trailing_atr`) can never trigger this.
+
 ### Slippage and Commission
 
 ```python

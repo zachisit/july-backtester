@@ -6,6 +6,8 @@ engine wiring sites (long entry and short entry) in
 helpers/portfolio_simulations.py.
 """
 
+from unittest.mock import patch
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -261,6 +263,14 @@ class TestBarsBack:
 # affordability epsilon — we need the position to actually open here.
 # --------------------------------------------------------------------------
 def _run_half(df, signals, stop_config):
+    # The guard below is only reachable under the legacy entry-gap mode: since
+    # #499 the default declines a fill that is already through the structural
+    # level ("skip"), which tests/test_gap_stop_499.py pins.
+    with patch.dict("config.CONFIG", {"gap_below_stop_on_entry": "ignore"}, clear=False):
+        return _run_half_inner(df, signals, stop_config)
+
+
+def _run_half_inner(df, signals, stop_config):
     return run_portfolio_simulation(
         portfolio_data={"TEST": df},
         signals={"TEST": pd.Series(signals, index=df.index)},

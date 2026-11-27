@@ -421,8 +421,9 @@ printed extreme. The level is **static — it does not trail**.
   protective side), a structural level is decoupled from the fill, so under `execution_time="open"`
   a next-open that gaps *through* the extreme leaves the stop on the WRONG side of entry (long: a
   level above the fill; short: below it). Both entry branches therefore only arm the stop when it is
-  actually protective (`_lvl < entry_price` long / `_lvl > ep` short); otherwise they fall through
-  to no stop. Without this an inverted stop fires the next bar and fills at the phantom level *in the
+  actually protective (`_lvl < entry_price` long / `_lvl > ep` short). Since #499 the entry is
+  normally not taken at all: `gap_below_stop_on_entry` defaults to `"skip"` (or `"exit_at_open"`
+  stops out at the same open), and the old enter-with-no-stop behaviour needs `"ignore"`. Without this an inverted stop fires the next bar and fills at the phantom level *in the
   trade's favor* — a spurious profitable "Stop Loss" that flatters P&L/win-rate and poisons
   `InitialRisk`/`RMultiple`. Pairing with `intrabar_resolution` reduces the phantom-fill magnitude
   but does not replace the guard.

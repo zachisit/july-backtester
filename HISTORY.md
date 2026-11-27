@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+**Results change.** Re-run affected backtests before comparing with older results.
+
+- **Gap-through stop fills are labelled `Stop Loss (gap)`** when a stop fills worse than its level (#499/#502). Numbers are unchanged; only `ExitReason` differs.
+- **An entry whose fill is already through its structural stop (`atr`, `signal_bar`) is skipped** by default (`gap_below_stop_on_entry: "skip"`, #499/#502). Previously a `signal_bar` entry was taken with no stop and an `atr` entry stopped out on the fill bar. Set `"ignore"` to reproduce older runs.
+
 ## [1.17.0] — 2026-11-27
 
 **Results change.** Re-run affected backtests before comparing with older results.

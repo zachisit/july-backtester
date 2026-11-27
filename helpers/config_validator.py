@@ -148,6 +148,7 @@ KNOWN_KEYS: set[str] = {
     "intrabar_resolution",
     "stop_gap_fill",
     "stop_gap_fill_armed_trail",
+    "gap_below_stop_on_entry",
     "entry_bar_stop_check",
     "open_exec_same_bar_reentry_guard",
     "intrabar_timeframe",
@@ -337,6 +338,15 @@ def validate_config(config: dict) -> list[str]:
         msg = (f"WARNING: entry_trigger '{et}' is not a known mode "
                f"(expected 'level' or 'edge') -- the run will fall back to "
                f"'edge', i.e. entry only on the TRANSITION into the signal value")
+        warnings.append(msg)
+        logger.warning(msg)
+
+    # gap_below_stop_on_entry (#499): only "exit_at_open" opts out of the
+    # default; anything else runs as "skip", so say so instead of guessing.
+    gm = config.get("gap_below_stop_on_entry")
+    if gm is not None and str(gm).strip().lower() not in {"skip", "exit_at_open", "ignore"}:
+        msg = (f"WARNING: gap_below_stop_on_entry '{gm}' is not a known mode "
+               f"(expected 'skip', 'exit_at_open' or 'ignore') -- the run will fall back to 'skip'")
         warnings.append(msg)
         logger.warning(msg)
 
