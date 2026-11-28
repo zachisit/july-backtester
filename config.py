@@ -577,6 +577,12 @@ CONFIG = {
                                    #   <= top_n + sell_buffer_rank (reduces churn)
         "drift_trim_pct": 0.0,     # trim a position only when its weight drifts
                                    #   more than this fraction above target (0 = always)
+        # Idle cash return (#516) — mutually exclusive, both off by default:
+        "cash_rate_annual": 0.0,   # fixed annual rate on idle cash, compounded per
+                                   #   trading day as (1+annual)**(1/252)-1
+        "cash_sweep_symbol": None, # idle cash follows this instrument's close-to-close
+                                   #   return; its frame must be in data and it is
+                                   #   removed from the tradeable universe
     },
 
     # Scale-invariant RELATIVE position cap (issue #293): the largest fraction of
