@@ -53,18 +53,32 @@ def add_line_to_summary(summary_lines_list, label, value, is_curr=False, is_pct=
 
 def generate_overall_metrics_summary(
     trades_df, daily_returns, benchmark_returns, benchmark_df, daily_equity,
-    benchmark_ticker, initial_equity, risk_free_rate, trading_days_per_year
+    benchmark_ticker, initial_equity, risk_free_rate, trading_days_per_year,
+    portfolio_timeline=None,
 ):
     """
     Generates the text summary for overall performance metrics,
     including standard portfolio Sharpe and per-trade Sharpe diagnostics.
+
+    ``portfolio_timeline`` is the run's own daily equity curve (#519). When it
+    is usable, Total Net Profit / Strategy Total Return / CAGR / after-tax CAGR
+    / Calmar come from its last value against ``initial_equity`` and any part
+    of that not in the trade log is printed as its own line. When None, the
+    headline is ``initial_equity + sum(Profit)`` as before.
     """
     title = "Overall Performance Metrics"
     summary_lines = [] # Use a list to build the summary
     try:
         # --- Basic Core Metrics ---
         core_metrics = calculations.calculate_core_metrics(trades_df)
-        final_equity = initial_equity + core_metrics.get('total_profit', 0)
+        headline = calculations.resolve_headline_pnl(
+            core_metrics.get('total_profit'), initial_equity, portfolio_timeline)
+        if headline['source'] == 'equity_curve':
+            final_equity = headline['final_equity']
+            net_profit = headline['net_profit']
+        else:
+            final_equity = initial_equity + core_metrics.get('total_profit', 0)
+            net_profit = core_metrics.get('total_profit')
         total_trades = core_metrics.get('total_trades', 0)
 
         # --- Duration & CAGR ---
@@ -177,7 +191,12 @@ def generate_overall_metrics_summary(
         add_line = lambda label, value, **kwargs: add_line_to_summary(summary_lines, label, value, **kwargs)
 
         # --- Add lines using the helper ---
-        add_line("Total Net Profit:", core_metrics.get('total_profit'), is_curr=True)
+        add_line("Total Net Profit:", net_profit, is_curr=True)
+        if calculations.non_trade_pnl_is_material(headline['non_trade_pnl'], initial_equity):
+            add_line("Net Profit from Trade Log:", core_metrics.get('total_profit'), is_curr=True)
+            add_line("Equity Change Not in Trade Log:", headline['non_trade_pnl'], is_curr=True)
+            summary_lines.append("  (equity curve minus trade Profit, e.g. cash interest, fees or borrow booked to cash,")
+            summary_lines.append("   open-position MTM, end-of-run marking)")
         # ... (Add all other standard lines as before) ...
         add_line("Total Trades:", total_trades, fmt_spec="{:,.0f}")
         if 'Shares' in trades_df.columns and pd.api.types.is_numeric_dtype(trades_df['Shares']):
@@ -206,7 +225,7 @@ def generate_overall_metrics_summary(
         add_line("CAGR:", cagr, is_pct=True)
 
         # --- After-Tax CAGR (30% flat rate on net profits) ---
-        total_profit = core_metrics.get('total_profit', 0) or 0
+        total_profit = net_profit or 0
         if pd.notna(total_profit) and total_profit > 0:
             after_tax_profit = total_profit * 0.70
         else:

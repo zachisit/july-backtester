@@ -202,6 +202,70 @@ def calculate_cagr(initial_equity: float, final_equity: float, duration_years: f
         return (value_ratio ** (1.0 / float(duration_years))) - 1.0
     except (OverflowError, ValueError, ZeroDivisionError): return np.nan
 
+#: Smallest equity change outside the trade log the report calls out. Engine
+#: runs whose curve and trades reconcile differ by float noise only (~1e-6 $);
+#: anything at or above half a dollar, or one part per million of the starting
+#: capital on a large account, is a real non-trade change (#519).
+NON_TRADE_PNL_MIN_ABS = 0.50
+NON_TRADE_PNL_MIN_FRAC = 1e-6
+
+
+def _equity_curve_end(equity_curve) -> Optional[float]:
+    """Last finite value of a run's equity curve, or None when it is unusable."""
+    if not isinstance(equity_curve, pd.Series) or equity_curve.empty:
+        return None
+    values = pd.to_numeric(equity_curve, errors='coerce')
+    values = values[np.isfinite(values)]
+    if values.empty:
+        return None
+    return float(values.iloc[-1])
+
+
+def resolve_headline_pnl(trade_total_profit, initial_equity, equity_curve=None) -> Dict[str, Any]:
+    """Headline Net P&L / final equity for the report (#519).
+
+    With a usable equity curve (the run's ``PORTFOLIO_TIMELINE``) the headline
+    is the curve's last value against ``initial_equity`` -- the same basis as
+    the drawdown, Sharpe and charts, and as the terminal's ``pnl_percent``. The
+    part of it not booked into any trade's ``Profit`` (cash interest, fees or
+    borrow booked to cash, open-position MTM on a realised-only trade log,
+    end-of-run marking) is returned as ``non_trade_pnl``.
+
+    Without a curve the headline is ``initial_equity + sum(Profit)`` exactly as
+    before and ``non_trade_pnl`` is None (it is never invented).
+
+    Returns ``{'net_profit', 'final_equity', 'trade_profit', 'non_trade_pnl',
+    'source'}`` with ``source`` in ``{'equity_curve', 'trade_log'}``.
+    """
+    trade_profit = trade_total_profit
+    out = {
+        'net_profit': trade_profit,
+        'final_equity': initial_equity + (trade_profit if pd.notna(trade_profit) else 0),
+        'trade_profit': trade_profit,
+        'non_trade_pnl': None,
+        'source': 'trade_log',
+    }
+    end = _equity_curve_end(equity_curve)
+    if end is None or pd.isna(initial_equity) or initial_equity <= 1e-9:
+        return out
+    net = end - float(initial_equity)
+    out.update(
+        net_profit=net,
+        final_equity=end,
+        non_trade_pnl=net - (float(trade_profit) if pd.notna(trade_profit) else 0.0),
+        source='equity_curve',
+    )
+    return out
+
+
+def non_trade_pnl_is_material(non_trade_pnl, initial_equity) -> bool:
+    """True when an equity change outside the trade log is worth showing (#519)."""
+    if non_trade_pnl is None or pd.isna(non_trade_pnl):
+        return False
+    base = abs(float(initial_equity)) if pd.notna(initial_equity) else 0.0
+    return abs(float(non_trade_pnl)) >= max(NON_TRADE_PNL_MIN_ABS, NON_TRADE_PNL_MIN_FRAC * base)
+
+
 def calculate_calmar(cagr: float, max_drawdown_percent: float) -> float: # RESTORED
     """Calculates Calmar Ratio (CAGR / Max Drawdown %). Max DD should be positive magnitude."""
     if pd.isna(cagr) or pd.isna(max_drawdown_percent): return np.nan

@@ -223,8 +223,14 @@ def build_v3_page1(meta: dict, M: dict) -> plt.Figure:
     # --- Headline (5 bordered KPI tiles) ---
     fig.text(0.05, 0.858, "HEADLINE", ha="left", va="bottom",
              fontsize=8, color=T["primary"], fontweight="bold")
+    # Equity change outside the trade log (cash interest, fees booked to cash,
+    # open MTM...) is part of the headline Net P&L; say so instead of letting it
+    # differ silently from the sum of trades (#519).
+    _non_trade = M.get("non_trade_pnl") if M.get("non_trade_material") else None
+    _net_sub = (f"incl. {_curr(_non_trade, signed=True)} not in trades"
+                if _non_trade is not None else "")
     kpi_specs = [
-        ("Net P&L", _curr(M.get("total_profit")), "", (M.get("total_profit") or 0) >= 0),
+        ("Net P&L", _curr(M.get("total_profit")), _net_sub, (M.get("total_profit") or 0) >= 0),
         ("Return / DD", _num(M.get("ret_dd")), f"{_num(meta.get('duration_years'), 1)} yrs", None),
         ("Sharpe", _num(M.get("sharpe")), f"Sortino {_num(M.get('sortino'))}", None),
         ("Max Drawdown", _curr(-abs(M.get("max_dd_dollars") or 0)),
@@ -242,9 +248,16 @@ def build_v3_page1(meta: dict, M: dict) -> plt.Figure:
              fontsize=8, color=T["primary"], fontweight="bold")
     _hline(fig, 0.05, 0.95, 0.683, color=T["grid"], lw=0.6)
 
+    _perf_rows = [
+        ("Net P&L", _curr(M.get("total_profit")), (M.get("total_profit") or 0) < 0),
+    ]
+    if _non_trade is not None:
+        _perf_rows += [
+            ("  from Trades", _curr(M.get("trade_profit")), (M.get("trade_profit") or 0) < 0),
+            ("  Not in Trade Log", _curr(_non_trade, signed=True), _non_trade < 0),
+        ]
     left_blocks = [
-        ("Performance", [
-            ("Net P&L", _curr(M.get("total_profit")), (M.get("total_profit") or 0) < 0),
+        ("Performance", _perf_rows + [
             ("Gross P&L", _curr(M.get("gross_profit")), False),
             ("Est. Costs", _curr(-abs(M.get("transaction_fees") or 0)),
              (M.get("transaction_fees") or 0) > 0),

@@ -279,8 +279,15 @@ def build_executive_summary_page(
 
     _, _, _, max_dd = calculations.calculate_equity_drawdown(daily_equity)
 
+    # total_profit is the headline the analyzer resolved -- the equity curve's
+    # when one was supplied (#519). Name the part not in the trade log.
+    _non_trade = core_metrics.get('non_trade_pnl')
+    _net_sub = ''
+    if calculations.non_trade_pnl_is_material(_non_trade, initial_equity):
+        _net_sub = f"incl. {_fmt_curr(_non_trade)} not in trades"
+
     tiles = [
-        ('Net Profit', _fmt_curr(total_profit), total_profit >= 0),
+        ('Net Profit', _fmt_curr(total_profit), total_profit >= 0, _net_sub),
         ('Total Return', _fmt_pct(total_return),
          None if total_return is None else total_return >= 0),
         ('CAGR', _fmt_pct(cagr), None if cagr is None else cagr >= 0),
@@ -293,10 +300,10 @@ def build_executive_summary_page(
         ('Profit Factor', _fmt_float(core_metrics.get('profit_factor'), 2),
          None if core_metrics.get('profit_factor') is None else core_metrics.get('profit_factor', 0) >= 1.0),
     ]
-    for idx, (label, value, positive) in enumerate(tiles):
+    for idx, (label, value, positive, *sub) in enumerate(tiles):
         r, c = divmod(idx, 4)
         ax_tile = fig.add_subplot(gs_kpi[r, c])
-        draw_kpi_tile(ax_tile, label, value, positive=positive)
+        draw_kpi_tile(ax_tile, label, value, subtitle=sub[0] if sub else '', positive=positive)
 
     # --- Row 1: Equity vs benchmark ---
     ax_eq = fig.add_subplot(gs[1])
@@ -886,6 +893,12 @@ def generate_tearsheet_pdf(report_data: dict, output_path: str):
                      if pd.notna(start_d) and pd.notna(end_d) else 0)
     else:
         start_str, end_str, dur_years = 'N/A', 'N/A', 0
+    # Same duration as the executive-summary CAGR: the analyzer's, which is the
+    # equity curve's span when one was supplied and the first-entry-to-last-exit
+    # span (identical to the above) otherwise (#519).
+    _core_dur = core_metrics.get('duration_years')
+    if _core_dur is not None and pd.notna(_core_dur) and _core_dur > 0:
+        dur_years = _core_dur
 
     cagr = calculations.calculate_cagr(initial_equity, final_equity, dur_years) if dur_years > 0 else None
     sharpe_val = core_metrics.get('sharpe')

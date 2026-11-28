@@ -323,7 +323,12 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
         # (excluding the warmup period), Sharpe/Sortino start from the first trade rather
         # than the configured start_date, and drawdown misses intra-trade mark-to-market.
         _portfolio_timeline = config_params.get('PORTFOLIO_TIMELINE')
+        _headline_curve = None
         if _portfolio_timeline is not None and not _portfolio_timeline.empty:
+            # Headline Net P&L / CAGR come from this curve too (#519), so they
+            # agree with the drawdown/Sharpe below and include equity changes
+            # that never enter a trade's Profit (e.g. cash interest).
+            _headline_curve = _portfolio_timeline
             equity_for_dd_calc = _portfolio_timeline
             daily_equity = _portfolio_timeline
             daily_returns = _portfolio_timeline.pct_change().dropna()
@@ -338,7 +343,8 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
         print("\n--- Generating Report Sections ---")
         title, summary = report_generator.generate_overall_metrics_summary(
             trades_df, daily_returns, benchmark_returns, benchmark_df, equity_for_dd_calc,
-            benchmark_ticker, initial_equity, risk_free_rate, trading_days
+            benchmark_ticker, initial_equity, risk_free_rate, trading_days,
+            portfolio_timeline=_headline_curve,
         )
         report_sections.append({'type': 'text', 'title': title, 'data': summary})
 
@@ -610,6 +616,15 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
             _core_for_pdf['sharpe'] = _sharpe_val
             _core_for_pdf['sortino'] = _sortino_val
             _core_for_pdf['duration_years'] = total_duration_years
+            # Headline Net P&L for both layouts (#519): the equity curve's when
+            # one was supplied, else sum(Profit) unchanged. Every tile derived
+            # from total_profit (Total Return, CAGR, Return/DD, Recovery Factor,
+            # Calmar, Serenity) follows it.
+            _headline = calculations.resolve_headline_pnl(
+                _core_raw.get('total_profit'), initial_equity, _headline_curve)
+            _core_for_pdf['total_profit'] = _headline['net_profit']
+            _core_for_pdf['trade_total_profit'] = _headline['trade_profit']
+            _core_for_pdf['non_trade_pnl'] = _headline['non_trade_pnl']
 
             # Overall metrics text for appendix (re-use from report_sections)
             _overall_text = next(
