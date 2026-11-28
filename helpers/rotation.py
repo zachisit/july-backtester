@@ -39,7 +39,8 @@ special-casing.
 
 Public API
 ----------
-run_rotation(data, rank_fn, config, *, regime_gate=None, params=None) -> dict | None
+run_rotation(data, rank_fn, config, *, regime_gate=None, params=None,
+             entry_gate=None) -> dict | None
 run_rotation_from_config(data, config) -> dict | None   (honors rotation.enabled)
 build_rebalance_dates(data, rebalance_days) -> list[pd.Timestamp]
 WEIGHTING_SCHEMES -> dict[str, Callable]     (pluggable weighting registry)
@@ -203,6 +204,7 @@ def run_rotation(
     *,
     regime_gate: Callable | None = None,
     params: dict | None = None,
+    entry_gate: Callable | None = None,
 ) -> dict | None:
     """Run a cross-sectional rotation backtest.
 
@@ -229,6 +231,29 @@ def run_rotation(
         the book is fully liquidated to cash for that rebalance (risk-off).
     params : dict, optional
         Static kwargs forwarded to ``rank_fn``.
+    entry_gate : Callable, optional
+        ``entry_gate(data, rebalance_date) -> bool`` — same contract as
+        ``regime_gate`` (called with the **signal** date; must read data only up
+        to and including it). When it returns ``False`` the rebalance runs with
+        **no new capital committed** (issue #515):
+
+        * sells execute as normal (names leaving the keep band are sold);
+        * held names stay, with the SAME target weights they would get un-gated
+          (weights are computed over the would-be book, so the empty slots are
+          left in cash rather than re-spread over the held names);
+        * no new names are bought — their slots stay in cash;
+        * drift **top-ups** of held names are blocked (an add is new capital,
+          the thing the gate exists to stop); over-weight **trims** still run,
+          since they only reduce exposure.
+
+        ``regime_gate`` takes precedence: on a rebalance where it returns
+        ``False`` the book is liquidated and ``entry_gate`` is not consulted. An
+        exception in ``entry_gate`` logs a warning and fails open (entries
+        allowed), exactly like ``regime_gate``. When a gate is supplied the
+        result carries ``entry_gate_closed_rebalances`` (rebalances on which it
+        returned ``False``) and ``entry_gate_blocked_entries`` (new-name buys it
+        suppressed); with ``entry_gate=None`` (default) behaviour and the result
+        dict are unchanged.
 
     Returns
     -------
@@ -276,6 +301,8 @@ def run_rotation(
     # (date, cash, {sym: shares}) after each rebalance — the daily equity curve is
     # reconstructed from these: cash + live MTM changes only at rebalance dates.
     snapshots: list = []
+    gate_closed_rebalances = 0
+    gate_blocked_entries = 0
 
     def _mtm(date, col: str = "Close") -> float:
         """Equity = cash + live position value at *date*. ``col`` selects the
@@ -531,6 +558,16 @@ def run_rotation(
             snapshots.append((exec_date, cash, {}))
             continue
 
+        entries_open = True
+        if entry_gate is not None:
+            try:
+                entries_open = bool(entry_gate(data, signal_date))
+            except Exception as exc:  # fail open, same as regime_gate
+                logger.warning("[WARNING] rotation entry_gate raised: %s", exc)
+                entries_open = True
+            if not entries_open:
+                gate_closed_rebalances += 1
+
         raw_ranking = rank_fn(data, signal_date, **params)
         ranking = [s for s in _normalise_ranking(raw_ranking) if s in data]
         target = ranking[:top_n]
@@ -561,6 +598,9 @@ def run_rotation(
         # New positions cannot be opened on the terminal bar — they could not be
         # held for even one bar and would be immediate friction (finding F2).
         allow_new = exec_date != terminal_date
+        # Entry gate closed (issue #515): no new capital this rebalance — blocks
+        # new-name buys (step 5) and drift top-ups (step 4); trims still run.
+        allow_entries = allow_new and entries_open
 
         # Mark equity at the EXECUTION bar (not a future bar) for sizing (F1).
         equity_now = _mtm(exec_date, "Open")
@@ -590,7 +630,7 @@ def run_rotation(
                 # A trim only sells shares already held for a real (non-zero)
                 # duration, so it's fine on the terminal bar too.
                 _do_trim(sym, exec_date, target_dollars)
-            elif drift < -drift_trim and allow_new:
+            elif drift < -drift_trim and allow_entries:
                 # Same "no new capital commitment on the terminal bar" rule
                 # that gates _do_buy (finding F2) — without it, an add here
                 # buys shares that the End-of-Backtest MTM immediately closes
@@ -606,6 +646,9 @@ def run_rotation(
             for sym in new_names:
                 w = weights.get(sym, 0.0)
                 if w <= 0:
+                    continue
+                if not entries_open:
+                    gate_blocked_entries += 1
                     continue
                 _do_buy(sym, exec_date, equity_now * w)
 
@@ -634,7 +677,7 @@ def run_rotation(
     metrics = calculate_advanced_metrics(pnl_list, timeline.dropna(), duration_list)
     final_pnl_percent = (timeline.dropna().iloc[-1] / initial_capital) - 1
 
-    return {
+    result = {
         **metrics,
         "pnl_percent": final_pnl_percent,
         "Trades": len(pnl_list),
@@ -643,6 +686,10 @@ def run_rotation(
         "initial_capital": initial_capital,
         "portfolio_timeline": timeline.dropna(),
     }
+    if entry_gate is not None:
+        result["entry_gate_closed_rebalances"] = gate_closed_rebalances
+        result["entry_gate_blocked_entries"] = gate_blocked_entries
+    return result
 
 
 def _build_daily_timeline(data, insts, snapshots, all_dates) -> pd.Series:
@@ -717,4 +764,5 @@ def run_rotation_from_config(data: dict, config: dict) -> dict | None:
         config,
         regime_gate=entry.get("regime_gate"),
         params=entry.get("params"),
+        entry_gate=entry.get("entry_gate"),
     )

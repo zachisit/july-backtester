@@ -99,6 +99,7 @@ def register_strategy(
     params: dict | None = None,
     kind: str = SIGNAL,
     regime_gate: Callable | None = None,
+    entry_gate: Callable | None = None,
 ) -> Callable:
     """Decorator that registers a strategy function in the global registry.
 
@@ -135,6 +136,11 @@ def register_strategy(
         Rotation-only. ``regime_gate(data, rebalance_date) -> bool`` — when it
         returns ``False`` the rotation liquidates to cash for that rebalance.
         Ignored for signal strategies.
+    entry_gate : Callable, optional
+        Rotation-only. ``entry_gate(data, rebalance_date) -> bool`` — when it
+        returns ``False`` the rotation keeps its holdings but opens no new
+        positions (and tops up none) for that rebalance; sells still run. See
+        :func:`helpers.rotation.run_rotation`. Ignored for signal strategies.
 
     Examples
     --------
@@ -171,6 +177,7 @@ def register_strategy(
             "params":       dict(params),
             "kind":         kind,
             "regime_gate":  regime_gate,
+            "entry_gate":   entry_gate,
         }
         return fn
 
@@ -182,6 +189,7 @@ def register_rotation(
     dependencies: list[str] | None = None,
     params: dict | None = None,
     regime_gate: Callable | None = None,
+    entry_gate: Callable | None = None,
 ) -> Callable:
     """Register a cross-sectional **rotation** ranking plugin (issue #294).
 
@@ -218,6 +226,7 @@ def register_rotation(
         params=params,
         kind=ROTATION,
         regime_gate=regime_gate,
+        entry_gate=entry_gate,
     )
 
 
@@ -390,7 +399,8 @@ def get_rotation_strategies(directory: str = "custom_strategies") -> dict:
     Mirrors :func:`get_active_strategies` (loads *directory* + a ``private/``
     submodule if present) but returns only ``kind == "rotation"`` entries. Each
     value has the shape ``{"logic": rank_fn, "dependencies": list, "params":
-    dict, "kind": "rotation", "regime_gate": callable | None}``.
+    dict, "kind": "rotation", "regime_gate": callable | None,
+    "entry_gate": callable | None}``.
 
     Not filtered by ``CONFIG["strategies"]`` — rotation selection is driven by
     ``CONFIG["rotation"]["rank_strategy"]`` instead.
