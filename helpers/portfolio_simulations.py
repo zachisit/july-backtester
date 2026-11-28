@@ -2991,7 +2991,12 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         positions[symbol]['sbl_max_h'] = float(raw_entry_price)
                         # Count, per entry taken, a level built on the adjusted
                         # Low (#511). The once-per-symbol warning still fires.
-                        if (symbol, signal_date) in _sbl_fallback_bars:
+                        # Only a level that took effect counts (#513): under
+                        # gap_below_stop_on_entry="ignore" the guard discards a
+                        # level at/above the fill (NaN, no stop). exit_at_open's
+                        # level is NaN too but decides the exit, so it counts.
+                        if ((symbol, signal_date) in _sbl_fallback_bars
+                                and (pd.notna(stop_loss_level) or _gap_exit_now)):
                             _sizing_diag.record("sbl_adjusted_fallback", symbol)
                     if inst.margin_mode == _inst.INITIAL_MARGIN:
                         reserved_margin += _margin

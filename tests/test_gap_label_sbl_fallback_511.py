@@ -292,3 +292,43 @@ class TestSblFallbackCounter:
         out = d.format_report()
         assert "Position sizing: 1 condition recorded" in out
         assert COVERAGE_DRIFT in out and "Low_raw" in out
+
+
+# ---------------------------------------------------------------------------
+class TestSblFallbackCountsOnlyArmedStops:
+    """#513: an entry whose signal_bar_low level was discarded by the protective
+    guard (gap_below_stop_on_entry="ignore") has no stop, so it is not counted.
+    Probe from the #512 review: signal bar Low 95, no raw low, next open 94."""
+    ROWS = [(100, 101, 95, 100), (94, 96, 93, 95), (95, 96, 94, 95)]
+    SIG = [1, 0, 0]
+
+    def _res(self, mode):
+        return _run(_frame(self.ROWS), self.SIG, SBL,
+                    cfg_over={"gap_below_stop_on_entry": mode}, full=True)
+
+    def test_ignore_mode_discarded_stop_is_not_counted(self):
+        res = self._res("ignore")
+        assert len(res["trade_log"]) == 1
+        assert res["trade_log"][0]["ExitReason"] == "End of Backtest"
+        assert "sbl_adjusted_fallback" not in res["sizing_diagnostics"]
+
+    def test_exit_at_open_level_decides_the_exit_and_is_counted(self):
+        res = self._res("exit_at_open")
+        assert len(res["trade_log"]) == 1
+        assert res["trade_log"][0]["ExitReason"] == "Stop Loss (gap, signal_bar_low)"
+        assert res["sizing_diagnostics"].get("sbl_adjusted_fallback") == 1
+
+    def test_skip_mode_declines_and_does_not_count(self):
+        res = self._res("skip")
+        assert res is None or len(res["trade_log"]) == 0
+        if res is not None:
+            assert "sbl_adjusted_fallback" not in res["sizing_diagnostics"]
+            assert res["sizing_diagnostics"].get("skipped_gap_below_stop") == 1
+
+    def test_ignore_mode_armed_stop_is_still_counted(self):
+        """A level below the fill survives the guard under "ignore" and counts."""
+        rows = [(100, 101, 95, 100), (99, 100, 97, 98), (98, 99, 97, 98)]
+        res = _run(_frame(rows), self.SIG, SBL,
+                   cfg_over={"gap_below_stop_on_entry": "ignore"}, full=True)
+        assert len(res["trade_log"]) == 1
+        assert res["sizing_diagnostics"].get("sbl_adjusted_fallback") == 1
