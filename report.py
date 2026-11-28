@@ -138,6 +138,107 @@ def _load_initial_capital(run_dir: Path) -> float | None:
     return None
 
 
+#: Tolerances for the curve-vs-trades scale check in :func:`_curve_is_in_dollars`.
+#: A dollar curve's total change matches the trade log's total Profit closely
+#: (exactly when open positions are marked out at the end); a normalised curve
+#: (starting at 1.0 or 100) misses by orders of magnitude.
+_CURVE_PROFIT_REL_TOL = 0.5      # of the larger of |sum(Profit)| and |curve change|
+_CURVE_LEVEL_REL_TOL = 0.25      # of the curve's first point
+
+#: Verdicts returned by :func:`_curve_is_in_dollars`.
+CURVE_DOLLARS = "dollars"
+CURVE_INCONCLUSIVE = "inconclusive"
+CURVE_MISMATCH = "mismatch"
+
+
+def _curve_is_in_dollars(values: "pd.Series", trades_df: "pd.DataFrame | None") -> str:
+    """Whether an equity curve is on the same dollar scale as the trade log.
+
+    Compares the curve's total change (last - first) with ``sum(Profit)``.
+    Position-size bounds don't work here: a compounding strategy's later
+    positions exceed its starting capital, and rotation lots keep their first
+    ``EntryDate`` while top-ups are folded in at an average cost. The mismatch
+    allowed is the larger of half the profit/change and a quarter of the
+    curve's level, so realised-only logs (open positions excluded) still pass.
+
+    Returns one of:
+
+    * ``CURVE_DOLLARS`` -- the change reconciles with Profit (or the trade log
+      has no usable Profit, so there is nothing to check against);
+    * ``CURVE_INCONCLUSIVE`` -- the change and Profit are both within the
+      level slack (a quarter of the first point). Inside it a curve of any
+      scale reconciles, e.g. break-even trades net to zero against both a
+      $100,000 -> $100,000 curve and a 1.00 -> 1.00 one, so the scale can't
+      be verified;
+    * ``CURVE_MISMATCH`` -- the change does not match Profit: the curve may be
+      normalised, or the trade log may exclude open-position P&L.
+    """
+    if trades_df is None or trades_df.empty or "Profit" not in trades_df.columns:
+        return CURVE_DOLLARS
+    profit = pd.to_numeric(trades_df["Profit"], errors="coerce").dropna()
+    if profit.empty:
+        return CURVE_DOLLARS
+    total_profit = float(profit.sum())
+    change = float(values.iloc[-1] - values.iloc[0])
+    evidence = max(abs(total_profit), abs(change))
+    level_slack = _CURVE_LEVEL_REL_TOL * abs(float(values.iloc[0]))
+    if evidence <= level_slack:
+        return CURVE_INCONCLUSIVE
+    mismatch = abs(change - total_profit)
+    if mismatch <= max(_CURVE_PROFIT_REL_TOL * evidence, level_slack):
+        return CURVE_DOLLARS
+    return CURVE_MISMATCH
+
+
+def _fallback_initial_capital(timeline: "pd.Series | None", equity_path: Path,
+                              trades_df: "pd.DataFrame | None" = None) -> float | None:
+    """Initial capital when neither --equity nor config_snapshot.json gives one.
+
+    Uses the first point of the companion ``<stem>_equity.csv``: the engine's
+    ``portfolio_timeline`` starts at the first bar of the run, so that value is
+    the end-of-first-bar equity: the starting capital plus only that bar's P&L
+    and costs (zero when nothing is held on the first bar) -- far closer than a
+    fixed default.
+
+    The curve is used only when its scale is verified against the trades'
+    total Profit (see :func:`_curve_is_in_dollars`). When the check is
+    inconclusive or fails, a WARNING says starting capital could not be
+    verified and the default is assumed.
+
+    Returns None, after printing a WARNING that the analyzer default is being
+    assumed, when there is no usable curve; every %-based figure then depends
+    on that guess.
+    """
+    if timeline is not None:
+        values = pd.to_numeric(timeline, errors="coerce").dropna()
+        if not values.empty and float(values.iloc[0]) > 0:
+            capital = float(values.iloc[0])
+            verdict = _curve_is_in_dollars(values, trades_df)
+            if verdict == CURVE_DOLLARS:
+                print(f"Initial capital inferred from the first point of {equity_path.name}: "
+                      f"{capital:,.2f} (end-of-first-bar equity; pass --equity to override)")
+                return capital
+            change = float(values.iloc[-1] - values.iloc[0])
+            total_profit = float(pd.to_numeric(trades_df["Profit"], errors="coerce").sum())
+            if verdict == CURVE_INCONCLUSIVE:
+                reason = (f"its change ({change:,.2f}) and the trades' total Profit "
+                          f"({total_profit:,.2f}) are both small next to its first point "
+                          f"({capital:,.2f}), so a dollar curve and a normalised one "
+                          f"(e.g. starting at 1.0 or 100) would reconcile alike")
+            else:
+                reason = (f"its change ({change:,.2f}) does not match the trades' total "
+                          f"Profit ({total_profit:,.2f}). The curve may be normalised, or "
+                          f"the trade log may exclude open-position P&L")
+            print(f"WARNING: could not verify starting capital from {equity_path.name}: "
+                  f"{reason}. Pass --equity <capital> to set it.")
+    print(f"WARNING: no initial capital found (no --equity, no config_snapshot.json "
+          f"initial_capital, no usable {equity_path.name}); assuming "
+          f"${INITIAL_EQUITY:,.0f}. Total return, CAGR, Calmar, drawdown %, turnover "
+          f"and Monte Carlo figures all depend on it -- pass --equity <capital> "
+          f"if the backtest used a different starting capital.")
+    return None
+
+
 def _load_strategy_verdicts(run_dir: Path) -> list[dict]:
     """Load llm_verdict.json from a run directory if present.
 
@@ -332,8 +433,9 @@ def main():
         type=float,
         default=None,
         help=f"Initial equity for the analysis. If omitted, auto-loaded from "
-             f"config_snapshot.json's initial_capital when available, else "
-             f"falls back to {INITIAL_EQUITY}. The walk-forward (WFA) section "
+             f"config_snapshot.json's initial_capital when available, else the "
+             f"first value of the companion <stem>_equity.csv, else falls back to "
+             f"{INITIAL_EQUITY} with a WARNING. The walk-forward (WFA) section "
              f"ignores this when the run has wfa_inputs.json: it always uses the "
              f"run's own initial capital so it matches main.py.",
     )
@@ -453,6 +555,12 @@ def main():
             this_config = {**config_params}
             if portfolio_timeline is not None:
                 this_config['PORTFOLIO_TIMELINE'] = portfolio_timeline
+            if args.equity is None and initial_capital is None:
+                _fallback = _fallback_initial_capital(
+                    portfolio_timeline, csv_file.parent / f"{csv_file.stem}_equity.csv",
+                    trades_df)
+                if _fallback is not None:
+                    this_config['INITIAL_EQUITY'] = _fallback
             _verdict_match = _match_strategy_verdict(_strategy_verdicts, csv_file.stem,
                                                     csv_file.parent.name)
             if _verdict_match is not None:
@@ -529,8 +637,10 @@ def main():
         # Pair the curve with the trades CSV it was written beside, never with
         # --report-name: that would score this CSV's trades on another
         # strategy's curve (#477).
-        portfolio_timeline = _load_equity_file(
-            Path(csv_path).parent / f"{Path(csv_path).stem}_equity.csv")
+        _equity_path = Path(csv_path).parent / f"{Path(csv_path).stem}_equity.csv"
+        portfolio_timeline = _load_equity_file(_equity_path)
+        if args.equity is None and initial_capital is None:
+            initial_capital = _fallback_initial_capital(portfolio_timeline, _equity_path, trades_df)
         config_params = {
             **base_config,
             'BASE_OUTPUT_DIRECTORY': output_dir,
