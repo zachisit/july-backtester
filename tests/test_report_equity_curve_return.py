@@ -125,6 +125,11 @@ class TestResolveHeadlinePnl:
         curve = pd.Series([INIT, 104_000.0, np.nan], index=pd.bdate_range("2020-01-01", periods=3))
         assert calculations.resolve_headline_pnl(0.0, INIT, curve)["net_profit"] == pytest.approx(4_000.0)
 
+    def test_reverse_ordered_curve_uses_latest_date(self):
+        curve = pd.Series([INIT, 101_000.0, 108_000.0],
+                          index=pd.bdate_range("2020-01-01", periods=3))[::-1]
+        assert calculations.resolve_headline_pnl(0.0, INIT, curve)["net_profit"] == pytest.approx(8_000.0)
+
     def test_materiality(self):
         assert not calculations.non_trade_pnl_is_material(None, INIT)
         assert not calculations.non_trade_pnl_is_material(1e-6, INIT)
@@ -306,6 +311,18 @@ class TestV3Layout:
         # header period = the span Net P&L / duration are measured over
         assert seen["meta"]["start_date"] == curve.index[0].strftime("%d %b %Y")
         assert seen["meta"]["end_date"] == curve.index[-1].strftime("%d %b %Y")
+
+    def test_reverse_ordered_curve_uses_latest_date(self, tmp_path, monkeypatch):
+        """Codex r2: an _equity.csv in reverse date order must still give the
+        chronologically last value as the headline end (and a positive span)."""
+        trades = _trades()
+        curve = _timeline(trades, non_trade_total=7_738.0)
+        seen = self._capture(monkeypatch)
+        _run_report(tmp_path, monkeypatch, trades, curve.iloc[::-1], "v3")
+        M = seen["M"]
+        assert M["total_profit"] == pytest.approx(curve.iloc[-1] - INIT, abs=1e-6)
+        assert M["cagr"] == pytest.approx(_curve_cagr(curve), abs=1e-9)
+        assert seen["meta"]["start_date"] == curve.index[0].strftime("%d %b %Y")
 
     def test_no_curve_unchanged(self, tmp_path, monkeypatch):
         trades = _trades()

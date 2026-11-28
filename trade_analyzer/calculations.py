@@ -214,6 +214,8 @@ def _equity_curve_end(equity_curve) -> Optional[float]:
     """Last finite value of a run's equity curve, or None when it is unusable."""
     if not isinstance(equity_curve, pd.Series) or equity_curve.empty:
         return None
+    if isinstance(equity_curve.index, pd.DatetimeIndex) and not equity_curve.index.is_monotonic_increasing:
+        equity_curve = equity_curve.sort_index()  # "last" = latest date
     values = pd.to_numeric(equity_curve, errors='coerce')
     values = values[np.isfinite(values)]
     if values.empty:

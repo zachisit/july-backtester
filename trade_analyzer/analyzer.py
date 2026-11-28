@@ -324,6 +324,12 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
         # than the configured start_date, and drawdown misses intra-trade mark-to-market.
         _portfolio_timeline = config_params.get('PORTFOLIO_TIMELINE')
         _headline_curve = None
+        if (_portfolio_timeline is not None and not _portfolio_timeline.empty
+                and isinstance(_portfolio_timeline.index, pd.DatetimeIndex)
+                and not _portfolio_timeline.index.is_monotonic_increasing):
+            # An out-of-order _equity.csv would otherwise give a negative span
+            # and take the oldest point as the headline's end (#519 review).
+            _portfolio_timeline = _portfolio_timeline.sort_index()
         if _portfolio_timeline is not None and not _portfolio_timeline.empty:
             # Headline Net P&L / CAGR come from this curve too (#519), so they
             # agree with the drawdown/Sharpe below and include equity changes
