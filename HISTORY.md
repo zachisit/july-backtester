@@ -2,8 +2,26 @@
 
 ## [Unreleased]
 
+**Results change.** Re-run affected backtests before comparing with older results.
+
+- **Gap-through stop fills are labelled `Stop Loss (gap)`** when a stop fills worse than its level (#499/#502; #511 below changes this to `Stop Loss (gap, <type>)`). Numbers are unchanged; only `ExitReason` differs.
+- **Label change: gap labels now keep the stop type** (#511). A gapped stop reads `Stop Loss (gap, <type>)`, e.g. `Stop Loss (gap, atr)`, instead of `Stop Loss (gap)`. A `signal_bar_low` stop raised by its ATR trail reads `Stop Loss (signal_bar_low trail)` at the level and `Stop Loss (gap, signal_bar_low trail)` gapped. Anything that matches the exact string `Stop Loss (gap)` needs updating: match the prefix `Stop Loss (gap, ` or use `is_gap_stop_reason`. No fill, P&L or trade count changes.
+- **New sizing condition `sbl_adjusted_fallback`** (#511): each `signal_bar_low` entry whose stop came from the adjusted Low (no `raw_low` in `signal_aux` and no `Low_raw` / `raw_low` column) is counted in `sizing_diagnostics` and in the run's "Position sizing" report. The once-per-symbol warning stays. Stop levels are unchanged.
+- **An entry whose fill is already through its structural stop (`atr`, `signal_bar`) is skipped** by default (`gap_below_stop_on_entry: "skip"`, #499/#502). Previously a `signal_bar` entry was taken with no stop and an `atr` entry stopped out on the fill bar. Set `"ignore"` to reproduce older runs.
+- **New: `fixed_risk` sizing, a `signal_bar_low` stop (raw low minus an offset, rounded to cents, with an optional ATR trail) and a session-count `time_stop`** (#501/#503). All opt-in; existing configs are unchanged. A cash-clamped `fixed_risk` entry can still come out fractional until #507 is fixed.
+- **New: `entry_priority: "score"` and per-bar entry limits** (`max_new_positions_per_bar`, `max_new_risk_per_bar`), plus an optional entry-candidate log and shadow returns for skipped candidates (#500/#504). The default ordering is unchanged. Once cash or the caps bind, the score decides which trades are taken, not just their order.
+
+## [1.17.0] — 2026-11-27
+
+**Results change.** Re-run affected backtests before comparing with older results.
+
+- **`rule:` universes no longer apply a $5 price screen by default** (`universe_min_price` 5.0 → 0.0, #474/#475). The screen ran on retrospectively adjusted closes, which is look-ahead: it dropped names that later split and kept names that later reverse-split. A positive threshold still works and logs a look-ahead warning once per threshold; an invalid threshold (negative, NaN/inf, bool, non-numeric) now raises up front, and numpy numbers are accepted. A `rule:` run made before 1.17.0 with the key unset used $5. Set `universe_min_price: 5.0` to reproduce it. `config_snapshot.json` now records the rule-universe defaults a run resolved to under `_resolved_defaults`, so a later default change stays traceable. An as-of price screen is #508.
+- **Same-bar re-entry at the open after an intrabar exit is refused** under `execution_time="open"` (#483, #401 follow-up).
+
 ### Fixes
 
+- PIT rosters: dashed share-class spellings (`BRK-B`) resolve to the corpus's dotted files (#485/#486); ATGE's 2009–2012 S&P tenure resolves to DeVry (`DV-201705`, #498).
+- The tearsheet's walk-forward reuses `main.py`'s inputs, so it matches the terminal verdict (#477/#478).
 - `report.py` writes tearsheets to `detailed_reports/<Portfolio>/<Strategy>/`, mirroring `analyzer_csvs/<Portfolio>/`, in both `--all` and single-file mode. A strategy name shared by two portfolios of one run no longer overwrites the first portfolio's PDF/Markdown (#479). Explicit `--output-dir` (single-file mode only; `--all` now warns that it ignores it) and CSVs outside `analyzer_csvs/<Portfolio>/` are unchanged; old run folders are not moved. Existing run folders are not migrated: their old flat `detailed_reports/<Strategy>/` folders stay in place, and regenerating writes the per-portfolio folders alongside them without deleting anything.
 
 ## [1.16.0] — 2026-10-24

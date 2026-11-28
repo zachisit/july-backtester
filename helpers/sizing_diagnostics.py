@@ -47,6 +47,15 @@ REASONS = {
     "rejected_by_heat": (
         OVERRIDDEN,
         "rejected by the max_portfolio_heat budget"),
+    "skipped_gap_below_stop": (
+        OVERRIDDEN,
+        "declined: the entry fill was already through the initial stop "
+        "(gap_below_stop_on_entry='skip', #499)"),
+    "sbl_adjusted_fallback": (
+        COVERAGE_DRIFT,
+        "signal_bar_low stop built on the adjusted Low (no raw low supplied), "
+        "so the offset and rounding are in adjusted dollars -- return raw_low "
+        "from the strategy, or add a Low_raw column (#511)"),
     "clamped_by_contract_cap": (
         OVERRIDDEN,
         "reduced by max_contracts_cap before the requested risk budget was reached"),

@@ -315,6 +315,88 @@ Everything goes in the `portfolios` dictionary in `config.py`. Comment out entri
 
 Include multiple entries to test each strategy with each stop type in the same run. Be aware that each additional stop type multiplies the total number of simulations.
 
+#### Stop fills, gap-throughs and the entry day (#425, #426, #499)
+
+A stop is a resting order, so the engine fills it the way a broker would:
+
+| Bar | Long stop fill | Short stop fill | `ExitReason` |
+| --- | --- | --- | --- |
+| Opens inside the stop, trades through it | the stop level | the stop level | `Stop Loss (<type>)` |
+| Opens beyond the stop (gap-through) | `min(stop, Open)` | `max(stop, Open)` | `Stop Loss (gap, <type>)` |
+
+`<type>` is the configured stop type, the same in both labels, e.g. `Stop Loss (atr)` / `Stop Loss (gap, atr)`. A `signal_bar_low` stop that its ATR trail has moved off the initial level reads `signal_bar_low trail`: `Stop Loss (signal_bar_low trail)` / `Stop Loss (gap, signal_bar_low trail)` (#511). To count gap exits, match the prefix `Stop Loss (gap, ` (or call `helpers.portfolio_simulations.is_gap_stop_reason`), not an exact string. Before #511 every gap exit read `Stop Loss (gap)`.
+
+- The existing slippage model (and market impact, if enabled) is applied on top of the gap fill, as on every other exit.
+- `stop_gap_fill: "level"` restores the legacy always-at-the-stop fill (optimistic; for A/B comparisons only). An armed `trailing_atr` trail keeps its exact-level fill unless `stop_gap_fill_armed_trail: "open"`.
+- With `intrabar_resolution` on and finer bars supplied, the sub-bar fill wins; a fill worse than the stop is still labelled `Stop Loss (gap, <type>)`.
+- **Entry bar.** Under `execution_time: "open"` the fill bar's own Low (High for shorts) is checked against the initial stop (`entry_bar_stop_check`, default on). A bar that opens above the stop and trades through it stops out at the stop.
+- **Entry day gap below the stop.** A structural stop (`atr`, `signal_bar`) is fixed before the fill. If the fill price (the open) is already at or below it, the stop was gapped through before it could rest. `gap_below_stop_on_entry` decides what happens:
+  - `"skip"` (default): no trade. Counted in `sizing_diagnostics` as `skipped_gap_below_stop`.
+  - `"exit_at_open"`: take the entry and stop out at the same open (`Stop Loss (gap, <type>)`), paying slippage and commission both ways.
+  - `"ignore"`: legacy (pre-#499). Enter anyway; a `signal_bar` level above the fill is not armed (the trade has no stop), an `atr` level above it fires on the fill bar.
+
+  Stops anchored to the entry price (`percentage`, `points`, `trailing_atr`) can never trigger this.
+
+#### Fixed-risk sizing, signal-bar-low stop, time stop (#501)
+
+The common swing-book rule: risk X% of equity to the stop, capped at Y% of equity in notional, plus an optional time exit.
+
+```python
+"position_sizing_method": "fixed_risk",
+"risk_per_trade": 0.005,          # 0.5% of equity lost if the stop is hit
+"max_position_pct": 0.05,         # no position larger than 5% of equity (notional)
+"stop_loss_configs": [
+    # Initial stop = the signal bar's UNADJUSTED low minus $0.01, rounded to cents
+    # (how a broker order is placed), mapped onto the adjusted price scale.
+    {"type": "signal_bar_low", "offset": 0.01},
+    # ... optionally trailed: 3 x ATR(10) under the highest high, raised only.
+    {"type": "signal_bar_low", "offset": 0.01, "trail_atr": 3.0, "atr_period": 10},
+    # ... or with a 20-session time stop, exiting at the next open.
+    {"type": "signal_bar_low", "offset": 0.01,
+     "time_stop": {"sessions": 20, "exit": "next_open"}},
+],
+```
+
+- **`fixed_risk`**: `shares = floor(min(risk_per_trade × equity / (entry − stop), max_position_pct × equity / entry))`. The stop is the one the position actually gets, resolved by the same function. With no stop, or a stop at or above the fill, there is no trade. Under `execution_time: "open"`, `equity` is the start-of-bar mark (see #490). Gross exposure stays bounded by cash. When cash is short, the cash clamp runs after the floor and does not round, so a cash-clamped entry can come out with a fractional share count (#507).
+- **`signal_bar_low`** (long only). The raw low comes from, in order:
+  1. a `raw_low` column the strategy returns next to `Signal`;
+  2. a `Low_raw` / `raw_low` column on the price frame;
+  3. the adjusted `Low`, with a one-time warning per symbol, in which case the offset is in adjusted dollars. Every entry that falls back here is also counted in `sizing_diagnostics` as `sbl_adjusted_fallback` and listed in the run's "Position sizing" report, with the fix: return `raw_low` from the strategy, or add a `Low_raw` column (#511).
+
+  The raw stop is converted with the signal bar's own factor `Low_adj / Low_raw`, so a later split does not move it. `round_cents: false` turns off the rounding.
+- **Trail** (`trail_atr` > 0): runs after each bar's stop check, including the entry bar. The candidate is `max(entry fill, highs from the entry bar through the prior bar) − trail_atr × ATR(atr_period)` at the prior bar, and the stop is only ever raised. ATR here is the simple mean true range, expanding at the series start. A level set on bar *j* is first checked on bar *j+1*. Once the trail has moved the stop, its exit reads `Stop Loss (signal_bar_low trail)` (gapped: `Stop Loss (gap, signal_bar_low trail)`).
+- **`time_stop`**: `{"sessions": N, "exit": "next_open" | "close"}`, set per stop config or globally as `CONFIG["time_stop"]`. The entry bar is session 1.
+  - `next_open` exits at the open of session N+1, before that bar's stop check.
+  - `close` exits at the close of session N.
+
+  A stop hit on an earlier bar wins. Sessions are the symbol's own trading bars, not calendar days. The exit reason is `Time Stop`.
+
+#### Which signals get taken on a busy bar (#500)
+
+When more signals fire than cash, heat or the per-bar caps allow, `entry_priority` decides the order they are tried in. `"alphabetical"` is a hidden selection rule: it favours A-names. `"score"` orders by a column the strategy returns next to `Signal`:
+
+```python
+df["entry_score"] = df["RSI_14"]   # any column computed only from data known at the signal bar
+```
+
+```python
+"entry_priority": "score",
+"entry_score_ascending": False,    # highest score first; ties alphabetical; NaN last
+"max_new_positions_per_bar": None, # e.g. 5
+"max_new_risk_per_bar": 0.02,      # sum of shares * (entry - stop) for new entries <= 2% of equity
+"log_entry_candidates": True,      # writes *_entry_candidates.csv next to the trade log
+"shadow_skipped_candidates": True, # hypothetical return of every budget-skipped candidate
+```
+
+- The engine reads the score at the **signal bar** only.
+- **Once cash or the per-bar caps bind, the score is a selection rule, not just an ordering.** It decides which trades exist at all, so read the results as conditional on it. While #507 is open, a cash-clamped entry can spend cash to exactly zero, so every lower-scored candidate on that bar is refused for `cash`.
+- `"score"` with no `entry_score` column fails the run. It does not fall back to alphabetical.
+- The per-bar caps apply after cash, ADV and heat, in priority order. A candidate that fails a cap is skipped and the next one is tried. The caps are shared by both legs, and shorts are processed before longs on a bar, so in a long/short book shorts use the caps first. Score order holds within each leg; the run warns once if a long is refused by a cap that shorts had already used.
+- The candidate log has one row per signalled entry: score, `Taken`, and `skipped_reason`, which is one of `cash`, `heat`, `bar_risk`, `bar_count`, `adv`, `zero_size` (the sizing method returned nothing, e.g. no stop distance), `duplicate_symbol`, `same_bar_reentry`, `pit` or `gap_below_stop`. Taken trades also carry `EntryScore` in the trade log.
+- **Shadow returns** re-run each budget-skipped candidate through the same engine, as the only position in a one-symbol book. The result is in `ShadowReturnPct`, `ShadowExitDate` and `ShadowExitReason`.
+  - The trade is cut `shadow_horizon_bars` (260) after the fill.
+  - It costs one extra simulation per skipped candidate, so leave it off for busy universes unless you need the audit.
+
 ### Slippage and Commission
 
 ```python

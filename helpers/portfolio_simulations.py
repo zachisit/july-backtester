@@ -142,6 +142,99 @@ def _stop_gap_mode(stop_config, pos):
     return "open"
 
 
+# Every gap-through stop label starts with this prefix (#511). Count gap exits
+# with ``is_gap_stop_reason`` / ``startswith(GAP_STOP_PREFIX)``, never by an
+# exact string: the label carries the stop type after the prefix.
+GAP_STOP_PREFIX = "Stop Loss (gap, "
+
+
+def _stop_type_label(stop_config, pos=None):
+    """The ``<type>`` part of a stop exit label (#511).
+
+    The configured stop type, except a ``signal_bar_low`` stop that its ATR
+    trail has moved off the initial level, which reads
+    ``"signal_bar_low trail"``.
+    """
+    stype = stop_config.get('type')
+    if stype == "signal_bar_low" and pos is not None and pos.get('sbl_trail_raised'):
+        return "signal_bar_low trail"
+    return f"{stype}"
+
+
+def _gap_stop_reason(stop_config, pos=None):
+    """``"Stop Loss (gap, <type>)"`` -- a stop filled worse than its level (#511)."""
+    return f"{GAP_STOP_PREFIX}{_stop_type_label(stop_config, pos)})"
+
+
+def is_gap_stop_reason(reason):
+    """True for any gap-through stop exit label (#499/#511)."""
+    return isinstance(reason, str) and reason.startswith(GAP_STOP_PREFIX)
+
+
+def _stop_exit_reason(stop_config, fill, stop_level, side="long", pos=None):
+    """Exit reason for a stop fill (#499, #511).
+
+    A fill strictly WORSE than the stop level -- the bar opened beyond it, or
+    sub-bar data showed a gap through it -- is tagged
+    ``"Stop Loss (gap, <type>)"`` so gap-throughs can be counted in the trade
+    log. A fill at the level keeps ``"Stop Loss (<type>)"``. ``<type>`` is the
+    same in both (see ``_stop_type_label``).
+    """
+    if fill is not None and pd.notna(fill) and pd.notna(stop_level):
+        if (side == "long" and fill < stop_level) or (side == "short" and fill > stop_level):
+            return _gap_stop_reason(stop_config, pos)
+    return f"Stop Loss ({_stop_type_label(stop_config, pos)})"
+
+
+# Stop types whose level is fixed before the fill (not anchored to it), so the
+# fill can already be through them on the entry bar (#499).
+_STRUCTURAL_STOP_TYPES = frozenset({"atr", "signal_bar", "signal_bar_low"})
+
+
+def _simple_atr(df, period):
+    """Mean true range over ``period`` bars, expanding at the series start.
+
+    The first bar's TR is High - Low (no prior close). A simple mean, not
+    Wilder's smoothing, used by the ``signal_bar_low`` trail (#501). Scale-invariant, so it is computed on the engine's adjusted
+    bars and applied to an adjusted stop.
+    """
+    h, l, c = df['High'], df['Low'], df['Close']
+    pc = c.shift(1)
+    tr = pd.concat([h - l, (h - pc).abs(), (l - pc).abs()], axis=1).max(axis=1)
+    tr.iloc[:1] = (h - l).iloc[:1]
+    return tr.rolling(int(period), min_periods=1).mean()
+
+
+def _time_stop_cfg(stop_config):
+    """Resolve the session-count time stop (#501) -> (N, mode) or None.
+
+    Read from the stop config first (so one run can sweep stop configs with and
+    without it) and from CONFIG["time_stop"] otherwise.
+    ``{"sessions": N, "exit": "next_open" | "close"}``.
+    """
+    ts = stop_config.get("time_stop") if isinstance(stop_config, dict) else None
+    if ts is None:
+        ts = CONFIG.get("time_stop")
+    if not ts:
+        return None
+    n = int(ts.get("sessions", 0) or 0)
+    if n < 1:
+        return None
+    mode = str(ts.get("exit", "next_open")).strip().lower()
+    return n, ("close" if mode == "close" else "next_open")
+
+
+TIME_STOP_REASON = "Time Stop"
+
+
+def _entry_gap_mode():
+    """``gap_below_stop_on_entry`` (#499): "skip" (default) | "exit_at_open" |
+    "ignore" (legacy, pre-#499: enter anyway -- a signal_bar stop above the fill
+    is simply not armed, an atr stop above it fires on the fill bar)."""
+    mode = str(CONFIG.get("gap_below_stop_on_entry", "skip")).strip().lower()
+    return mode if mode in ("exit_at_open", "ignore") else "skip"
+
+
 def _prearm_decision(high, low, stop_level, target, window_bars, side="long",
                      bar_open=None, gap_mode="level"):
     """Outcome of ONE pre-arm bar for a ``trailing_atr`` position.
@@ -293,7 +386,7 @@ def _is_entry_bar(signals, edge_masks, symbol, sig_date, entry_value):
     return bool(_sym_masks[entry_value].loc[sig_date])
 
 
-def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config, size_mults=None, delisting_dates=None, intrabar_data=None, start_date=None):
+def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocation_pct, spy_df, vix_df, tnx_df, stop_config, size_mults=None, delisting_dates=None, intrabar_data=None, start_date=None, signal_aux=None, _shadow=False):
     """
     Runs a portfolio simulation with integrated stop-loss handling and logs
     a rich set of features for each trade for future machine learning analysis.
@@ -307,6 +400,12 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     start_date : date-like, optional
         First execution/timeline date. Earlier bars remain available for signal
         timing, structural stops and prior-bar ADV, but are never simulated.
+    signal_aux : dict[str, pd.DataFrame], optional
+        Per-symbol extra columns the strategy returned next to ``Signal``,
+        indexed like the signal series. Read: ``raw_low`` (the signal bar's
+        UNADJUSTED low, for the ``signal_bar_low`` stop, #501) and
+        ``entry_score`` (score-based entry priority, #500). Only values at the
+        signal bar are read.
     """
     from helpers.timeframe_utils import get_bars_per_year, get_bars_per_day_exact
 
@@ -358,6 +457,81 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # it had fallen back to edge (adversarial QA on #405).
     _entry_trigger = str(CONFIG.get("entry_trigger", "edge")).strip().lower()
     _edge_masks = None if _entry_trigger == "level" else _build_entry_edge_masks(signals)
+    _ts_cfg = _time_stop_cfg(stop_config)   # (sessions, mode) or None (#501)
+
+    def _is_at_open_exit(reason):
+        """Exits that do NOT block a same-bar re-entry under the #401 guard.
+
+        A time stop is deliberately NOT one of them, even in next_open mode: the
+        re-entry would have been decided on the prior bar while the position was
+        still held, which is exactly the case the guard exists to refuse (a
+        gapped stop that fills at the open blocks for the same reason). Kept as
+        a function so the rule is stated in one place (#501 QA round 2)."""
+        return reason in _AT_OPEN_EXIT_REASONS
+
+    if stop_config.get("type") == "signal_bar_low" and any(
+            (s == -2).any() for s in signals.values()):
+        logger.warning("signal_bar_low is a long-only stop type: short entries in this "
+                       "run carry no stop (#501)")
+    # --- SCORE PRIORITY + PER-BAR ENTRY LIMITS + CANDIDATE LOG (#500) ---
+    _priority_cfg = str(CONFIG.get("entry_priority", "alphabetical")).strip().lower()
+    if _priority_cfg == "score" and not _shadow and not any(
+            aux is not None and "entry_score" in aux.columns
+            for aux in (signal_aux or {}).values()):
+        raise ValueError(
+            "entry_priority='score' needs an 'entry_score' column returned by the "
+            "strategy next to 'Signal' (computed from data known at the signal bar); "
+            "none was supplied. It does not fall back to alphabetical (#500).")
+    _score_desc = not bool(CONFIG.get("entry_score_ascending", False))
+    _max_new_n = None if _shadow else CONFIG.get("max_new_positions_per_bar")
+    _max_new_risk = None if _shadow else CONFIG.get("max_new_risk_per_bar")
+    _cand_log_on = (not _shadow) and bool(CONFIG.get("log_entry_candidates", False))
+    entry_candidates = []
+    _bar_new = {"n": 0, "risk": 0.0}
+
+    def _entry_score(symbol, sig_date):
+        return _aux_value(symbol, sig_date, "entry_score")
+
+    def _score_key(symbol, sig_date):
+        """Sort key: signalled bars first, by score (desc by default), NaN score
+        last among them, ties alphabetical. Non-signalled bars sort after."""
+        sc = _entry_score(symbol, sig_date)
+        if pd.isna(sc):
+            return (1, 0.0, symbol)
+        return (0, -float(sc) if _score_desc else float(sc), symbol)
+
+    def _bar_limit_reason(new_risk, equity):
+        """None when the per-bar caps admit one more entry with ``new_risk``
+        dollars at risk, else the skip reason. Checked after every other gate,
+        so a failure skips this candidate and the loop tries the next."""
+        if _max_new_n is not None and _bar_new["n"] + 1 > int(_max_new_n):
+            return "bar_count"
+        if (_max_new_risk is not None and pd.notna(new_risk)
+                and _bar_new["risk"] + new_risk > float(_max_new_risk) * max(equity, 0.0) + 1e-9):
+            return "bar_risk"
+        return None
+
+    # The bar's caps are shared by both legs, and the short leg runs before the
+    # long leg, so with both active shorts consume the caps first (score order
+    # holds WITHIN a leg). Said once per run rather than silently.
+    _cross_leg_warned = [False]
+
+    def _bar_admit(new_risk, side="long"):
+        if side == "short":
+            _bar_new["short_n"] = _bar_new.get("short_n", 0) + 1
+        _bar_new["n"] += 1
+        _bar_new["risk"] += float(new_risk) if pd.notna(new_risk) else 0.0
+
+    def _cand(symbol, side, sig_date, taken, reason=None, shares=None, fill=None):
+        if not _cand_log_on:
+            return
+        entry_candidates.append({
+            "Date": date.isoformat(), "Symbol": symbol, "Side": side,
+            "SignalDate": sig_date.isoformat() if pd.notna(sig_date) else None,
+            "Score": _entry_score(symbol, sig_date), "Taken": bool(taken),
+            "skipped_reason": None if taken else reason,
+            "Shares": shares, "FillPrice": fill,
+        })
 
     # Dynamic HTB rate compounding based on timeframe (fixes issue #55)
     bars_per_year = get_bars_per_year(CONFIG)
@@ -645,8 +819,105 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         prior = df.loc[:at_date, 'Close'].dropna()
         return prior.iloc[-1] if len(prior) else None
 
-    def _initial_long_stop(symbol, df, signal_date, raw_entry_price, entry_price):
-        """Resolve long stop/trail state for both heat admission and the final fill."""
+    _sbl_atr_cache: dict = {}
+    _sbl_warned = set()
+    # (symbol, signal_date) whose signal_bar_low level came from the adjusted
+    # Low because no raw low was supplied; read when the entry is taken (#511).
+    _sbl_fallback_bars = set()
+
+    def _aux_value(symbol, at_date, column):
+        """Strategy-supplied value at ``at_date`` (signal_aux), else NaN."""
+        if not signal_aux:
+            return np.nan
+        aux = signal_aux.get(symbol)
+        if aux is None or column not in aux.columns or at_date not in aux.index:
+            return np.nan
+        v = aux.at[at_date, column]
+        return v if pd.notna(v) else np.nan
+
+    def _signal_bar_low_level(symbol, df, signal_date):
+        """Initial stop for ``{"type": "signal_bar_low", "offset": 0.01}`` (#501).
+
+        stop_raw = round(raw signal-bar low - offset, 2), placed in RAW dollars the
+        way a broker order is; it is then mapped onto the engine's (adjusted)
+        price scale with the signal bar's own adjustment factor Low_adj/Low_raw,
+        so a series that later splits stops at the same economic level.
+        Raw low source: signal_aux['raw_low'] -> a 'Low_raw' / 'raw_low' column
+        on the price frame -> the adjusted Low (factor 1, warned once per symbol).
+        """
+        if pd.isna(signal_date) or signal_date not in df.index:
+            return np.nan
+        adj_low = df.at[signal_date, 'Low']
+        if pd.isna(adj_low) or adj_low <= 0:
+            return np.nan
+        raw_low = _aux_value(symbol, signal_date, 'raw_low')
+        if pd.isna(raw_low):
+            for _c in ('Low_raw', 'raw_low'):
+                if _c in df.columns and pd.notna(df.at[signal_date, _c]):
+                    raw_low = df.at[signal_date, _c]
+                    break
+        _used_adjusted = pd.isna(raw_low) or raw_low <= 0
+        if _used_adjusted:
+            if symbol not in _sbl_warned:
+                _sbl_warned.add(symbol)
+                logger.warning("signal_bar_low: no raw low for %s; using the adjusted "
+                               "Low (offset applied in adjusted dollars)", symbol)
+            raw_low = adj_low
+        stop_raw = float(raw_low) - float(stop_config.get("offset", 0.01) or 0.0)
+        if stop_config.get("round_cents", True):
+            stop_raw = round(stop_raw, 2)
+        if stop_raw <= 0:
+            return np.nan
+        if _used_adjusted:
+            _sbl_fallback_bars.add((symbol, signal_date))
+        # Round away float noise from the factor: 13.676 * (a/a) came back as
+        # 13.675999999999998, so a bar whose Low printed exactly at the stop
+        # never touched it. 8 dp is far below any price tick.
+        return round(stop_raw * (float(adj_low) / float(raw_low)), 8)
+
+    def _sbl_trail_update(symbol, pos, date):
+        """Ratchet a ``signal_bar_low`` trail after the bar's stop check (#501).
+
+        cand = max(entry, highs from the entry bar through the PRIOR bar)
+               - trail_atr * ATR(atr_period) at the prior bar,
+        raised only, then this bar's High is folded into the running max. The
+        level set here is first checked on the NEXT bar (next-day activation),
+        i.e. a stop order updated after the close and working from the next session.
+        """
+        mult = stop_config.get("trail_atr")
+        if not mult or mult <= 0:
+            return
+        df = portfolio_data[symbol]
+        prev = prev_trading_dates[symbol].get(date)
+        if pd.notna(prev) and prev in df.index:
+            period = int(stop_config.get("atr_period", 10))
+            atr = _sbl_atr_cache.get((symbol, period))
+            if atr is None:
+                atr = _sbl_atr_cache[(symbol, period)] = _simple_atr(df, period)
+            a = atr.get(prev, np.nan)
+            if pd.notna(a):
+                cand = pos['sbl_max_h'] - float(mult) * float(a)
+                cur = pos.get('stop_loss_level')
+                if pd.isna(cur) or cand > cur:
+                    pos['stop_loss_level'] = cand
+                    # Label only (#511): the stop now sits at a trail level.
+                    pos['sbl_trail_raised'] = True
+        h = df.at[date, 'High'] if date in df.index else np.nan
+        if pd.notna(h) and h > pos['sbl_max_h']:
+            pos['sbl_max_h'] = float(h)
+
+    def _sessions_held(symbol, pos, date):
+        """Trading sessions of ``symbol`` since the entry bar (entry bar = 0)."""
+        idx = portfolio_data[symbol].index
+        return idx.get_loc(date) - idx.get_loc(pos['entry_date'])
+
+    def _initial_long_stop(symbol, df, signal_date, raw_entry_price, entry_price, guard=True):
+        """Resolve long stop/trail state for both heat admission and the final fill.
+
+        ``guard=False`` returns a structural level (signal_bar) even when it sits
+        at or above the fill, so the entry-day gap check (#499) can see it; the
+        position itself is always built from the guarded call.
+        """
         inst = instruments[symbol]
         stop_loss_level = np.nan
         _trail_target = None   # arm price for trailing_atr (None otherwise)
@@ -729,8 +1000,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # unguarded it fires next bar and fills at the phantom level
                 # (in the trade's FAVOR), booking a spurious "Stop Loss" profit
                 # and a 1%-proxy InitialRisk. Fall through to no stop instead.
-                if _lvl is not None and _lvl < entry_price:
+                if _lvl is not None and (_lvl < entry_price or not guard):
                     stop_loss_level = _lvl
+
+        elif _stype == 'signal_bar_low':
+            # #501: raw signal-bar low minus a dollar offset, mapped to the
+            # adjusted scale. Same protective-side guard as signal_bar.
+            _lvl = _signal_bar_low_level(symbol, df, signal_date)
+            if pd.notna(_lvl) and (_lvl < entry_price or not guard):
+                stop_loss_level = _lvl
 
         elif _stype == 'trailing_atr':
             # Sleeve A mechanic. Lock ATR at the breakout (signal) bar and keep it
@@ -890,6 +1168,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 del book[symbol]
 
     for date in portfolio_timeline.index:
+        _bar_new["n"], _bar_new["risk"], _bar_new["short_n"] = 0, 0.0, 0
         # Freeze before delisting, ordinary exits, and fill-bar stops can append
         # outcomes unavailable to an order at this bar's open.
         kelly_completed_count = len(trade_log) if execution_time == "open" else None
@@ -956,6 +1235,18 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 exit_date = date
                 exit_reason = "PIT Membership Exit"
 
+            # --- TIME STOP, next_open (#501) ---
+            # Exit at the open of session N+1 after entry. Checked BEFORE the
+            # stop: the order is a market-on-open, so it fills first; a stop
+            # hit on any earlier bar has already closed the trade.
+            if pd.isna(raw_exit_price) and _ts_cfg is not None and _ts_cfg[1] == "next_open":
+                if _sessions_held(symbol, pos, date) >= _ts_cfg[0]:
+                    _ts_px = portfolio_data[symbol].loc[date].get('Open')
+                    if pd.isna(_ts_px):
+                        _ts_px = portfolio_data[symbol].loc[date].get('Close')
+                    if pd.notna(_ts_px):
+                        raw_exit_price, exit_date, exit_reason = _ts_px, date, TIME_STOP_REASON
+
             # --- STOP-LOSS CHECK ---
             if (pd.isna(raw_exit_price) and stop_config.get("type") != "none"
                     and pd.notna(pos.get('stop_loss_level'))):
@@ -978,7 +1269,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     if _decision == "stop":
                         raw_exit_price = _fill
                         exit_date = date
-                        exit_reason = f"Stop Loss ({stop_config['type']})"
+                        exit_reason = _stop_exit_reason(stop_config, _fill, pos['stop_loss_level'], "long", pos)
                     # "arm" / "hold": leave raw_exit_price NaN — the TRAIL block below
                     # calls _update_trailing_atr_stop, which arms + seeds off THIS same
                     # bar's High when the target was reached (idempotent on "hold").
@@ -988,7 +1279,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         pos['stop_loss_level'], portfolio_data[symbol].loc[date].get('Open'),
                         "long", _stop_gap_mode(stop_config, pos))
                     exit_date = date
-                    exit_reason = f"Stop Loss ({stop_config['type']})"
+                    exit_reason = f"Stop Loss ({_stop_type_label(stop_config, pos)})"
                     # Sub-bar resolution: refine the fill from finer-resolution bars
                     # when enabled + available — a gap through the stop fills at the
                     # (worse) sub-bar open rather than optimistically at the stop.
@@ -1002,6 +1293,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _fill, _ = _intrabar.resolve_stop_fill(_day_bars, pos['stop_loss_level'], side="long")
                         if _fill is not None:
                             raw_exit_price = _fill
+                    exit_reason = _stop_exit_reason(stop_config, raw_exit_price, pos['stop_loss_level'], "long", pos)
 
             # --- STRATEGY-BASED EXIT (full <= -1) or PARTIAL SCALE-OUT (-1 < s < 0) ---
             partial_fraction = 0.0
@@ -1072,6 +1364,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         pos['risk'] *= (pos['shares'] - _pexit_shares) / pos['shares']
                     pos['shares'] -= _pexit_shares
 
+            # --- TIME STOP, close (#501): exit at the close of session N ---
+            if pd.isna(raw_exit_price) and _ts_cfg is not None and _ts_cfg[1] == "close":
+                if _sessions_held(symbol, pos, date) >= _ts_cfg[0] - 1:
+                    _ts_px = portfolio_data[symbol].loc[date].get('Close')
+                    if pd.notna(_ts_px):
+                        raw_exit_price, exit_date, exit_reason = _ts_px, date, TIME_STOP_REASON
+
             # --- MAINTENANCE MARGIN / MARGIN CALL (futures only) ---
             # Force-liquidate a futures position when posted margin + unrealized P&L
             # falls below the maintenance requirement (notional * maintenance_margin_pct).
@@ -1102,6 +1401,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         pos['stop_loss_level'] = max(pos['stop_loss_level'], new_stop_level)
                 elif stop_config.get("type") == "trailing_atr":
                     _update_trailing_atr_stop(pos, portfolio_data[symbol], date, stop_config)
+                elif stop_config.get("type") == "signal_bar_low" and 'sbl_max_h' in pos:
+                    _sbl_trail_update(symbol, pos, date)
                 continue
 
             # --- TRADE EXIT AND LOGGING LOGIC ---
@@ -1169,7 +1470,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             log_entry.update(pos.get('features', {}))
             trade_log.append(log_entry)
             exited_symbols.append(symbol)
-            if _guard_same_bar and exit_reason not in _AT_OPEN_EXIT_REASONS:
+            if _guard_same_bar and not _is_at_open_exit(exit_reason):
                 _open_entry_blocked.add(symbol)
 
         for symbol in exited_symbols: del positions[symbol]
@@ -1200,6 +1501,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 cover_raw = row.get('Open' if execution_time == 'open' else 'Close')
                 cover_reason = "PIT Membership Exit"
 
+            # TIME STOP, next_open (#501, mirror of the long side)
+            if pd.isna(cover_raw) and _ts_cfg is not None and _ts_cfg[1] == "next_open":
+                if _sessions_held(symbol, spos, date) >= _ts_cfg[0]:
+                    _ts_px = row.get('Open')
+                    if pd.isna(_ts_px):
+                        _ts_px = row.get('Close')
+                    if pd.notna(_ts_px):
+                        cover_raw, cover_reason = _ts_px, TIME_STOP_REASON
+
             # STOP-LOSS (short is stopped when the High trades up through the stop)
             if (pd.isna(cover_raw) and stop_config.get("type") != "none"
                     and pd.notna(spos.get('stop_loss_level'))):
@@ -1218,7 +1528,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         gap_mode=_stop_gap_mode(stop_config, spos))
                     if _decision == "stop":
                         cover_raw = _fill
-                        cover_reason = f"Stop Loss ({stop_config['type']})"
+                        cover_reason = _stop_exit_reason(stop_config, _fill, spos['stop_loss_level'], "short", spos)
                     # "arm" / "hold": leave cover_raw NaN — the trail-update below arms
                     # + seeds off THIS same bar's Low when the target was reached.
                 elif pd.notna(cur_high) and cur_high >= spos['stop_loss_level']:
@@ -1226,7 +1536,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     cover_raw = _coarse_stop_fill(
                         spos['stop_loss_level'], row.get('Open'),
                         "short", _stop_gap_mode(stop_config, spos))
-                    cover_reason = f"Stop Loss ({stop_config['type']})"
+                    cover_reason = f"Stop Loss ({_stop_type_label(stop_config, spos)})"
                     # See mirrored long-side comment: skip gap-refinement once the ATR
                     # trail has armed, matching the reference's exact-level trail fill.
                     if (_intrabar_on and symbol in intrabar_data
@@ -1236,6 +1546,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _fill, _ = _intrabar.resolve_stop_fill(_day_bars, spos['stop_loss_level'], side="short")
                         if _fill is not None:
                             cover_raw = _fill
+                    cover_reason = _stop_exit_reason(stop_config, cover_raw, spos['stop_loss_level'], "short", spos)
 
             # MAINTENANCE MARGIN / MARGIN CALL (futures short)
             if pd.isna(cover_raw):
@@ -1264,6 +1575,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         and signals[symbol].loc[sig_date] != -2):
                     cover_raw = row.get('Open' if execution_time == 'open' else 'Close')
                     cover_reason = "Short Cover"
+
+            # TIME STOP, close (#501, mirror of the long side)
+            if pd.isna(cover_raw) and _ts_cfg is not None and _ts_cfg[1] == "close":
+                if _sessions_held(symbol, spos, date) >= _ts_cfg[0] - 1 and pd.notna(row.get('Close')):
+                    cover_raw, cover_reason = row.get('Close'), TIME_STOP_REASON
 
             # Not covering this bar → trail the short stop and move on.
             if pd.isna(cover_raw):
@@ -1326,13 +1642,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             })
             trade_log[-1].update(spos.get('features', {}))
             short_exited.append(symbol)
-            if _guard_same_bar and cover_reason not in _AT_OPEN_EXIT_REASONS:
+            if _guard_same_bar and not _is_at_open_exit(cover_reason):
                 _open_entry_blocked.add(symbol)
         for symbol in short_exited:
             del short_positions[symbol]
 
         # --- SHORT ENTRY (signal = -2, not already in any position) ---
-        _priority = CONFIG.get("entry_priority", "alphabetical")
+        _priority = _priority_cfg
         if _priority == "signal_date":
             def _short_sig_key(item):
                 sym, _df = item
@@ -1343,6 +1659,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     return (0, str(sd), sym)
                 return (1, "", sym)
             _short_items = sorted(portfolio_data.items(), key=_short_sig_key)
+        elif _priority == "score":
+            _short_items = sorted(
+                portfolio_data.items(),
+                key=lambda it: _score_key(
+                    it[0], prev_trading_dates[it[0]].get(date) if execution_time == "open" else date))
         elif _priority == "random_seed":
             # Seeded per bar from (seed, date, side): a different order every
             # bar, identical across runs with the same seed (#412). One RNG
@@ -1354,16 +1675,27 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         else:
             _short_items = sorted(portfolio_data.items(), key=lambda x: x[0])
         for symbol, df in _short_items:
-            if date not in df.index or symbol in positions or symbol in short_positions:
+            if date not in df.index:
                 continue
+            if symbol in positions or symbol in short_positions:
+                if _cand_log_on:
+                    _sdl = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
+                    if _is_entry_bar(signals, _edge_masks, symbol, _sdl, -2):
+                        _cand(symbol, "short", _sdl, False, "duplicate_symbol")
+                continue
+            sig_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
+            _s_sig_here = _cand_log_on and _is_entry_bar(signals, _edge_masks, symbol, sig_date, -2)
             if symbol in _open_entry_blocked:
+                if _s_sig_here:
+                    _cand(symbol, "short", sig_date, False, "same_bar_reentry")
                 continue
             if _is_delisted(symbol, date):
                 continue
             if (not _pit_flag(symbol, date, '_pit_member', True)
                     or _pit_flag(symbol, date, '_pit_force_exit', False)):
+                if _s_sig_here:
+                    _cand(symbol, "short", sig_date, False, "pit")
                 continue
-            sig_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
             if _is_entry_bar(signals, _edge_masks, symbol, sig_date, -2):
                 ep = df.loc[date].get('Open' if execution_time == 'open' else 'Close')
                 if pd.isna(ep) or ep <= 0:
@@ -1373,6 +1705,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # Short-side stop / target / trail init (mirror of the long entry block).
                 # Stop sits ABOVE entry; target BELOW; ATR locked at the signal bar.
                 _s_stop, _s_target, _s_atr, _s_trail_anchor = np.nan, None, None, None
+                _s_gap_lvl = np.nan   # unguarded structural level for the #499 entry-gap check
                 _sc_type = stop_config.get("type")
                 if _sc_type in ('percentage', 'points'):
                     _s_stop = _inst.stop_level(inst_se, ep, stop_config, side="short")
@@ -1389,6 +1722,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if pd.notna(_ab) and pd.notna(_cb):
                             _s_stop = _inst.atr_stop_level(_cb, _ab, stop_config.get("multiplier", 3.0),
                                                            side="short", point_cap=stop_config.get("point_cap"))
+                            _s_gap_lvl = _s_stop
                 elif _sc_type == 'signal_bar':
                     # Mirror of the long-side branch: stop ABOVE the signal bar's high.
                     # `sig_date` is already the true signal bar for both execution_time modes.
@@ -1403,6 +1737,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         # stop if it sits ABOVE the short fill `ep`. A next-open that gaps
                         # UP through the signal-bar high leaves the level below entry — not
                         # a stop; unguarded it covers next bar in the trade's FAVOR.
+                        if _lvl is not None:
+                            _s_gap_lvl = _lvl
                         if _lvl is not None and _lvl > ep:
                             _s_stop = _lvl
                 elif _sc_type == 'trailing_atr':
@@ -1430,6 +1766,15 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _t1 = stop_config.get("t1_mult", 0.0)
                         if _sm > 0 and _t1 > 0:
                             _s_target = _s_trail_anchor - _eff * (_t1 / _sm)
+                # Entry-day gap through the initial stop (#499, mirror of the long side).
+                _s_gap_exit_now = False
+                if (pd.notna(_s_gap_lvl) and ep >= _s_gap_lvl
+                        and _entry_gap_mode() != "ignore"):
+                    if _entry_gap_mode() == "skip":
+                        _sizing_diag.record("skipped_gap_below_stop", symbol)
+                        _cand(symbol, "short", sig_date, False, "gap_below_stop")
+                        continue
+                    _s_gap_exit_now = True
                 _s_ir = float(_s_stop - ep) if (pd.notna(_s_stop) and _s_stop > ep) else None
 
                 # --- CAPTURE FEATURES AT ENTRY (mirror of the long entry block) ---
@@ -1608,7 +1953,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     # to 0 forever as price appreciates.
                     _s_per_contract_margin = _inst.margin_required(inst_se, 1, ep)
                     if _s_sizing_method not in ("risk_pct_capped",
-                                                "fixed_contracts"):
+                                                "fixed_contracts", "fixed_risk"):
                         shares = ((shares * _s_entry_fill)
                                   / _s_per_contract_margin
                                   if _s_per_contract_margin > 0 else 0.0)
@@ -1632,6 +1977,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                                 _fs_risk(shares), total_equity,
                                                 CONFIG.get("max_portfolio_heat", 1.0)):
                         _sizing_diag.record("rejected_by_heat", symbol)
+                        _cand(symbol, "short", sig_date, False, "heat")
                         continue
 
                     # Same contract-volume cap and prior-bar ADV timing as longs.
@@ -1669,10 +2015,12 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if _s_max_by_margin < shares:
                             _sizing_diag.record("clamped_by_cash", symbol)
                         if _s_max_by_margin <= 0:
+                            _cand(symbol, "short", sig_date, False, "cash")
                             continue
                         shares = min(shares, _s_max_by_margin)
                     shares = _inst.round_units(inst_se, shares)
                     if shares < 1:
+                        _cand(symbol, "short", sig_date, False, "zero_size")
                         continue
                     # Registered for later entries' gates from the FINAL count
                     # (#317), as the long path does.
@@ -1702,6 +2050,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             _s_margin = _inst.margin_required(inst_se, shares, _s_entry_fill)
                             commission = _inst.commission(inst_se, shares)
                         if shares < 1 or _s_margin + commission > cash - reserved_margin:
+                            _cand(symbol, "short", sig_date, False, "cash")
                             continue
                     _fs_new_risk = _fs_risk(shares)
                     if not check_portfolio_heat({**positions, **short_positions},
@@ -1713,6 +2062,14 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     _s_final_ir = (_s_stop - _s_entry_fill
                                    if _s_impact_add > 0 and pd.notna(_s_stop)
                                    and _s_stop > _s_entry_fill else _s_ir)
+                    _s_bar_risk = (shares * inst_se.point_value * (_s_stop - _s_entry_fill)
+                                   if pd.notna(_s_stop) and _s_stop > _s_entry_fill else _fs_new_risk)
+                    _blr = _bar_limit_reason(_s_bar_risk, total_equity)
+                    if _blr is not None:
+                        _cand(symbol, "short", sig_date, False, _blr)
+                        continue
+                    _bar_admit(_s_bar_risk, "short")
+                    _cand(symbol, "short", sig_date, True, shares=shares, fill=_s_entry_fill)
                     reserved_margin += _s_margin
                     cash -= commission
                     short_positions[symbol] = {
@@ -1744,6 +2101,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     _s_bp = cash - reserved_short_collateral
                     if _s_bp <= 1e-9 * max(total_equity, 1.0):
                         _sizing_diag.record("clamped_by_cash", symbol)
+                        _cand(symbol, "short", sig_date, False, "cash")
                         continue
 
                     # #386: honour position_sizing_method here. This branch
@@ -1769,6 +2127,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     # is what shows the harness is symmetric by direction and
                     # only the non-default methods diverged.
                     _s_sizing_kwargs = dict(_s_sizing_kwargs_base)
+                    if _s_eq_sizing_method == "fixed_risk":
+                        _s_sizing_kwargs["stop_distance_points"] = _s_ir
                     shares = calculate_position_size(
                         method=_s_eq_sizing_method,
                         equity=total_equity,
@@ -1781,6 +2141,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         allocation_pct=allocation_pct,
                         **_s_sizing_kwargs,
                     )
+                    _s_sized_zero = not (shares > 0)   # the sizer itself declined (#500 log)
 
                     # size_mults, which this leg also dropped. It is a public
                     # parameter of run_portfolio_simulation and the long path
@@ -1799,7 +2160,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     # this is identity today; it is here so the branch stays
                     # correct if a non-unit-value CASH_FULL instrument appears.
                     if (_s_eq_sizing_method not in
-                            ("risk_pct_capped", "fixed_contracts")
+                            ("risk_pct_capped", "fixed_contracts", "fixed_risk")
                             and inst_se.point_value != 1.0):
                         shares = shares / inst_se.point_value
 
@@ -1820,6 +2181,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     if not check_portfolio_heat({**positions, **short_positions},
                                                 _s_new_risk, total_equity, _s_max_heat):
                         _sizing_diag.record("rejected_by_heat", symbol)
+                        _cand(symbol, "short", sig_date, False, "heat")
                         continue
 
                     # Clamp the desired units to free buying power, including
@@ -1831,6 +2193,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _short_margin_req if _short_margin_req > 0 else 1.0)
                     _s_unit_budget = _s_budget_price + _inst.commission(inst_se, 1.0)
                     if _s_unit_budget <= 0:
+                        _cand(symbol, "short", sig_date, False, "cash")
                         continue
                     if _s_bp / _s_unit_budget < shares:
                         _sizing_diag.record("clamped_by_cash", symbol)
@@ -1838,6 +2201,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     while shares * _s_budget_price + _inst.commission(inst_se, shares) > _s_bp:
                         shares = float(np.nextafter(shares, 0.0))
                     if shares <= 0:
+                        _cand(symbol, "short", sig_date, False,
+                              "zero_size" if _s_sized_zero else "cash")
                         continue
 
 
@@ -1848,6 +2213,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if pd.notna(_s_adv20) and _s_adv20 > 0:
                             _s_max_shares = _s_adv20 * _s_max_pct_adv
                             if _s_max_shares <= 0:
+                                _cand(symbol, "short", sig_date, False, "adv")
                                 continue
                             if _s_max_shares < shares:
                                 _sizing_diag.record("clamped_by_adv", symbol)
@@ -1867,7 +2233,19 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
                     # Match the cash-long minimum meaningful equity size.
                     if shares <= 0.001:
+                        _cand(symbol, "short", sig_date, False,
+                              "zero_size" if _s_sized_zero else "cash")
                         continue
+                    # --- PER-BAR ENTRY LIMITS (#500) ---
+                    _s_bar_risk = (shares * (_s_stop - _s_entry_fill)
+                                   if pd.notna(_s_stop) and _s_stop > _s_entry_fill
+                                   else _inst.notional(inst_se, shares, _s_entry_fill) * _s_stop_dist)
+                    _blr = _bar_limit_reason(_s_bar_risk, total_equity)
+                    if _blr is not None:
+                        _cand(symbol, "short", sig_date, False, _blr)
+                        continue
+                    _bar_admit(_s_bar_risk, "short")
+                    _cand(symbol, "short", sig_date, True, shares=shares, fill=_s_entry_fill)
                     commission = _inst.commission(inst_se, shares)
                     cash -= commission   # proceeds and collateral cancel; only commission is a real cash cost
                     # Reserve collateral off the FINAL (post-ADV-cap) notional (#430).
@@ -1889,8 +2267,13 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         'size_mult': _s_size_mult,
                     }
 
+                # --- ENTRY-DAY GAP: exit_at_open (#499, mirror of the long side) ---
+                if _s_gap_exit_now and symbol in short_positions:
+                    _close_short_now(symbol, short_positions[symbol], date, ep,
+                                     _gap_stop_reason(stop_config, short_positions[symbol]))
+                    del short_positions[symbol]
                 # --- ENTRY-BAR EVALUATION (opt-in, mirror of the long entry-bar check) ---
-                if (_intrabar_on and stop_config.get("type") == "trailing_atr"
+                elif (_intrabar_on and symbol in short_positions and stop_config.get("type") == "trailing_atr"
                         and short_positions[symbol].get('trail_target') is not None):
                     _spos0 = short_positions[symbol]
                     _hi0 = df.loc[date].get('High')
@@ -1901,7 +2284,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _hi0, _lo0, _spos0['stop_loss_level'], _spos0['trail_target'],
                         _wbars0, side="short")
                     if _dec0 == "stop":
-                        _close_short_now(symbol, _spos0, date, _fill0, f"Stop Loss ({stop_config['type']})")
+                        _close_short_now(symbol, _spos0, date, _fill0,
+                                         _stop_exit_reason(stop_config, _fill0, _spos0['stop_loss_level'], "short", _spos0))
                         del short_positions[symbol]
                     else:
                         _update_trailing_atr_stop(_spos0, df, date, stop_config, side="short")
@@ -1921,8 +2305,16 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                 _bars0, _spos0['stop_loss_level'], side="short")
                             if _refined0 is not None:
                                 _cov0 = _refined0
-                        _close_short_now(symbol, _spos0, date, _cov0, f"Stop Loss ({stop_config['type']})")
+                        _close_short_now(symbol, _spos0, date, _cov0,
+                                         _stop_exit_reason(stop_config, _cov0, _spos0['stop_loss_level'], "short", _spos0))
                         del short_positions[symbol]
+                # --- ENTRY BAR survived: 1-session close time stop (#501, mirror of the long side) ---
+                if (symbol in short_positions and _ts_cfg is not None and _ts_cfg == (1, "close")
+                        and short_positions[symbol]['entry_date'] == date
+                        and pd.notna(df.loc[date].get('Close'))):
+                    _close_short_now(symbol, short_positions[symbol], date,
+                                     df.loc[date].get('Close'), TIME_STOP_REASON)
+                    del short_positions[symbol]
 
         # --- POSITION ENTRY LOGIC ---
         if _priority == "signal_date":
@@ -1935,6 +2327,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     return (0, str(sd), sym)
                 return (1, "", sym)
             _entry_items = sorted(portfolio_data.items(), key=_long_sig_key)
+        elif _priority == "score":
+            _entry_items = sorted(
+                portfolio_data.items(),
+                key=lambda it: _score_key(
+                    it[0], prev_trading_dates[it[0]].get(date) if execution_time == "open" else date))
         elif _priority == "random_seed":
             # Per-bar seed, see the short-entry block above (#412).
             _rng_long = _random.Random(f"{CONFIG.get('entry_random_seed', 42)}|{date}|long")
@@ -1964,13 +2361,25 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
             # stop), so a hold-state series that still reads 1 does not re-buy
             # the bar it was stopped out of. (A PIT cover cannot reach here: the
             # membership / force-exit check just below refuses the entry.)
-            if symbol in positions or symbol in short_positions: continue
+            if _cand_log_on:
+                _sd_log = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
+                _sig_here = _is_entry_bar(signals, _edge_masks, symbol, _sd_log, 1)
+            else:
+                _sig_here = False
+            if symbol in positions or symbol in short_positions:
+                if _sig_here:
+                    _cand(symbol, "long", _sd_log, False, "duplicate_symbol")
+                continue
             if symbol in _open_entry_blocked:
+                if _sig_here:
+                    _cand(symbol, "long", _sd_log, False, "same_bar_reentry")
                 continue
             if _is_delisted(symbol, date):
                 continue
             if (not _pit_flag(symbol, date, '_pit_member', True)
                     or _pit_flag(symbol, date, '_pit_force_exit', False)):
+                if _sig_here:
+                    _cand(symbol, "long", _sd_log, False, "pit")
                 continue
             raw_entry_price, entry_exec_date = np.nan, pd.NaT
             signal_date = prev_trading_dates[symbol].get(date) if execution_time == 'open' else date
@@ -1982,12 +2391,32 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
             entry_price = _inst.apply_slippage(instruments[symbol], raw_entry_price, "buy")
 
+            # --- ENTRY-DAY GAP THROUGH THE INITIAL STOP (#499) ---
+            # A structural stop (atr / signal_bar) is fixed before the fill. When
+            # the fill itself is already at or below it, the stop has been gapped
+            # through before the order could rest. "skip" declines the trade (a
+            # broker would reject a sell-stop above the market); "exit_at_open"
+            # takes the entry and stops out at the same fill. Anchored-to-entry
+            # stops (percentage/points/trailing_atr) can never trigger this.
+            _gap_exit_now = False
+            if (stop_config.get("type") in _STRUCTURAL_STOP_TYPES
+                    and _entry_gap_mode() != "ignore"):
+                _gap_lvl = _initial_long_stop(symbol, df, signal_date, raw_entry_price,
+                                              entry_price, guard=False)[0]
+                if pd.notna(_gap_lvl) and raw_entry_price <= _gap_lvl:
+                    if _entry_gap_mode() == "skip":
+                        _sizing_diag.record("skipped_gap_below_stop", symbol)
+                        _cand(symbol, "long", signal_date, False, "gap_below_stop")
+                        continue
+                    _gap_exit_now = True
+
             # Equity buying power nets out collateral held by open shorts (#430);
             # futures buying power is governed by reserved_margin instead.
             _bp = cash - (0.0 if instruments[symbol].margin_mode == _inst.INITIAL_MARGIN
                           else reserved_short_collateral)
             if entry_price > 0 and _bp <= 0:
                 _sizing_diag.record("clamped_by_cash", symbol)
+                _cand(symbol, "long", signal_date, False, "cash")
             if entry_price > 0 and _bp > 0:
                 # --- PER-SIGNAL SIZE MULTIPLIER ---
                 # Apply per-signal size multiplier when the strategy provides one
@@ -2086,6 +2515,21 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             if _sb_lvl is not None and _sb_lvl < raw_entry_price:
                                 sizing_kwargs["stop_distance_pct"] = (
                                     (raw_entry_price - _sb_lvl) / raw_entry_price)
+
+                # fixed_risk (#501) and any signal_bar_low sizing: take the
+                # distance from the SAME resolver that sets the position's stop
+                # rather than predicting it with another ladder (#391).
+                if sizing_method == "fixed_risk" or stop_config.get("type") == "signal_bar_low":
+                    _fr_stop = _initial_long_stop(symbol, df, signal_date,
+                                                  raw_entry_price, entry_price)[0]
+                    _fr_dist = (entry_price - _fr_stop) if pd.notna(_fr_stop) else np.nan
+                    if pd.notna(_fr_dist) and _fr_dist > 0:
+                        sizing_kwargs["stop_distance_points"] = float(_fr_dist)
+                        sizing_kwargs["stop_distance_pct"] = float(_fr_dist) / entry_price
+                    elif sizing_method == "fixed_risk":
+                        sizing_kwargs["stop_distance_points"] = None
+                    if sizing_method == "fixed_risk":
+                        sizing_kwargs["point_value"] = instruments[symbol].point_value
 
                 # For kelly: compute rolling stats from completed trades so sizing
                 # actually adapts to the strategy's live performance.
@@ -2213,6 +2657,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                 # sites agreeing is worth more than the line.
                                 _rp_stop_dist_pts = float(raw_entry_price - _sb_lvl)
 
+                    if _stype_sz == "signal_bar_low":
+                        _rp_stop_dist_pts = sizing_kwargs.get("stop_distance_points")
                     sizing_kwargs["stop_distance_points"] = _rp_stop_dist_pts
                     sizing_kwargs["point_value"] = inst.point_value
                     # #385: the integer floor and max_contracts_cap are contract-
@@ -2262,6 +2708,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # Apply the per-signal size multiplier (entry-queue / ML band)
                 # to the sized position before the heat check.
                 shares = shares * _size_mult
+                _sized_zero = not (shares > 0)   # sizing itself declined (e.g. no stop distance)
+                _adv_cut = False                  # the ADV cap reduced this order
 
                 # risk_pct_capped and fixed_contracts already answer in UNITS
                 # (contracts/shares); the other four return equity-equivalent
@@ -2271,7 +2719,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 # number that is already in the right units. This method check is
                 # the one piece of the old three-way dispatch that is load-bearing
                 # rather than duplication, so it survives #384 as an explicit gate.
-                if sizing_method in ("risk_pct_capped", "fixed_contracts"):
+                if sizing_method in ("risk_pct_capped", "fixed_contracts", "fixed_risk"):
                     pass
                 # Convert equity-equivalent shares to futures contracts: use
                 # their dollar target for margined instruments, otherwise
@@ -2320,6 +2768,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                 if not check_portfolio_heat({**positions, **short_positions},
                                             new_position_risk, total_equity, max_heat):
                     _sizing_diag.record("rejected_by_heat", symbol)
+                    _cand(symbol, "long", signal_date, False, "heat")
                     continue
 
                 # Cash constraint (equity full-notional pre-clamp; futures clamp on margin below)
@@ -2337,9 +2786,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         max_shares_allowed = adv_20 * max_pct_adv
                         if max_shares_allowed <= 0:
                             _sizing_diag.record("clamped_by_adv", symbol)
+                            _cand(symbol, "long", signal_date, False, "adv")
                             continue
                         if max_shares_allowed < shares:
                             _sizing_diag.record("clamped_by_adv", symbol)
+                            _adv_cut = True
                         shares = min(shares, max_shares_allowed)
 
                 # --- VOLUME-BASED MARKET IMPACT ---
@@ -2355,6 +2806,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
 
                 # Integer contracts for futures; fractional shares pass through for equities.
                 shares = _inst.round_units(inst, shares)
+                if inst.integer_units and shares < 1 and not _adv_cut:
+                    _sized_zero = True   # target under one contract: a size outcome, not cash
 
                 # --- AFFORDABILITY (margin-mode aware) ---
                 commission_cost = _inst.commission(inst, shares)
@@ -2392,7 +2845,9 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         _sizing_diag.record("clamped_by_cash", symbol)
                         # Robustly calculate the absolute maximum number of shares we can possibly afford
                         shares = _bp / (entry_price + CONFIG['commission_per_share'])
-                        if shares <= 0: continue  # Cannot afford even a fraction of a share
+                        if shares <= 0:  # Cannot afford even a fraction of a share
+                            _cand(symbol, "long", signal_date, False, "cash")
+                            continue
                         # Recalculate final total cost with the affordable share size
                         total_cost = (shares * entry_price) + (shares * CONFIG['commission_per_share'])
                         # Division followed by separate notional/fee products can
@@ -2405,6 +2860,11 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     can_afford = _bp >= total_cost and shares > 0.001
 
                 # Final check: Ensure we can afford the trade and it's a meaningful size
+                if not can_afford:
+                    _cand(symbol, "long", signal_date, False,
+                          "zero_size" if _sized_zero
+                          else "adv" if (_adv_cut and inst.integer_units and shares < 1)
+                          else "cash")
                 if can_afford:
                     # --- CAPTURE FEATURES AT ENTRY ---
                     # Read from the SIGNAL bar, not the fill bar (issue #310).
@@ -2490,7 +2950,27 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         if not check_portfolio_heat({**positions, **short_positions},
                                                     _final_risk, total_equity, max_heat):
                             _sizing_diag.record("rejected_by_heat", symbol)
+                            _cand(symbol, "long", signal_date, False, "heat")
                             continue
+                    # --- PER-BAR ENTRY LIMITS (#500), after every other gate ---
+                    _bar_risk_new = (shares * inst.point_value * (entry_price - stop_loss_level)
+                                     if pd.notna(stop_loss_level) and stop_loss_level < entry_price
+                                     else _final_risk)
+                    _blr = _bar_limit_reason(_bar_risk_new, total_equity)
+                    if _blr is not None:
+                        _cand(symbol, "long", signal_date, False, _blr)
+                        if _bar_new.get("short_n", 0) and not _cross_leg_warned[0]:
+                            _cross_leg_warned[0] = True
+                            logger.warning(
+                                "max_new_*_per_bar: shorts are admitted before longs on a bar, "
+                                "so a long was refused by a cap that shorts had already used "
+                                "(score order applies within each leg, not across them; #500)")
+                        continue
+                    _bar_admit(_bar_risk_new)
+                    _cand(symbol, "long", signal_date, True, shares=shares, fill=entry_price)
+                    _sc_feat = _entry_score(symbol, signal_date)
+                    if pd.notna(_sc_feat):
+                        features['EntryScore'] = _sc_feat
                     positions[symbol] = {
                         'shares': shares, 'entry_price': entry_price,
                         'raw_entry_price': raw_entry_price,
@@ -2506,12 +2986,24 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                         'trail_anchor': _trail_anchor,
                         'margin': _margin if inst.margin_mode == _inst.INITIAL_MARGIN else 0.0,
                     }
+                    if stop_config.get("type") == "signal_bar_low":
+                        # Running max for the trail starts at the entry fill (#501).
+                        positions[symbol]['sbl_max_h'] = float(raw_entry_price)
+                        # Count, per entry taken, a level built on the adjusted
+                        # Low (#511). The once-per-symbol warning still fires.
+                        if (symbol, signal_date) in _sbl_fallback_bars:
+                            _sizing_diag.record("sbl_adjusted_fallback", symbol)
                     if inst.margin_mode == _inst.INITIAL_MARGIN:
                         reserved_margin += _margin
                         cash -= commission_cost
                     else:
                         cash -= total_cost
 
+                    # --- ENTRY-DAY GAP: exit_at_open (#499) ---
+                    if _gap_exit_now:
+                        _close_long_now(symbol, positions[symbol], date, raw_entry_price,
+                                        _gap_stop_reason(stop_config, positions[symbol]))
+                        del positions[symbol]
                     # --- ENTRY-BAR EVALUATION (opt-in, trailing_atr + intrabar_resolution) ---
                     # The reference Sleeve A mechanic checks the stop/target starting ON
                     # the entry bar itself (leg1 loop is `range(entry_i, cap+1)`), but the
@@ -2519,7 +3011,7 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                     # the NEXT date. Reproduce the entry-bar check here: if the entry bar's
                     # own High/Low already resolves the stop or the arm target, apply it
                     # immediately instead of silently deferring to the next bar.
-                    if (_intrabar_on and stop_config.get("type") == "trailing_atr"
+                    elif (_intrabar_on and stop_config.get("type") == "trailing_atr"
                             and positions[symbol].get('trail_target') is not None):
                         _pos0 = positions[symbol]
                         _hi0 = df.loc[date].get('High')
@@ -2530,7 +3022,8 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                             _hi0, _lo0, _pos0['stop_loss_level'], _pos0['trail_target'],
                             _wbars0, side="long")
                         if _dec0 == "stop":
-                            _close_long_now(symbol, _pos0, date, _fill0, f"Stop Loss ({stop_config['type']})")
+                            _close_long_now(symbol, _pos0, date, _fill0,
+                                            _stop_exit_reason(stop_config, _fill0, _pos0['stop_loss_level'], "long", _pos0))
                             del positions[symbol]
                         else:
                             # "arm" / "hold": _update_trailing_atr_stop arms + seeds off
@@ -2558,7 +3051,17 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
                                     _bars0, _pos0['stop_loss_level'], side="long")
                                 if _refined0 is not None:
                                     _fill0 = _refined0
-                            _close_long_now(symbol, _pos0, date, _fill0, f"Stop Loss ({stop_config['type']})")
+                            _close_long_now(symbol, _pos0, date, _fill0,
+                                            _stop_exit_reason(stop_config, _fill0, _pos0['stop_loss_level'], "long", _pos0))
+                            del positions[symbol]
+                    # --- ENTRY BAR survived: signal_bar_low trail + 1-session time stop (#501) ---
+                    if symbol in positions:
+                        if 'sbl_max_h' in positions[symbol]:
+                            _sbl_trail_update(symbol, positions[symbol], date)
+                        if (_ts_cfg is not None and _ts_cfg == (1, "close")
+                                and pd.notna(df.loc[date].get('Close'))):
+                            _close_long_now(symbol, positions[symbol], date,
+                                            df.loc[date].get('Close'), TIME_STOP_REASON)
                             del positions[symbol]
 
         if _delist_on:
@@ -2705,7 +3208,16 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
         # as a strategy finding. Logging only on the success path would have
         # left the headline case silent, which is the defect being fixed.
         # Caught by this ticket's own tests, not by inspection.
-        _sizing_diag.log_report()
+        if not _shadow:
+            _sizing_diag.log_report()
+            if _cand_log_on and entry_candidates:
+                # The zero-trade run returns None (callers branch on it), so the
+                # candidate log cannot ride home on the result; summarise it here
+                # instead of dropping it (#500 QA round 2).
+                _why = pd.Series([c["skipped_reason"] for c in entry_candidates]).value_counts()
+                logger.warning("No trades: %d entry candidates, all skipped (%s)",
+                               len(entry_candidates),
+                               ", ".join(f"{k}={v}" for k, v in _why.items()))
         return None
 
     duration_list = [t['HoldDuration'] for t in trade_log]
@@ -2720,9 +3232,80 @@ def run_portfolio_simulation(portfolio_data, signals, initial_capital, allocatio
     # default and fires per entry, so a per-site warning is thousands of lines
     # on a thin universe and gets filtered out within a day. The counts also go
     # on the result, so a test asserts them instead of scraping a log.
-    _sizing_diag.log_report()
+    if not _shadow:
+        _sizing_diag.log_report()
+
+    if _cand_log_on and CONFIG.get("shadow_skipped_candidates", False):
+        _attach_shadow_returns(entry_candidates, portfolio_data, signals, initial_capital,
+                               allocation_pct, spy_df, vix_df, tnx_df, stop_config,
+                               signal_aux, intrabar_data)
+    _extra = {"entry_candidates": entry_candidates} if _cand_log_on else {}
 
     return {**metrics, "pnl_percent": final_pnl_percent, "Trades": len(pnl_list),
             "trade_pnl_list": pnl_list, "trade_log": trade_log, "initial_capital": initial_capital,
             "portfolio_timeline": portfolio_timeline.dropna(),
-            "sizing_diagnostics": _sizing_diag.as_dict(), **survivorship_stats}
+            "sizing_diagnostics": _sizing_diag.as_dict(), **survivorship_stats, **_extra}
+
+
+# Skip reasons that are selection / budget effects -- the ones a shadow return
+# is meant to audit. Structural refusals (duplicate symbol, PIT, gap) are not
+# trades the book chose against, so they get no shadow.
+_SHADOW_REASONS = frozenset({"cash", "heat", "bar_risk", "bar_count", "adv"})
+
+
+def _attach_shadow_returns(candidates, portfolio_data, signals, initial_capital,
+                           allocation_pct, spy_df, vix_df, tnx_df, stop_config,
+                           signal_aux, intrabar_data):
+    """Hypothetical outcome of every budget-skipped candidate (#500).
+
+    Each one is re-run through ``run_portfolio_simulation`` itself -- the same
+    fills, stops, trail, time stop and strategy exits -- as the only position in
+    an otherwise empty one-symbol book, entered on the bar it was skipped. Only
+    the candidate's own entry signal is kept; later exit signals stay. The
+    frame is cut ``shadow_horizon_bars`` (default 260) after the fill, so a
+    trade still open there is marked at that close (ExitReason "End of
+    Backtest"). Adds ShadowReturnPct / ShadowExitDate / ShadowExitReason.
+    """
+    horizon = int(CONFIG.get("shadow_horizon_bars", 260) or 260)
+    for c in candidates:
+        if c.get("Taken") or c.get("skipped_reason") not in _SHADOW_REASONS:
+            continue
+        sym = c["Symbol"]
+        df = portfolio_data.get(sym)
+        if df is None or c.get("SignalDate") is None:
+            continue
+        fill = pd.Timestamp(c["Date"])
+        sig_d = pd.Timestamp(c["SignalDate"])
+        if fill.tzinfo is None and df.index.tz is not None:
+            fill, sig_d = fill.tz_localize(df.index.tz), sig_d.tz_localize(df.index.tz)
+        if fill not in df.index or sig_d not in df.index:
+            continue
+        i_sig, i_fill = df.index.get_loc(sig_d), df.index.get_loc(fill)
+        sub = df.iloc[max(0, i_sig - 300): i_fill + horizon + 1]
+        sig = signals[sym].reindex(sub.index).astype(float).copy()
+        if c["Side"] == "long":
+            # -2 also exits a long: keep it as an exit (-1), drop every other entry.
+            sig[sig == 1] = 0.0
+            sig[sig == -2] = -1.0
+            sig.loc[sig_d] = 1.0
+        else:
+            # a 1 never covers a short; drop it and every other short entry.
+            sig[(sig == 1) | (sig == -2)] = 0.0
+            sig.loc[sig_d] = -2.0
+        aux = None
+        if signal_aux and sym in signal_aux:
+            aux = {sym: signal_aux[sym].reindex(sub.index)}
+        ib = {sym: intrabar_data[sym]} if intrabar_data and sym in intrabar_data else None
+        res = run_portfolio_simulation(
+            {sym: sub}, {sym: sig}, initial_capital, allocation_pct, spy_df, vix_df,
+            tnx_df, stop_config, intrabar_data=ib, start_date=fill, signal_aux=aux,
+            _shadow=True)
+        if not res:
+            continue
+        t = next((t for t in res["trade_log"]
+                  if pd.Timestamp(t["EntryDate"]) == fill.tz_localize(None)
+                  or t["EntryDate"] == fill.isoformat()), None)
+        if t is not None:
+            c["ShadowReturnPct"] = t["ProfitPct"]
+            c["ShadowExitDate"] = t["ExitDate"]
+            c["ShadowExitReason"] = t["ExitReason"]
