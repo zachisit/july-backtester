@@ -324,6 +324,20 @@ class TestV3Layout:
         assert M["cagr"] == pytest.approx(_curve_cagr(curve), abs=1e-9)
         assert seen["meta"]["start_date"] == curve.index[0].strftime("%d %b %Y")
 
+    def test_trailing_missing_points_trim_value_and_period_together(self, tmp_path, monkeypatch):
+        """Codex r3: a curve ending in missing values must not pair an earlier
+        equity value with the later end date (CAGR span / displayed period)."""
+        trades = _trades()
+        curve = _timeline(trades, non_trade_total=7_738.0)
+        extra = pd.bdate_range(curve.index[-1] + pd.Timedelta(days=1), periods=60)
+        padded = pd.concat([curve, pd.Series(np.nan, index=extra)]).rename("Equity")
+        seen = self._capture(monkeypatch)
+        _run_report(tmp_path, monkeypatch, trades, padded, "v3")
+        M = seen["M"]
+        assert M["total_profit"] == pytest.approx(curve.iloc[-1] - INIT, abs=1e-6)
+        assert M["cagr"] == pytest.approx(_curve_cagr(curve), abs=1e-9)
+        assert seen["meta"]["end_date"] == curve.index[-1].strftime("%d %b %Y")
+
     def test_no_curve_unchanged(self, tmp_path, monkeypatch):
         trades = _trades()
         seen = self._capture(monkeypatch)
