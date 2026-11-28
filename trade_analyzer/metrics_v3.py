@@ -428,11 +428,22 @@ def compute_v3_metrics(
     # naive full-series VaR.
     var95, cvar95 = var_cvar_pct(r, level=0.05, active_only=True)
     fees = total_fees(trades_df)
+    _trade_profit = core_metrics.get("trade_total_profit", total_profit)
 
     return {
         # overall performance
+        # total_profit is the headline Net P&L the caller resolved: the run's
+        # equity curve end vs initial_equity when a curve was supplied, else
+        # sum(Profit) (#519). non_trade_pnl is the part not in any trade's
+        # Profit (None without a curve); trade_profit is sum(Profit).
         "total_profit": total_profit,
-        "gross_profit": total_profit + fees if pd.notna(total_profit) else np.nan,
+        "trade_profit": _trade_profit,
+        "non_trade_pnl": core_metrics.get("non_trade_pnl"),
+        "non_trade_material": calculations.non_trade_pnl_is_material(
+            core_metrics.get("non_trade_pnl"), initial_equity),
+        # Gross P&L stays trade-based (trades before costs), so Gross - Costs =
+        # the trade log's net; the non-trade part is its own row (#519 review).
+        "gross_profit": (_trade_profit + fees) if pd.notna(_trade_profit) else np.nan,
         "transaction_fees": fees,
         "sharpe": core_metrics.get("sharpe", np.nan),
         "sortino": core_metrics.get("sortino", np.nan),
