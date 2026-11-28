@@ -91,6 +91,10 @@ REGISTRY: StrategyRegistry = StrategyRegistry()
 # column); "rotation" is a cross-sectional ranking plugin (see helpers/rotation.py).
 SIGNAL = "signal"
 ROTATION = "rotation"
+# "target_weight" is a fully funded multi-asset basket plugin consumed by
+# helpers/target_weight_portfolio.py (issue #487). Never handed to main.py's
+# per-symbol pipeline.
+TARGET_WEIGHT = "target_weight"
 
 
 def register_strategy(
@@ -402,4 +406,89 @@ def get_rotation_strategies(directory: str = "custom_strategies") -> dict:
 
     return {
         n: e for n, e in _REGISTRY.items() if e.get("kind", SIGNAL) == ROTATION
+    }
+
+
+def register_target_weight(
+    name: str,
+    symbols: list[str],
+    cash_symbol: str,
+    signal_symbols: dict[str, str] | None = None,
+    exposure: dict[str, float] | None = None,
+    cost_bps: dict[str, float] | None = None,
+    band: float = 0.02,
+    params: dict | None = None,
+    portfolio_name: str | None = None,
+    report_periods: dict | None = None,
+    description: str = "",
+    valid_from: tuple[str, str] | None = None,
+) -> Callable:
+    """Register a fully funded **target-weight** portfolio plugin (issue #487).
+
+    The decorated function decides portfolio weights from completed sessions::
+
+        weights_fn(data: dict[str, pd.DataFrame], **params) -> pd.DataFrame
+
+    ``data`` holds the full fetched history (warm-up included) of every product
+    in ``symbols`` + ``cash_symbol`` keyed by ticker, and of every
+    ``signal_symbols`` entry keyed by its *role* (e.g. ``"spy"``, ``"vix"``).
+    The return value is indexed by session date; row ``t`` holds the target
+    weight of each risk product (one column per ``symbols`` entry, ``>= 0``,
+    summing to ``<= 1``) decided at the close of ``t``. The engine executes it
+    at the next open; the cash sleeve takes ``1 - sum(weights)``. Extra
+    columns (e.g. the signal's inputs and state) are kept as diagnostics and
+    shown in the report.
+
+    Parameters
+    ----------
+    symbols : risk products in purchase-priority order (e.g. ``["VIXY", "SVXY"]``)
+    cash_symbol : idle-cash product (e.g. ``"SGOV"``)
+    signal_symbols : ``{role: ticker}`` inputs that are not traded
+    exposure : signed underlying exposure per unit value, used for the band
+    cost_bps : default per-symbol cost in bps of traded notional
+    band : rebalance tolerance (0.02 = 2 percentage points)
+    portfolio_name : label for run folders/reports (default: joined tickers)
+    report_periods : ``{label: (start, end_or_None)}`` sub-periods to report
+    valid_from : ``(date, reason)``; the runner refuses a ``start_date`` before
+        *date* (e.g. a product whose leverage, and so its ``exposure``
+        coefficient, changed on that date)
+    """
+    def decorator(fn: Callable) -> Callable:
+        _REGISTRY[name] = {
+            "logic":          fn,
+            "dependencies":   [],
+            "params":         dict(params or {}),
+            "kind":           TARGET_WEIGHT,
+            "regime_gate":    None,
+            "symbols":        list(symbols),
+            "cash_symbol":    cash_symbol,
+            "signal_symbols": dict(signal_symbols or {}),
+            "exposure":       None if exposure is None else dict(exposure),
+            "cost_bps":       dict(cost_bps or {}),
+            "band":           float(band),
+            "portfolio_name": portfolio_name or "-".join(list(symbols) + [cash_symbol]),
+            "report_periods": dict(report_periods or {}),
+            "description":    description,
+            "name":           name,
+            "valid_from":     None if valid_from is None else (str(valid_from[0]), str(valid_from[1])),
+        }
+        return fn
+
+    return decorator
+
+
+def get_target_weight_strategies(directory: str = "custom_strategies") -> dict:
+    """Return the registered **target-weight** plugins as ``{name: entry}``.
+
+    Loads *directory* (and a ``private/`` submodule) like
+    :func:`get_active_strategies`, but returns only ``kind == "target_weight"``
+    entries. Selection is by ``CONFIG["portfolio_strategy"]``, not
+    ``CONFIG["strategies"]``.
+    """
+    load_strategies(directory)
+    private_dir = os.path.join(directory, "private")
+    if os.path.isdir(private_dir):
+        load_strategies(private_dir)
+    return {
+        n: e for n, e in _REGISTRY.items() if e.get("kind", SIGNAL) == TARGET_WEIGHT
     }

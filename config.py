@@ -595,4 +595,36 @@ CONFIG = {
     # min(cpu_count(), number of tasks); 1 runs every task serially in one
     # invocation, keeping the combined summary. CLI: --workers N.
     "max_workers": None,
+
+    # ============================================================
+    # SECTION 32: TARGET-WEIGHT PORTFOLIO STRATEGIES (#487)
+    # ============================================================
+    # Fully funded multi-asset baskets (helpers/target_weight_portfolio.py),
+    # e.g. "VIX eVRP Dual (SGOV funded)". None (default) = the normal
+    # single-asset run; nothing below is read. A name runs that
+    # @register_target_weight plugin INSTEAD of `portfolios`/`strategies`.
+    # CLI: --portfolio-strategy "<name>". See docs/TARGET_WEIGHT_PORTFOLIOS.md.
+    "portfolio_strategy": None,
+    # "settled_only" = purchases use settled cash only (stricter than Reg T);
+    # "gfv_aware"    = Reg T cash account: risk buys may use unsettled proceeds,
+    #                  but those shares are never sold before the funds settle;
+    # "immediate"    = same-open reuse of sale proceeds (upper bound, can commit
+    #                  good-faith violations; not executable).
+    # Every run reports all three; this picks the headline series.
+    "portfolio_settlement": "settled_only",
+    # [effective_date, lag_sessions] rules: T+2, then T+1 from 2024-05-28.
+    "portfolio_settlement_rules": [["1900-01-01", 2], ["2024-05-28", 1]],
+    "portfolio_rebalance_band": None,       # None = the strategy's registered band
+    "portfolio_cost_bps": None,             # e.g. {"VIXY": 20, "SVXY": 20, "SGOV": 5}; None = strategy's
+    "portfolio_symbol_map": {},             # provider ticker remap, e.g. {"vix": "$VIX"}
+    "portfolio_benchmark_ticker": "SPY",    # buy-and-hold comparison (cash sleeve is always shown)
+    "portfolio_benchmark_cost_bps": 5.0,    # one-time entry cost on the benchmark
+    # Funded baskets need total-return prices (the cash sleeve's yield arrives as
+    # distributions). Polygon's adjusted=true is split-only, so a Polygon run is
+    # refused unless this is True; the report then labels the run price-only.
+    "portfolio_allow_price_only": False,
+    # A benchmark whose data would come from a different ticker (via
+    # portfolio_symbol_map, or a signal role with the benchmark's name) is
+    # refused unless this is True; the run then warns and the report flags it.
+    "portfolio_allow_benchmark_substitution": False,
 }
