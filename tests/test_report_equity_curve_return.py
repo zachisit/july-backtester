@@ -282,7 +282,7 @@ class TestV3Layout:
 
         def _spy(meta, M):
             fig = orig(meta, M)
-            seen["M"], seen["text"] = dict(M), _fig_text(fig)
+            seen["M"], seen["text"], seen["meta"] = dict(M), _fig_text(fig), dict(meta)
             return fig
         monkeypatch.setattr(_pdf_v3, "build_v3_page1", _spy)
         return seen
@@ -303,6 +303,9 @@ class TestV3Layout:
         assert M["recovery_factor"] == pytest.approx(curve_net / mdd, rel=1e-9)
         assert "Not in Trade Log" in seen["text"]
         assert "not in trades" in seen["text"]
+        # header period = the span Net P&L / duration are measured over
+        assert seen["meta"]["start_date"] == curve.index[0].strftime("%d %b %Y")
+        assert seen["meta"]["end_date"] == curve.index[-1].strftime("%d %b %Y")
 
     def test_no_curve_unchanged(self, tmp_path, monkeypatch):
         trades = _trades()
@@ -312,6 +315,8 @@ class TestV3Layout:
         assert M["total_profit"] == pytest.approx(trades["Profit"].sum(), abs=1e-6)
         assert M["non_trade_pnl"] is None
         assert "Not in Trade Log" not in seen["text"]
+        assert seen["meta"]["start_date"] == trades["Date"].min().strftime("%d %b %Y")
+        assert seen["meta"]["end_date"] == trades["Ex. date"].max().strftime("%d %b %Y")
 
 
 class TestClassicLayout:
@@ -344,6 +349,17 @@ class TestClassicLayout:
         assert seen["cover"]["cagr"] == pytest.approx(_curve_cagr(curve), abs=1e-9)
         assert f"${curve_net:,.0f}" in seen["exec_text"] or f"${curve_net:,.2f}" in seen["exec_text"]
         assert "not in trades" in seen["exec_text"]
+
+    def test_cover_period_is_the_curve_span(self, tmp_path, monkeypatch):
+        """Codex r1: the cover's 'Backtest period' must be the span its CAGR is
+        measured over (the curve's), not first entry -> last exit."""
+        trades = _trades()
+        curve = _timeline(trades, non_trade_total=7_738.0)
+        assert curve.index[0] < trades["Date"].min()  # curve starts before trading
+        seen = self._capture(monkeypatch)
+        _run_report(tmp_path, monkeypatch, trades, curve, "classic")
+        assert seen["cover"]["start_date"] == curve.index[0].strftime("%Y-%m-%d")
+        assert seen["cover"]["end_date"] == curve.index[-1].strftime("%Y-%m-%d")
 
     def test_no_curve_cover_unchanged(self, tmp_path, monkeypatch):
         trades = _trades()

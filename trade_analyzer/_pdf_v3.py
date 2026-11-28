@@ -611,6 +611,13 @@ def generate_tearsheet_v3(report_data: dict, output_path: str) -> str:
             start_str = pd.to_datetime(trades_df["Date"]).min().strftime("%d %b %Y")
         if "Ex. date" in trades_df and trades_df["Ex. date"].notna().any():
             end_str = pd.to_datetime(trades_df["Ex. date"]).max().strftime("%d %b %Y")
+    # Curve-based headline (#519): show the period Net P&L and the duration
+    # are measured over -- the equity curve's span, not first entry/last exit.
+    if (core_metrics.get("headline_source") == "equity_curve"
+            and isinstance(daily_equity, pd.Series) and len(daily_equity) > 1
+            and isinstance(daily_equity.index, pd.DatetimeIndex)):
+        start_str = daily_equity.index[0].strftime("%d %b %Y")
+        end_str = daily_equity.index[-1].strftime("%d %b %Y")
 
     meta = {
         "name": report_name,

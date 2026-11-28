@@ -625,6 +625,7 @@ def _run_analysis(trades_df_raw: pd.DataFrame, output_dir: str, report_name: str
             _core_for_pdf['total_profit'] = _headline['net_profit']
             _core_for_pdf['trade_total_profit'] = _headline['trade_profit']
             _core_for_pdf['non_trade_pnl'] = _headline['non_trade_pnl']
+            _core_for_pdf['headline_source'] = _headline['source']
 
             # Overall metrics text for appendix (re-use from report_sections)
             _overall_text = next(

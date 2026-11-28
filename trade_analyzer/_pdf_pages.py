@@ -893,12 +893,15 @@ def generate_tearsheet_pdf(report_data: dict, output_path: str):
                      if pd.notna(start_d) and pd.notna(end_d) else 0)
     else:
         start_str, end_str, dur_years = 'N/A', 'N/A', 0
-    # Same duration as the executive-summary CAGR: the analyzer's, which is the
-    # equity curve's span when one was supplied and the first-entry-to-last-exit
-    # span (identical to the above) otherwise (#519).
-    _core_dur = core_metrics.get('duration_years')
-    if _core_dur is not None and pd.notna(_core_dur) and _core_dur > 0:
-        dur_years = _core_dur
+    # With a curve-based headline (#519) the cover's period and CAGR span are
+    # the equity curve's, matching the executive-summary CAGR and the period
+    # the Net P&L is measured over. Otherwise first entry -> last exit as before.
+    if (core_metrics.get('headline_source') == 'equity_curve'
+            and isinstance(daily_equity, pd.Series) and len(daily_equity) > 1
+            and isinstance(daily_equity.index, pd.DatetimeIndex)):
+        _c0, _c1 = daily_equity.index[0], daily_equity.index[-1]
+        start_str, end_str = _c0.strftime('%Y-%m-%d'), _c1.strftime('%Y-%m-%d')
+        dur_years = (_c1 - _c0).days / 365.25
 
     cagr = calculations.calculate_cagr(initial_equity, final_equity, dur_years) if dur_years > 0 else None
     sharpe_val = core_metrics.get('sharpe')
