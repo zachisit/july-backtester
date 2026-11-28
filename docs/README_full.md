@@ -322,15 +322,17 @@ A stop is a resting order, so the engine fills it the way a broker would:
 | Bar | Long stop fill | Short stop fill | `ExitReason` |
 | --- | --- | --- | --- |
 | Opens inside the stop, trades through it | the stop level | the stop level | `Stop Loss (<type>)` |
-| Opens beyond the stop (gap-through) | `min(stop, Open)` | `max(stop, Open)` | `Stop Loss (gap)` |
+| Opens beyond the stop (gap-through) | `min(stop, Open)` | `max(stop, Open)` | `Stop Loss (gap, <type>)` |
+
+`<type>` is the configured stop type, the same in both labels, e.g. `Stop Loss (atr)` / `Stop Loss (gap, atr)`. A `signal_bar_low` stop that its ATR trail has moved off the initial level reads `signal_bar_low trail`: `Stop Loss (signal_bar_low trail)` / `Stop Loss (gap, signal_bar_low trail)` (#511). To count gap exits, match the prefix `Stop Loss (gap, ` (or call `helpers.portfolio_simulations.is_gap_stop_reason`), not an exact string. Before #511 every gap exit read `Stop Loss (gap)`.
 
 - The existing slippage model (and market impact, if enabled) is applied on top of the gap fill, as on every other exit.
 - `stop_gap_fill: "level"` restores the legacy always-at-the-stop fill (optimistic; for A/B comparisons only). An armed `trailing_atr` trail keeps its exact-level fill unless `stop_gap_fill_armed_trail: "open"`.
-- With `intrabar_resolution` on and finer bars supplied, the sub-bar fill wins; a fill worse than the stop is still labelled `Stop Loss (gap)`.
+- With `intrabar_resolution` on and finer bars supplied, the sub-bar fill wins; a fill worse than the stop is still labelled `Stop Loss (gap, <type>)`.
 - **Entry bar.** Under `execution_time: "open"` the fill bar's own Low (High for shorts) is checked against the initial stop (`entry_bar_stop_check`, default on). A bar that opens above the stop and trades through it stops out at the stop.
 - **Entry day gap below the stop.** A structural stop (`atr`, `signal_bar`) is fixed before the fill. If the fill price (the open) is already at or below it, the stop was gapped through before it could rest. `gap_below_stop_on_entry` decides what happens:
   - `"skip"` (default): no trade. Counted in `sizing_diagnostics` as `skipped_gap_below_stop`.
-  - `"exit_at_open"`: take the entry and stop out at the same open (`Stop Loss (gap)`), paying slippage and commission both ways.
+  - `"exit_at_open"`: take the entry and stop out at the same open (`Stop Loss (gap, <type>)`), paying slippage and commission both ways.
   - `"ignore"`: legacy (pre-#499). Enter anyway; a `signal_bar` level above the fill is not armed (the trade has no stop), an `atr` level above it fires on the fill bar.
 
   Stops anchored to the entry price (`percentage`, `points`, `trailing_atr`) can never trigger this.
@@ -359,10 +361,10 @@ The common swing-book rule: risk X% of equity to the stop, capped at Y% of equit
 - **`signal_bar_low`** (long only). The raw low comes from, in order:
   1. a `raw_low` column the strategy returns next to `Signal`;
   2. a `Low_raw` / `raw_low` column on the price frame;
-  3. the adjusted `Low`, with a one-time warning per symbol, in which case the offset is in adjusted dollars.
+  3. the adjusted `Low`, with a one-time warning per symbol, in which case the offset is in adjusted dollars. Every entry that falls back here is also counted in `sizing_diagnostics` as `sbl_adjusted_fallback` and listed in the run's "Position sizing" report, with the fix: return `raw_low` from the strategy, or add a `Low_raw` column (#511).
 
   The raw stop is converted with the signal bar's own factor `Low_adj / Low_raw`, so a later split does not move it. `round_cents: false` turns off the rounding.
-- **Trail** (`trail_atr` > 0): runs after each bar's stop check, including the entry bar. The candidate is `max(entry fill, highs from the entry bar through the prior bar) − trail_atr × ATR(atr_period)` at the prior bar, and the stop is only ever raised. ATR here is the simple mean true range, expanding at the series start. A level set on bar *j* is first checked on bar *j+1*.
+- **Trail** (`trail_atr` > 0): runs after each bar's stop check, including the entry bar. The candidate is `max(entry fill, highs from the entry bar through the prior bar) − trail_atr × ATR(atr_period)` at the prior bar, and the stop is only ever raised. ATR here is the simple mean true range, expanding at the series start. A level set on bar *j* is first checked on bar *j+1*. Once the trail has moved the stop, its exit reads `Stop Loss (signal_bar_low trail)` (gapped: `Stop Loss (gap, signal_bar_low trail)`).
 - **`time_stop`**: `{"sessions": N, "exit": "next_open" | "close"}`, set per stop config or globally as `CONFIG["time_stop"]`. The entry bar is session 1.
   - `next_open` exits at the open of session N+1, before that bar's stop check.
   - `close` exits at the close of session N.

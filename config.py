@@ -512,11 +512,11 @@ CONFIG = {
     # execution_time="open") is already AT OR BEYOND it, the stop was gapped
     # through before it could rest. "skip" (default) = no trade, counted in
     # sizing_diagnostics as skipped_gap_below_stop. "exit_at_open" = take the
-    # entry and stop out at the same fill, ExitReason "Stop Loss (gap)".
+    # entry and stop out at the same fill, ExitReason "Stop Loss (gap, <type>)".
     # "ignore" = legacy pre-#499 behaviour (enter anyway; a signal_bar level
     # above the fill is not armed, an atr level above it fires on the fill bar).
-    # Any coarse stop that fills at a gap-through open is also labelled
-    # "Stop Loss (gap)" in the trade log.
+    # Any stop that fills worse than its level is also labelled
+    # "Stop Loss (gap, <type>)" in the trade log (#511; was "Stop Loss (gap)").
     "gap_below_stop_on_entry": "skip",
     # Session-count time stop (issue #501). None = off. {"sessions": N, "exit":
     # "next_open"} exits at the open of session N+1 after entry (the entry bar is

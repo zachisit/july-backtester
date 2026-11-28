@@ -173,7 +173,7 @@ class TestPointStop:
                    stop_config={"type": "points", "value": 50.0})
         assert res is not None
         t = res["trade_log"][0]
-        assert t["ExitReason"] == "Stop Loss (gap)"   # gap-through fill (#499 label)
+        assert t["ExitReason"] == "Stop Loss (gap, points)"   # gap-through fill (#499/#511 label)
         # Stop level is anchored to the raw (pre-slippage) entry price, not the
         # slipped fill — slippage is a separate, symmetric friction that must not
         # also shift where the stop sits (see portfolio_simulations.py raw_entry_price
