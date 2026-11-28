@@ -282,6 +282,10 @@ def substitutions(entry: dict, config: dict) -> dict:
     for role, ticker in entry["signal_symbols"].items():
         # Shared names are compared too: the role's own declared ticker can be
         # replaced even when the product/benchmark of that name is not (Codex C1).
+        # A role declared as its own shared name is the same substitution as the
+        # product/benchmark line above, so it is not repeated (Codex C2).
+        if role in names and _bare(ticker) == _bare(role):
+            continue
         if _bare(requests[role]) != _bare(ticker):
             out[f"{role} ({ticker})"] = requests[role]
     return out

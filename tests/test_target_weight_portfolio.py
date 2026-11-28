@@ -1145,6 +1145,32 @@ class TestReviewBenchmarkSubstitution:
         resolve_settings(entry, cfg)  # the benchmark stays SPY, so no refusal
         assert substitutions(entry, cfg) == {"SPY (QQQ)": "SPY"}
 
+    def test_shared_name_substitution_is_reported_once(self):
+        # Codex C2: declared {"SPY": "SPY"} mapped to QQQ is one substitution, not two.
+        from helpers.target_weight_runner import resolve_settings, substitutions
+        cfg = _config(portfolio_symbol_map={"SPY": "QQQ", "vix": "I:VIX9D", "vix3m": "I:VIX6M"},
+                      portfolio_allow_benchmark_substitution=True)
+        entry = self._entry()
+        entry["signal_symbols"] = {"SPY": "SPY", "vix": "I:VIX", "vix3m": "I:VIX3M"}
+        resolve_settings(entry, cfg)
+        assert substitutions(entry, cfg) == {"SPY": "QQQ", "vix (I:VIX)": "I:VIX9D",
+                                             "vix3m (I:VIX3M)": "I:VIX6M"}
+
+    def test_page_one_never_drops_a_warning_silently(self, portfolio_run):
+        import matplotlib.pyplot as plt
+        from trade_analyzer import portfolio_report as pr
+        run_dir, _ = portfolio_run
+        art = pr.load_artifacts(run_dir / "analyzer_csvs" / "VIXY-SVXY-SGOV" / "VIX_eVRP_Dual_SGOV_funded.csv")
+        art["summary"] = {**art["summary"], "substitutions": {f"X{k}": f"Y{k}" for k in range(5)}}
+        pages = pr.build_pages(art, "VIX eVRP Dual (SGOV funded)")
+        try:
+            page1 = " | ".join(t.get_text() for t in pages[0].texts)
+        finally:
+            for f in pages:
+                plt.close(f)
+        assert "X0 is run on Y0" in page1 and "X1 is run on Y1" in page1
+        assert "... and 3 more warnings" in page1
+
     def test_flag_must_be_a_bool(self):
         from helpers.target_weight_runner import PortfolioConfigError, resolve_settings, resolve_strategy
         cfg = _config(portfolio_allow_benchmark_substitution="yes")

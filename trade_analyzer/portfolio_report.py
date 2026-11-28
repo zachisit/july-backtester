@@ -486,7 +486,10 @@ def build_pages(art: dict, name: str) -> list:
     if _is_immediate(summary):
         fig.text(0.98, 0.89, NON_DEPLOYABLE_SHORT, fontsize=7.5, color=config.THEME["negative"],
                  fontweight="bold", va="top", ha="right")
-    flags = flag_lines(summary)[:3]
+    flags = flag_lines(summary)
+    if len(flags) > 3:  # never drop a warning silently (PR #489 Codex C2)
+        flags = flags[:2] + [f"... and {len(flags) - 2} more warnings: see the Markdown report "
+                             f"and metrics.json"]
     for k, line in enumerate(flags):
         fig.text(0.02, 0.873 - 0.016 * k, line, fontsize=7.2, color=config.THEME["negative"],
                  fontweight="bold", va="top")
