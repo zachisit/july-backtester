@@ -110,7 +110,7 @@ class TestBatchPrecedence:
     def test_batch_without_snapshot_uses_each_curve(self, tmp_path, monkeypatch):
         run_dir, _ = _write_run(tmp_path, snapshot=False)
         _write_trades(run_dir / "analyzer_csvs" / "Port", stem="Other",
-                      curve_values=[2_000_000.0, 2_100_000.0])
+                      curve_values=[2_000_000.0, 2_600_000.0])
         assert sorted(_run(monkeypatch, ["--all", str(run_dir)])) == [CURVE_START, 2_000_000.0]
 
     def test_batch_without_snapshot_or_curve_warns(self, tmp_path, monkeypatch, capsys):
@@ -165,7 +165,7 @@ class TestCurveScaleGuard:
         trades = self._trades([30_000.0, 20_000.0])
         assert self._fallback(tmp_path, self._curve(1.0, 1.5), trades) is None
         out = capsys.readouterr().out
-        assert "ignoring x_equity.csv as a capital source" in out
+        assert "could not verify starting capital from x_equity.csv" in out
         assert "WARNING: no initial capital found" in out
 
     def test_curve_starting_at_100_is_rejected(self, tmp_path):
@@ -188,8 +188,16 @@ class TestCurveScaleGuard:
 
     def test_realised_only_log_keeps_curve(self, tmp_path):
         # Open positions excluded from the log: curve change > realised profit.
+        trades = self._trades([40_000.0])
+        assert self._fallback(tmp_path, self._curve(100_000.0, 160_000.0), trades) == pytest.approx(100_000.0)
+
+    def test_small_move_realised_only_log_is_unverified(self, tmp_path, capsys):
+        # +20% curve, +8% realised: within the slack a normalised 100 -> 120
+        # curve with $8 of Profit would reconcile the same way, so the scale
+        # can't be verified (W1).
         trades = self._trades([8_000.0])
-        assert self._fallback(tmp_path, self._curve(100_000.0, 120_000.0), trades) == pytest.approx(100_000.0)
+        assert self._fallback(tmp_path, self._curve(100_000.0, 120_000.0), trades) is None
+        assert "could not verify starting capital" in capsys.readouterr().out
 
     def test_losing_dollar_curve_is_kept(self, tmp_path):
         trades = self._trades([-30_000.0, -10_000.0])
@@ -202,4 +210,78 @@ class TestCurveScaleGuard:
     def test_end_to_end_normalised_curve_uses_default(self, tmp_path, monkeypatch, capsys):
         csv_path = _write_trades(tmp_path / "loose", curve_values=[1.0, 1.5])
         assert _run(monkeypatch, [str(csv_path)]) == [INITIAL_EQUITY]
-        assert "ignoring Strat_equity.csv" in capsys.readouterr().out
+        assert "could not verify starting capital from Strat_equity.csv" in capsys.readouterr().out
+
+
+class TestBreakEvenCurveIsInconclusive:
+    """W1 (#506 review): with break-even trades, any scale of curve reconciles.
+
+    +$10,000 and -$10,000 trades net to zero, so a $100,000 -> $110,000 ->
+    $100,000 curve and a 1.00 -> 1.10 -> 1.00 one both match. The check can't
+    tell the scale, so the curve must not be used as capital.
+    """
+
+    TRADES = pd.DataFrame({"Symbol": ["AAA", "BBB"], "Profit": [10_000.0, -10_000.0]})
+
+    @staticmethod
+    def _curve(*values):
+        return pd.Series(values, index=pd.date_range("2020-01-02", periods=len(values), freq="D"))
+
+    def _fallback(self, tmp_path, *values):
+        return report_cli._fallback_initial_capital(
+            self._curve(*values), tmp_path / "x_equity.csv", self.TRADES)
+
+    def test_normalised_break_even_curve_is_not_taken_as_one_dollar(self, tmp_path, capsys):
+        assert self._fallback(tmp_path, 1.00, 1.10, 1.00) is None
+        out = capsys.readouterr().out
+        assert "could not verify starting capital from x_equity.csv" in out
+        assert "--equity" in out
+        assert "WARNING: no initial capital found" in out
+
+    def test_base_100_break_even_curve_is_not_taken_as_100_dollars(self, tmp_path):
+        assert self._fallback(tmp_path, 100.0, 110.0, 100.0) is None
+
+    def test_dollar_break_even_curve_is_also_unverified(self, tmp_path):
+        # Same numbers in dollars: indistinguishable from the normalised one.
+        assert self._fallback(tmp_path, 100_000.0, 110_000.0, 100_000.0) is None
+
+    def test_end_to_end_break_even_normalised_curve_uses_default(self, tmp_path, monkeypatch, capsys):
+        folder = tmp_path / "loose"
+        folder.mkdir()
+        pd.DataFrame([
+            {"Symbol": "AAA", "Date": "2020-01-02", "Price": 100.0, "Ex. date": "2020-01-03",
+             "Ex. Price": 110.0, "Profit": 10_000.0, "% Profit": 10.0, "Shares": 1_000},
+            {"Symbol": "BBB", "Date": "2020-01-03", "Price": 100.0, "Ex. date": "2020-01-06",
+             "Ex. Price": 90.0, "Profit": -10_000.0, "% Profit": -10.0, "Shares": 1_000},
+        ]).to_csv(folder / "Strat.csv", index=False)
+        self._curve(1.00, 1.10, 1.00).rename("Equity").rename_axis("Date").to_csv(
+            folder / "Strat_equity.csv")
+        assert _run(monkeypatch, [str(folder / "Strat.csv")]) == [INITIAL_EQUITY]
+        assert "could not verify starting capital" in capsys.readouterr().out
+
+    def test_moved_dollar_curve_still_reconciles(self, tmp_path):
+        # A real move well beyond the slack is still verified.
+        trades = pd.DataFrame({"Symbol": ["AAA"], "Profit": [60_000.0]})
+        curve = self._curve(100_000.0, 130_000.0, 160_000.0)
+        assert report_cli._fallback_initial_capital(
+            curve, tmp_path / "x_equity.csv", trades) == pytest.approx(100_000.0)
+
+
+class TestMismatchWarningWording:
+    """W2 (#506 review): a mismatch doesn't prove the curve is normalised.
+
+    A $100,000 account that fell to $40,000 on an open loss, with a closed-
+    trade log of zero Profit, is a genuine dollar curve. Falling back is
+    fine; the warning must say capital is unverified and why it may differ.
+    """
+
+    def test_open_loss_curve_warns_unverified_not_normalised(self, tmp_path, capsys):
+        trades = pd.DataFrame({"Symbol": ["AAA"], "Profit": [0.0]})
+        curve = pd.Series([100_000.0, 70_000.0, 40_000.0],
+                          index=pd.date_range("2020-01-02", periods=3, freq="D"))
+        assert report_cli._fallback_initial_capital(curve, tmp_path / "x_equity.csv", trades) is None
+        out = capsys.readouterr().out
+        assert "could not verify starting capital from x_equity.csv" in out
+        assert "open-position P&L" in out
+        assert "--equity" in out
+        assert "not in dollars" not in out

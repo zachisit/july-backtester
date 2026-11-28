@@ -145,8 +145,13 @@ def _load_initial_capital(run_dir: Path) -> float | None:
 _CURVE_PROFIT_REL_TOL = 0.5      # of the larger of |sum(Profit)| and |curve change|
 _CURVE_LEVEL_REL_TOL = 0.25      # of the curve's first point
 
+#: Verdicts returned by :func:`_curve_is_in_dollars`.
+CURVE_DOLLARS = "dollars"
+CURVE_INCONCLUSIVE = "inconclusive"
+CURVE_MISMATCH = "mismatch"
 
-def _curve_is_in_dollars(values: "pd.Series", trades_df: "pd.DataFrame | None") -> bool:
+
+def _curve_is_in_dollars(values: "pd.Series", trades_df: "pd.DataFrame | None") -> str:
     """Whether an equity curve is on the same dollar scale as the trade log.
 
     Compares the curve's total change (last - first) with ``sum(Profit)``.
@@ -155,19 +160,34 @@ def _curve_is_in_dollars(values: "pd.Series", trades_df: "pd.DataFrame | None") 
     ``EntryDate`` while top-ups are folded in at an average cost. The mismatch
     allowed is the larger of half the profit/change and a quarter of the
     curve's level, so realised-only logs (open positions excluded) still pass.
-    Returns True (keep the curve) when the trade log has no usable Profit.
+
+    Returns one of:
+
+    * ``CURVE_DOLLARS`` -- the change reconciles with Profit (or the trade log
+      has no usable Profit, so there is nothing to check against);
+    * ``CURVE_INCONCLUSIVE`` -- the change and Profit are both within the
+      level slack (a quarter of the first point). Inside it a curve of any
+      scale reconciles, e.g. break-even trades net to zero against both a
+      $100,000 -> $100,000 curve and a 1.00 -> 1.00 one, so the scale can't
+      be verified;
+    * ``CURVE_MISMATCH`` -- the change does not match Profit: the curve may be
+      normalised, or the trade log may exclude open-position P&L.
     """
     if trades_df is None or trades_df.empty or "Profit" not in trades_df.columns:
-        return True
+        return CURVE_DOLLARS
     profit = pd.to_numeric(trades_df["Profit"], errors="coerce").dropna()
     if profit.empty:
-        return True
+        return CURVE_DOLLARS
     total_profit = float(profit.sum())
     change = float(values.iloc[-1] - values.iloc[0])
+    evidence = max(abs(total_profit), abs(change))
+    level_slack = _CURVE_LEVEL_REL_TOL * abs(float(values.iloc[0]))
+    if evidence <= level_slack:
+        return CURVE_INCONCLUSIVE
     mismatch = abs(change - total_profit)
-    allowed = max(_CURVE_PROFIT_REL_TOL * max(abs(total_profit), abs(change)),
-                  _CURVE_LEVEL_REL_TOL * abs(float(values.iloc[0])))
-    return mismatch <= allowed
+    if mismatch <= max(_CURVE_PROFIT_REL_TOL * evidence, level_slack):
+        return CURVE_DOLLARS
+    return CURVE_MISMATCH
 
 
 def _fallback_initial_capital(timeline: "pd.Series | None", equity_path: Path,
@@ -180,9 +200,10 @@ def _fallback_initial_capital(timeline: "pd.Series | None", equity_path: Path,
     and costs (zero when nothing is held on the first bar) -- far closer than a
     fixed default.
 
-    The curve is rejected when it is plainly not in dollars, i.e. when its
-    total change does not match the trades' total Profit (see
-    :func:`_curve_is_in_dollars`): a normalised curve (e.g. starting at 1.0).
+    The curve is used only when its scale is verified against the trades'
+    total Profit (see :func:`_curve_is_in_dollars`). When the check is
+    inconclusive or fails, a WARNING says starting capital could not be
+    verified and the default is assumed.
 
     Returns None, after printing a WARNING that the analyzer default is being
     assumed, when there is no usable curve; every %-based figure then depends
@@ -192,14 +213,24 @@ def _fallback_initial_capital(timeline: "pd.Series | None", equity_path: Path,
         values = pd.to_numeric(timeline, errors="coerce").dropna()
         if not values.empty and float(values.iloc[0]) > 0:
             capital = float(values.iloc[0])
-            if not _curve_is_in_dollars(values, trades_df):
-                print(f"WARNING: ignoring {equity_path.name} as a capital source: its change "
-                      f"({values.iloc[-1] - values.iloc[0]:,.2f}) does not match the trades' "
-                      f"total Profit, so the curve is not in dollars (normalised?).")
-            else:
+            verdict = _curve_is_in_dollars(values, trades_df)
+            if verdict == CURVE_DOLLARS:
                 print(f"Initial capital inferred from the first point of {equity_path.name}: "
                       f"{capital:,.2f} (end-of-first-bar equity; pass --equity to override)")
                 return capital
+            change = float(values.iloc[-1] - values.iloc[0])
+            total_profit = float(pd.to_numeric(trades_df["Profit"], errors="coerce").sum())
+            if verdict == CURVE_INCONCLUSIVE:
+                reason = (f"its change ({change:,.2f}) and the trades' total Profit "
+                          f"({total_profit:,.2f}) are both small next to its first point "
+                          f"({capital:,.2f}), so a dollar curve and a normalised one "
+                          f"(e.g. starting at 1.0 or 100) would reconcile alike")
+            else:
+                reason = (f"its change ({change:,.2f}) does not match the trades' total "
+                          f"Profit ({total_profit:,.2f}). The curve may be normalised, or "
+                          f"the trade log may exclude open-position P&L")
+            print(f"WARNING: could not verify starting capital from {equity_path.name}: "
+                  f"{reason}. Pass --equity <capital> to set it.")
     print(f"WARNING: no initial capital found (no --equity, no config_snapshot.json "
           f"initial_capital, no usable {equity_path.name}); assuming "
           f"${INITIAL_EQUITY:,.0f}. Total return, CAGR, Calmar, drawdown %, turnover "
