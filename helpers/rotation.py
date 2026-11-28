@@ -81,7 +81,95 @@ _DEFAULT_ROTATION = {
     "weighting": "equal",    # key into WEIGHTING_SCHEMES
     "sell_buffer_rank": 0,    # hysteresis: keep a holding while rank <= top_n + this
     "drift_trim_pct": 0.0,    # only trim/add when |weight - target| > this fraction
+    # Idle-cash return (issue #516). Mutually exclusive; both off by default.
+    "cash_rate_annual": 0.0,  # fixed annual rate on idle cash, compounded per trading day
+    "cash_sweep_symbol": None,  # idle cash follows this instrument's close-to-close return
 }
+
+# Trading days per year for the fixed cash rate — the same (1+annual)^(1/252)-1
+# convention the engine uses for the short hard-to-borrow debit.
+_CASH_DAYS_PER_YEAR = 252
+
+
+def _resolve_cash_yield(rcfg: dict, data: dict):
+    """Validate the idle-cash keys and split the sweep instrument out of *data*.
+
+    Returns ``(mode, annual_rate, sweep_symbol, sweep_df, trade_data)`` where
+    ``mode`` is ``None`` (disabled), ``"fixed"`` or ``"sweep"`` and ``trade_data``
+    is *data* without the sweep instrument (identical object when not sweeping).
+    """
+    raw_rate = rcfg.get("cash_rate_annual", 0.0)
+    try:
+        rate = float(raw_rate or 0.0)
+    except (TypeError, ValueError):
+        raise ValueError(f"rotation.cash_rate_annual must be a number, got {raw_rate!r}")
+    if not np.isfinite(rate) or rate <= -1.0:
+        raise ValueError(f"rotation.cash_rate_annual must be finite and > -1, got {raw_rate!r}")
+    sweep = rcfg.get("cash_sweep_symbol")
+    if sweep is not None and not isinstance(sweep, str):
+        raise ValueError(f"rotation.cash_sweep_symbol must be a string or None, got {sweep!r}")
+    sweep = sweep or None
+    if sweep and rate != 0.0:
+        raise ValueError(
+            "rotation.cash_rate_annual and rotation.cash_sweep_symbol are mutually "
+            "exclusive — set one of them, not both."
+        )
+    if sweep:
+        if sweep not in (data or {}) or data[sweep] is None or data[sweep].empty:
+            raise ValueError(
+                f"rotation.cash_sweep_symbol '{sweep}' is not present in data — pass its "
+                "OHLCV frame in data (it is removed from the tradeable universe)."
+            )
+        trade_data = {k: v for k, v in data.items() if k != sweep}
+        return "sweep", 0.0, sweep, data[sweep], trade_data
+    if rate != 0.0:
+        return "fixed", rate, None, None, data
+    return None, 0.0, None, None, data
+
+
+def _cash_daily_rates(mode, annual_rate, sweep_sym, sweep_df, all_dates) -> np.ndarray:
+    """Per-master-date return applied to idle cash held over that date.
+
+    ``rates[0]`` is always 0 (nothing elapses before the first bar).
+
+    * ``"fixed"``: ``(1 + annual) ** (1/252) - 1`` on every subsequent bar.
+    * ``"sweep"``: the sweep series' close-to-close return between the
+      previous master date on which it has a valid Close and this one. A master
+      date the sweep lacks earns 0 and the next available bar catches the move
+      up, so no return is lost. Master dates before the series' first valid bar
+      inside the run earn 0 (warned once). Sweep bars on dates outside the master
+      calendar are ignored (their move is still captured at the next master
+      date it trades on).
+    """
+    n = len(all_dates)
+    rates = np.zeros(n, dtype=float)
+    if mode == "fixed":
+        rates[1:] = (1.0 + annual_rate) ** (1.0 / _CASH_DAYS_PER_YEAR) - 1.0
+        return rates
+    closes = pd.to_numeric(sweep_df["Close"], errors="coerce")
+    closes = closes[closes > 0]
+    closes = closes[~closes.index.duplicated(keep="last")]
+    on_master = closes.reindex(pd.DatetimeIndex(all_dates))
+    valid = on_master.notna().to_numpy()
+    if not valid.any():
+        logger.warning(
+            "[WARNING] rotation.cash_sweep_symbol '%s' has no valid Close on any "
+            "trading date of the run — idle cash earns 0.", sweep_sym,
+        )
+        return rates
+    first = int(np.argmax(valid))
+    if first > 0:
+        logger.warning(
+            "[WARNING] rotation.cash_sweep_symbol '%s' starts on %s, after the run's "
+            "first bar %s — idle cash earns 0 before it.",
+            sweep_sym, all_dates[first], all_dates[0],
+        )
+    prev = on_master.ffill().shift(1)
+    r = (on_master / prev - 1.0).to_numpy()
+    r[~np.isfinite(r)] = 0.0
+    rates[:] = r
+    rates[0] = 0.0
+    return rates
 
 
 # Cash-affordability comparisons must not trip on floating-point noise at the
@@ -230,6 +318,33 @@ def run_rotation(
     params : dict, optional
         Static kwargs forwarded to ``rank_fn``.
 
+    Idle cash (issue #516)
+    ----------------------
+    By default uninvested cash earns 0%. Two mutually exclusive ``rotation``
+    keys make it earn a return (setting both raises ``ValueError``):
+
+    * ``cash_rate_annual`` — fixed annual rate, compounded per bar of the
+      master trading calendar at ``(1 + annual) ** (1/252) - 1`` (the engine's
+      short-borrow convention). Daily bars are assumed.
+    * ``cash_sweep_symbol`` — idle cash earns the close-to-close return of that
+      instrument, whose OHLCV frame MUST be supplied in ``data`` (else
+      ``ValueError``). It is removed from the tradeable universe before anything
+      else runs: ``rank_fn`` / ``regime_gate`` never see it, it is never bought,
+      and it does not contribute dates to the master calendar or the rebalance
+      schedule. A master date it has no bar for earns 0 (the next bar catches
+      the move up); dates before its first bar earn 0 with a one-time warning.
+
+    Interest for master date *i* is earned on the cash balance held over it —
+    on an execution day, the cash left after that day's Open fills — and is
+    credited into ``cash`` itself, so it compounds and funds later buys and the
+    daily equity curve rises every day. It is not trade P&L: ``trade_log``
+    Profit is unaffected and the total is reported as ``cash_interest_total``
+    (plus ``cash_yield_mode``: ``"fixed"`` / ``"sweep"``). Both keys absent
+    or ``0`` / ``None`` is byte-for-byte the legacy behaviour (and the two
+    extra result keys are omitted). Drift trims are unchanged: a trim is
+    still driven only by ``drift_trim_pct``; interest simply raises equity and
+    therefore every target dollar amount at the next rebalance.
+
     Returns
     -------
     dict | None
@@ -254,6 +369,11 @@ def run_rotation(
         )
         weight_fn = _equal_weights
 
+    # Idle-cash return (issue #516). The sweep instrument, if any, is removed
+    # from the tradeable universe here — never ranked, never bought, and it does
+    # not shape the master calendar or the rebalance dates.
+    cash_mode, cash_rate, sweep_sym, sweep_df, data = _resolve_cash_yield(rcfg, data)
+
     if not data:
         return None
 
@@ -276,6 +396,32 @@ def run_rotation(
     # (date, cash, {sym: shares}) after each rebalance — the daily equity curve is
     # reconstructed from these: cash + live MTM changes only at rebalance dates.
     snapshots: list = []
+
+    # Idle-cash accrual state (issue #516). ``cash_path[i]`` is the cash balance
+    # at the close of master date i, including that day's interest; it replaces
+    # the snapshot cash in the daily curve so accrual shows every day.
+    cash_rates = (_cash_daily_rates(cash_mode, cash_rate, sweep_sym, sweep_df, all_dates)
+                  if cash_mode else None)
+    cash_path = np.full(len(all_dates), np.nan) if cash_mode else None
+    date_index = {d: i for i, d in enumerate(all_dates)} if cash_mode else None
+    accrued_upto = 0          # next master-date index still to accrue
+    cash_interest_total = 0.0
+
+    def _accrue_until(stop: int) -> None:
+        """Credit interest for master dates ``[accrued_upto, stop)`` on the cash
+        balance held over each of them. Called just before the fills on master
+        date ``stop`` (so interest earned through the prior close funds those
+        fills) and once at the end. No trades happen on the dates it covers, so
+        the balance it applies to is the post-trade cash of the latest
+        execution — i.e. interest for an execution day is earned on the cash
+        left idle after that day's Open fills."""
+        nonlocal cash, accrued_upto, cash_interest_total
+        for i in range(accrued_upto, stop):
+            interest = cash * cash_rates[i]
+            cash += interest
+            cash_interest_total += interest
+            cash_path[i] = cash
+        accrued_upto = max(accrued_upto, stop)
 
     def _mtm(date, col: str = "Close") -> float:
         """Equity = cash + live position value at *date*. ``col`` selects the
@@ -513,6 +659,10 @@ def run_rotation(
             # MTM close below marks any open book to that bar's Close.
             continue
 
+        if cash_mode:
+            # Interest through the prior close lands in cash before the fills.
+            _accrue_until(date_index[exec_date])
+
         # Decisions read data strictly up to and including signal_date; fills land
         # on exec_date (the next bar). rank_fn is contractually bound to the
         # signal bar, so there is no look-ahead into the execution bar.
@@ -616,6 +766,9 @@ def run_rotation(
     # No terminal empty snapshot: the last rebalance snapshot's holdings are marked
     # to each day's Close by _build_daily_timeline, so the terminal equity already
     # includes open-position value (parallel to the engine's EoB mark-to-market).
+    if cash_mode:
+        _accrue_until(len(all_dates))
+
     for sym in list(positions.keys()):
         _do_close_mtm(sym, terminal_date)
 
@@ -627,14 +780,23 @@ def run_rotation(
     # cash + live position MTM only change at rebalance dates, so each daily
     # equity value is the most-recent snapshot's cash plus its held shares priced
     # at that day's close. Scale-invariant: every term is linear in share counts.
-    timeline = _build_daily_timeline(data, insts, snapshots, all_dates)
+    timeline = _build_daily_timeline(data, insts, snapshots, all_dates,
+                                     cash_path=cash_path)
 
     from helpers.simulations import calculate_advanced_metrics  # lazy (CONFIG import)
     duration_list = [t["HoldDuration"] for t in trade_log]
     metrics = calculate_advanced_metrics(pnl_list, timeline.dropna(), duration_list)
     final_pnl_percent = (timeline.dropna().iloc[-1] / initial_capital) - 1
 
+    extra = {}
+    if cash_mode:
+        # Interest is NOT trade P&L: it is in cash / the equity curve / pnl_percent,
+        # never in trade_log Profit or trade_pnl_list.
+        extra = {"cash_interest_total": cash_interest_total,
+                 "cash_yield_mode": cash_mode}
+
     return {
+        **extra,
         **metrics,
         "pnl_percent": final_pnl_percent,
         "Trades": len(pnl_list),
@@ -645,7 +807,7 @@ def run_rotation(
     }
 
 
-def _build_daily_timeline(data, insts, snapshots, all_dates) -> pd.Series:
+def _build_daily_timeline(data, insts, snapshots, all_dates, cash_path=None) -> pd.Series:
     """Daily equity curve from per-rebalance ``(date, cash, {sym: shares})``
     snapshots.
 
@@ -653,7 +815,13 @@ def _build_daily_timeline(data, insts, snapshots, all_dates) -> pd.Series:
     that day; equity is that snapshot's cash plus its held shares priced at the
     day's close. cash and holdings only change at rebalance dates, so this is
     exact. Scale-invariant: every term is linear in share counts, which are
-    themselves proportional to initial capital."""
+    themselves proportional to initial capital.
+
+    ``cash_path`` (issue #516, idle-cash return): when given, an array aligned
+    to the sorted ``all_dates`` holding each day's closing cash balance including
+    accrued interest. It replaces the snapshot's cash so the accrual shows on
+    every day instead of jumping at rebalance dates. Holdings still come from
+    the snapshots. ``None`` (default) is the unchanged legacy path."""
     if not all_dates or not snapshots:
         return pd.Series(dtype=float)
 
@@ -668,6 +836,8 @@ def _build_daily_timeline(data, insts, snapshots, all_dates) -> pd.Series:
         if si < 0:
             continue  # before the first rebalance (shouldn't happen: rebal[0]==dates[0])
         _, cash, holdings = snapshots[si]
+        if cash_path is not None:
+            cash = cash_path[i]
         val = cash
         for sym, shares in holdings.items():
             # Same carry-forward rule as _mtm so the two equity paths agree (F3).
