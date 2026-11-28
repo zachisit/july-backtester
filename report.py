@@ -179,57 +179,41 @@ def _portfolio_dir_for(name: str) -> str:
 _RUN_MARKERS = ("config_snapshot.json", "wfa_inputs.json", "llm_verdict.json",
                 "overall_portfolio_summary.csv")
 
+#: Windows paths are case-insensitive, so ``Analyzer_CSVs`` is the same folder
+#: there; POSIX keeps an exact match.
+_FOLD_CASE = os.name == "nt"
+
 
 def _run_layout(csv_path) -> "tuple[Path | None, Path]":
     """``(run_dir, portfolio_subdir)`` for a CSV inside a run's ``analyzer_csvs/``.
 
     ``run/analyzer_csvs/Nasdaq_100/Strat.csv`` -> ``(<abs>/run,
-    Path("Nasdaq_100"))``. Reports are written to
-    ``run/detailed_reports/<portfolio_subdir>/<strategy>/`` so the same strategy
-    name in two portfolios of one run gets two reports instead of the second
-    overwriting the first (#479). A CSV directly under ``analyzer_csvs/`` gives
-    ``Path()`` for the subdir; a CSV outside any run gives ``(None, Path())``.
+    Path("Nasdaq_100"))``, so reports go to
+    ``run/detailed_reports/Nasdaq_100/<strategy>/``, where ``--all`` writes
+    them (#479). A CSV directly under ``analyzer_csvs/`` gives ``Path()`` for
+    the subdir; a CSV outside any run gives ``(None, Path())``.
 
-    When several folders are named ``analyzer_csvs`` -- a parent folder, or a
-    portfolio that happens to have that name -- the run's is the innermost one
-    whose parent holds a run file (``config_snapshot.json``,
-    ``wfa_inputs.json``, ...). The path is searched as given first
-    (``abspath``, no symlink resolution), so a symlinked ``analyzer_csvs/``
-    folder still counts. Only if that finds no run file is it searched again
-    with ``os.path.realpath``, so ``link/..`` follows the filesystem instead of
-    collapsing lexically onto the wrong run. With no run file anywhere, the
-    innermost ``analyzer_csvs`` wins (resolved path first, then as given).
-    That keeps single-file mode pointing at the same run, folder and config as
-    ``--all``.
+    The run is the innermost ``analyzer_csvs`` whose parent holds a run file,
+    else the innermost ``analyzer_csvs``. Two spellings of the CSV's path are
+    searched, in order: the path as given (``abspath``), which keeps the name
+    of a symlinked or junctioned ``analyzer_csvs/``, but only if it still
+    names the file actually read (POSIX resolves ``link/..`` through the
+    link, so a lexically collapsed path can point at another run); then the
+    ``realpath``, which follows every link and junction.
     """
-    def _search(parts):
-        candidates = [i for i, name in enumerate(parts[:-1]) if name == "analyzer_csvs"]
-        marked = next((i for i in reversed(candidates)
-                       if any((Path(*parts[:i]) / m).is_file() for m in _RUN_MARKERS)),
-                      None)
-        return candidates, marked
-
-    lexical_path = os.path.abspath(str(csv_path))
-    lexical = Path(lexical_path).parts
-    lex_candidates, idx = _search(lexical)
-    # Normalising collapses ``link/..`` by name; trust the as-given match only
-    # if it still names the file actually read, else pair trades with the
-    # wrong run's config.
-    if idx is not None and not (os.path.exists(lexical_path)
-                                and os.path.samefile(lexical_path, csv_path)):
-        idx = None
-    parts = lexical
-    if idx is None:
-        resolved = Path(os.path.realpath(str(csv_path))).parts
-        real_candidates, idx = _search(resolved)
-        if idx is not None or real_candidates:
-            parts = resolved
-            idx = idx if idx is not None else real_candidates[-1]
-        elif lex_candidates:
-            idx = lex_candidates[-1]
-        else:
-            return None, Path()
-    return Path(*parts[:idx]), Path(*parts[idx + 1:-1])
+    as_given = os.path.abspath(csv_path)
+    try:
+        paths = [as_given] if os.path.samefile(as_given, csv_path) else []
+    except OSError:
+        paths = []
+    paths.append(os.path.realpath(csv_path))
+    # Every (run_dir, portfolio_subdir) split, innermost first, as-given first.
+    layouts = [(Path(*parts[:i]), Path(*parts[i + 1:-1]))
+               for parts in (Path(p).parts for p in paths)
+               for i in reversed(range(len(parts) - 1))
+               if (parts[i].lower() if _FOLD_CASE else parts[i]) == "analyzer_csvs"]
+    marked = [lay for lay in layouts if any((lay[0] / m).is_file() for m in _RUN_MARKERS)]
+    return (marked or layouts or [(None, Path())])[0]
 
 
 def _portfolio_subdir(csv_path) -> Path:
