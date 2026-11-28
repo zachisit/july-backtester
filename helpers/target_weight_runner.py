@@ -280,8 +280,8 @@ def substitutions(entry: dict, config: dict) -> dict:
         if _bare(requests[s]) != _bare(s):
             out[s] = requests[s]
     for role, ticker in entry["signal_symbols"].items():
-        if role in names:
-            continue  # shares a product/benchmark key: reported under that name above
+        # Shared names are compared too: the role's own declared ticker can be
+        # replaced even when the product/benchmark of that name is not (Codex C1).
         if _bare(requests[role]) != _bare(ticker):
             out[f"{role} ({ticker})"] = requests[role]
     return out

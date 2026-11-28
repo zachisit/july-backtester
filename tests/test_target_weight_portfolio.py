@@ -1137,6 +1137,14 @@ class TestReviewBenchmarkSubstitution:
         resolve_settings(entry, _config())  # products may be substituted, with a warning
         assert substitutions(entry, _config()) == {"VIXY": "QQQ"}
 
+    def test_shared_name_role_keeps_its_own_substitution_report(self):
+        # Codex C1: role "SPY" is declared as QQQ, but the map makes it SPY.
+        from helpers.target_weight_runner import resolve_settings, substitutions
+        cfg = _config(portfolio_symbol_map={"SPY": "SPY"})
+        entry = self._entry(SPY="QQQ")
+        resolve_settings(entry, cfg)  # the benchmark stays SPY, so no refusal
+        assert substitutions(entry, cfg) == {"SPY (QQQ)": "SPY"}
+
     def test_flag_must_be_a_bool(self):
         from helpers.target_weight_runner import PortfolioConfigError, resolve_settings, resolve_strategy
         cfg = _config(portfolio_allow_benchmark_substitution="yes")
