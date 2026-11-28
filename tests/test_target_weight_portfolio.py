@@ -1171,6 +1171,18 @@ class TestReviewBenchmarkSubstitution:
         assert "X0 is run on Y0" in page1 and "X1 is run on Y1" in page1
         assert "... and 3 more warnings" in page1
 
+    def test_warning_names_the_replaced_instrument(self):
+        # Codex C3: for a signal role the replaced instrument is its declared ticker.
+        from trade_analyzer import portfolio_report as pr
+        lines = pr.flag_lines({"substitutions": {"SPY (QQQ)": "SPY", "SGOV": "BIL",
+                                                 "vix (I:VIX)": "I:VIX9D"}})
+        assert lines == [
+            "SUBSTITUTED INPUT: SPY (QQQ) is run on SPY (portfolio_symbol_map); results are not those of QQQ.",
+            "SUBSTITUTED INPUT: SGOV is run on BIL (portfolio_symbol_map); results are not those of SGOV.",
+            "SUBSTITUTED INPUT: vix (I:VIX) is run on I:VIX9D (portfolio_symbol_map); "
+            "results are not those of I:VIX.",
+        ]
+
     def test_flag_must_be_a_bool(self):
         from helpers.target_weight_runner import PortfolioConfigError, resolve_settings, resolve_strategy
         cfg = _config(portfolio_allow_benchmark_substitution="yes")

@@ -132,8 +132,12 @@ def flag_lines(summary: dict) -> list:
         out.append("PRICE-ONLY INPUTS: " + summary["validation"]["distribution_treatment"]
                    + f". The {summary['cash_symbol']} sleeve's yield is missing from NAV.")
     for logical, ticker in (summary.get("substitutions") or {}).items():
+        # A signal role is labelled "role (DECLARED)"; the replaced instrument is
+        # the declared ticker, not the role name (PR #489 Codex C3).
+        replaced = (logical[logical.rindex(" (") + 2:-1]
+                    if logical.endswith(")") and " (" in logical else logical)
         out.append(f"SUBSTITUTED INPUT: {logical} is run on {ticker} (portfolio_symbol_map); "
-                   f"results are not those of {logical.split(' ')[0]}.")
+                   f"results are not those of {replaced}.")
     return out
 
 
