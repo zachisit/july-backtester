@@ -127,49 +127,39 @@ def _resolve_cash_yield(rcfg: dict, data: dict):
     return None, 0.0, None, None, data
 
 
-def _cash_daily_rates(mode, annual_rate, sweep_sym, sweep_df, all_dates) -> np.ndarray:
-    """Per-master-date return applied to idle cash held over that date.
+def _cash_daily_series(mode, annual_rate, sweep_sym, sweep_df, all_dates) -> np.ndarray:
+    """Per-master-date input for the idle-cash accrual.
 
-    ``rates[0]`` is always 0 (nothing elapses before the first bar).
-
-    * ``"fixed"``: ``(1 + annual) ** (1/252) - 1`` on every subsequent bar.
-    * ``"sweep"``: the sweep series' close-to-close return between the
-      previous master date on which it has a valid Close and this one. A master
-      date the sweep lacks earns 0 and the next available bar catches the move
-      up, so no return is lost. Master dates before the series' first valid bar
-      inside the run earn 0 (warned once). Sweep bars on dates outside the master
-      calendar are ignored (their move is still captured at the next master
-      date it trades on).
+    * ``"fixed"``: the per-day rate ``(1 + annual) ** (1/252) - 1`` on every
+      bar after the first (``[0]`` is 0 — nothing elapses before the first bar).
+    * ``"sweep"``: the sweep instrument's Close on each master date, NaN where
+      it has no valid (positive, finite) bar. Sweep bars on dates outside the
+      master calendar are ignored; their move is still captured at the next
+      master date the sweep trades on. Warns once when the series has no bar in
+      the run or starts after the run's first bar.
     """
     n = len(all_dates)
-    rates = np.zeros(n, dtype=float)
     if mode == "fixed":
+        rates = np.zeros(n, dtype=float)
         rates[1:] = (1.0 + annual_rate) ** (1.0 / _CASH_DAYS_PER_YEAR) - 1.0
         return rates
     closes = pd.to_numeric(sweep_df["Close"], errors="coerce")
-    closes = closes[closes > 0]
+    closes = closes[np.isfinite(closes) & (closes > 0)]
     closes = closes[~closes.index.duplicated(keep="last")]
-    on_master = closes.reindex(pd.DatetimeIndex(all_dates))
-    valid = on_master.notna().to_numpy()
+    on_master = closes.reindex(pd.DatetimeIndex(all_dates)).to_numpy(dtype=float)
+    valid = ~np.isnan(on_master)
     if not valid.any():
         logger.warning(
             "[WARNING] rotation.cash_sweep_symbol '%s' has no valid Close on any "
             "trading date of the run — idle cash earns 0.", sweep_sym,
         )
-        return rates
-    first = int(np.argmax(valid))
-    if first > 0:
+    elif not valid[0]:
         logger.warning(
             "[WARNING] rotation.cash_sweep_symbol '%s' starts on %s, after the run's "
             "first bar %s — idle cash earns 0 before it.",
-            sweep_sym, all_dates[first], all_dates[0],
+            sweep_sym, all_dates[int(np.argmax(valid))], all_dates[0],
         )
-    prev = on_master.ffill().shift(1)
-    r = (on_master / prev - 1.0).to_numpy()
-    r[~np.isfinite(r)] = 0.0
-    rates[:] = r
-    rates[0] = 0.0
-    return rates
+    return on_master
 
 
 # Cash-affordability comparisons must not trip on floating-point noise at the
@@ -331,8 +321,12 @@ def run_rotation(
       ``ValueError``). It is removed from the tradeable universe before anything
       else runs: ``rank_fn`` / ``regime_gate`` never see it, it is never bought,
       and it does not contribute dates to the master calendar or the rebalance
-      schedule. A master date it has no bar for earns 0 (the next bar catches
-      the move up); dates before its first bar earn 0 with a one-time warning.
+      schedule. A master date it has no bar for earns 0 on the day; the next
+      valid bar's span return is spread geometrically over the gap and applied
+      to the balance actually held on each gap day, credited on that bar (so a
+      rebalance inside a gap is attributed correctly and the move is not lost).
+      Dates before its first bar earn 0 with a one-time warning; dates after
+      its last bar earn 0.
 
     Interest for master date *i* is earned on the cash balance held over it —
     on an execution day, the cash left after that day's Open fills — and is
@@ -400,12 +394,40 @@ def run_rotation(
     # Idle-cash accrual state (issue #516). ``cash_path[i]`` is the cash balance
     # at the close of master date i, including that day's interest; it replaces
     # the snapshot cash in the daily curve so accrual shows every day.
-    cash_rates = (_cash_daily_rates(cash_mode, cash_rate, sweep_sym, sweep_df, all_dates)
-                  if cash_mode else None)
+    cash_series = (_cash_daily_series(cash_mode, cash_rate, sweep_sym, sweep_df, all_dates)
+                   if cash_mode else None)
     cash_path = np.full(len(all_dates), np.nan) if cash_mode else None
     date_index = {d: i for i, d in enumerate(all_dates)} if cash_mode else None
     accrued_upto = 0          # next master-date index still to accrue
     cash_interest_total = 0.0
+    sweep_last_close = None   # last valid sweep Close already accrued through
+    sweep_gap_balances: list = []  # balances held over sweep-gap days, pending
+
+    def _sweep_interest(i: int) -> float:
+        """Interest for master date *i* in sweep mode. A gap day (no valid
+        sweep Close) earns 0 now and its balance is remembered; the next valid
+        bar's span return ``close / last_close - 1`` is spread geometrically
+        over the span's days and applied to the balance actually held on each
+        of them (compounding within the span), then credited on that bar. So a
+        cash flow inside a gap never earns, or loses, return for days before it
+        happened — and nothing reads a price after the bar it is credited on."""
+        nonlocal sweep_last_close
+        c = cash_series[i]
+        if np.isnan(c):
+            if sweep_last_close is not None:
+                sweep_gap_balances.append(cash)
+            return 0.0
+        if sweep_last_close is None:   # first valid bar: nothing to measure from
+            sweep_last_close = c
+            return 0.0
+        balances = sweep_gap_balances + [cash]
+        g = (c / sweep_last_close) ** (1.0 / len(balances)) - 1.0
+        pending = 0.0
+        for b in balances:
+            pending += (b + pending) * g
+        sweep_gap_balances.clear()
+        sweep_last_close = c
+        return pending
 
     def _accrue_until(stop: int) -> None:
         """Credit interest for master dates ``[accrued_upto, stop)`` on the cash
@@ -417,7 +439,10 @@ def run_rotation(
         left idle after that day's Open fills."""
         nonlocal cash, accrued_upto, cash_interest_total
         for i in range(accrued_upto, stop):
-            interest = cash * cash_rates[i]
+            if cash_mode == "fixed":
+                interest = cash * cash_series[i]
+            else:
+                interest = _sweep_interest(i)
             cash += interest
             cash_interest_total += interest
             cash_path[i] = cash

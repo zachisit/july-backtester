@@ -270,6 +270,34 @@ class TestSweep:
         assert tl[10] == tl[9]                                   # 0 on the gap
         assert tl[11] == pytest.approx(C0 * full[11] / full[0], rel=1e-12)  # caught up
 
+    def test_cash_flow_inside_gap_is_attributed_per_day(self):
+        """codex r1: a buy on a gap day must not forfeit the return the cash
+        earned on the gap days BEFORE it (nor may a post-flow balance collect
+        the whole span return). Sweep bars 29-31 missing, buy fills at idx 31."""
+        data = _two_fund_universe()
+        sw = _sweep_df()
+        s = sw["Close"].to_numpy()
+        data["SWEEP"] = sw.drop(sw.index[29:32])
+        first = data["A"].index[30]
+        # drift_trim_pct=10 -> no later drift adds; the idx-31 buy is the only fill.
+        res = rotation.run_rotation(data, _rank_from(first),
+                                    _cfg(cash_sweep_symbol="SWEEP", drift_trim_pct=10.0))
+        tl = res["portfolio_timeline"].to_numpy()
+        (trade,) = res["trade_log"]
+        closes = data["A"]["Close"].to_numpy()
+        B = tl[28]
+        assert B == pytest.approx(C0 * s[28] / s[0], rel=1e-12)
+        assert tl[29] == tl[30] == B                       # gap days: 0 on the day
+        r31 = tl[31] - trade["Shares"] * closes[31]         # cash left after the buy
+        g = (s[32] / s[28]) ** (1 / 4) - 1
+        pending = 0.0
+        for b in (B, B, r31, r31):
+            pending += (b + pending) * g
+        cash32 = tl[32] - trade["Shares"] * closes[32]
+        assert cash32 == pytest.approx(r31 + pending, rel=1e-12)
+        # The pre-buy gap days' return is kept (≈ B * 2 days of sweep return).
+        assert pending > 0.9 * B * ((1 + g) ** 2 - 1)
+
     def test_late_start_earns_zero_before_and_warns_once(self, caplog):
         data = _two_fund_universe()
         idx = data["A"].index[10:]
