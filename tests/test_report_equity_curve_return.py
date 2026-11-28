@@ -303,6 +303,9 @@ class TestV3Layout:
         assert M["cagr"] == pytest.approx(_curve_cagr(curve), abs=1e-9)
         assert M["trade_profit"] == pytest.approx(trades["Profit"].sum(), abs=1e-6)
         assert M["non_trade_pnl"] == pytest.approx(7_738.0, abs=1e-6)
+        # Codex r4: Gross P&L stays trade-based (trades before costs)
+        assert M["gross_profit"] == pytest.approx(
+            trades["Profit"].sum() + M["transaction_fees"], abs=1e-6)
         mdd = float((curve.cummax() - curve).max())
         assert M["ret_dd"] == pytest.approx(curve_net / mdd, rel=1e-9)
         assert M["recovery_factor"] == pytest.approx(curve_net / mdd, rel=1e-9)
