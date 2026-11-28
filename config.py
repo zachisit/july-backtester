@@ -623,4 +623,8 @@ CONFIG = {
     # distributions). Polygon's adjusted=true is split-only, so a Polygon run is
     # refused unless this is True; the report then labels the run price-only.
     "portfolio_allow_price_only": False,
+    # A benchmark whose data would come from a different ticker (via
+    # portfolio_symbol_map, or a signal role with the benchmark's name) is
+    # refused unless this is True; the run then warns and the report flags it.
+    "portfolio_allow_benchmark_substitution": False,
 }

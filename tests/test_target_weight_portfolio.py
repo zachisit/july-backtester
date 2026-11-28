@@ -1,5 +1,6 @@
 """Target-weight portfolio engine, VIX eVRP plugin, runner and report (issue #487)."""
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -1075,3 +1076,147 @@ class TestReviewNits:
         (tmp_path / "a.csv").write_bytes(b"tampered\r\n")
         with pytest.raises(SystemExit, match="Checksum mismatch"):
             st.verify_checksums(tmp_path, ["a.csv"])
+
+
+# ---------------------------------------------------------------------------
+# PR #489 review round 3 (Whiz, Shardul 11-26): F1-F4
+# ---------------------------------------------------------------------------
+
+def _weights(dates, rows):
+    """Weight-basis targets: rows[i] = (VIXY, SVXY) decided at session i's close."""
+    return pd.DataFrame(rows, index=dates[:len(rows)], columns=RISK).reindex(dates).ffill()
+
+
+class TestReviewBenchmarkSubstitution:
+    """F1: products, the benchmark and signal roles share one data key space."""
+
+    def _entry(self, **signal_symbols):
+        from helpers.target_weight_runner import resolve_strategy
+        _ensure_plugin_registered()
+        _, entry = resolve_strategy(_config())
+        entry = dict(entry)
+        entry["signal_symbols"] = {**entry["signal_symbols"], **signal_symbols}
+        return entry
+
+    def test_signal_role_named_like_the_benchmark_is_refused(self):
+        from helpers.target_weight_runner import PortfolioConfigError, resolve_settings
+        entry = self._entry(SPY="QQQ")  # role "SPY" -> QQQ overwrites data["SPY"]
+        with pytest.raises(PortfolioConfigError, match="benchmark 'SPY' would run on 'QQQ'"):
+            resolve_settings(entry, _config())
+
+    def test_symbol_map_benchmark_substitution_is_refused(self):
+        from helpers.target_weight_runner import PortfolioConfigError, resolve_settings, resolve_strategy
+        cfg = _config(portfolio_symbol_map={"SPY": "QQQ"})
+        _, entry = resolve_strategy(cfg)
+        with pytest.raises(PortfolioConfigError, match="portfolio_allow_benchmark_substitution"):
+            resolve_settings(entry, cfg)
+
+    def test_flag_allows_it_and_the_substitution_is_reported(self):
+        from helpers.target_weight_runner import resolve_settings, substitutions
+        cfg = _config(portfolio_allow_benchmark_substitution=True)
+        entry = self._entry(SPY="QQQ")
+        resolve_settings(entry, cfg)
+        assert substitutions(entry, cfg) == {"SPY": "QQQ"}
+
+    def test_flag_run_warns_and_flags_page_one(self, tmp_path, caplog):
+        from helpers.target_weight_runner import run_target_weight_backtest
+        from trade_analyzer import portfolio_report as pr
+        uni = synthetic_universe()
+        uni["QQQ"] = uni["SPY"].assign(Close=uni["SPY"]["Close"] * 1.01)
+        with caplog.at_level(logging.WARNING):
+            s = run_target_weight_backtest(
+                _config(portfolio_symbol_map={"SPY": "QQQ"}, portfolio_allow_benchmark_substitution=True),
+                str(tmp_path), "bsub", _fetcher(uni))
+        assert s["substitutions"]["SPY"] == "QQQ"
+        assert "SPY is run on 'QQQ'" in caplog.text
+        assert any("SPY is run on QQQ" in line for line in pr.flag_lines(s))
+
+    def test_signal_role_named_like_a_product_is_reported(self):
+        from helpers.target_weight_runner import resolve_settings, substitutions
+        entry = self._entry(VIXY="QQQ")  # replaces the VIXY holding's data
+        resolve_settings(entry, _config())  # products may be substituted, with a warning
+        assert substitutions(entry, _config()) == {"VIXY": "QQQ"}
+
+    def test_flag_must_be_a_bool(self):
+        from helpers.target_weight_runner import PortfolioConfigError, resolve_settings, resolve_strategy
+        cfg = _config(portfolio_allow_benchmark_substitution="yes")
+        _, entry = resolve_strategy(cfg)
+        with pytest.raises(PortfolioConfigError, match="must be True or False"):
+            resolve_settings(entry, cfg)
+
+    def test_default_run_and_provider_spellings_are_untouched(self):
+        from helpers.target_weight_runner import resolve_settings, resolve_strategy, substitutions
+        cfg = _config(portfolio_symbol_map={"vix": "$VIX", "SPY": "$SPY"})
+        _, entry = resolve_strategy(cfg)
+        resolve_settings(entry, cfg)
+        assert substitutions(entry, cfg) == {}
+
+    def test_disabled_benchmark_is_never_refused(self):
+        from helpers.target_weight_runner import resolve_settings
+        resolve_settings(self._entry(SPY="QQQ"), _config(portfolio_benchmark_ticker=None))
+
+
+class TestReviewProductMiss:
+    """F2: a blocked switch between products is flagged per product."""
+
+    def test_blocked_switch_is_flagged_although_the_total_is_filled(self):
+        p = _flat(8)
+        # Close 0: 100% VIXY (bought on session 1 with unsettled SGOV proceeds,
+        # so locked until T+2). Close 1: switch to 100% SVXY.
+        t = _weights(p.index, [(1.0, 0.0), (0.0, 1.0)])
+        r = _sim(p, p, t, exposure=None, cost_bps={}, settlement=twp.GFV_AWARE)
+        led = r.ledger
+        assert led["VIXY_weight"].iloc[2] == pytest.approx(1.0)  # still the wrong ETF
+        assert not led["target_unfilled_at_open"].iloc[2]       # the aggregate reads filled
+        assert led["product_unfilled_at_open"].iloc[2]          # the per-product flag does not
+        # Once VIXY frees and the switch completes, the flag clears.
+        assert led["SVXY_weight"].iloc[-1] == pytest.approx(1.0)
+        assert not led["product_unfilled_at_open"].iloc[-1]
+
+    def test_completed_switch_is_not_flagged(self):
+        p = _flat(8)
+        t = _weights(p.index, [(1.0, 0.0), (0.0, 1.0)])
+        led = _sim(p, p, t, exposure=None, cost_bps={}, settlement=twp.IMMEDIATE).ledger
+        assert not led["product_unfilled_at_open"].any()
+
+    def test_band_drift_without_a_rebalance_is_not_a_miss(self):
+        opens, closes, rng = _random_market(3)
+        exposure = rng.choice([-0.2, 0.0, 0.2], size=len(opens))
+        led = _sim(opens, closes, _targets(opens.index, exposure), settlement=twp.IMMEDIATE).ledger
+        assert not led.loc[~led["rebalanced"], "product_unfilled_at_open"].any()
+
+    def test_counted_in_the_run_summary_and_report(self, portfolio_run):
+        from trade_analyzer import portfolio_report as pr
+        run_dir, summary = portfolio_run
+        n = summary["activity"]["unfilled_product_days"]
+        assert isinstance(n, int) and n >= 0
+        assert summary["periods"]["Full period"]["Strategy"]["unfilled_product_days"] == n
+        assert "missed its own target weight" in " ".join(pr.activity_lines(summary))
+        csv = pd.read_csv(run_dir / "overall_portfolio_summary.csv")
+        assert csv["Unfilled Product Days"].iloc[0] == n
+
+
+class TestReviewLotLogMatchesFills:
+    """F3: a sub-dust gfv purchase logged a restricted lot without a BUY fill."""
+
+    def test_every_logged_lot_has_a_buy_fill(self):
+        p = _flat(6)
+        # Close 1 adds SVXY (a product entry forces a rebalance) and nudges VIXY
+        # up by 5e-15 of NAV: below the dust threshold (1e-14), funded from the
+        # unsettled SGOV sale.
+        t = _weights(p.index, [(0.5, 0.0), (0.5 + 5e-15, 0.3)])
+        r = _sim(p, p, t, exposure=None, cost_bps={}, settlement=twp.GFV_AWARE)
+        buys = set(map(tuple, r.fills.loc[r.fills["Side"] == "BUY", ["Date", "Symbol"]].to_numpy()))
+        lots = set(map(tuple, r.restrictions[["Date", "Symbol"]].to_numpy()))
+        assert lots, "the path must exercise unsettled-funded buys"
+        assert lots <= buys, lots - buys
+
+
+class TestReviewGfvDoc:
+    """F4: the lot-locking rule is documented."""
+
+    def test_split_lot_rule_is_documented(self):
+        with open(os.path.join(PROJECT_ROOT, "docs", "TARGET_WEIGHT_PORTFOLIOS.md"), encoding="utf-8") as fh:
+            text = fh.read()
+        assert "Only the receivable-funded part of a fill is restricted" in text
+        assert "0.23 pp/yr" in text

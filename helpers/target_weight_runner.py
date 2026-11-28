@@ -56,6 +56,7 @@ CONFIG_DEFAULTS = {
     "portfolio_benchmark_ticker": "SPY",
     "portfolio_benchmark_cost_bps": 5.0,
     "portfolio_allow_price_only": False,    # True = run on split-only (no dividend) prices
+    "portfolio_allow_benchmark_substitution": False,  # True = allow a benchmark run on another ticker
 }
 
 #: Settlement series in report order. Every run simulates all three.
@@ -213,37 +214,76 @@ def resolve_settings(entry: dict, config: dict) -> dict:
         rf = float("nan")
     if not np.isfinite(rf):
         raise PortfolioConfigError(f"risk_free_rate must be a finite number; got {config.get('risk_free_rate')!r}")
+    allow_bench_sub = config.get("portfolio_allow_benchmark_substitution", False)
+    if not isinstance(allow_bench_sub, bool):
+        raise PortfolioConfigError(f"portfolio_allow_benchmark_substitution must be True or False; "
+                                   f"got {allow_bench_sub!r}")
+    bench = _benchmark(config)
+    if bench and not allow_bench_sub:
+        bench_ticker = _requests(entry, config)[bench]
+        if _bare(bench_ticker) != _bare(bench):
+            raise PortfolioConfigError(
+                f"Target-weight run refused: the benchmark {bench!r} would run on {bench_ticker!r} "
+                f"data, so every 'vs {bench}' figure would compare against a different instrument. "
+                f"This comes from portfolio_symbol_map, or from a signal role named {bench!r}, which "
+                f"shares that name's data. Rename the signal role, drop the map entry, change "
+                f"portfolio_benchmark_ticker, or set portfolio_allow_benchmark_substitution=True "
+                f"to run anyway (the run warns and the report states the substitution).")
     return {"settlement": settlement, "rules": rules, "band": band, "cost_bps": cost_bps,
             "symbol_map": dict(symbol_map), "benchmark_cost_bps": bench_cost,
             "price_basis": basis, "price_basis_text": basis_text, "risk_free_rate": rf}
 
 
+def _bare(t) -> str:
+    return str(t).upper().lstrip("$").replace("I:", "").replace("^", "")
+
+
+def _requests(entry: dict, config: dict) -> dict:
+    """``{data key: provider ticker}`` exactly as :func:`fetch_inputs` fetches them.
+
+    Products, the benchmark and signal roles share one key space (the
+    strategy reads ``data[key]``). A signal role with the same name as a
+    product or the benchmark therefore *replaces* that data (PR #489 review
+    F1), so substitutions are derived from this one map, never per name.
+    """
+    symbol_map = dict(_cfg(config, "portfolio_symbol_map") or {})
+    requests = {}
+    for s in list(entry["symbols"]) + [entry["cash_symbol"]]:
+        requests[s] = symbol_map.get(s, s)
+    for role, ticker in entry["signal_symbols"].items():
+        requests[role] = symbol_map.get(role, symbol_map.get(ticker, ticker))
+    bench = _benchmark(config)
+    if bench and bench not in requests:
+        requests[bench] = symbol_map.get(bench, bench)
+    return requests
+
+
 def substitutions(entry: dict, config: dict) -> dict:
     """``{logical name: provider ticker}`` for every product, benchmark or signal
-    input that ``portfolio_symbol_map`` replaces with a *different* ticker.
+    input whose data comes from a *different* ticker.
 
     The data checks (inception, coverage) run on the substituted series, so a
     map such as ``{"SGOV": "BIL"}`` runs a different cash product under the
     SGOV label. It is allowed, but the run records and the report states it
-    (PR #489 review #4).
+    (PR #489 review #4). A substituted benchmark is refused unless
+    ``portfolio_allow_benchmark_substitution=True`` (see
+    :func:`resolve_settings`). Read from the effective fetch map, so a signal
+    role that shares a product or benchmark name is reported too (review F1).
     """
-    symbol_map = dict(_cfg(config, "portfolio_symbol_map") or {})
-
-    def _bare(t):
-        return str(t).upper().lstrip("$").replace("I:", "").replace("^", "")
-
+    requests = _requests(entry, config)
     out = {}
     names = list(entry["symbols"]) + [entry["cash_symbol"]]
     bench = _benchmark(config)
-    if bench:
+    if bench and bench not in names:
         names.append(bench)
     for s in names:
-        if s in symbol_map and _bare(symbol_map[s]) != _bare(s):
-            out[s] = symbol_map[s]
+        if _bare(requests[s]) != _bare(s):
+            out[s] = requests[s]
     for role, ticker in entry["signal_symbols"].items():
-        mapped = symbol_map.get(role, symbol_map.get(ticker, ticker))
-        if _bare(mapped) != _bare(ticker):
-            out[f"{role} ({ticker})"] = mapped
+        if role in names:
+            continue  # shares a product/benchmark key: reported under that name above
+        if _bare(requests[role]) != _bare(ticker):
+            out[f"{role} ({ticker})"] = requests[role]
     return out
 
 
@@ -271,19 +311,11 @@ def fetch_inputs(entry: dict, config: dict, fetcher) -> tuple[dict, dict]:
     Returns ``(data, provenance)``. ``data`` is keyed by product ticker for
     products and the benchmark, and by role for signal inputs.
     """
-    symbol_map = dict(_cfg(config, "portfolio_symbol_map") or {})
     start = pd.Timestamp(config["start_date"])
     warmup = int(config.get("pit_warmup_days", 400) or 0)
     fetch_start = (start - pd.Timedelta(days=max(warmup, 60))).strftime("%Y-%m-%d")
     end = config.get("end_date") or datetime.now().strftime("%Y-%m-%d")
-    requests = {}
-    for s in list(entry["symbols"]) + [entry["cash_symbol"]]:
-        requests[s] = symbol_map.get(s, s)
-    for role, ticker in entry["signal_symbols"].items():
-        requests[role] = symbol_map.get(role, symbol_map.get(ticker, ticker))
-    bench = _benchmark(config)
-    if bench and bench not in requests:
-        requests[bench] = symbol_map.get(bench, bench)
+    requests = _requests(entry, config)
     data, provenance, fetched = {}, {}, {}
     for key, ticker in requests.items():
         if ticker not in fetched:  # e.g. SPY as both the "spy" signal and the benchmark
@@ -467,6 +499,7 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
             "mean_cash_sleeve_weight": float(led[f"{cash_symbol}_weight"].mean()),
             "mean_unsettled_weight": float(led["unsettled_weight"].mean()),
             "unfilled_target_days": int(led["target_unfilled_at_open"].sum()),
+            "unfilled_product_days": int(led["product_unfilled_at_open"].sum()),
             "turnover_sum": float(led["turnover"].sum()),
             "cost_sum": float(led["cost"].sum()),
         })
@@ -533,6 +566,8 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
                      "fills": int(len(fills)),
                      "rebalance_fills": int(len(rebalance_fills)),
                      "unfilled_target_days": int(ledger["target_unfilled_at_open"].sum()),
+                     # Per-product miss on a rebalance session (PR #489 review F2).
+                     "unfilled_product_days": int(ledger["product_unfilled_at_open"].sum()),
                      "signal_state_sessions": {str(k): int(v) for k, v in states.items()}},
         "validation": validation,
         "provenance": {"data_provider": config.get("data_provider"),
@@ -582,7 +617,8 @@ def run_target_weight_backtest(config: dict, run_dir: str, run_id: str, fetcher)
            "Volatility": s["volatility"], "Sharpe vs cash sleeve": s.get("sharpe_cash_reference"),
            f"Sharpe (rf={rf:.2%})": s["sharpe_rf"], "Calmar": s["calmar"],
            "Total Cost": summary["costs"]["total"], "Rebalance Sessions": summary["activity"]["rebalance_sessions"],
-           "Unfilled Target Days": summary["activity"]["unfilled_target_days"]}
+           "Unfilled Target Days": summary["activity"]["unfilled_target_days"],
+           "Unfilled Product Days": summary["activity"]["unfilled_product_days"]}
     for col in daily.columns[1:]:
         row[f"{col} Total Return"] = full[col]["total_return"]
         row[f"{col} CAGR"] = full[col]["cagr"]

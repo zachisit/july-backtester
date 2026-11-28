@@ -433,9 +433,13 @@ def simulate_target_weights(
                         unsettled_used = _pay_gfv(purchase * (1 + fees[j]), cash, receivables, restricted[j],
                                  (1 + fees[j]) * op[i, j])
                         cash = max(cash, 0) - min(max(cash, 0), purchase * (1 + fees[j]))
-                        lot_log.extend({"Date": date, "Symbol": symbols[j], "FreeDate": when,
-                                        "Shares": amt / ((1 + fees[j]) * op[i, j])}
-                                       for when, amt in unsettled_used)
+                        # Same threshold as the BUY fill below, so every logged lot
+                        # has a matching fill (PR #489 review F3). The lots held in
+                        # ``restricted`` are unchanged (frozen-ledger parity).
+                        if purchase > tiny:
+                            lot_log.extend({"Date": date, "Symbol": symbols[j], "FreeDate": when,
+                                            "Shares": amt / ((1 + fees[j]) * op[i, j])}
+                                           for when, amt in unsettled_used)
                     else:
                         cash -= purchase * (1 + fees[j])
                     cost += purchase * fees[j]
@@ -476,6 +480,12 @@ def simulate_target_weights(
             executed = _exposure(q * op[i], after_open)
         else:
             executed = float((q[:n_risk] * op[i, :n_risk]).sum()) / after_open
+        # Per-product miss (PR #489 review F2): the aggregate flag below compares
+        # total risk weight / exposure only, so a blocked A -> B switch that still
+        # holds 100% A reads as filled. Only rebalance sessions are judged: on
+        # the others the band rule chose not to trade.
+        product_miss = bool(rebalance and n_risk and np.any(
+            np.abs(q[:n_risk] * op[i, :n_risk] / after_open - weights[:n_risk]) > max(band, 1e-9)))
         values = q * cl[i]
         nav = float(values.sum()) + cash + pending
         close_exposure = (_exposure(values, nav) if coeffs is not None
@@ -485,6 +495,7 @@ def simulate_target_weights(
                "exposure_open_after": executed, "exposure_close": close_exposure,
                "rebalanced": bool(rebalance),
                "target_unfilled_at_open": abs(executed - target) > band,
+               "product_unfilled_at_open": product_miss,
                "cash": cash, "unsettled": pending, "unsettled_weight": pending / nav,
                "cost": cost, "turnover": turnover}
         for j, s in enumerate(symbols):

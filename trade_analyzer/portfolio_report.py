@@ -358,7 +358,9 @@ def activity_lines(summary: dict, fills: pd.DataFrame | None = None) -> list:
         f"Rebalance rule fired on {act['rebalance_sessions']} sessions; {traded} executed rebalance fills "
         f"(the rest had nothing executable, e.g. the first session or proceeds still unsettled)   ·   "
         f"fills: {act['fills']} (rebalance {act['rebalance_fills']}, the rest park settled cash in {cash})   ·   "
-        f"sessions where the target was not reached at the open: {act['unfilled_target_days']}",
+        f"sessions where the target was not reached at the open: {act['unfilled_target_days']}   ·   "
+        f"rebalance sessions where a product missed its own target weight: "
+        f"{act.get('unfilled_product_days', 'n/a')}",
         "Signal state (sessions): " + ", ".join(f"{k} {v}" for k, v in act["signal_state_sessions"].items()),
     ]
 
@@ -585,6 +587,8 @@ def write_markdown(art: dict, md_path: str, image_dir: str) -> None:
         f"{_traded_sessions(summary, art['fills'])} executed rebalance fills\n"
         f"- Fills: {summary['activity']['fills']} (rebalance {summary['activity']['rebalance_fills']})\n"
         f"- Unfilled target days: {summary['activity']['unfilled_target_days']}\n"
+        f"- Unfilled product days (a product missed its own target weight on a rebalance session): "
+        f"{summary['activity'].get('unfilled_product_days', 'n/a')}\n"
         f"- Signal-state sessions: {summary['activity']['signal_state_sessions']}\n",
         "### Most recent rebalance fills\n", _md_table(recent_fills(art["fills"])),
         "## Assumptions and limitations\n", "".join(f"- {line}\n" for line in notes(summary)),

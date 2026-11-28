@@ -79,6 +79,21 @@ risk-weight drift instead of signed exposure.
   a real cash account pays. `immediate` gives 8.63%. The gfv_aware
   restrictions are written per lot to `gfv_restricted_lots.csv`, and each
   BUY fill records `UnsettledFunding` / `RestrictedUntil`.
+
+  Only the receivable-funded part of a fill is restricted. There is one lot
+  per receivable, freed on that receivable's settlement date; the part paid
+  with settled cash is free at once. A whole-fill lock, where the entire fill
+  stays locked until the latest receivable it used settles, is the stricter
+  reading of the broker rule. It costs about 0.23 pp/yr on the frozen window
+  (8.61% vs 8.84% CAGR, independently reproduced in the PR #489 review).
+* **Missed targets are flagged two ways.** `target_unfilled_at_open` compares
+  the aggregate (total risk weight, or signed exposure) with its target by
+  more than the band; it is the flag the PR #179 parity checks.
+  `product_unfilled_at_open` flags a rebalance session on which any single
+  product's executed weight misses its own target by more than the band. It
+  catches a blocked switch, e.g. 100% A to 100% B under `gfv_aware`, that
+  still holds 100% A and so reads as filled in aggregate. The counts are
+  `unfilled_target_days` and `unfilled_product_days`.
 * **Stale intentions never execute.** Each open re-reads the latest prior-close target.
 * **Costs** are in bps of traded notional on every sale and purchase,
   including the initial cash-sleeve buy. Units are fractional, there are no
@@ -113,6 +128,7 @@ risk-weight drift instead of signed exposure.
 | `portfolio_benchmark_ticker` | `"SPY"` | buy-and-hold comparison (`None`/`""` disables); the cash sleeve is always shown too |
 | `portfolio_benchmark_cost_bps` | `5.0` | one-time benchmark entry cost |
 | `portfolio_allow_price_only` | `False` | run on `price_only` inputs anyway (see Distributions) |
+| `portfolio_allow_benchmark_substitution` | `False` | A benchmark whose data would come from another ticker is refused by default. That happens through `portfolio_symbol_map`, or through a signal role with the benchmark's name, since roles, products and the benchmark share one data key space. `True` runs it anyway, with a warning and a page-1 flag |
 | `risk_free_rate` | `0.05` | the repo-wide key; used for the tearsheet's rf Sharpe (`sharpe_rf`). `metrics.json` also keeps `sharpe_rf2` at a fixed 2% for parity with the study |
 
 Invalid `portfolio_*` values refuse the run (`PortfolioConfigError`) before
